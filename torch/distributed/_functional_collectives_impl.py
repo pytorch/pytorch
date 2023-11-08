@@ -23,6 +23,8 @@ _wait_all
 
 """
 
+USE_NATIVE_C10D_FUNCTIONAL = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+
 logger = logging.getLogger(__name__)
 
 data_ptr_to_work = dict()

@@ -1,14 +1,16 @@
+import dataclasses
 import functools
 import itertools
 import logging
 import operator
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
 from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+import torch.utils._pytree as pytree
 from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
@@ -91,6 +93,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     stable_topological_sort(gm.graph)
 
     fake_tensor_updater.incremental_update()
+
     # Keep this last, since it introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
@@ -622,85 +625,127 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 graph.erase_node(node)
 
 
-InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
+@dataclasses.dataclass
+class InplaceableOp:
+    inplace_op: torch._ops.OpOverload
+    mutated_arg_indices: List[int]
+
+    def get_flat_mutated_args(self, node: torch.fx.Node) -> List[torch.fx.Node]:
+        """
+        Given a node that calls an in-placeable op, return the arg nodes that
+        would be mutated if the op were its in-place variant.
+
+        NOTE: we assume the in-placeable op to have the same signature as its
+        in-place variant.
+        """
+        mutated_args = []
+        for idx in self.mutated_arg_indices:
+            mutated_args.extend(pytree.tree_flatten(node.args[idx])[0])
+        return mutated_args
 
 
 def reinplace_inplaceable_ops(graph):
     """
-    Reinplaces in-placeable ops in easy cases where the node being mutated is
-    only used by the op (users == 1), and the node being mutated shares storage
-    with no other nodes.
-
-    Also handles input mutations when there is a corresponding copy node.
+    Reinplaces in-placeable operations.
+    If there are no uses of a view of the mutated arg after the current node,
+    it is possible to inplace the op.
+    This above algorithm could be justified by observing side effects. While
+    we traverse the graph in forwards direction, only latter nodes could view
+    side effects of the current node. If the current node is not used later as
+    well as no view of this node is used later in the graph, then it is safe to
+    inplace as there would be no way to observe the side effects.
+    This condition is slightly different for graph inputs where they can only
+    be inplaced if the above condition is true and there's a copy_ in the
+    epilogue that signals that the caller wants to observe the mutation.
     """
 
-    copy_args_to_copy_nodes = {}
+    # (mutation_node, mutated_arg) => copy_epilogue
+    # The value associated to mutation_node may be a collection
+    # if the mutation op returns multiple values.
+    # The value associated to mutated_arg is always a tensor.
+    mutation_to_copy_epilogue = {}
+
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
-    for node in reversed(graph.nodes):
+    node_order: Dict[Any, int] = {}
+    for i, node in enumerate(reversed(graph.nodes)):
+        node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
-            dst = node.args[0]
-            src = node.args[1]
-            # If the target is a getitem and it indexes a possible clone,
-            # then skip over it
-            if (
-                src.target == operator.getitem
-                and src.args[0].target == triton_kernel_wrapper_functional
-                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
-            ):
-                src = src.args[0]
-            copy_args_to_copy_nodes[(dst, src)] = node
-            assert node.args[0].op == "placeholder"
-            mutated_inputs.add(node.args[0])
+            mutated_arg = node.args[0]
+            mutation_node = node.args[1]
+            # The mutation op could have returned a collection of tensors.
+            # Follow getitem nodes to find the mutation node.
+            while mutation_node.target == operator.getitem:
+                mutation_node = mutation_node.args[0]
+            mutation_to_copy_epilogue[(mutation_node, mutated_arg)] = node
+            # According to the invariant, copy_ can only occur for mutations
+            # of placeholders.
+            assert mutated_arg.op == "placeholder"
+            mutated_inputs.add(mutated_arg)
 
-    def can_inplace(node, mutated_arg):
-        if isinstance(mutated_arg, (list, tuple)):
-            return all(can_inplace(node, arg) for arg in mutated_arg)
-        if get_node_storage(mutated_arg) is None:
-            return False
-        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if mutated_arg.op == "placeholder":
-            if not (
-                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-            ):
-                return False
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+        node_loc = node_order[node]
+        for view in shared_view_nodes:
+            for user in view.users:
+                # Skip all users before node
+                if node_order[user] <= node_loc:
+                    continue
+                # Skip over the copy_ epilogue node that could get reinplaced
+                if copy_node == user:
+                    continue
+                return True
+        return False
 
-            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
+    def can_inplace(node, mutated_args):
+        for mutated_arg in mutated_args:
+            if get_node_storage(mutated_arg) is None:
                 return False
+            shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+            if mutated_arg.op == "placeholder":
+                if not (
+                    copy_node := mutation_to_copy_epilogue.get(
+                        (node, mutated_arg), False
+                    )
+                ):
+                    return False
 
-            # Check for any uses other than current node and copy_ epilogue
-            if len(mutated_arg.users) > 2:
+                if any_use_of_views_after_node(
+                    node, shared_view_nodes, copy_node=copy_node
+                ):
+                    return False
+            elif any(view.op == "placeholder" for view in shared_view_nodes):
+                # If mutated arg is view of any of the inputs of the graph,
+                # do not allow for inplacing.
+                # This would require more sophisticated algorithm to handle
                 return False
-
-            graph.erase_node(copy_node)
-            return True
-        else:
-            # NB: This condition could be relaxed if none of the aliases
-            # are used after this mutation op. But that's trickier.
-            if len(shared_view_nodes) > 1:  # Arg aliases another node
+            elif any_use_of_views_after_node(node, shared_view_nodes, copy_node=None):
                 return False
-            if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                return False
-            return True
+        return True
 
     inplaceable_ops = {
-        aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+        aten.index_put.default: InplaceableOp(aten.index_put_.default, [0]),
         aten._unsafe_index_put.default: InplaceableOp(
-            inductor_prims._unsafe_index_put_, 0
+            inductor_prims._unsafe_index_put_, [0]
         ),
         c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, 0
+            c10d_functional.all_reduce_.default, [0]
         ),
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-            c10d_functional.all_reduce_coalesced_.default, 0
+            c10d_functional.all_reduce_coalesced_.default, [0]
         ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_inplace(node, node.args[inplaceable_op.mutated_arg]):
+            mutated_args = inplaceable_op.get_flat_mutated_args(node)
+            if can_inplace(node, mutated_args):
+                # Erase all copy epilogues incurred by this node
+                for mutated_arg in mutated_args:
+                    copy_epilogue = mutation_to_copy_epilogue.get((node, mutated_arg))
+                    if copy_epilogue is not None:
+                        graph.erase_node(copy_epilogue)
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called

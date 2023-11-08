@@ -2686,6 +2686,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       tensors,
       tensors,
@@ -2703,7 +2705,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
             stream.stream());
       },
       OpType::BROADCAST,
-      "nccl:broadcast");
+      "nccl:broadcast",
+      avoidRecordStreams);
 }
 
 // _broadcast_oop adds an out-of-place broadcast in PGNCCL
@@ -3796,6 +3799,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       outputTensors,
       inputs,
@@ -3805,7 +3810,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          if (!avoidRecordStreams_) {
+          if (!avoidRecordStreams) {
             for (auto input : inputs) {
               c10::cuda::CUDACachingAllocator::recordStream(
                   input.storage().data_ptr(), stream);
@@ -3817,7 +3822,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
         return ncclSuccess;
       },
       OpType::SCATTER,
-      "nccl:scatter");
+      "nccl:scatter",
+      avoidRecordStreams);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
