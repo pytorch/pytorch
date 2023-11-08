@@ -299,7 +299,7 @@ def is_contiguous_general(func, *args, **kwargs):
         if torch.any(inp.lengths()[1:-1].ne(orig_dim)):
             return False
         if torch.any(
-            inp.offsets()[1:]
+            inp.offsets()[1:-1]
             - torch.arange(
                 1, inp.lengths().shape[0], device=inp.device, dtype=torch.int64
             )

@@ -343,7 +343,7 @@ def jagged_from_tensor_and_lengths(
     offsets = torch.cat(
         [
             start_list + offset_lengths,
-            start_list[-1] + offset_lengths[-1] + length_list[-1],
+            torch.tensor([start_list[-1] + offset_lengths[-1] + length_list[-1]], device=start_list.device, dtype=torch.int64),
         ]
     )
 
