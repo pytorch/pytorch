@@ -2628,8 +2628,8 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(str(fw_output[0]), "sum_1")
         # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
         # rather than saving the sizes of the primals input for use in backward expand
-        self.assertEqual(str(fw_output[1]), "sym_size")
-        self.assertEqual(str(fw_output[2]), "sym_size_1")
+        self.assertEqual(str(fw_output[1]), "sym_size_int")
+        self.assertEqual(str(fw_output[2]), "sym_size_int_1")
 
         inp = [
             torch.randn(10, requires_grad=True),
@@ -3503,7 +3503,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition

@@ -178,7 +178,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #define SKIP_CODE ((void*)0x1)
 
 bool is_dynamo_compiling = false;
-static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
@@ -685,13 +684,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     }
     return (PyObject*)e->code;
   }
-  if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
-    if (r == NULL) {
-      return NULL;
-    }
-    Py_DECREF(r);
-  }
   return lookup(e->next, frame, e, index + 1);
 }
 
@@ -1117,14 +1109,6 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_fail_hook(PyObject* dummy, PyObject* obj) {
-  if (obj == Py_None) {
-    obj = NULL;
-  }
-  Py_XSETREF(guard_fail_hook, Py_XNewRef(obj));
-  Py_RETURN_NONE;
-}
-
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   if (obj == Py_None) {
     obj = NULL;
@@ -1138,7 +1122,6 @@ static PyMethodDef _methods[] = {
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
-    {"set_guard_fail_hook", set_guard_fail_hook, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};

@@ -965,6 +965,7 @@ coverage_ignore_functions = [
     "guard_scalar",
     "has_hint",
     "has_symbolic_sizes_strides",
+    "has_free_symbols",
     "hint_int",
     "is_channels_last_contiguous_2d",
     "is_channels_last_contiguous_3d",
@@ -978,6 +979,7 @@ coverage_ignore_functions = [
     "is_symbolic",
     "parallel_and",
     "parallel_or",
+    "sym_eq",
     "tensor_has_hints",
     # torch.fx.experimental.unification.core
     "reify",
