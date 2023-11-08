@@ -1,12 +1,15 @@
 r"""
-This package adds support for CUDA tensor types, that implement the same
-function as CPU tensors, but they utilize GPUs for computation.
+This package adds support for CUDA tensor types.
+
+It implements the same function as CPU tensors, but they utilize 
+GPUs for computation.
 
 It is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports CUDA.
 
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
+
 
 import contextlib
 import importlib
@@ -114,7 +117,7 @@ default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
-    r"""Returns true if compile with CUDA support."""
+    r"""Return true if compile with CUDA support."""
     return hasattr(torch._C, "_cuda_getDeviceCount")
 
 
@@ -123,7 +126,7 @@ def _nvml_based_avail() -> bool:
 
 
 def is_available() -> bool:
-    r"""Returns a bool indicating if CUDA is currently available."""
+    r"""Return a bool indicating if CUDA is currently available."""
     if not _is_compiled():
         return False
     if _nvml_based_avail():
@@ -139,7 +142,7 @@ def is_available() -> bool:
 
 
 def is_bf16_supported():
-    r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
+    r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
     if torch.version.hip:
@@ -220,7 +223,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
 
 
 def is_initialized():
-    r"""Returns whether PyTorch's CUDA state has been initialized."""
+    r"""Return whether PyTorch's CUDA state has been initialized."""
     return _initialized and not _is_in_bad_fork()
 
 
@@ -253,11 +256,12 @@ OutOfMemoryError = torch._C._OutOfMemoryError
 
 
 def init():
-    r"""Initialize PyTorch's CUDA state.  You may need to call
-    this explicitly if you are interacting with PyTorch via
-    its C API, as Python bindings for CUDA functionality will not
-    be available until this initialization takes place.  Ordinary users
-    should not need this, as all of PyTorch's CUDA methods
+    r"""Initialize PyTorch's CUDA state.
+    
+    You may need to call this explicitly if you are interacting with 
+    PyTorch via its C API, as Python bindings for CUDA functionality 
+    will not be available until this initialization takes place.  
+    Ordinary users should not need this, as all of PyTorch's CUDA methods
     automatically initialize CUDA state on-demand.
 
     Does nothing if the CUDA state is already initialized.
@@ -390,7 +394,7 @@ class device_of(device):
 
 
 def set_device(device: _device_t) -> None:
-    r"""Sets the current device.
+    r"""Set the current device.
 
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
@@ -405,7 +409,7 @@ def set_device(device: _device_t) -> None:
 
 
 def get_device_name(device: Optional[_device_t] = None) -> str:
-    r"""Gets the name of a device.
+    r"""Get the name of a device.
 
     Args:
         device (torch.device or int, optional): device for which to return the
@@ -420,7 +424,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
-    r"""Gets the cuda capability of a device.
+    r"""Get the cuda capability of a device.
 
     Args:
         device (torch.device or int, optional): device for which to return the
@@ -437,7 +441,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
 
 
 def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
-    r"""Gets the properties of a device.
+    r"""Get the properties of a device.
 
     Args:
         device (torch.device or int or str): device for which to return the
@@ -454,7 +458,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
 
 
 def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
-    r"""Checks if peer access between two devices is possible."""
+    r"""Check if peer access between two devices is possible."""
     _lazy_init()
     device = _get_device_index(device, optional=True)
     peer_device = _get_device_index(peer_device)
@@ -522,8 +526,7 @@ class StreamContext:
 
 
 def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
-    r"""Wrapper around the Context-manager StreamContext that
-    selects a given stream.
+    r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
@@ -535,7 +538,7 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
 
 
 def set_stream(stream: Stream):
-    r"""Sets the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -553,13 +556,13 @@ def set_stream(stream: Stream):
 
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
-    """Parse CUDA_VISIBLE_DEVICES environment variable."""
+    r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
         return list(range(64))
 
     def _strtoul(s: str) -> int:
-        """Return -1 or positive integer sequence string starts with,"""
+        """Return -1 or positive integer sequence string starts with."""
         if not s:
             return -1
         for idx, c in enumerate(s):
@@ -601,8 +604,7 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
 
 def _raw_device_count_nvml() -> int:
-    """Return number of devices as reported by NVML
-    or negative value if NVML discovery/initialization failed."""
+    r"""Return number of devices as reported by NVML or negative value if NVML discovery/initialization failed."""
     from ctypes import byref, c_int, CDLL
 
     nvml_h = CDLL("libnvidia-ml.so.1")
@@ -620,8 +622,7 @@ def _raw_device_count_nvml() -> int:
 
 
 def _raw_device_uuid_nvml() -> Optional[List[str]]:
-    """Return list of device UUID as reported by NVML
-    or None if NVM discovery/initialization failed."""
+    r"""Return list of device UUID as reported by NVML or None if NVM discovery/initialization failed."""
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
     nvml_h = CDLL("libnvidia-ml.so.1")
@@ -653,8 +654,7 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
 
 
 def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
-    """Given the set of partial uuids and list of known uuids builds
-    a set of ordinals excluding ambiguous partials IDs"""
+    r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
     def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
         best_match = -1
@@ -681,8 +681,10 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 
 
 def _device_count_nvml() -> int:
-    """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
-    Negative value is returned if NVML discovery or initialization has failed."""
+    r"""Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
+
+    Negative value is returned if NVML discovery or initialization has failed.
+    """
     visible_devices = _parse_visible_devices()
     if not visible_devices:
         return 0
@@ -713,7 +715,7 @@ def _device_count_nvml() -> int:
 
 
 def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Returns the NVML index of the device, taking CUDA_VISIBLE_DEVICES into account."""
+    r"""Return the NVML index of the device, taking CUDA_VISIBLE_DEVICES into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
@@ -733,7 +735,7 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
 
 @lru_cache(maxsize=1)
 def device_count() -> int:
-    r"""Returns the number of GPUs available."""
+    r"""Return the number of GPUs available."""
     if not _is_compiled():
         return 0
     nvml_count = _device_count_nvml()
@@ -741,7 +743,7 @@ def device_count() -> int:
 
 
 def get_arch_list() -> List[str]:
-    r"""Returns list CUDA architectures this library was compiled for."""
+    r"""Return list CUDA architectures this library was compiled for."""
     if not is_available():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
@@ -751,7 +753,7 @@ def get_arch_list() -> List[str]:
 
 
 def get_gencode_flags() -> str:
-    r"""Returns NVCC gencode flags this library was compiled with."""
+    r"""Return NVCC gencode flags this library was compiled with."""
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
@@ -765,13 +767,13 @@ def get_gencode_flags() -> str:
 
 
 def current_device() -> int:
-    r"""Returns the index of a currently selected device."""
+    r"""Return the index of a currently selected device."""
     _lazy_init()
     return torch._C._cuda_getDevice()
 
 
 def synchronize(device: _device_t = None) -> None:
-    r"""Waits for all kernels in all streams on a CUDA device to complete.
+    r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
         device (torch.device or int, optional): device for which to synchronize.
@@ -797,7 +799,7 @@ def ipc_collect():
 
 
 def current_stream(device: Optional[_device_t] = None) -> Stream:
-    r"""Returns the currently selected :class:`Stream` for a given device.
+    r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -815,7 +817,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
-    r"""Returns the default :class:`Stream` for a given device.
+    r"""Return the default :class:`Stream` for a given device.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -833,13 +835,13 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
 
 
 def current_blas_handle():
-    r"""Returns cublasHandle_t pointer to current cuBLAS handle"""
+    r"""Return cublasHandle_t pointer to current cuBLAS handle"""
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
 
 def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
-    r"""Sets the debug mode for cuda synchronizing operations.
+    r"""Set the debug mode for cuda synchronizing operations.
 
     Args:
         debug_mode(str or int): if "default" or 0, don't error or warn on synchronizing operations,
@@ -849,7 +851,6 @@ def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
         This is an experimental feature, and not all synchronizing operations will trigger warning or error. In
         particular, operations in torch.distributed and torch.sparse namespaces are not covered yet.
     """
-
     _lazy_init()
     if isinstance(debug_mode, str):
         if debug_mode == "default":
@@ -867,8 +868,7 @@ def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
 
 
 def get_sync_debug_mode() -> int:
-    r"""Returns current value of debug mode for cuda synchronizing operations."""
-
+    r"""Return current value of debug mode for cuda synchronizing operations."""
     _lazy_init()
     return torch._C._cuda_get_sync_debug_mode()
 
@@ -891,8 +891,8 @@ def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the percent of time over the past sample period during which global (device)
-    memory was being read or written. as given by `nvidia-smi`.
+    r"""Return the percent of time over the past sample period during which global (device)
+    memory was being read or written as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -910,7 +910,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def utilization(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the percent of time over the past sample period during which one or
+    r"""Return the percent of time over the past sample period during which one or
     more kernels was executing on the GPU as given by `nvidia-smi`.
 
     Args:
@@ -921,7 +921,6 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-
     handle = _get_pynvml_handler(device)
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
@@ -929,8 +928,9 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def temperature(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average temperature of the GPU sensor in Degrees C (Centigrades)
-        over the past sample period as given by `nvidia-smi`.
+    r"""Return the average temperature of the GPU sensor in Degrees C (Centigrades).
+
+    The average temperature is computed based on past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -946,7 +946,7 @@ def temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def power_draw(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average power draw of the GPU sensor in mW (MilliWatts)
+    r"""Return the average power draw of the GPU sensor in mW (MilliWatts)
         over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
 
     Args:
@@ -962,7 +962,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -995,7 +995,6 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
     Args:
         device (torch.device): selected device.
     """
-
     idx = device.index
     if idx is None:
         idx = current_device()
@@ -1005,7 +1004,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 def _set_rng_state_offset(
     offset: int, device: Union[int, str, torch.device] = "cuda"
 ) -> None:
-    r"""Sets the random number generator state offset of the specified GPU.
+    r"""Set the random number generator state offset of the specified GPU.
 
     Args:
         offset (int): The desired offset
@@ -1022,7 +1021,7 @@ def _set_rng_state_offset(
 
 
 def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int:
-    r"""Returns the random number generator state offset of the specified GPU.
+    r"""Return the random number generator state offset of the specified GPU.
 
     Args:
         device (torch.device or int, optional): The device to return the RNG state offset of.
