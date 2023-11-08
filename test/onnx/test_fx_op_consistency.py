@@ -529,9 +529,9 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
+        in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Gemm", "uint8, int8, int16, int32, int64"
         ),
     ),
     skip(
