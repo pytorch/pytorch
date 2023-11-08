@@ -61,7 +61,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols",
+    "has_free_symbols", "sym_eq",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -101,9 +101,14 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-def hint_int(a):
+def hint_int(a, fallback=None):
+    """
+    Retrieve the hint for an int (based on the underlying real values as observed
+    at runtime).  If no hint is available (e.g., because data dependent shapes),
+    if fallback is not None, use that instead (otherwise raise an error).
+    """
     if isinstance(a, torch.SymInt):
-        return a.node.require_hint()
+        return a.node.require_hint(fallback)
     assert type(a) is int, a
     return a
 
@@ -274,6 +279,20 @@ def parallel_and(*args):
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
+
+def sym_eq(x, y):
+    """
+    Like ==, but when run on list/tuple, it will recursively test equality
+    and use sym_and to join the results together, without guarding.
+    """
+    if (isinstance(x, tuple) and isinstance(y, tuple)) or (isinstance(x, list) and isinstance(y, list)):
+        if len(x) != len(y):
+            return False
+        return functools.reduce(operator.and_, map(sym_eq, x, y), True)
+    elif isinstance(x, (int, torch.SymInt)) and isinstance(y, (int, torch.SymInt)):
+        return x == y
+    else:
+        raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
