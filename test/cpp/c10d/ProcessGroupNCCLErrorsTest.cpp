@@ -156,7 +156,6 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
  protected:
   std::string getNCCLWatchdogDebugInfo() override {
     LOG(INFO) << "overridden getNCCLWatchdogDebugInfo called";
-    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
     watchDogDebugInfoFinished_ = true;
     return "";
   }
@@ -417,7 +416,7 @@ class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
     auto work = pg.allreduce(tensors_);
     std::this_thread::sleep_for(
         std::chrono::seconds(heartBeatIntervalInSec * multiplier));
-    EXPECT_THROW(work->wait(), std::runtime_error);
+    EXPECT_THROW(work->wait(), c10::DistBackendError);
   }
 
   const int heartBeatIntervalInSec = 2;
