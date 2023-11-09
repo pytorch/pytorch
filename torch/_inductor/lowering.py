@@ -1186,12 +1186,14 @@ def unfold(x, dimension, size, step):
     if ndim == 0:
         return slice_(unsqueeze(x, 0), end=size)
 
+    dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_leq(size, dim_size)
     sizevars.guard_lt(0, step)
 
-    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
-    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+    new_dim_size = FloorDiv(dim_size - size, step) + 1
+    if sizevars.size_hint(dim_size) > 0:
+        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -5096,6 +5098,10 @@ try:
     @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(c10d_functional.broadcast)
+    def broadcast(input, src, tag, ranks, group_size):
+        return ir.Broadcast.create(input, src, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
