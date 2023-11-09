@@ -258,7 +258,7 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
                                              unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
     r"""
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.
-    
+
     In the default scenario, storage-related methods will not be generated automatically.
 
     When you implement kernels for various torch operations, and register them to the PrivateUse1 dispatch key.

@@ -101,7 +101,7 @@ def _get_device_module(device="cuda"):
 class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
-    
+
     If no non-CPU tensors are present, the default device type will
     be used. The default value is 'cuda'. The device type is used in
     the checkpointing process when determining which device states
@@ -1299,7 +1299,7 @@ def _checkpoint_without_reentrant_generator(
     **kwargs
 ):
     """Checkpointing without reentrant autograd.
-    
+
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs

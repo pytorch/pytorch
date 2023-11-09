@@ -82,8 +82,8 @@ def conv_flop_count(
     transposed: bool = False,
 ) -> int:
     """Count flops for convolution.
-    
-    Note only multiplication is 
+
+    Note only multiplication is
     counted. Computation for bias are ignored.
     Flops for a transposed convolution are calculated as
     flops = (x_shape[2:] * prod(w_shape) * batch_size).
@@ -140,7 +140,7 @@ def conv_backward_flop(
 def sdpa_flop_count(query_shape, key_shape, value_shape):
     """
     Count flops for self-attention.
-    
+
     NB: We can assume that value_shape == key_shape
     """
     b, h, s_q, d_q = query_shape
@@ -360,7 +360,7 @@ class FlopCounterMode(TorchDispatchMode):
 
     def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
         """Return the flop counts as a dictionary of dictionaries.
-        
+
         The outer
         dictionary is keyed by module name, and the inner dictionary is keyed by
         operation name.
