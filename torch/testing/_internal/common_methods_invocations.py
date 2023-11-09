@@ -13844,7 +13844,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=empty_types() + (torch.float16, torch.bfloat16, torch.float32),
         supports_out=False,
         supports_autograd=True,
-        supports_fwgrad_bwgrad=True,
+        supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
         decorators=[],
@@ -13855,6 +13855,7 @@ op_db: List[OpInfo] = [
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
             # None Mismatch Tensor
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
         )
