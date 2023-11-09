@@ -297,6 +297,8 @@ ALLOW_LIST = [
     ("c10d::allreduce_", datetime.date(2023, 7, 30)),
     ("c10d::_allgather_base_", datetime.date(2023, 12, 30)),
     ("c10d::_reduce_scatter_base_", datetime.date(2023, 12, 30)),
+    ("c10d::broadcast_", datetime.date(2023, 12, 30)),
+    ("c10d::scatter_", datetime.date(2023, 12, 30)),
     # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
@@ -312,6 +314,10 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2023, 12, 31)),
     ("onednn::qlinear_pointwise", datetime.date(2023, 12, 31)),
 ]
 

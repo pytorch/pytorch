@@ -107,7 +107,7 @@ class BaseSchedulerNode:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
-            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
@@ -332,10 +332,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and input_node.node.has_aliasing()
+                            isinstance(input_node.node, ir.FallbackKernel)
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -779,7 +777,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
-        self.node: ir.Buffer
+        self.node: ir.Buffer = None  # type: ignore[assignment]
         self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
@@ -839,7 +837,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_or_aliased_buffer_names(self) -> Set[str]:
         return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
-    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+    def get_nodes(self) -> List[SchedulerNode]:
         return self.snodes
 
     def __repr__(self):
@@ -852,6 +850,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
+
+    @cache_on_self
+    def get_template_node(self):
+        for node in self.snodes:
+            if node.is_template():
+                return node
+        return None
 
     def get_device(self):
         return self.group[0]
@@ -1017,7 +1022,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
-            self.node: ir.Buffer
+            self.node: ir.Buffer = None  # type: ignore[assignment]
             self.users: List[NodeUser] = []
 
             self.set_read_writes(
@@ -1317,7 +1322,7 @@ class Scheduler:
         def dep_closure(node_name):
             reachable_names = {node_name}
             node = self.name_to_node[node_name]
-            write_dep = list(node.read_writes.writes)[0]
+            write_dep = next(iter(node.read_writes.writes))
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
@@ -1356,6 +1361,7 @@ class Scheduler:
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
+            assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
@@ -2164,12 +2170,7 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                if isinstance(node.node, ir.CUDATemplateBuffer):
-                    from .codegen.cuda.cuda_scheduling import CUDAScheduling
-
-                    CUDAScheduling(self).codegen_template(node, epilogue)
-                else:
-                    self.get_backend(device).codegen_template(node, epilogue)
+                self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
@@ -2177,6 +2178,7 @@ class Scheduler:
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
+                assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
             if config.debug_check_inf_and_nan:
@@ -2221,7 +2223,7 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         """
         Given a template node, generate a kernel.

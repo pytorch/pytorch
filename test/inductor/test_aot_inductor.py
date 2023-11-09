@@ -11,12 +11,12 @@ import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
-from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
-from torch._inductor.utils import aot_inductor_launcher
+from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
+from torch.testing._internal import common_utils
 
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -25,8 +25,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+
+from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
+
+if HAS_CUDA:
+    import triton
+    from torch.testing._internal.triton_utils import add_kernel
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -38,19 +43,9 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
+        from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
+        from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -93,7 +88,7 @@ class AOTInductorModelRunner:
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher(so_path, device)],
                 # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(),
+                build_directory=tempfile.mkdtemp(dir=cache_dir()),
                 functions=["run", "get_call_spec"],
                 with_cuda=(device == "cuda"),
             )
@@ -203,21 +198,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    def test_simple_split(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
-
-        example_inputs = (torch.randn(2, 8, device=self.device),)
-        counters.clear()
-        self.check_model(Model(), example_inputs)
-        self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
-        self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
-        self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
-
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -231,7 +211,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
-    def test_output_path(self):
+    def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -246,6 +226,26 @@ class AOTInductorTestsTemplate:
         )
         with config.patch("aot_inductor.output_path", "tmp_output_"):
             self.check_model(Model(), example_inputs)
+
+    def test_output_path_2(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        model = Model().to(device=self.device)
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
+        actual_path = AOTInductorModelRunner.compile(
+            model, example_inputs, options={"aot_inductor.output_path": expected_path}
+        )
+        self.assertTrue(actual_path == expected_path)
 
     @requires_cuda()
     def test_multi_device(self):
@@ -520,6 +520,50 @@ class AOTInductorTestsTemplate:
         ]
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    def test_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output, updated_amax = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        constraints = [
+            torch._export.dynamic_dim(x, 0) >= 1,
+            torch._export.dynamic_dim(x, 0) <= 2048,
+        ]
+        self.check_model(
+            Model(dtype),
+            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            constraints=constraints,
+        )
 
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -928,6 +972,26 @@ class AOTInductorTestsTemplate:
             torch.float32, self.device == "cuda"
         )
 
+    def test_consecutive_compiles(self):
+        """Test that compilation behaves correctly with cache hits"""
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        mod = TestModule()
+        inp = torch.rand(1)
+        mod(inp)
+        mod2 = torch.fx.symbolic_trace(mod, concrete_args=[inp])
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+        # compile the 2nd time with cache hit
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+
     def test_normal_functional(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1007,6 +1071,67 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_repeat_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.sin(x)
+                return y, y
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    @common_utils.parametrize("grid_type", [1, 2, 3])
+    @common_utils.parametrize("num_dims", [1, 2])
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_basic(self, grid_type, num_dims, dynamic):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+
+                def grid_fn(meta):
+                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                if grid_type == 1:
+                    grid = (n_elements,)
+                elif grid_type == 2:
+                    grid = lambda meta: (  # noqa: E731
+                        triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                    )
+                else:
+                    grid = grid_fn
+
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                return output
+
+        dims = [10] * num_dims
+        a = torch.randn(*dims, device=self.device)
+        b = torch.randn(*dims, device=self.device)
+        constraints = []
+        if dynamic:
+            constraints = [
+                torch._export.dynamic_dim(a, 0) >= 1,
+                torch._export.dynamic_dim(a, 0) <= 10,
+                torch._export.dynamic_dim(b, 0) >= 1,
+                torch._export.dynamic_dim(b, 0) <= 10,
+            ]
+        self.check_model(Model(), (a, b), constraints=constraints)
+
+
+common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -1032,6 +1157,8 @@ copy_tests(
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
@@ -1054,6 +1181,8 @@ copy_tests(
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
     },
 )
 
@@ -1097,6 +1226,7 @@ copy_tests(
     AOTInductorTestNonABICompatibleCuda,
     "non_abi_compatible_cuda",
 )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

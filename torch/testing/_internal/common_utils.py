@@ -179,7 +179,15 @@ TestEnvironment.def_flag(
     env_var="SANDCASTLE",
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False)
-TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE", include_in_repro=False)
+
+_is_fbcode_default = (
+    hasattr(torch._utils_internal, "IS_FBSOURCE") and
+    torch._utils_internal.IS_FBSOURCE
+)
+
+TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
+                         default=_is_fbcode_default,
+                         include_in_repro=False)
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
@@ -1287,14 +1295,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -1309,7 +1317,7 @@ def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor 
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
-    torch._dynamo.config.translation_validation = True
+    torch.fx.experimental._config.translation_validation = True
 
 # Some tests take too long when dynamic_shapes is combined with
 # translation_validation. Whenever that happens, we solve that by
@@ -1319,7 +1327,7 @@ def disable_translation_validation_if_dynamic_shapes(fn):
     def wrapper(*args, **kwargs):
         if torch._dynamo.config.dynamic_shapes:
             # Turning TV off due to high latency on dynamic shapes.
-            torch._dynamo.config.translation_validation = False
+            torch.fx.experimental._config.translation_validation = False
         return fn(*args, **kwargs)
     return wrapper
 
