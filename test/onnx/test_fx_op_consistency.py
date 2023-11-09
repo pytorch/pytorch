@@ -142,8 +142,10 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
+        "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
+        "linalg.vector_norm",
         "scatter_add",
         "scatter_reduce",
         "square",
