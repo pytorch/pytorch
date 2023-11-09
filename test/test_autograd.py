@@ -3746,7 +3746,6 @@ class TestAutograd(TestCase):
                     def inner_func(x):
                         return x.sin()
                 else:
-                    # This should not mutate the global grad mode!
                     def inner_func(x):
                         return x.sin()
 
