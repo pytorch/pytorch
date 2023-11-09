@@ -343,7 +343,7 @@ def init_from_local_shards(
         process_group=None,
         init_rrefs=False) -> ShardedTensor:
     """
-    Create an :class:`ShardedTensor` from local shards and the global metadata.
+    Create a :class:`ShardedTensor` from local shards and the global metadata.
 
     Needs to be called on all ranks in an SPMD fashion.
 
