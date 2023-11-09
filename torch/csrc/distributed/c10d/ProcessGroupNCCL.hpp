@@ -82,6 +82,12 @@ enum ErrorHandlingMode {
 constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
     "TORCH_NCCL_AVOID_RECORD_STREAMS";
 
+// If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
+// allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
+// can register/deregister the tensor on all available NCCL communicators.
+constexpr const char* NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
+    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK";
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -814,6 +820,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
+
+  // Whether or not to hook the cache allocator to register all allocated
+  // tensors
+  bool useTensorRegisterAllocatorHook_ = false;
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.

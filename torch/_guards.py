@@ -151,7 +151,6 @@ class Guard:
     # GRAD_MODE and SHAPE_ENV.
     originating_source: Source
     create_fn: Callable[[GuardBuilderBase, Guard], None]
-    is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[List[str]] = None
@@ -242,7 +241,13 @@ class Guard:
         return output
 
     def create(self, builder: GuardBuilderBase):
-        return self.create_fn(builder, self)
+        try:
+            return self.create_fn(builder, self)
+        except Exception:
+            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            if self.stack:
+                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
+            raise
 
     def is_nn_module(self):
         return self.source.is_nn_module()
@@ -762,10 +767,10 @@ class Source:
     def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn, is_volatile=False) -> Guard:
+    def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self, fn, is_volatile)
+        return Guard(self, fn)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
