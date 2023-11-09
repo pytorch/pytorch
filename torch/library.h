@@ -93,6 +93,8 @@ enum class _RegisterOrVerify { REGISTER, VERIFY };
 template <class CurClass>
 class class_;
 
+#define HAS_IMPL_ABSTRACT_PYSTUB
+
 /// Represents a C++ function that implements an operator.  Most users won't
 /// interact directly with this class, except via error messages: the
 /// constructors this function define the set of permissible "function"-like
@@ -606,19 +608,16 @@ class TORCH_API Library final {
     return _def(std::move(s), nullptr, tags, rv);
   }
 
-  /// Declares that an operator (given by name) has an abstract impl in a
-  /// Python module (pymodule). If the abstract impl was not yet imported,
-  /// we will warn about it.
+  /// Declares that for all operators that are subsequently def'ed, their
+  /// abstract impls may be found in the given Python module (pymodule).
+  /// This registers some help text that is used if the abstract impl
+  /// cannot be found.
   ///
   /// Args:
-  /// - name: the name of the operator
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
-  Library& impl_abstract_pystub(const char* name, const char* pymodule, const char* context = "") {
-    at::OperatorName opname = _parseNameForLib(name);
-    registrars_.emplace_back(
-      c10::Dispatcher::singleton().registerAbstractImplPyStub(opname, pymodule, context)
-      );
+  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
+    impl_abstract_pystub_ = {pymodule, context};
     return *this;
   }
 
@@ -731,20 +730,20 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>) & {
+  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
-  Library& def(detail::SelectiveStr<true> raw_schema) & {
-    return def(raw_schema.operator const char*());
+  Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
+    return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f));
+        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
   }
 
   template <typename Func>
@@ -840,6 +839,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
+  c10::optional<std::pair<const char*, const char*>> impl_abstract_pystub_;
   const char* file_;
   uint32_t line_;
 
