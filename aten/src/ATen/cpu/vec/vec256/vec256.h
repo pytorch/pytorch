@@ -83,6 +83,11 @@ inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
 
+template<>
+inline Vectorized<float> cast<float, int32_t>(const Vectorized<int32_t>& src) {
+  return _mm256_cvtepi32_ps(src);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
@@ -102,14 +107,14 @@ inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
-                   const Vectorized<int64_t>& vindex, const Vectorized<double>& mask) {
+                   const Vectorized<int64_t>& vindex, Vectorized<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
-                   const Vectorized<int32_t>& vindex, const Vectorized<float>& mask) {
+                   const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
 
