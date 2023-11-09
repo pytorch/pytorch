@@ -178,6 +178,9 @@ def all_gather_tensor(
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
+        # torch.cat access the data so we already need to wait here, first do wait
+        # and then chunk + cat avoid us going through ACT dispatching logic again
+        res = res.wait()
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -398,6 +401,14 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func == torch.ops.aten.wait.default:
+            # Fast handle aten.view as a lot of view related op goes to aten.view
+            # eventually, this avoids pytree slowdown
+            res = func(args[0].elem, args[1])
+            wrapper_res = AsyncCollectiveTensor(res)
+            _register_tensor_wrapper(wrapper_res)
+            return wrapper_res
+
         is_view_op = _is_view_op(func)
 
         def unwrap(e: AsyncCollectiveTensor):
