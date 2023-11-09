@@ -1204,7 +1204,7 @@ class BuiltinVariable(VariableTracker):
                     "the middle of the graph, which aot_autograd does not currently know how to handle. "
                 )
             tx.output.side_effects.store_attr(obj, name, val)
-            return val.add_options(self, obj, name_var)
+            return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
