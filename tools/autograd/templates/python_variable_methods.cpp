@@ -1063,8 +1063,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  if (device && device->is_privateuseone()) {
-    c10::LazyInit(device->type());
+  if (device.is_privateuseone()) {
+    c10::LazyInit(device.type());
   }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS
