@@ -4311,9 +4311,10 @@ def create_aot_dispatcher_function(
                         return x
                 static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
                 widr = WeakIdRef(x)
+                tc = torch._guards.TracingContext.get()
                 # TODO(voz): Doc goes here
-                if widr in torch._guards.TracingContext.get().weak_tensor_ref_to_fakification_policy:
-                    policy = torch._guards.TracingContext.get().weak_tensor_ref_to_fakification_policy[widr]
+                if tc and widr in tc.weak_tensor_ref_to_fakification_policy:
+                    policy = tc.weak_tensor_ref_to_fakification_policy[widr]
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims)
                 else:
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes)
