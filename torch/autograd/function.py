@@ -412,7 +412,7 @@ class _SingleLevelFunction(
 
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
-        r"""Formulate differentiation with forward mode automatic differentiation.
+        r"""Define a formula for differentiating the operation with forward mode automatic differentiation.
 
         This function is to be overridden by all subclasses.
         It must accept a context :attr:`ctx` as the first argument, followed by
