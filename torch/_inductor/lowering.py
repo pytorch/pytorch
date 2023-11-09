@@ -5132,6 +5132,97 @@ try:
             )
         )
 
+    _c10d_functional = torch.ops._c10d_functional
+
+    @register_lowering(_c10d_functional.all_reduce)
+    def _all_reduce(inp, reduce_op, group_name):
+        inp = clone(inp)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.all_reduce_)
+    def _all_reduce_(inp, reduce_op, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.all_reduce_coalesced)
+    def _all_reduce_coalesced(inputs, reduce_op, group_name):
+        inputs = [clone(inp) for inp in inputs]
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_coalesced_.default,
+            inputs,
+            reduce_op,
+            group_name,
+        )
+        return inputs
+
+    @register_lowering(_c10d_functional.all_reduce_coalesced_)
+    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_coalesced_.default,
+            inputs,
+            reduce_op,
+            group_name,
+        )
+        return inputs
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor)
+    def _all_gather_into_tensor(inp, group_size, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_gather_into_tensor.default,
+                inp,
+                group_size,
+                group_name,
+            )
+        )
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor_coalesced)
+    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_gather_into_tensor_coalesced.default,
+                inputs,
+                group_size,
+                group_name,
+            ),
+        )
+
+    @register_lowering(_c10d_functional.reduce_scatter_tensor)
+    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.reduce_scatter_tensor.default,
+                inp,
+                reduce_op,
+                group_size,
+                group_name,
+            )
+        )
+
+    @register_lowering(_c10d_functional.reduce_scatter_tensor_coalesced)
+    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.reduce_scatter_tensor_coalesced.default,
+                inputs,
+                reduce_op,
+                group_size,
+                group_name,
+            ),
+        )
+
+    @register_lowering(_c10d_functional.wait_tensor)
+    def _wait_tensor(inp):
+        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
+        return inp
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
