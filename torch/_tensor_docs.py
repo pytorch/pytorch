@@ -1088,10 +1088,7 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
 
 .. note::
-  Although sigma (:math:`\sigma`) is usually used to denote square root of varaince,
-  sigma (:math:`\sigma`) here denotes the scale parameter in Cauchy distribution.
-  
-  Also note that mean and variance are undefined in Cauchy distribution.
+  Sigma (:math:`\sigma`) is used to denote the scale parameter in Cauchy distribution.
 """,
 )
 
