@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    subtest,
     TestCase,
 )
 
@@ -18,7 +19,7 @@ FLOAT8_DTYPES = [
     torch.float8_e4m3fnuz,
 ]
 
-# Not provided by torch.finfo.
+# The following information are not yet provided by torch.finfo.
 
 MANTISSA_BITS = {
     torch.float8_e5m2: 2,
@@ -98,20 +99,20 @@ SPECIAL_NUMBERS = {
     ],
 }
 
+FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
 def simulate_fp8_precision(input, variant):
-    """
-    Round float32 input to the given float8 datatype variant.
-    """
+    """Round input (as float32) to the given float8 datatype variant."""
 
     # Constants
     dtype = torch.float32
     int_type = torch.int32
     mbits = MANTISSA_BITS[variant]
-    minexp = MINEXP[variant]  # ml_dtypes.finfo(variant).minexp
+    minexp = MINEXP[variant]  # ml_dtypes.finfo(variant).
+
+    input = input.to(dtype)
 
     # Extract bitfield components
-    assert input.dtype == torch.float32
     signs = torch.sign(input)
     input_int = torch.abs(input).view(int_type)
 
@@ -123,7 +124,7 @@ def simulate_fp8_precision(input, variant):
     # Add implicit leading 1 to mantissas, i.e. create 1.mmmmmmmm
     mantissa_val_base = 0x00800000 + mantissa_bits
 
-    # Shift mantissa to match minimum exponent - denormals in output remain normal in input
+    # Shift mantissa to match minimum exponent - denormals in output dtype remain normal in higher precision dtype
     denormal_bits = torch.maximum(
         minexp - exponent_base, torch.tensor(0, dtype=int_type)
     )
@@ -141,9 +142,45 @@ def simulate_fp8_precision(input, variant):
     mantissa_val_rounded += ties * is_odd * last_unrounded_bit
 
     # Re-compose mantissa and exponent
-    vals = mantissa_val_rounded * 2.0 ** (-23 + exponent)
+    vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    return vals.to(dtype) * signs
+    # Replace overflows with inf/NaN as appropriate (no saturation)
+    have_inf = variant in FLOAT8_DTYPES_WITH_INF
+    vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
+
+    return vals * signs
+
+
+ROUND_TRIP_TEST_CASES = (
+    # A general 'soak test'.
+    subtest(
+        lambda dtype, device: torch.rand((100, 100), device=device)
+        * torch.finfo(dtype).max,
+        name="soak",
+    ),
+    # A range below the smallest normal in the lower precision type, to ensure
+    # these are rounded correctly to their nearest subnormal in that type.
+    subtest(
+        lambda dtype, device: torch.rand(1000, device=device)
+        * 2
+        * torch.finfo(dtype).smallest_normal,
+        name="subnormals",
+    ),
+    # A range of integers to exert rounding to nearest even.
+    subtest(
+        lambda dtype, device: torch.arange(
+            int(torch.finfo(dtype).max), dtype=torch.int, device=device
+        ),
+        name="rte",
+    ),
+    # Max and its neighbours.
+    subtest(
+        lambda dtype, device: torch.finfo(dtype).max
+        + (torch.finfo(dtype).eps * torch.finfo(dtype).max)
+        * torch.arange(-3, 3, 0.25, device=device),
+        name="extremes",
+    ),
+)
 
 
 class TestFloat8Dtype(TestCase):
@@ -161,34 +198,25 @@ class TestFloat8Dtype(TestCase):
     def test_creation_with_zeros(self, dtype, device):
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
-        self.assertEqual(x, x8.float())
+        self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
     """
     Numerical test of float8 conversion
     """
 
     @parametrize("dtype", FLOAT8_DTYPES)
-    def test_cast_to_float8(self, dtype, device):
-        x = torch.rand((100, 100), device=device) * torch.finfo(dtype).max
+    @parametrize("get_input", ROUND_TRIP_TEST_CASES)
+    def test_cast_round_trip(self, dtype, get_input, device):
+        x = get_input(dtype, device)
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float(), atol=0, rtol=0)
-
-    @parametrize("dtype", FLOAT8_DTYPES)
-    def test_cast_to_float8_subnormal(self, dtype, device):
-        x = torch.rand((100, 100), device=device) * torch.finfo(dtype).smallest_normal
-        x = torch.cat((x, -x))
-        x8 = x.to(dtype)
-        x8_simulated = simulate_fp8_precision(x, dtype)
-        self.assertEqual(x8_simulated, x8.float(), atol=0, rtol=0)
-
-    """
-    Test special numbers
-    """
 
     @parametrize("dtype", FLOAT8_DTYPES)
     def test_special_numbers(self, dtype, device):
+        """Test special numbers."""
+
         def compare_binary_with_decimal(binary, decimal, number_name, dtype, device):
             bits_int = int(binary, 2)
             tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
@@ -200,7 +228,7 @@ class TestFloat8Dtype(TestCase):
                 ref_tensor_fp32 = torch.tensor(
                     [decimal], dtype=torch.float, device=device
                 )
-                self.assertEqual(tensor_fp32, ref_tensor_fp32)
+                self.assertEqual(tensor_fp32, ref_tensor_fp32, atol=0, rtol=0)
 
         for number in SPECIAL_NUMBERS[dtype]:
             compare_binary_with_decimal(*number, dtype, device)
