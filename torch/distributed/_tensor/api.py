@@ -468,8 +468,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         if isinstance(full_tensor, funcol.AsyncCollectiveTensor):
             # synchronously wait for any pending collectives to get the result tensor
-            full_tensor.trigger_wait()
-            full_tensor = full_tensor.elem
+            full_tensor = full_tensor.wait()
 
         return full_tensor
 

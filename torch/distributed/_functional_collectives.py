@@ -388,6 +388,10 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def wait(self) -> torch.Tensor:
+        wait_tensor(self.elem)
+        return self.elem
+
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
         return self.elem
@@ -421,6 +425,8 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def numpy(self):
+        return self.wait().numpy()
 
 """
 Utils and infrastructure for tracing support
