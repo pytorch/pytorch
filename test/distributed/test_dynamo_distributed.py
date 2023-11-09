@@ -573,10 +573,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_ctx_manager(self):
         """
-        Just ensures that the appropriate number of splits happen (based on
-        bucket size and model parameters) - verifies the number of times
-        the user-provided compiler is called by the DDPOptimizer which is
-        doing the graph splitting
+        Ensures that we get the right number of splits and that the respective
+        context managers' effects are applied to the computation.
         """
 
         for get_compiler in [
