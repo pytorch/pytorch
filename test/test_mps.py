@@ -3051,7 +3051,7 @@ class TestMPS(TestCaseMPS):
         loss_cpu.backward()
         self.assertEqual(x_mps.grad, x_cpu.grad)
 
-    def test_stack(self):
+    def test_stack_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/87856
         x_cpu = torch.tensor([[1, 2]])
         x_mps = x_cpu.detach().clone().to("mps")
@@ -4272,6 +4272,7 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         helper(3, 3)
+
     # L1 loss
     def test_l1_loss(self):
         def helper(shape, reduction):
