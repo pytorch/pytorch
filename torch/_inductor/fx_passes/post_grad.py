@@ -733,10 +733,10 @@ def reinplace_inplaceable_ops(graph):
         c10d_functional = torch.ops._c10d_functional
         inplaceable_collective_ops = {
             c10d_functional.all_reduce.default: InplaceableOp(
-                c10d_functional.all_reduce_.default, 0
+                c10d_functional.all_reduce_.default, [0]
             ),
             c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-                c10d_functional.all_reduce_coalesced_.default, 0
+                c10d_functional.all_reduce_coalesced_.default, [0]
             ),
         }
         inplaceable_ops.update(inplaceable_collective_ops)
