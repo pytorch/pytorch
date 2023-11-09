@@ -10,6 +10,7 @@ import copy
 import csv
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import logging
@@ -2153,8 +2154,6 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
-        example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
@@ -2353,7 +2352,9 @@ class BenchmarkRunner:
                 self.args.cosine = True
                 fp64_outputs = None
             finally:
-                del model_fp64
+                del model_fp64, inputs_fp64
+                gc.collect()
+                torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2382,6 +2383,8 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                gc.collect()
+                torch.cuda.empty_cache()
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2401,6 +2404,8 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                gc.collect()
+                torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
             is_same = True

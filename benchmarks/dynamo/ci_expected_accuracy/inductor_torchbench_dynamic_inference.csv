@@ -6,7 +6,7 @@ BERT_pytorch,pass,0
 
 
 
-Background_Matting,pass_due_to_skip,0
+Background_Matting,fail_accuracy,0
 
 
 
@@ -94,7 +94,7 @@ hf_Reformer,pass,5
 
 
 
-hf_T5_large,pass_due_to_skip,0
+hf_T5_large,pass,0
 
 
 
@@ -194,7 +194,7 @@ stable_diffusion_text_encoder,pass,0
 
 
 
-stable_diffusion_unet,pass_due_to_skip,0
+stable_diffusion_unet,pass,0
 
 
 
@@ -214,7 +214,7 @@ timm_vision_transformer,pass,0
 
 
 
-timm_vision_transformer_large,pass_due_to_skip,0
+timm_vision_transformer_large,pass,0
 
 
 

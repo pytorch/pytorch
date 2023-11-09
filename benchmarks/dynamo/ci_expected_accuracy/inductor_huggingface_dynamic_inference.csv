@@ -26,7 +26,7 @@ BertForQuestionAnswering,pass,0
 
 
 
-BlenderbotForCausalLM,pass_due_to_skip,0
+BlenderbotForCausalLM,pass,0
 
 
 
@@ -50,7 +50,7 @@ DebertaForQuestionAnswering,pass,0
 
 
 
-DebertaV2ForMaskedLM,pass_due_to_skip,0
+DebertaV2ForMaskedLM,pass,0
 
 
 
