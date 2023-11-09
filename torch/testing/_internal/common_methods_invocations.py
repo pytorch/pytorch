@@ -8242,6 +8242,78 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     yield from samples
 
+
+def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    batch, num_heads, head_dim = 4, 4, 8
+    seq_q = 11
+    seq_kv = 32
+
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
+
+    qkv_shapes = [(dim_4_q_shape, dim_4_kv_shape)]
+    samples = []
+    mask_types = [1, 2]  # UpperLeft, LowerRight
+    scales = [None, 1.0]
+
+    for qkv_shape, is_causal, dropout_p, mask_type, scale in product(
+            qkv_shapes, [True, False], [0.0, 0.5], mask_types, scales):
+        shape_q, shape_kv = qkv_shape
+        samples.append(SampleInput(
+            make(shape_q).transpose(1, 2),
+            make(shape_kv).transpose(1, 2),
+            make(shape_kv).transpose(1, 2),
+            bias=None,
+            cu_seqlens_q=None,
+            cu_seqlens_k=None,
+            max_seqlen_q=None,
+            dropout_p=dropout_p,
+            custom_mask_type=mask_type,
+            compute_log_sumexp=requires_grad,
+            scale=scale,
+            causal_diagonal=None,
+            seqlen_k=None
+        ))
+
+    # Add non standard shapes
+    diff_v_head_dim = SampleInput(
+        make((batch, seq_q, num_heads, head_dim)),
+        make((batch, seq_kv, num_heads, head_dim)),
+        make((batch, seq_kv, num_heads, head_dim + 8)),
+        bias=None,
+        cu_seqlens_q=None,
+        cu_seqlens_k=None,
+        max_seqlen_q=None,
+        dropout_p=dropout_p,
+        custom_mask_type=0,  # No Mask
+        compute_log_sumexp=requires_grad,
+        scale=None,
+        causal_diagonal=None,
+        seqlen_k=None
+    )
+
+    # Add an attn_mask
+    samples.append(
+        SampleInput(
+            make((batch, seq_q, num_heads, head_dim)),
+            make((batch, seq_kv, num_heads, head_dim)),
+            make((batch, seq_kv, num_heads, head_dim)),
+            bias=make(batch, num_heads, seq_q, seq_kv),
+            cu_seqlens_q=None,
+            cu_seqlens_k=None,
+            max_seqlen_q=None,
+            dropout_p=dropout_p,
+            custom_mask_type=0,  # No Mask
+            compute_log_sumexp=requires_grad,
+            scale=None,
+            causal_diagonal=None,
+            seqlen_k=None
+        )
+    )
+
+    yield from samples
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -13764,6 +13836,28 @@ op_db: List[OpInfo] = [
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
+    ),
+    OpInfo(
+        'torch.ops.aten._efficient_attention_forward',
+        sample_inputs_func=sample_inputs_efficient_attention_forward,
+        dtypes=empty_types(),
+        dtypesIfCUDA=empty_types() + (torch.float16, torch.bfloat16, torch.float32),
+        supports_out=False,
+        supports_autograd=True,
+        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=False,
+        check_batched_forward_grad=False,
+        decorators=[],
+        skips=(
+            # Device mismatch due to philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+            # Checking the scaler value of the philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+            # None Mismatch Tensor
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+        )
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
