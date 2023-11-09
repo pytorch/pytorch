@@ -2138,8 +2138,8 @@ class Scheduler:
 
     @dynamo_timed
     def codegen(self):
-        device = None
         for node in self.nodes:
+            device = None
             try:
                 log.debug(
                     "Generating code for node %s with estimated runtime %f",

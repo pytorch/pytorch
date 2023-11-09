@@ -7498,6 +7498,24 @@ class CommonTemplate:
             return  # skip testing if OOM
         fn(a, b)
 
+    def test_fuse_large_params_cpu(self):
+        def pt2_optimizer_step(optimizer):
+            @torch.compile()
+            def f():
+                optimizer.step()
+
+            f()
+
+        params = [
+            torch.rand(10, 10, dtype=torch.float32, device=self.device)
+            for _ in range(194)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        o = torch.optim.AdamW(params)
+        pt2_optimizer_step(o)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -8228,28 +8246,6 @@ if HAS_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
-
-
-if HAS_CPU:
-
-    class TestFuseLargeParamsCPU(TestCase):
-        def test_fuse_large_params_cpu(self):
-            def pt2_optimizer_step(optimizer):
-                @torch.compile()
-                def f():
-                    optimizer.step()
-
-                f()
-
-            params = [
-                torch.rand(10, 10, dtype=torch.float32, device="cpu")
-                for _ in range(194)
-            ]
-            for p in params:
-                p.grad = torch.rand_like(p)
-
-            o = torch.optim.AdamW(params)
-            pt2_optimizer_step(o)
 
 
 if __name__ == "__main__":
