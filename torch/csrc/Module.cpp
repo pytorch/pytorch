@@ -1827,6 +1827,28 @@ Call this whenever a new thread is created in order to propagate values from
         return map;
       });
 
+  py_module.def(
+      "_storage_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      "Gets the memory address of the Tensor's StorageImpl.");
+
+  py_module.def(
+      "_data_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
+      },
+      "Gets the memory address of the Tensor's data pointer.");
+
+  py_module.def(
+      "_is_cow_tensor",
+      [](const at::Tensor& tensor) {
+        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
+      },
+      "Checks if a tensor's data pointer is COW");
+
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
       (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
