@@ -178,7 +178,7 @@ def get_ops_covered_by_opinfos():
 factory_fns = {
     'tensor', 'zeros', 'ones', 'randn', 'arange', 'rand', 'empty', 'randperm',
     'linspace', 'logspace', 'hann_window', 'full', 'eye', 'blackman_window',
-    'barlett_window', 'randint', 'range',
+    'bartlett_window', 'randint', 'range',
 }
 
 

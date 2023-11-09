@@ -1468,10 +1468,10 @@ class TestCustomOp(CustomOpTestCaseBase):
             gm.code.strip(),
             """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
-    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
-    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
     return numpy_view_copy""",  # noqa: B950
         )
 
@@ -1697,6 +1697,14 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_autogen_aten_ops_are_pt2_compliant(self):
+        for op in [
+            torch.ops.aten._foreach_copy.default,
+            torch.ops.aten.fill.Tensor_out,
+        ]:
+            self.assertIn(torch.Tag.generated, op.tags)
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_resolve_packet(self):
         x = torch.randn(3)
         result = torch._C._jit_resolve_packet("aten::sum", x)
@@ -1764,6 +1772,20 @@ def forward(self, x_1):
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
 
+    def test_defined_in_python(self):
+        self.assertFalse(torch.ops.aten.sin.default._defined_in_python)
+        self.assertFalse(torch.ops.aten.sum.dim_IntList._defined_in_python)
+
+        lib = self.lib()
+        torch.library.define("{self._test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+        ns = self.ns()
+        self.assertTrue(ns.foo.default._defined_in_python)
+
+        torch.library.define(
+            "{self._test_ns}::bar.overload", "(Tensor x) -> Tensor", lib=lib
+        )
+        self.assertTrue(ns.bar.overload._defined_in_python)
+
     def _test_impl_device(self, name, types, device):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
@@ -1819,10 +1841,11 @@ def op_with_incorrect_schema(testcase, name):
 class MiniOpTest(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
 
-    def _op_delayed_backward_error(self, name):
+    def _init_op_delayed_backward_error(self):
+        name = "delayed_error"
+        qualname = f"{self.test_ns}::{name}"
         lib = self.lib()
         lib.define(f"{name}(Tensor x) -> Tensor")
-        qualname = f"{self.test_ns}::{name}"
         lib.impl(name, lambda x: x.clone(), "CompositeExplicitAutograd")
         op = self.get_op(qualname)
 
@@ -1842,12 +1865,18 @@ class MiniOpTest(CustomOpTestCaseBase):
         lib.impl(name, autograd_impl, "Autograd")
         return op
 
-    def _op_with_no_abstract_impl(self, name):
-        lib = self.lib()
-        lib.define(f"{name}(Tensor x) -> Tensor")
+    def _init_op_with_no_abstract_impl(self):
+        name = "no_abstract"
         qualname = f"{self.test_ns}::{name}"
+        lib = self.lib()
+        lib.define(f"{name}(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,))
         lib.impl(name, lambda x: x.clone(), "CPU")
-        return self.get_op(qualname)
+        return torch._library.utils.lookup_op(qualname)
+
+    def setUp(self):
+        super().setUp()
+        self._op_with_no_abstract_impl = self._init_op_with_no_abstract_impl()
+        self._op_delayed_backward_error = self._init_op_delayed_backward_error()
 
     @optests.dontGenerateOpCheckTests("Testing this API")
     def test_dont_generate(self):
@@ -1897,19 +1926,19 @@ class MiniOpTest(CustomOpTestCaseBase):
         op(x)
 
     def test_no_abstract(self):
-        op = self._op_with_no_abstract_impl("no_abstract")
+        op = self._op_with_no_abstract_impl
         x = torch.randn(3)
         op(x)
 
     def test_delayed_error(self):
-        op = self._op_delayed_backward_error("delayed_error")
+        op = self._op_delayed_backward_error
         x = torch.randn([], requires_grad=True)
         y = op(x)
         with self.assertRaises(NotImplementedError):
             y.sum().backward()
 
     def test_delayed_error_no_requires_grad(self):
-        op = self._op_delayed_backward_error("delayed_error")
+        op = self._op_delayed_backward_error
         x = torch.randn([])
         y = op(x)
 
@@ -1930,6 +1959,9 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
+    additional_decorators={
+        "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
+    },
 )
 
 optests.generate_opcheck_tests(

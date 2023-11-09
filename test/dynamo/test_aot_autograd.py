@@ -277,9 +277,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
     # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
     # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
-    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # that we do not hit this assertion, as dynamo recompiles correctly and protects this condition.
     #
-    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tensors
     # is because dynamo sends fake tensors down to aot_autograd.
     @patch("torch._functorch.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
@@ -456,7 +456,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -509,7 +512,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
@@ -544,7 +550,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -593,7 +602,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -639,7 +651,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -939,6 +954,43 @@ SeqNr|OrigAten|SrcFn
                 if re.search(r"Backward[01]", event.name):
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
+
+    def test_aot_grad_mode_mutation(self):
+        for compiler in ["aot_eager", "inductor"]:
+
+            def f(x):
+                y = x * x
+                torch.set_grad_enabled(False)
+                return y.clone(), y
+
+            f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
+
+            torch.set_grad_enabled(True)
+            x = torch.ones(3, requires_grad=True) * 3
+            y_ref = f(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            y = f_compiled(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            self.assertEqual(y_ref, y)
+
+            self.assertIsNone(y_ref[0].grad_fn)
+            self.assertIsNone(y[0].grad_fn)
+
+            self.assertIsNotNone(y_ref[1].grad_fn)
+            self.assertIsNotNone(y[1].grad_fn)
+
+            # Check that the grad computed for the inputs, given the input, is the same
+            # The tangent to `y[0]`, which has grad_required=False, is irrelevant
+            self.assertEqual(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(
+                    x
+                    for x in y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))
+                    if x is not None
+                ),
+            )
 
 
 if __name__ == "__main__":

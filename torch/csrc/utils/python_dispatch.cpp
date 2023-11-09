@@ -773,6 +773,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+  m.def("_dispatch_pystub", [](const char* name, const char* overload) {
+    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+        c10::OperatorName(name, overload));
+  });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
@@ -809,6 +813,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
   });
 
   using c10::impl::TorchDispatchModeKey;
