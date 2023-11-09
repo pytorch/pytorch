@@ -30,6 +30,10 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
         else:
             return tye
     if isinstance(arg, SizeArg):
+        if arg.expr is None:
+            # From triton/runtime/jit.py
+            # `None` is nullptr.  Implicitly convert to *i8.
+            return "*i8"
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":
@@ -65,8 +69,9 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
             # _maybe_evaluate_static...
             if x.name.startswith("load_seed_offset"):
                 return False
-            else:
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
+            if x.expr is None:
+                return False
+            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
