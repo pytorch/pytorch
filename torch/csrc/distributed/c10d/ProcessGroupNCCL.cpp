@@ -1343,24 +1343,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // kill the whole process.
   if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
-    const auto logMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog is collecting debug info or process is being terminated",
-        "heartbeat monitor thread sleep for some time before abort the process.",
-        " terminateProcessGroup_",
-        terminateProcessGroup_,
-        " collectiveDebugInfoMode_",
-        collectiveDebugInfoMode_);
-    LOG(WARNING) << logMsg;
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
-    LOG(ERROR)
-        << "monitoring thread detects no heartbeat and will finally kill the process!";
+    const auto logMsg = c10::str(
+        "[Rank ",
+        rank_,
+        "] monitoring thread detects no heartbeat and will finally kill the process!",
+        " terminateProcessGroup_",
+        terminateProcessGroup_,
+        " collectiveDebugInfoMode_",
+        collectiveDebugInfoMode_);
+    LOG(ERROR) << logMsg;
     terminateProcess(exitMsg);
   }
 }
