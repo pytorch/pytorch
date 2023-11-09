@@ -194,6 +194,7 @@ class SavePlanner(abc.ABC):
     def create_local_plan(self) -> SavePlan:
         """
         Compute the save plan for the current rank.
+
         This will be aggregated and passed to create_global_plan.
         Planner specific data can be passed through SavePlan::planner_data.
 
@@ -226,6 +227,8 @@ class SavePlanner(abc.ABC):
         self, write_item: WriteItem
     ) -> Union[torch.Tensor, io.BytesIO]:
         """
+        Transform and prepare ``write_item`` from ``state_dict`` for storage, ensuring idempotency and thread-safety.
+
         Lookup the object associated with ``write_item`` in ``state_dict`` and apply any
         transformation (such as serialization) prior to the storage layer consuming it.
 
@@ -320,7 +323,7 @@ class LoadPlanner:
         is_coordinator: bool,
     ) -> None:
         """
-        Initialize this instance to load data into ``state_dict``
+        Initialize this instance to load data into ``state_dict``.
 
         . N.B. This is called on every rank.
         """
@@ -346,9 +349,7 @@ class LoadPlanner:
 
     @abc.abstractmethod
     def finish_plan(self, central_plan: LoadPlan) -> LoadPlan:
-        """
-        Accept the plan from coordinator and return final LoadPlan.
-        """
+        """Accept the plan from coordinator and return final LoadPlan."""
         pass
 
     @abc.abstractmethod
@@ -377,7 +378,7 @@ class LoadPlanner:
     @abc.abstractmethod
     def commit_tensor(self, read_item: ReadItem, tensor: torch.Tensor) -> None:
         """
-        This method is called once the StorageReader finished loading data into ``tensor``.
+        Call once the StorageReader finished loading data into ``tensor``.
 
         The provided tensor is the same one returned by the call to ``resolve_tensor``.
         This method is only needed if this LoadPlanner needs to post process ``tensor`` prior to
