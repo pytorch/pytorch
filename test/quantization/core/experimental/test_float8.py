@@ -101,6 +101,7 @@ SPECIAL_NUMBERS = {
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
 
+
 def simulate_fp8_precision(input, variant):
     """Round input (as float32) to the given float8 datatype variant."""
 
@@ -173,7 +174,7 @@ ROUND_TRIP_TEST_CASES = (
         ),
         name="rte",
     ),
-    # Max and its neighbours.
+    # Values around max.
     subtest(
         lambda dtype, device: torch.finfo(dtype).max
         + (torch.finfo(dtype).eps * torch.finfo(dtype).max)
@@ -196,17 +197,17 @@ class TestFloat8Dtype(TestCase):
 
     @parametrize("dtype", FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
+        """Sanity test, round-trip casting of zeros."""
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
         self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
-    """
-    Numerical test of float8 conversion
-    """
-
     @parametrize("dtype", FLOAT8_DTYPES)
     @parametrize("get_input", ROUND_TRIP_TEST_CASES)
     def test_cast_round_trip(self, dtype, get_input, device):
+        """Numerical test of float8 conversion, by performing a round-trip cast
+        to the float8 dtype and back to float32, comparing against simulated
+        lower precision."""
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
