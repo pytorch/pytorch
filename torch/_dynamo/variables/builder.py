@@ -431,11 +431,11 @@ class VariableBuilder:
             def build_key_value(k, v):
                 nonlocal idx
                 if ConstantVariable.is_literal(k):
-                    key = ConstantVariable.create(k).add_guards(guards)
+                    key = ConstantVariable.create(k)
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(self.get_source(), idx)
-                    key = VariableBuilder(self.tx, source_key)(k).add_guards(guards)
+                    key = VariableBuilder(self.tx, source_key)(k)
 
                 source_value = GetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
