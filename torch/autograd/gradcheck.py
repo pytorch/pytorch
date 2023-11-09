@@ -490,8 +490,7 @@ def _get_analytical_jacobian_forward_ad(
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
     """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
 
-    Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
-    to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
+    Return N * M Jacobians where N is the number of tensors in target that require grad and
     M is the number of non-integral outputs.
     Contrary to other functions here, this function requires "inputs" to actually be used by the function.
     The computed value is expected to be wrong if the function captures the inputs by side effect instead of
