@@ -9,7 +9,7 @@ from torch.distributed.remote_device import _remote_device
 @dataclass
 class Shard:
     """
-    Contain a shard and its associated metadata.
+    A container which holds the data for a shard as a Tensor and also the associated metadata for that shard.
 
 
     Args:
