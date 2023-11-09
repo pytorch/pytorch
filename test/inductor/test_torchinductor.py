@@ -7656,7 +7656,7 @@ class CommonTemplate:
             x = torch.argmax(input=x)
             return x
 
-        x = torch.rand([3, 3, 3], dtype=torch.float64)
+        x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
 
