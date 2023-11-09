@@ -78,7 +78,8 @@ class NodeType(Enum):
 
 
 class DataParallelStrategy(OpStrategy):
-    """DataParallelStrategy is a special case of OpStrategy that only records the "data parallel style" placement strategy for each fx Node.
+    """DataParallelStrategy is a special case of OpStrategy that only records the "data parallel style" placement
+    strategy for each fx Node.
 
     It takes a list of PlacementStrategy, where each PlacementStrategy describes
     one way to distribute the tensor and computation. In the DataParallel case,

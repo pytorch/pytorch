@@ -47,7 +47,8 @@ class Override(ABC):
 
     @abstractmethod
     def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
-        r"""Implement this method to return a new :class:`nn.Module` instance to replace the ``orig_submodule`` argument in the model.
+        r"""Implement this method to return a new :class:`nn.Module` instance to replace the ``orig_submodule``
+        argument in the model.
 
         This helps if ``orig_submodule`` is not traceable or should not be traced.
 

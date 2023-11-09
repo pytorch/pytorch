@@ -555,7 +555,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         module: nn.Module,
         root_only: bool = False,
     ) -> List["FullyShardedDataParallel"]:
-        """Return all nested FSDP instances, possibly including ``module`` itself and only including FSDP root modules if ``root_only=True``.
+        """Return all nested FSDP instances.
+
+        This possibly includes ``module`` itself and only includes FSDP root modules if ``root_only=True``.
 
         Args:
             module (torch.nn.Module): Root module, which may or may not be an
@@ -636,8 +638,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         state_dict_config: Optional[StateDictConfig] = None,
         optim_state_dict_config: Optional[OptimStateDictConfig] = None,
     ) -> StateDictSettings:
-        """Set the ``state_dict_type`` and the corresponding (optional) configurations of all the descendant FSDP modules of the target module.
+        """Set the ``state_dict_type`` of all the descendant FSDP modules of the target module.
 
+        Also takes (optional) configuration for the model's and optimizer's state dict.
         The target module does not have to be a FSDP module. If the target
         module is a FSDP module, its ``state_dict_type`` will also be changed.
 
@@ -1558,8 +1561,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim: Optional[torch.optim.Optimizer] = None,
         group: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Scatters the full optimizer state dict from rank 0 to all other ranks, returning the sharded optimizer state dict on each rank.
+        """Scatter the full optimizer state dict from rank 0 to all other ranks.
 
+        Returns the sharded optimizer state dict on each rank.
         The return value is the same as :meth:`shard_full_optim_state_dict`, and on rank
         0, the first argument should be the return value of
         :meth:`full_optim_state_dict`.
