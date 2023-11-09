@@ -63,7 +63,7 @@ def _validate_output_tensor_for_gather(
         )
 
 def _flatten_tensor_size(size) -> torch.Size:
-    """Check if tensor size is valid, then flatten/return a torch.Size object."""
+    """Check if the tensor size is valid, then flatten/return a torch.Size object."""
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
         dims = list(*size)
     else:
