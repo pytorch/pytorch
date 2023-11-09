@@ -123,9 +123,13 @@ def _gather_state_dict(
     Args:
         state_dict (Dict[str, Any]): the target sharded state_dict.
         pg (Optional[dist.ProcessGroup]): the process group that is used to
-            gather ShardedTensor.
+            gather ShardedTensor. Note that gathering a DTensor will use
+            the DeviceMesh. So this argument will be ignored when gathering a
+            DTensor.
         device: (Optional[torch.device]): the device that is used to
-            perform allgather for ShardedTensor.
+            perform allgather for ShardedTensor. Note that gathering a DTensor
+            will use the DeviceMesh. So this argument will be ignored when
+            gathering a DTensor.
         cpu_offload (bool): whether to offload the tensors to CPU memory. The
             default value is False.
         ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
