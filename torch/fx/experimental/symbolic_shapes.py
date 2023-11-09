@@ -2090,8 +2090,10 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if source and source in self.source_to_symint_node_cache:
-            return self.source_to_symint_node_cache[source]
+        source_name = source.name() if source else None
+        if source_name and source_name in self.source_to_symint_node_cache:
+            return self.source_to_symint_node_cache[source_name]
+
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -2112,8 +2114,8 @@ class ShapeEnv:
             out = int(sym)
         else:
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
-        if source:
-            self.source_to_symint_node_cache[source] = out
+        if source_name:
+            self.source_to_symint_node_cache[source_name] = out
         return out
 
     @record_shapeenv_event()

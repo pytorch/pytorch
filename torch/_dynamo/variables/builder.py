@@ -1755,9 +1755,10 @@ def wrap_to_fake_tensor_and_record(
             )
         )
         # TODO(voz): Doc goes here
+        policy = FakificationPolicy(ignore_subclass, dynamic_dims, constraint_dims, source)
         TracingContext.get().weak_tensor_ref_to_fakification_policy[
             WeakIdRef(e)
-        ] = FakificationPolicy(ignore_subclass, dynamic_dims, constraint_dims)
+        ] = policy
 
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))

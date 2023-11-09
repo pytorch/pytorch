@@ -4315,7 +4315,7 @@ def create_aot_dispatcher_function(
                 # TODO(voz): Doc goes here
                 if tc and widr in tc.weak_tensor_ref_to_fakification_policy and not static_shapes:
                     policy = tc.weak_tensor_ref_to_fakification_policy[widr]
-                    out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims)
+                    out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims, source=policy.source)
                 else:
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes)
                 return out
