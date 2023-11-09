@@ -7,7 +7,7 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+    from torch.utils._pytree.api.cxx import tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         tree_map_only,
