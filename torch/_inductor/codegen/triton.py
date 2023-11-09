@@ -1334,7 +1334,7 @@ class TritonKernel(Kernel):
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
         if ("tmp" in mask or "rmask" in mask) and V.graph.get_dtype(name) != torch.bool:
-            other = ", other=0"
+            other = ", other=0.0"
         else:
             other = ""
 
@@ -2870,7 +2870,7 @@ class TritonScheduling(BaseScheduling):
             n.last_usage = set()
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

@@ -344,6 +344,7 @@ static constexpr auto kOutMsgSize = "Out msg size";
 static constexpr auto kInSplit = "In split size";
 static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGroupSize = "Group size";
+static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
@@ -365,12 +366,32 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
   map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
-  map.emplace(
-      kInSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getInputSplitSizes(), ", ")));
-  map.emplace(
-      kOutSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getOutputSplitSizes(), ", ")));
+  auto& inSplitSizes = debugInfo->getInputSplitSizes();
+  if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
+    map.emplace(kInSplit, fmt::format("[{}]", fmt::join(inSplitSizes, ", ")));
+  } else if (inSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kInSplit,
+        fmt::format(
+            "[{}, ...]",
+            fmt::join(
+                inSplitSizes.begin(),
+                inSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
+  auto& outSplitSizes = debugInfo->getOutputSplitSizes();
+  if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
+    map.emplace(kOutSplit, fmt::format("[{}]", fmt::join(outSplitSizes, ", ")));
+  } else if (outSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kOutSplit,
+        fmt::format(
+            "[{}, ...]",
+            fmt::join(
+                outSplitSizes.begin(),
+                outSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED

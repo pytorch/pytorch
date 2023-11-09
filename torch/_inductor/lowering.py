@@ -5026,12 +5026,12 @@ def sym_constrain_range(a, min, max):
     return a
 
 
-@register_lowering(aten.sym_size)
+@register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
 
-@register_lowering(aten.sym_stride)
+@register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     return a.get_stride()[dim]
 
@@ -5067,9 +5067,7 @@ def accumulate_grad_(variable, new_grad):
 
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel.create(
-        kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs
-    )
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
@@ -5133,6 +5131,97 @@ try:
                 self, output_split_sizes, input_split_sizes, tag, ranks, group_size
             )
         )
+
+    _c10d_functional = torch.ops._c10d_functional
+
+    @register_lowering(_c10d_functional.all_reduce)
+    def _all_reduce(inp, reduce_op, group_name):
+        inp = clone(inp)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.all_reduce_)
+    def _all_reduce_(inp, reduce_op, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.all_reduce_coalesced)
+    def _all_reduce_coalesced(inputs, reduce_op, group_name):
+        inputs = [clone(inp) for inp in inputs]
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_coalesced_.default,
+            inputs,
+            reduce_op,
+            group_name,
+        )
+        return inputs
+
+    @register_lowering(_c10d_functional.all_reduce_coalesced_)
+    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_reduce_coalesced_.default,
+            inputs,
+            reduce_op,
+            group_name,
+        )
+        return inputs
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor)
+    def _all_gather_into_tensor(inp, group_size, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_gather_into_tensor.default,
+                inp,
+                group_size,
+                group_name,
+            )
+        )
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor_coalesced)
+    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_gather_into_tensor_coalesced.default,
+                inputs,
+                group_size,
+                group_name,
+            ),
+        )
+
+    @register_lowering(_c10d_functional.reduce_scatter_tensor)
+    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.reduce_scatter_tensor.default,
+                inp,
+                reduce_op,
+                group_size,
+                group_name,
+            )
+        )
+
+    @register_lowering(_c10d_functional.reduce_scatter_tensor_coalesced)
+    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.reduce_scatter_tensor_coalesced.default,
+                inputs,
+                reduce_op,
+                group_size,
+                group_name,
+            ),
+        )
+
+    @register_lowering(_c10d_functional.wait_tensor)
+    def _wait_tensor(inp):
+        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
+        return inp
 
 except ImportError:
     log.info(

@@ -157,15 +157,18 @@ class QuantizationAnnotation:
 
 
 class Quantizer(ABC):
-    # Allows for user defined transforms to run before annotating the graph.
-    # This allows quantizer to allow quantizing part of the model that are otherwise not quantizable.
-    # For example quantizer can
-    # a) decompose a compound operator like scaled dot product attention,
-    # into bmm and softmax if quantizer knows how to quantize bmm/softmax but not sdpa
-    # or b) transform scalars to tensor to allow quantizing scalares.
     def transform_for_annotation(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        """Allows for user defined transforms to run before annotating the graph.
+        This allows quantizer to allow quantizing part of the model that are otherwise not quantizable.
+        For example quantizer can
+        a) decompose a compound operator like scaled dot product attention,
+        into bmm and softmax if quantizer knows how to quantize bmm/softmax but not sdpa
+        or b) transform scalars to tensor to allow quantizing scalares.
+
+        Note: this is an optional method
+        """
         return model
 
     # annotate nodes in the graph with observer or fake quant constructors

@@ -23,7 +23,7 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
-    convert_scalars_to_attrs,
+    _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
@@ -346,7 +346,7 @@ class XNNPACKQuantizer(Quantizer):
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         """Transforms scalar values to tensor attributes"""
-        return convert_scalars_to_attrs(model)
+        return _convert_scalars_to_attrs(model)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""

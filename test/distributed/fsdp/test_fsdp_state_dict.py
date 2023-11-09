@@ -21,6 +21,10 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
+from torch.distributed.checkpoint._state_dict_utils import (
+    _all_gather_sharded_tensor,
+    _gather_state_dict,
+)
 from torch.distributed.fsdp import (
     CPUOffload,
     FullStateDictConfig,
@@ -29,10 +33,6 @@ from torch.distributed.fsdp import (
     MixedPrecision,
     ShardedStateDictConfig,
     StateDictType,
-)
-from torch.distributed.fsdp._shard_utils import (
-    _all_gather_sharded_tensor,
-    _gather_state_dict,
 )
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
@@ -230,8 +230,8 @@ class TestFSDPStateDict(FSDPTest):
                 bn1 = checkpoint_wrapper(bn1)
                 lin2 = checkpoint_wrapper(lin2)
             seq = nn.Sequential(
-                FSDP(lin1, mixed_precision=lin_mp, *fsdp_args, **fsdp_kwargs),
-                FSDP(bn1, mixed_precision=bn_mp, *fsdp_args, **fsdp_kwargs),
+                FSDP(lin1, *fsdp_args, mixed_precision=lin_mp, **fsdp_kwargs),
+                FSDP(bn1, *fsdp_args, mixed_precision=bn_mp, **fsdp_kwargs),
                 lin2,
             )
             if checkpoint_wrap:
