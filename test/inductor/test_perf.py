@@ -13,9 +13,10 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.inductor_utils import requires_cuda
 
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import add_kernel, requires_cuda
+from torch.testing._internal.triton_utils import add_kernel
 
 aten = torch.ops.aten
 

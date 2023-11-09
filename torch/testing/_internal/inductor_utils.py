@@ -50,9 +50,19 @@ def test_cpu():
     ):
         return False
 
+def gpu_is_old():
+    if has_triton() and torch.cuda.is_available() and not TEST_WITH_ROCM:
+        device_props = torch.cuda.get_device_properties(0)
+        # some of our CI machines use M60's which can't run Triton
+        if device_props.major < 7:
+            return True
+    return False
+
 
 HAS_CPU = LazyVal(test_cpu)
-HAS_CUDA = has_triton()
+HAS_CUDA = has_triton() and not gpu_is_old()
+
+
 
 
 @register_backend
@@ -87,6 +97,9 @@ requires_multigpu = functools.partial(
 )
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
+)
+skip_if_mac = functools.partial(
+    unittest.skipIf, IS_MACOS, "Does not work on Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
