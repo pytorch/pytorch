@@ -117,4 +117,40 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
       storage.resizable());
 }
 
+C10_API void materialize_cow_storage(StorageImpl& storage) {
+  const at::DataPtr& data_ptr = storage.data_ptr();
+
+  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
+
+  auto result = ctx->decrement_refcount();
+
+  // This must be set by each branch below.
+  std::optional<DataPtr> new_data_ptr;
+
+  if (std::holds_alternative<cow::COWDeleterContext::LastReference>(result)) {
+    // This is the only reference to the data. If there were any racing writes,
+    // the context ensured they finished before giving us the result.
+    std::unique_ptr<void, DeleterFnPtr> data =
+        std::get<cow::COWDeleterContext::LastReference>(std::move(result));
+    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
+    new_data_ptr = DataPtr(
+        data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
+            result));
+    // We don't need to consume the result, it's just a shared lock ensuring
+    // that the data will remain while we copy it.
+    new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+  }
+
+  TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
+  DataPtr old_data_ptr =
+      storage.set_data_ptr_no_materialize_cow(*std::move(new_data_ptr));
+  // The refcount of the context was already decremented above. Release the
+  // reference to the context so the refcount doesn't get decremented again
+  old_data_ptr.release_context();
+}
+
 } // namespace c10::impl::cow

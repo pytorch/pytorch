@@ -156,6 +156,17 @@ struct C10_API Allocator {
 
   virtual DataPtr allocate(size_t n) const = 0;
 
+  // Clones an allocation that came from this allocator.
+  //
+  // To perform the copy, this function calls `copy_data`, which
+  // must be implemented by derived classes.
+  //
+  // Note that this explicitly ignores any context that may have been
+  // attached to the input data.
+  //
+  // Requires: input data was allocated by the same allocator.
+  DataPtr clone(const void* data, std::size_t n) const;
+
   // If this returns a non nullptr, it means that allocate()
   // is guaranteed to return a unique_ptr with this deleter attached;
   // it means the rawAllocate and rawDeallocate APIs are safe to use.
@@ -173,6 +184,23 @@ struct C10_API Allocator {
     AT_ASSERT(d);
     d(ptr);
   }
+
+ private:
+  // Copies data from one allocation to another.
+  // Pure virtual, so derived classes must define behavior.
+  // Derived class implementation can simply call `default_copy_data`
+  // to use `std::memcpy`.
+  //
+  // Requires: src and dest were allocated by this allocator
+  // Requires: src and dest both have length >= count
+  virtual void copy_data(void* dest, const void* src, std::size_t count)
+      const = 0;
+
+ protected:
+  // Uses `std::memcpy` to copy data.
+  // Child classes can use this as `copy_data` when an alternative copy
+  // API is not needed.
+  void default_copy_data(void* dest, const void* src, std::size_t count) const;
 };
 
 // This context is used to generate DataPtr which have arbitrary

@@ -138,5 +138,8 @@ struct CUDAPluggableAllocator
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 
   bool initialized_ = false;
+
+ private:
+  void copy_data(void* dest, const void* src, std::size_t count) const final;
 };
 } // namespace torch::cuda::CUDAPluggableAllocator

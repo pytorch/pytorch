@@ -301,6 +301,10 @@ class CUDAHostAllocator {
     }
   }
 
+  void copy_data(void* dest, const void* src, std::size_t count) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for CUDAHostAllocator");
+  }
+
  private:
   void process_events() {
     while (true) {
@@ -495,6 +499,11 @@ struct CUDAHostAllocatorWrapper final : public at::Allocator {
         ptr_and_ctx.second,
         &CUDAHostAllocatorDeleter,
         at::DeviceType::CPU};
+  }
+
+private:
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    getCUDAHostAllocator().copy_data(dest, src, count);
   }
 };
 

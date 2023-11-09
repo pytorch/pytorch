@@ -3220,6 +3220,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::string name() override {
     return "native";
   }
+
+ private:
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+  }
 };
 
 NativeCachingAllocator allocator;

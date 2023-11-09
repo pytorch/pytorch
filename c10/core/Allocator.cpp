@@ -4,6 +4,19 @@
 
 namespace c10 {
 
+DataPtr Allocator::clone(const void* data, std::size_t n) const {
+  DataPtr new_data = allocate(n);
+  copy_data(new_data.mutable_get(), data, n);
+  return new_data;
+}
+
+void Allocator::default_copy_data(
+    void* dest,
+    const void* src,
+    std::size_t count) const {
+  std::memcpy(dest, src, count);
+}
+
 static void deleteInefficientStdFunctionContext(void* ptr) {
   delete static_cast<InefficientStdFunctionContext*>(ptr);
 }
