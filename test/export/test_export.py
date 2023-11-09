@@ -76,7 +76,7 @@ class TestDynamismExpression(TestCase):
         ep = torch.export.export(conflicting_constraints, inp)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"is outside of inline constraint \[4, 5\]"
+            RuntimeError, r"Input 3 is outside of specified dynamic range \[4, 5\]"
         ):
             ep(torch.tensor([3]))
 
@@ -860,12 +860,14 @@ class TestExport(TestCase):
     def test_constrain_size_in_eager(self):
         def fn(x, y):
             n = x.max().item()
-            torch._constrain_as_size(n)
+            torch._constrain_as_size(n, max=5)
             return y + n
 
         ep = export(fn, (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))))
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
+        with self.assertRaisesRegex(RuntimeError, r"Input .* is outside of specified dynamic range \[0, 5\]."):
+            ep(torch.randint(6, 7, (2, 2)), torch.randint(3, 5, (2, 3)))
 
     def test_constrain_size_with_constrain_value(self):
         def fn(x, y):
@@ -874,11 +876,11 @@ class TestExport(TestCase):
             torch._constrain_as_size(n)
             return y + n
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 10\]."):
+        with self.assertRaisesRegex(RuntimeError, r"Input 1 is outside of specified dynamic range \[2, 10\]."):
             _ = fn(torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
 
         ep = export(fn, (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))))
-        with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint"):
+        with self.assertRaisesRegex(RuntimeError, r"Input 1 is outside of specified dynamic range \[2, 10\]."):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep(*test_inp)
 
@@ -911,7 +913,7 @@ class TestExport(TestCase):
 
         ep = export(case_1, (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between"):
+        with self.assertRaisesRegex(RuntimeError, r"Input -1 is outside of specified dynamic range"):
             _ = case_1(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -923,10 +925,10 @@ class TestExport(TestCase):
 
         ep = export(case_2, (torch.tensor(5), torch.randn(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 7 between"):
+        with self.assertRaisesRegex(RuntimeError, r"Input 7 is outside of specified dynamic range"):
             _ = case_2(torch.tensor(7), torch.randn(4, 5))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 9 between"):
+        with self.assertRaisesRegex(RuntimeError, r"Input 9 is outside of specified dynamic range"):
             _ = case_2(torch.tensor(9), torch.randn(4, 5))
 
         self.assertTrue(
@@ -939,12 +941,12 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Max value to constrain_range_for_size must be greater than 2. got: 1"):
             _ = case_3(torch.tensor(1), torch.randn(4, 5))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1 between \[2, 9223372036854775807\]."):
+        with self.assertRaisesRegex(RuntimeError, r"Input 1 is outside of specified dynamic range \[2, 9223372036854775807\]."):
             _ = case_4(torch.tensor(1), torch.randn(4, 5))
 
         ep = export(case_4, (torch.tensor(5), torch.randn(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1"):
+        with self.assertRaisesRegex(RuntimeError, r"Input 1 is outside of specified dynamic range \[2, 9223372036854775807\]"):
             _ = case_4(torch.tensor(1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -956,7 +958,7 @@ class TestExport(TestCase):
 
         ep = export(case_5, (torch.tensor(5), torch.randn(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 0"):
+        with self.assertRaisesRegex(RuntimeError, r"Input 0"):
             _ = case_5(torch.tensor(0), torch.randn(4, 5))
 
         self.assertTrue(
@@ -992,10 +994,7 @@ class TestExport(TestCase):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
-        ) as cm:
+        with self.assertRaisesRegex(RuntimeError, r"Input 30 is outside of specified dynamic range \[4, 7\]."):
             ep(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
@@ -1446,23 +1445,6 @@ class TestExport(TestCase):
         ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
-
-    def test_redundant_asserts(self):
-        def f(x):
-            y = x.item()
-            torch._constrain_as_size(y)
-            return torch.zeros(y)
-
-        ep = export(f, (torch.tensor([3]),))
-        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
-def forward(self, arg0_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-    ge = _local_scalar_dense >= 0
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
-    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (zeros,)""")
 
     def test_non_arg_name_dynamic_shapes_api(self):
         def foo(a, b):

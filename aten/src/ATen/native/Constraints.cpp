@@ -42,9 +42,9 @@ void sym_constrain_range(
 
     TORCH_CHECK(
       min_val <= size_as_int && size_as_int <= max_val,
-      "Invalid value range for ",
+      "Input ",
       size_as_int,
-      " between [",
+      " is outside of specified dynamic range [",
       min_val,
       ", ",
       max_val,

@@ -368,7 +368,6 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     """
     This function is NOT INTENDED to be used by itself.
     """
-
     if isinstance(a, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 

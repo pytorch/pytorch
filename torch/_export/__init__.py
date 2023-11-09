@@ -69,9 +69,6 @@ from .exported_program import (
     CallSpec,
     combine_args_kwargs,
 )
-from .passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
-)
 from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
 from .passes.replace_sym_size_ops_pass import _replace_sym_size_ops_pass
@@ -823,11 +820,6 @@ def _export(
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         (args, kwargs),
     )
-
-    if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
-        )
 
     return exported_program
 

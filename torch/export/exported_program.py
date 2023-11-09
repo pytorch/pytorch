@@ -322,7 +322,6 @@ class ExportedProgram:
         """
         from torch._decomp import core_aten_decompositions
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForInlineConstraintsPass,
             InputDim,
         )
         from torch._export.passes.lift_constant_tensor_pass import (
@@ -465,13 +464,6 @@ class ExportedProgram:
             self.example_inputs,
             self.verifier,
         )
-
-        if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
-            exported_program = exported_program._transform(
-                _AddRuntimeAssertionsForInlineConstraintsPass(
-                    new_range_constraints, new_equality_constraints
-                )
-            )
 
         return exported_program
 
