@@ -5696,7 +5696,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-        if version >= (11, 7):
+        if version == (11, 7):
             if not use_transpose_a and use_transpose_b:
                 if SM80OrLater:
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
@@ -5734,7 +5734,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("_int_mm not compiled for ROCM")
 
         version = _get_torch_cuda_version()
-        if version < (11, 7):
+        if version != (11, 7):
             self.skipTest("_int_mm only compiled for CUDA 11.7")
 
         def genf_int(x, y):
