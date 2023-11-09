@@ -1449,7 +1449,7 @@ def _check_and_build_extension_h_precompiler_headers(
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
-    extra_cflags_str = listToString(extra_cflags)    
+    extra_cflags_str = listToString(extra_cflags)
     extra_include_paths_str = (
         "" if extra_include_paths is None else " ".join([f"-I{include}" for include in extra_include_paths])
     )
