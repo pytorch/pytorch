@@ -4313,7 +4313,7 @@ def create_aot_dispatcher_function(
                 widr = WeakIdRef(x)
                 tc = torch._guards.TracingContext.get()
                 # TODO(voz): Doc goes here
-                if tc and widr in tc.weak_tensor_ref_to_fakification_policy:
+                if tc and widr in tc.weak_tensor_ref_to_fakification_policy and not static_shapes:
                     policy = tc.weak_tensor_ref_to_fakification_policy[widr]
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims)
                 else:

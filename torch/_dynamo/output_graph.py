@@ -1022,10 +1022,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
-        prior_fake_mode = self.tracing_context.fake_mode
-        self.tracing_context.fake_mode = FakeTensorMode(
-            shape_env=prior_fake_mode.shape_env
-        )
+        if not self.export:
+            prior_fake_mode = self.tracing_context.fake_mode
+            self.tracing_context.fake_mode = FakeTensorMode(
+                shape_env=prior_fake_mode.shape_env
+            )
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
