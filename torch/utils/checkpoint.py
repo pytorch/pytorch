@@ -101,11 +101,13 @@ def _get_device_module(device="cuda"):
 class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
+    
     If no non-CPU tensors are present, the default device type will
     be used. The default value is 'cuda'. The device type is used in
     the checkpointing process when determining which device states
     to save and restore for recomputation.
     """
+
     _default_device_type = "cuda"
 
     @staticmethod
@@ -347,7 +349,7 @@ def checkpoint(
     debug: bool = False,
     **kwargs
 ):
-    r"""Checkpoint a model or part of the model
+    r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
     Instead of keeping tensors needed for backward alive until they are used in
@@ -494,7 +496,7 @@ def checkpoint(
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
-    r"""A helper function for checkpointing sequential models.
+    r"""Checkpoint a sequential model to save memory.
 
     Sequential models execute a list of modules/functions in order
     (sequentially). Therefore, we can divide such a model in various segments
@@ -713,8 +715,7 @@ _enable_checkpoint_early_stop = True
 
 @contextlib.contextmanager
 def set_checkpoint_early_stop(enable: bool):
-    """Context manager that sets whether checkpoint should stop recomputation
-    early.
+    """Context manager that sets whether checkpoint should stop recomputation early.
 
     By default, non-reentrant checkpoint stops recomputation as soon as it
     has computed all needed Tensors. This context manager can be used to disable
@@ -1297,7 +1298,8 @@ def _checkpoint_without_reentrant_generator(
     *args,
     **kwargs
 ):
-    """Checkpointing without reentrant autograd
+    """Checkpointing without reentrant autograd.
+    
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs

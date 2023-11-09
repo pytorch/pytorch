@@ -45,6 +45,7 @@ class TorchDispatchMode:
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+    
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)

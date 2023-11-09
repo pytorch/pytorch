@@ -12,10 +12,7 @@ _privateuse1_backend_name = "privateuseone"
 
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
-    rename_privateuse1_backend(backend_name) -> None
-
-    This API should be use to rename the privateuse1 backend device to make
-    it more convenient to use as a device name within PyTorch APIs.
+    This API should be used to rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
 
     The steps are:
 
@@ -85,7 +82,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         # to implement torch.ones.
         >>> a = torch.ones(2, device="foo")
 
-        """
+    """
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
@@ -136,7 +133,7 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_tensor_to(self: torch.Tensor, device: Optional[Union[int, torch.device]] = None, non_blocking=False,
                        **kwargs) -> torch.Tensor:
-        r"""Performs Tensor device conversion. Call the to operator implementation.
+        r"""Perform Tensor device conversion. Call the to operator implementation.
 
         .. note::
             If the ``self`` Tensor already
@@ -168,7 +165,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_module_to(self: torch.nn.modules.module.T,
                        device: Optional[Union[int, torch.device]] = None) -> torch.nn.modules.module.T:
-        r"""Moves all model parameters and buffers to the custom device.
+        r"""Move all model parameters and buffers to the custom device.
 
         This also makes associated parameters and buffers different objects. So
         it should be called before constructing optimizer if the module will
@@ -192,14 +189,14 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
     # and UntypedStorage obtains through inheritance.
     @property  # type: ignore[misc]
     def wrap_storage_backend(self: torch.storage._StorageBase) -> bool:
-        r"""Returns the internal :class:`torch.UntypedStorage`"""
+        r"""Return the internal :class:`torch.UntypedStorage`."""
         return self.device.type == custom_backend_name
 
     _check_register_once(torch.storage._StorageBase, f'is_{custom_backend_name}')
     setattr(torch.storage._StorageBase, f'is_{custom_backend_name}', wrap_storage_backend)
 
     def wrap_storage_to(self, device=None, non_blocking=False):
-        r"""Returns a copy of this object in custom device memory.
+        r"""Return a copy of this object in custom device memory.
 
         If this object is already in device memory and on the correct device, then
         no copy is performed and the original object is returned.
@@ -260,9 +257,8 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
                                              for_storage: bool = False,
                                              unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
     r"""
-    generate_methods_for_privateuse1_backend(for_tensor, for_module, for_storage, unsupported_dtype) -> None
-
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.
+    
     In the default scenario, storage-related methods will not be generated automatically.
 
     When you implement kernels for various torch operations, and register them to the PrivateUse1 dispatch key.
@@ -291,7 +287,7 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
         >>> a = torch.tensor(2).foo()
         >>> a.is_foo
         >>> hasattr(torch.nn.Module, 'foo')
-        """
+    """
     custom_backend_name = _get_privateuse1_backend_name()
 
     if for_tensor:
