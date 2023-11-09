@@ -22,7 +22,7 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Dict, List, Optional, Union, Tuple
-from torch.torch_version import TorchVersion, Version
+from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
 
@@ -401,12 +401,11 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     if cuda_version is None:
         return
 
-    cuda_str_version = cuda_version.group(1)
-    cuda_ver = Version(cuda_str_version)
+    cuda_ver = cuda_str_version = cuda_version.group(1)
     if torch.version.cuda is None:
         return
 
-    torch_cuda_version = Version(torch.version.cuda)
+    torch_cuda_version = TorchVersion(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
         if getattr(cuda_ver, "major", None) is None:
@@ -1135,7 +1134,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         extra_compile_args_dlink += [f'-L{x}' for x in library_dirs]
         extra_compile_args_dlink += [f'-l{x}' for x in dlink_libraries]
 
-        if (torch.version.cuda is not None) and Version(torch.version.cuda) >= '11.2':
+        if (torch.version.cuda is not None) and TorchVersion(torch.version.cuda) >= '11.2':
             extra_compile_args_dlink += ['-dlto']   # Device Link Time Optimization started from cuda 11.2
 
         extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink
@@ -1450,8 +1449,10 @@ def _check_and_build_extension_h_precompiler_headers(
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
-    extra_cflags_str = listToString(extra_cflags)
-    extra_include_paths_str = " ".join([f'-I{include}' for include in extra_include_paths])
+    extra_cflags_str = listToString(extra_cflags)    
+    extra_include_paths_str = (
+        "" if extra_include_paths is None else " ".join([f"-I{include}" for include in extra_include_paths])
+    )
 
     lib_include = os.path.join(_TORCH_PATH, 'include')
     torch_include_dirs = [
@@ -2347,7 +2348,7 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = '11.0'
-        if torch.version.cuda is not None and Version(torch.version.cuda) >= required_cuda_version:
+        if torch.version.cuda is not None and TorchVersion(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
