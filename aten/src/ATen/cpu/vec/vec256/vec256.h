@@ -85,7 +85,12 @@ inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
 
 template<>
 inline Vectorized<float> cast<float, int32_t>(const Vectorized<int32_t>& src) {
-  return _mm256_cvtepi32_ps(src);
+  return _mm256_castsi256_ps(src);
+}
+
+template<>
+inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) {
+  return _mm256_castsi256_pd(src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
