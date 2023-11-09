@@ -158,8 +158,8 @@ thread_local = ThreadLocal()
 def use_skip_tracker(skip_tracker: SkipTracker) -> Generator[None, None, None]:
     """Register the given skip tracker on the current thread within a context.
 
-    with use_skip_tracker(my_skip_tracker):
-        ...
+        with use_skip_tracker(my_skip_tracker):
+            ...
 
     """
     orig = thread_local.skip_tracker
