@@ -209,14 +209,6 @@ def split_module(
 
         instantiate_node_partition_mapping(node)
 
-        # add node to partitions
-        partition = partitions.get(partition_name)
-        if partition is None:
-            partitions[partition_name] = partition = Partition(partition_name)
-
-        partition.node_names.append(node.name)
-        node._fx_partition = partition_name
-
         torch.fx.graph.map_arg(
             node.args, lambda def_node: record_cross_partition_use(def_node, node)
         )
