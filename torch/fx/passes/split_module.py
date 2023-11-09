@@ -1,5 +1,7 @@
 import inspect
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
+from collections import OrderedDict
+import logging
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -7,7 +9,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 
 __all__ = ["Partition", "split_module"]
-
+_LOGGER = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=True)
 class Partition:
@@ -194,6 +196,75 @@ def split_module(
         partition.node_names.append(node.name)
         node._fx_partition = partition_name
 
+    # Global State Nodes are nodes which by their global state effects,
+    # "taint" all downstream nodes while they are active.
+    GLOBAL_STATE_NODES = [
+        torch.amp._enter_autocast,
+        torch.amp._exit_autocast,
+        torch._C._set_grad_enabled
+    ]
+
+    # For grad regions:
+    # ------------------------
+    # 1. first region: we do nothing
+    # 2. subsequent regions: we insert the set_grad at the beginning
+    grad_regions: OrderedDict[Node, Set[int]] = OrderedDict()
+
+    # For autocast regions:
+    # ------------------------
+    # 1. first region: we will only insert the _exit at the end
+    # 2. intermediate regions: we will insert both the
+    #    _enter at the beginning and _exit at the end
+    # 3. last region: we will only insert _enter at the beginning
+    # We will do so in the order in which the autocasts were instantiated.
+    autocast_regions: OrderedDict[Node, Set[int]] = OrderedDict()
+    autocast_exits: Dict[Node, Optional[Node]] = {}
+
+    active_grad = None
+    active_autocasts = set()
+
+    for node in m.graph.nodes:
+        if node.op in ["placeholder", "get_attr", "output"]:
+            continue
+
+        instantiate_node_partition_mapping(node)
+
+        if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
+            if node.target == torch._C._set_grad_enabled:
+                assert len(node.args) == 1
+                assert isinstance(node.args[0], bool)
+                active_grad = node
+                grad_regions[active_grad] = set({split_callback(node)})
+            elif node.target == torch.amp._enter_autocast:
+                # Should all be python constants
+                assert all(not isinstance(arg, Node) for arg in node.args)
+                active_autocasts.add(node)
+                autocast_regions[node] = set({split_callback(node)})
+                autocast_exits[node] = None
+            elif node.target == torch.amp._exit_autocast:
+                assert len(node.args) == 1
+                active_autocasts.remove(node.args[0])
+                autocast_exits[node.args[0]] = node
+
+        if active_grad is not None:
+            grad_regions[active_grad].add(split_callback(node))
+
+        for a in active_autocasts:
+            autocast_regions[a].add(split_callback(node))
+
+    assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
+
+    autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
+    grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
+
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _LOGGER.debug("autocast_regions: %s", autocast_regions)
+        _LOGGER.debug("grad_regions: %s", grad_regions)
+
+    assert_monotonically_increasing = bool(autocast_regions) or bool(grad_regions)
+
+    # split nodes into partitions
+    highest_partition = -1
     for node in m.graph.nodes:
         orig_nodes[node.name] = node
 
@@ -207,22 +278,20 @@ def split_module(
             )
             continue
 
-        instantiate_node_partition_mapping(node)
+        if assert_monotonically_increasing:
+            pid = split_callback(node)
+            assert highest_partition <= pid,\
+                ("autocast or set_grad_enabled require monotonically increasing partitions:"
+                 f"highest: {highest_partition}, this node's: {pid}")
+            highest_partition = pid
 
-        # add node to partitions
-        partition = partitions.get(partition_name)
-        if partition is None:
-            partitions[partition_name] = partition = Partition(partition_name)
-
-        partition.node_names.append(node.name)
-        node._fx_partition = partition_name
-
-        torch.fx.graph.map_arg(
-            node.args, lambda def_node: record_cross_partition_use(def_node, node)
-        )
-        torch.fx.graph.map_arg(
-            node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
-        )  # noqa: B950
+        if node.target not in GLOBAL_STATE_NODES:
+            torch.fx.graph.map_arg(
+                node.args, lambda def_node: record_cross_partition_use(def_node, node)
+            )
+            torch.fx.graph.map_arg(
+                node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
+            )  # noqa: B950
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
@@ -242,6 +311,23 @@ def split_module(
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
         raise RuntimeError("cycle exists between partitions!")
+
+    # Enter prelude
+    for regions_mapping in [autocast_regions, grad_regions]:
+        for node, regions in regions_mapping.items():
+            assert len(regions) > 0
+            partitions[str(regions[0])].environment[node] = node
+            for r in regions[1:]:
+                partition = partitions[str(r)]
+                new_node = partition.graph.create_node(
+                    op=node.op,
+                    target=node.target,
+                    args=tuple(arg for arg in node.args),
+                    kwargs={},
+                    type_expr=node.type,
+                )
+                new_node.meta = node.meta.copy()  # is it really a good idea to copy this?
+                partition.environment[node] = new_node
 
     # add placeholders to partition inputs
     for partition_name in sorted_partitions:
@@ -296,6 +382,24 @@ def split_module(
             )
             new_node.meta = node.meta.copy()
             partition.environment[node] = new_node
+
+    # Exit epilogue
+    for regions_mapping in [autocast_regions]:
+        for node in reversed(regions_mapping):
+            regions = regions_mapping[node]
+            assert len(regions) > 0
+            for r in regions[:-1]:
+                partition = partitions[str(r)]
+                exit_node = autocast_exits[node]
+                assert exit_node is not None, "Missing exit node"
+                new_node = partition.graph.create_node(
+                    op=exit_node.op,
+                    target=exit_node.target,
+                    args=(partition.environment[node],),
+                    kwargs={},
+                    type_expr=exit_node.type,
+                )
+                new_node.meta = exit_node.meta.copy()  # is it really a good idea to copy this?
 
     # original module environment dict mapping node names to nodes
     orig_mod_env: Dict[str, Node] = {}
