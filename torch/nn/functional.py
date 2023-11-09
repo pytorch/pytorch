@@ -434,7 +434,7 @@ def fractional_max_pool2d_with_indices(
     output_ratio: Optional[BroadcastingList2[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -533,7 +533,7 @@ def fractional_max_pool3d_with_indices(
     output_ratio: Optional[BroadcastingList3[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -642,7 +642,7 @@ def max_pool1d_with_indices(
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -728,7 +728,7 @@ def max_pool2d_with_indices(
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -814,7 +814,7 @@ def max_pool3d_with_indices(
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -1076,7 +1076,7 @@ def lp_pool1d(
 
 def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: # noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool1d(input, output_size, return_indices=False)
 
@@ -1118,7 +1118,7 @@ adaptive_max_pool1d = boolean_dispatch(
 def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: #noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
@@ -1161,7 +1161,7 @@ adaptive_max_pool2d = boolean_dispatch(
 def adaptive_max_pool3d_with_indices(
     input: Tensor, output_size: BroadcastingList3[int],
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]: #noqa: D400
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool3d(input, output_size, return_indices=False)
 
