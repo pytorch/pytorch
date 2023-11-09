@@ -32,7 +32,7 @@ from .utils import _element_wise_add, _normalize_device_info
 # TODO: We need to refactor this code.
 def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     r"""
-    Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
+    Transform ``state_dict`` by flattening all nested ShardedTensor instances found.
 
     The resulting ShardedTensor instances are only correct regarding the local shard and
     MUST not be used for any other purpose but checkpointing, as no operator will work with them.
