@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import functools
-import warnings
 from typing import Sequence, TypeVar
 
 import torch

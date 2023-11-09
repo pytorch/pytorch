@@ -284,7 +284,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: list
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = ["a", "b", "c"]
@@ -373,7 +373,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: list
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.randn(3, 4, 5)
         z = ["a", "b", "c"]
@@ -482,7 +482,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: list
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = ["a", "b", "c"]
@@ -509,7 +509,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -544,7 +544,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -578,7 +578,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -599,7 +599,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -621,7 +621,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -640,7 +640,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(1, 4, 5)
         z = "test_tensorclass"
@@ -658,7 +658,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -676,7 +676,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 6, 5)
         z = "test_tensorclass"
@@ -703,7 +703,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -723,7 +723,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -743,7 +743,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -763,7 +763,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -778,7 +778,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -798,7 +798,7 @@ class TestTensorClass(TestCase):
         class MyDataNested:
             X: torch.Tensor
             z: str
-            y: "MyDataNested" = None
+            y: MyDataNested = None
 
         X = torch.ones(3, 4, 5)
         z = "test_tensorclass"
@@ -1308,7 +1308,7 @@ class TestTensorClass(TestCase):
         class MyClass:
             x: torch.Tensor
             z: str
-            y: "MyClass" = None
+            y: MyClass = None
 
         z = "test_tensorclass"
         tc = MyClass(
@@ -1348,13 +1348,13 @@ class TestTensorClass(TestCase):
         class MyClass1:
             x: torch.Tensor
             z: str
-            y: "MyClass1" = None
+            y: MyClass1 = None
 
         @tensorclass
         class MyClass2:
             x: torch.Tensor
             z: str
-            y: "MyClass2" = None
+            y: MyClass2 = None
 
         a = MyClass1(
             torch.zeros(3),
@@ -1409,7 +1409,7 @@ class TestTensorClass(TestCase):
         class MyClass1:
             x: torch.Tensor
             z: str
-            y: "MyClass1" = None
+            y: MyClass1 = None
 
         # with all 0
         x = MyClass1(
@@ -1461,7 +1461,7 @@ class TestTensorClass(TestCase):
         class MyClass:
             x: torch.Tensor
             z: str
-            y: "MyClass" = None
+            y: MyClass = None
 
         c = MyClass(
             torch.randn(3, 4),
@@ -1493,7 +1493,7 @@ class TestTensorClass(TestCase):
         class MyClass:
             x: torch.Tensor
             z: str
-            y: "MyClass" = None
+            y: MyClass = None
 
         c = MyClass(
             torch.randn(3, 4),
@@ -1514,7 +1514,7 @@ class TestTensorClass(TestCase):
         class MyClass:
             x: torch.Tensor
             z: str
-            y: "MyClass" = None
+            y: MyClass = None
 
         c = MyClass(
             torch.randn(3, 4),
@@ -1534,7 +1534,7 @@ class TestTensorClass(TestCase):
         class MyClass:
             x: torch.Tensor
             z: str
-            y: "MyClass" = None
+            y: MyClass = None
 
         c = MyClass(
             torch.randn(3, 4),
