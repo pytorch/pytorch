@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -47,6 +47,66 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
+def _iterate_state_dict(
+    iter_object: Any,
+    sharded_tensor_func: Callable,
+    dtensor_func: Callable,
+    *,
+    pg: Optional[dist.ProcessGroup] = None,
+    device: Optional[torch.device] = None,
+    cpu_offload: bool = False,
+    ranks_only: Tuple[int, ...] = tuple(),
+) -> Dict[str, Any]:
+    # TODO: should we use pytree?
+    cpu_device = torch.device("cpu")
+    if isinstance(iter_object, ShardedTensor):
+        ret = sharded_tensor_func(iter_object, pg, device)
+    elif isinstance(iter_object, DTensor):
+        ret = dtensor_func(iter_object, pg, device)
+    elif (
+        isinstance(iter_object, (torch.Tensor, int, float, str)) or iter_object is None
+    ):
+        ret = iter_object
+    elif isinstance(iter_object, dict):
+        ret = {
+            key: _iterate_state_dict(
+                value,
+                sharded_tensor_func,
+                dtensor_func,
+                pg=pg,
+                device=device,
+                cpu_offload=cpu_offload,
+                ranks_only=ranks_only,
+            )
+            for key, value in iter_object.items()
+        }
+    elif isinstance(iter_object, (list, tuple)):
+        ret = [
+            _iterate_state_dict(
+                v,
+                sharded_tensor_func,
+                dtensor_func,
+                pg=pg,
+                device=device,
+                cpu_offload=cpu_offload,
+                ranks_only=ranks_only,
+            )
+            for v in iter_object
+        ]
+        if isinstance(iter_object, tuple):
+            ret = tuple(ret)
+    else:
+        raise ValueError(f"Unexpected value type {type(iter_object)}")
+
+    if not ranks_only or dist.get_rank(pg) in ranks_only:
+        if isinstance(ret, torch.Tensor) and cpu_offload:
+            ret = ret.to(cpu_device)
+    else:
+        ret = {} if isinstance(ret, dict) else None
+
+    return ret
+
+
 def _gather_state_dict(
     state_dict: Dict[str, Any],
     *,
@@ -79,43 +139,64 @@ def _gather_state_dict(
     Returns:
         The gathered state dictionary.
     """
-    new_state_dict = {}
-    cpu_device = torch.device("cpu")
-    for key, value in state_dict.items():
-        if isinstance(value, ShardedTensor):
-            # ShardedTensor does not seem to record the original device type.
-            # So if the tensor is moved to CPU, we won't know the original type.
-            # As a result, we have to rely on the user to tell us the correct one.
-            output_tensor = _all_gather_sharded_tensor(value, pg, device)
-            local_shard_device = (
-                value.local_shards()[0].tensor.device
-                if value.local_shards()
-                else cpu_device
-            )
-            if output_tensor.device != local_shard_device:
-                value = output_tensor.to(local_shard_device)
-            else:
-                value = output_tensor
-        elif isinstance(value, DTensor):
-            if value.device != value.device_mesh.device_type:
-                value = value.to(value.device_mesh.device_type)
-            # FSDP all_gather: [Shard(0)] -> [Replicate()]
-            # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
-            # 2D FSDP + TP all_gather:
-            # - [Shard(0), Shard(n)] -> [Replicate(), Replicate()]
-            # - [Shard(0), Replicate()] -> [Replicate(), Replicate()]
-            placements = [Replicate() for _ in value.placements]
-            value = value.redistribute(
-                device_mesh=value.device_mesh,
-                placements=placements,
-            )
-            value = value.to_local()
-        elif isinstance(value, dict):
-            value = _gather_state_dict(value, pg=pg, device=device)
 
-        if isinstance(value, torch.Tensor) and cpu_offload:
-            value = value.to(cpu_device)
+    def sharded_tensor_func(value, pg, device):
+        # ShardedTensor does not seem to record the original device type.
+        # So if the tensor is moved to CPU, we won't know the original type.
+        # As a result, we have to rely on the user to tell us the correct one.
+        cpu_device = torch.device("cpu")
+        output_tensor = _all_gather_sharded_tensor(value, pg, device)
+        local_shard_device = (
+            value.local_shards()[0].tensor.device
+            if value.local_shards()
+            else cpu_device
+        )
+        if output_tensor.device != local_shard_device:
+            value = output_tensor.to(local_shard_device)
+        else:
+            value = output_tensor
+        return value
 
-        if len(ranks_only) == 0 or dist.get_rank(pg) in ranks_only:
-            new_state_dict[key] = value
-    return new_state_dict
+    def dtensor_func(value, pg, device):
+        if value.device != value.device_mesh.device_type:
+            value = value.to(value.device_mesh.device_type)
+        # FSDP all_gather: [Shard(0)] -> [Replicate()]
+        # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+        # 2D FSDP + TP all_gather:
+        # - [Shard(0), Shard(n)] -> [Replicate(), Replicate()]
+        # - [Shard(0), Replicate()] -> [Replicate(), Replicate()]
+        placements = [Replicate() for _ in value.placements]
+        value = value.redistribute(
+            device_mesh=value.device_mesh,
+            placements=placements,
+        )
+        value = value.to_local()
+        return value
+
+    return _iterate_state_dict(
+        state_dict,
+        sharded_tensor_func,
+        dtensor_func,
+        pg=pg,
+        device=device,
+        cpu_offload=cpu_offload,
+        ranks_only=ranks_only,
+    )
+
+
+def _offload_state_dict_to_cpu(
+    state_dict: Dict[str, Any],
+    *,
+    pg: Optional[dist.ProcessGroup] = None,
+    device: Optional[torch.device] = None,
+    ranks_only: Tuple[int, ...] = tuple(),
+) -> Dict[str, Any]:
+    return _iterate_state_dict(
+        state_dict,
+        lambda value, pg, device: value,
+        lambda value, pg, device: value,
+        pg=pg,
+        device=device,
+        cpu_offload=True,
+        ranks_only=ranks_only,
+    )
