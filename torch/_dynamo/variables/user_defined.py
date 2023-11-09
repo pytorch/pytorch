@@ -242,7 +242,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
-
         if (
             self.value.__str__()
             == "<method 'run_backward' of 'torch._C._EngineBase' objects>"
@@ -329,7 +328,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     allow_unreachable=True,
                     accumulate_grad=True,
                 )
-            return ConstantVariable.create(None, **options)
+            return ConstantVariable.create(None)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
@@ -685,10 +684,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        fn_variable = variables.UserFunctionVariable(
-            self.value.forward.__func__, **options
-        )
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,

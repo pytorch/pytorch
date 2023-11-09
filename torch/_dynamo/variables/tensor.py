@@ -593,10 +593,10 @@ class TensorVariable(VariableTracker):
                 inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
             )
             """
-            none_variable = ConstantVariable.create(None, **options)
+            none_variable = ConstantVariable.create(None)
             grad_tensors = none_variable if len(args) == 0 else args[0]
-            false_variable = ConstantVariable.create(False, **options)
-            backward_variable = TorchVariable(torch.autograd.backward, **options)
+            false_variable = ConstantVariable.create(False)
+            backward_variable = TorchVariable(torch.autograd.backward)
             result = backward_variable.call_function(
                 tx,
                 [
@@ -609,7 +609,7 @@ class TensorVariable(VariableTracker):
                 ],
                 {},
             )
-            return ConstantVariable.create(None, **options)
+            return ConstantVariable.create(None)
         elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:

@@ -616,7 +616,7 @@ class TorchVariable(VariableTracker):
                 args,
                 {},
             )
-            return ConstantVariable.create(None, **options)
+            return ConstantVariable.create(None)
         elif self.value is torch.autograd.backward:
             from .builder import SourcelessBuilder
 
@@ -627,10 +627,10 @@ class TorchVariable(VariableTracker):
                 args,
                 {},
             )
-            return ConstantVariable.create(None, **options)
+            return ConstantVariable.create(None)
         elif self.value is torch._C._are_functorch_transforms_active:
             # for now let's assume `_are_functorch_transforms_active` always returns false
-            return ConstantVariable.create(False, **options)
+            return ConstantVariable.create(False)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
