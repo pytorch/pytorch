@@ -1759,6 +1759,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             grid_decision = grid[0]
         else:
             meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
             grid_decision = None
             for i, c in enumerate(configs):
                 if all(arg == meta[key] for key, arg in c.kwargs.items()):
