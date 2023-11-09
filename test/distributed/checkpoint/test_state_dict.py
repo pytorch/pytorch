@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -23,7 +24,6 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -32,8 +32,11 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
 
 
 if not dist.is_available():
@@ -48,7 +51,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestStateDict(FSDPTest):
+class TestStateDict(DTensorTestBase):
     """Tests state_dict and load_state_dict"""
 
     @property
@@ -265,6 +268,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp(self) -> None:
         self.run_subtests(
@@ -290,6 +294,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_ddp(self) -> None:
         self.run_subtests(
@@ -337,6 +342,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim, test_frozen)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ddp(self) -> None:
         self.run_subtests(
@@ -344,12 +350,14 @@ class TestStateDict(FSDPTest):
             self._test_fsdp_ddp,
         )
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_frozen_parameters(self) -> None:
         self._test_fsdp_ddp(use_composable=False, test_frozen=True)
 
     # TODO: enable use_dtensor once 2D device_mesh support is fully landed.
     """
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_use_dtensor(self) -> None:
         self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
@@ -359,6 +367,7 @@ class TestStateDict(FSDPTest):
     # Disable this test as it is broken after
     # https://github.com/pytorch/pytorch/pull/108298.
     """
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:
         self.run_subtests(
@@ -368,6 +377,7 @@ class TestStateDict(FSDPTest):
         )
     """
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_single_gpu(self) -> None:
         def init_model_optim():
@@ -380,6 +390,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_strict(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
@@ -401,6 +412,7 @@ class TestStateDict(FSDPTest):
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_partial(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))

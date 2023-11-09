@@ -30,6 +30,7 @@ from .iter import (
     IteratorVariable,
     RepeatIteratorVariable,
 )
+from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -75,8 +76,8 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
-    "DataClassVariable",
     "CustomizedDictVariable",
+    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -90,13 +91,14 @@ __all__ = [
     "CountIteratorVariable",
     "CycleIteratorVariable",
     "LambdaVariable",
+    "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
-    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
+    "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
