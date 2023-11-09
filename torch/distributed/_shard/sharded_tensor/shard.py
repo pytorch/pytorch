@@ -11,8 +11,6 @@ class Shard:
     """
     Contain a shard and its associated metadata.
 
-    Container which holds the data for a shard as a Tensor and also
-    the associated metadata for that shard.
 
     Args:
         tensor(torch.Tensor): Local tensor for the shard.
