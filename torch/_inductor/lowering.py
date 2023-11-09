@@ -5097,6 +5097,10 @@ try:
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
+    @register_lowering(c10d_functional.broadcast)
+    def broadcast(input, src, tag, ranks, group_size):
+        return ir.Broadcast.create(input, src, tag, ranks, group_size)
+
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
