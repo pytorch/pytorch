@@ -41,7 +41,7 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
-
+from torch.utils.weak import WeakIdRef
 
 original_zip = zip
 
@@ -2730,7 +2730,6 @@ def aot_wrapper_dedupe(
     args_set = set()
     ok = True
 
-    # breakpoint()
     for i, a in enumerate(flat_args):
         if not isinstance(a, torch.Tensor):
             leaf_flat_args.append(a)
@@ -4311,7 +4310,13 @@ def create_aot_dispatcher_function(
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
                 static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                out = fake_mode.from_tensor(x, static_shapes=static_shapes)
+                widr = WeakIdRef(x)
+                # TODO(voz): Doc goes here
+                if widr in torch._guards.TracingContext.get().weak_tensor_ref_to_fakification_policy:
+                    policy = torch._guards.TracingContext.get().weak_tensor_ref_to_fakification_policy[widr]
+                    out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims)
+                else:
+                    out = fake_mode.from_tensor(x, static_shapes=static_shapes)
                 return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]

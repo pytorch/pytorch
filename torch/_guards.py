@@ -561,6 +561,21 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+class FakificationPolicy:
+    """
+    TODO(voz): Doc goes here
+    """
+
+    ignore_subclass: bool = False
+    dynamic_dims: Optional[DimList[DimDynamic]] = None
+    constraint_dims: Optional[DimList[DimConstraint]] = None
+
+    def __init__(self, ignore_subclass, dynamic_dims, constraint_dims):
+        self.ignore_subclass = ignore_subclass
+        self.dynamic_dims = dynamic_dims
+        self.constraint_dims = constraint_dims
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -605,6 +620,7 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        self.weak_tensor_ref_to_fakification_policy: Dict[Any, FakificationPolicy] = {}
 
     @staticmethod
     @contextmanager

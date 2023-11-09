@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 import torch
 
 from torch import SymInt
-from torch._guards import GuardSource, TracingContext
+from torch._guards import FakificationPolicy, GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -1743,6 +1743,11 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims=constraint_dims,
             )
         )
+        # TODO(voz): Doc goes here
+        TracingContext.get().weak_tensor_ref_to_fakification_policy[
+            WeakIdRef(e)
+        ] = FakificationPolicy(ignore_subclass, dynamic_dims, constraint_dims)
+
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
