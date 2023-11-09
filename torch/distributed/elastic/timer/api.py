@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 class TimerRequest:
     """
-    Represent a countdown timer acquisition and release.
+    A data object representing a countdown timer acquisition and release that is used between the ``TimerClient`` and ``TimerServer``.
 
     Data object representing a countdown timer acquisition and release
     that is used between the ``TimerClient`` and ``TimerServer``.
