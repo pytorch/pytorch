@@ -137,13 +137,9 @@ def redistribute_local_tensor(
                 )
             elif current.is_replicate():
                 # split the tensor and return the corresponding cloned local shard
-                shards, _ = target_placement._split_tensor(
-                    local_tensor,
-                    num_chunks,
-                    with_padding=False,
-                    contiguous=False,
+                new_local_tensor = target_placement._replicate_to_shard(
+                    local_tensor, device_mesh, i, my_coordinate[i]
                 )
-                new_local_tensor = shards[my_coordinate[i]].clone()
             else:
                 # NOTE: this case shouldn't hit _decompose_sharding, decompose sharding should
                 # decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
@@ -159,9 +155,10 @@ def redistribute_local_tensor(
 
         elif target.is_partial():
             if current.is_replicate():
-                # For replicate -> partial, we perform division to num of chunks and generate
-                # parial, and recover it back when pending sum get cleared.
-                new_local_tensor = local_tensor / num_chunks
+                partial_spec = cast(_Partial, target)
+                new_local_tensor = partial_spec._replicate_to_partial(
+                    local_tensor, device_mesh, i
+                )
             else:
                 raise RuntimeError(
                     f"redistribute from {current_placements} to {target_placements} not supported yet"
