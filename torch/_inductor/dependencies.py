@@ -415,7 +415,10 @@ def extract_input_node_reduction_ranges(  # noqa: F722
             buffer = V.graph.get_buffer(read.name)
             if buffer is None:
                 continue
-            if isinstance(buffer, ComputedBuffer) and len(buffer.get_reduction_size()) > 0:
+            if (
+                isinstance(buffer, ComputedBuffer)
+                and len(buffer.get_reduction_size()) > 0
+            ):
                 if reduction_size is None:
                     reduction_size = buffer.get_reduction_size()
                     size = buffer.get_size()
