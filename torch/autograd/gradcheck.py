@@ -1946,7 +1946,7 @@ def gradcheck(
     fast_mode: bool = False,
     masked: Optional[bool] = None,
 ) -> bool:
-    r"""Verify gradients via numerical vs. analytical comparisons with :func:`~torch.allclose`.
+    r"""Verify gradients.
 
     Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
