@@ -1716,16 +1716,26 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
+
         static_shapes, reason = tensor_always_has_static_shape(
             e, is_tensor, guard_source=source.guard_source()
         )
 
+        widr = WeakIdRef(e)
         dynamic_dims, constraint_dims = None, None
-        if not e.is_nested:
-            # TODO: We should probably support this for nested tensors too
-            dynamic_dims, constraint_dims = _automatic_dynamic(
-                e, tx, source.name(), static_shapes
-            )
+        # TODO(voz): Doc
+        # We need to cache this, because it can inadvertenly compute a more static policy in the middle of a trace
+        # ...Why tho???
+        if widr in TracingContext.get().weak_tensor_ref_to_fakification_policy:
+            policy = TracingContext.get().weak_tensor_ref_to_fakification_policy[widr]
+            dynamic_dims = policy.dynamic_dims
+            constraint_dims = policy.constraint_dims
+        else:
+            if not e.is_nested:
+                # TODO: We should probably support this for nested tensors too
+                dynamic_dims, constraint_dims = _automatic_dynamic(
+                    e, tx, source.name(), static_shapes
+                )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
@@ -1734,6 +1744,7 @@ def wrap_to_fake_tensor_and_record(
             dynamic_dims,
             constraint_dims,
         )
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
