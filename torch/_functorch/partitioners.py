@@ -314,10 +314,13 @@ def _size_of(node: fx.Node) -> int:
                 return 1
             else:
                 return 999999
+        # NB: The fallback values here are meaningless, maybe we should respect
+        # torch._inductor.config.unbacked_symint_fallback (but this is a
+        # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
@@ -431,7 +434,7 @@ def reordering_to_mimic_autograd_engine(gm):
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
     get_depth(output_node, depths)
 
     def insert_node_in_graph(node):
@@ -588,7 +591,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
     # rng states accordingly.
-    fw_output_node = [node for node in fw_module.graph.nodes if node.op == "output"][0]
+    fw_output_node = next(node for node in fw_module.graph.nodes if node.op == "output")
     fw_outputs = fw_output_node.args[0]
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]
