@@ -225,7 +225,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x1 -= y
             return x0, x1
 
-        torch._dynamo.testing.standard_test(self, inplace_on_literals, 1, expected_ops=2)
+        torch._dynamo.testing.standard_test(
+            self, inplace_on_literals, 1, expected_ops=2
+        )
 
     def test_unpack4(self):
         def unpack4(a, b):
