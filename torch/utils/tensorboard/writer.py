@@ -51,7 +51,7 @@ class FileWriter:
 
     def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=""):
         """Create a `FileWriter` and an event file.
-        
+
         On construction the writer creates a new event file in `log_dir`.
         The other arguments to the constructor control the asynchronous writes to
         the event file.
@@ -153,14 +153,14 @@ class FileWriter:
 
     def close(self):
         """Flushes the event file to disk and close the file.
-        
+
         Call this method when you do not need the summary writer anymore.
         """
         self.event_writer.close()
 
     def reopen(self):
         """Reopens the EventFileWriter.
-        
+
         Can be called after `close()` to add more events in the same directory.
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
@@ -261,7 +261,7 @@ class SummaryWriter:
     def _check_caffe2_blob(self, item):
         """
         Caffe2 users have the option of passing a string representing the name of a blob in the workspace instead of passing the actual Tensor/array containing the numeric values.
-        
+
         Thus, we need to check if we received a string as input
         instead of an actual Tensor/array, and if so, we need to fetch the Blob
         from the workspace corresponding to that name. Fetching can be done with the
@@ -1150,7 +1150,7 @@ class SummaryWriter:
 
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once for each SummaryWriter() object.
-        
+
         Because it only provides metadata to tensorboard, the function can be called before or after the training loop.
 
         Args:
@@ -1181,7 +1181,7 @@ class SummaryWriter:
         walltime=None,
     ):
         """Add meshes or 3D point clouds to TensorBoard.
-        
+
         The visualization is based on Three.js,
         so it allows users to interact with the rendered object. Besides the basic definitions
         such as vertices, faces, users can further provide camera parameter, lighting condition, etc.

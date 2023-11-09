@@ -762,7 +762,7 @@ def _try_get_shapes(nets):
 def model_to_graph_def(model, **kwargs):
     """
     Convert a Caffe2 model to a Tensorflow graph.
-    
+
     This function extracts 'param_init_net' and 'net' from the model and passes it to nets_to_graph()
     for further processing.
 

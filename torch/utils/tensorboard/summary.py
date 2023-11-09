@@ -465,7 +465,7 @@ def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_c
 def histogram(name, values, bins, max_bins=None):
     # pylint: disable=line-too-long
     """Output a `Summary` protocol buffer with a histogram.
-    
+
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -541,7 +541,7 @@ def make_histogram(values, bins, max_bins=None):
 
 def image(tag, tensor, rescale=1, dataformats="NCHW"):
     """Output a `Summary` protocol buffer with images.
-    
+
     The summary has up to `max_images` summary values containing images. The
     images are built from `tensor` which must be 3-D with shape `[height, width,
     channels]` and where `channels` can be:
