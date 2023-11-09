@@ -2628,6 +2628,14 @@ class TestHelperModules:
             x *= y
             return x
 
+    class AddMulScalar(torch.nn.Module):
+        def forward(self, x):
+            x = x + 3
+            x = x * 3
+            x += 3
+            x *= 3
+            return x
+
     class ConvBnReLU2dAndLinearReLU(torch.nn.Module):
         def __init__(self):
             super().__init__()
