@@ -259,7 +259,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
 
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Compute the dot product between a vector ``v`` and the Jacobian of given function at a specified point.
+    r"""Compute the dot product between a vector ``v`` and the Jacobian of a given function at a specified point.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
