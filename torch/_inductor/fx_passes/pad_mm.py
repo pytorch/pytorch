@@ -163,11 +163,14 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
 
     # Fails with AMD
     try:
-        machine_balance = (
-            1000 * utils.get_device_tflops(dtype)
-        ) / utils.get_gpu_dram_gbps()
+        tflops = utils.get_device_tflops(dtype)
+        gbps = utils.get_gpu_dram_gbps()
     except Exception:
         return True
+
+    if tflops is None:
+        return True
+    machine_balance = 1000 * tflops / gbps
 
     # dram_gbps might be underestimating bandwidth because of cache.
     # if we estimate machine balance too low we might miss some speedups,

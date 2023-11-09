@@ -49,18 +49,3 @@ def _check_has_dynamic_shape(
         has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}"
     )
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
-
-
-def skipCUDAIf(cond, msg):
-    if cond:
-        def decorate_fn(fn):
-            def inner(self, *args, **kwargs):
-                if self.device == "cuda":
-                    raise unittest.SkipTest(msg)
-                return fn(self, *args, **kwargs)
-            return inner
-    else:
-        def decorate_fn(fn):
-            return fn
-
-    return decorate_fn
