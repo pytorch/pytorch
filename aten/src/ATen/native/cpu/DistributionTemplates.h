@@ -148,6 +148,50 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
     data[j + 8] = radius * std::sin(theta) * std + mean;
   }
 }
+ 
+#if defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+static void normal_fill_16_VSX(float *data,Vectorized<float> &two_pi,Vectorized<float> &one,Vectorized<float> &minus_two, Vectorized<float> &mean,Vectorized<float> &std) {
+  using Vec = Vectorized<float>;
+  Vec u1=one-Vec::loadu(data);// [0, 1) -> (0, 1] for log.
+  Vec u2=Vec::loadu(data+Vec::size());
+  Vec radius=(minus_two * u1.log());//std::sqrt(-2 * std::log(u1));
+  radius=radius.sqrt();
+  Vec theta=two_pi * u2;
+  Vec output_vec=radius * theta.cos() * std + mean;
+  Vec output_vec2=radius * theta.sin() * std + mean;
+  output_vec.store(data);
+  output_vec2.store(data+Vec::size());
+}
+
+template <typename RNG>
+void normal_fill_VSX(const TensorBase &self, const float mean, const float std, RNG generator) {
+  float *data = self.data_ptr<float>();
+  auto   size = self.numel();
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  for (const auto i : c10::irange(size)) {
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(generator);
+  }
+
+  using Vec = Vectorized<float>;
+  Vec two_pi = Vec(2.0f * c10::pi<double>);
+  Vec one = Vec(1.0f);
+  Vec minus_two = Vec(-2.0f);
+  Vec var_vec  = Vec(std);
+  Vec mean_vec = Vec(mean);
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    normal_fill_16_VSX(data + i, two_pi, one, minus_two, mean_vec, var_vec);
+  }
+  if (size % 16 != 0) {
+    data = data + size - 16;
+    for (const auto i : c10::irange(16)) {
+      at::uniform_real_distribution<float> uniform(0, 1);
+      data[i] = uniform(generator);
+    }
+     normal_fill_16_VSX(data, two_pi, one, minus_two, mean_vec, var_vec);
+  }
+}
+#endif //VSX
 
 template <typename scalar_t, typename RNG>
 void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
@@ -179,6 +223,8 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef CPU_CAPABILITY_AVX2
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
+#elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
+    normal_fill_VSX(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
