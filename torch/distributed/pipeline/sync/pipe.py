@@ -9,10 +9,10 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
+from torch import Tensor, nn
+from torch.distributed.rpc import RRef
 import torch.autograd
 import torch.cuda
-from torch import nn, Tensor
-from torch.distributed.rpc import RRef
 
 from . import microbatch
 from .batchnorm import DeferredBatchNorm
@@ -198,7 +198,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
             module.to(device)
         else:
             device = _retrieve_device(module)
-        if current_device is not None and (current_device != device or device.type == "cpu"):
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
             partitions.append(_assemble_partition(current_partition))
             devices.append(current_device)
             current_partition = []
@@ -322,9 +322,7 @@ class Pipe(Module):
         if chunks <= 0:
             raise ValueError("number of chunks must be positive integer")
         if checkpoint not in ["always", "except_last", "never"]:
-            raise ValueError(
-                "checkpoint is not one of 'always', 'except_last', or 'never'"
-            )
+            raise ValueError("checkpoint is not one of 'always', 'except_last', or 'never'")
 
         _verify_module(module)
 
@@ -348,19 +346,9 @@ class Pipe(Module):
         copy_streams = self._ensure_copy_streams()
 
         # The micro-batch index where the checkpointing stops.
-        checkpoint_stop = {
-            "always": self.chunks,
-            "except_last": self.chunks - 1,
-            "never": 0,
-        }[self.checkpoint]
+        checkpoint_stop = {"always": self.chunks, "except_last": self.chunks - 1, "never": 0}[self.checkpoint]
 
-        self.pipeline = Pipeline(
-            self.partitions,
-            self.devices,
-            copy_streams,
-            self._skip_layout,
-            checkpoint_stop,
-        )
+        self.pipeline = Pipeline(self.partitions, self.devices, copy_streams, self._skip_layout, checkpoint_stop)
 
     def __len__(self) -> int:
         """Count the length of the underlying sequential module."""
@@ -431,9 +419,7 @@ class Pipe(Module):
         """
         if not self._copy_streams:
             for device in self.devices:
-                self._copy_streams.append(
-                    [new_stream(device) for _ in range(self.chunks)]
-                )
+                self._copy_streams.append([new_stream(device) for _ in range(self.chunks)])
 
         return self._copy_streams
 
@@ -483,9 +469,7 @@ class Pipe(Module):
             TypeError: input doesn't contain at least one tensor
 
         """
-        first_partition_device = (
-            self.devices[0] if len(self.devices) != 0 else torch.device("cpu")
-        )
+        first_partition_device = (self.devices[0] if len(self.devices) != 0 else torch.device("cpu"))
         microbatch.check(first_partition_device, *inputs)
 
         if not self.devices:
