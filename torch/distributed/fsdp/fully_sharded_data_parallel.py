@@ -1448,7 +1448,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """Shard a full optimizer state-dict.
 
-        Remaps the state in ``full_optim_state_dict` to flattened parameters instead of unflattened
+        Remaps the state in ``full_optim_state_dict`` to flattened parameters instead of unflattened
         parameters and restricts to only this rank's part of the optimizer state.
         The first argument should be the return value of :meth:`full_optim_state_dict`.
 
