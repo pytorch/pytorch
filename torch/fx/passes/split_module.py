@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
+from torch.fx.node import Node
 
 __all__ = ["Partition", "split_module"]
 
@@ -16,10 +17,10 @@ class Partition:
         self.node_names: List[str] = []
         self.inputs: Dict[str, None] = {}
         self.outputs: Dict[str, None] = {}
-        self.partitions_dependent_on: Dict[str, None] = {}
-        self.partition_dependents: Dict[str, None] = {}
+        self.dependencies: Dict[str, None] = {}
+        self.dependents: Dict[str, None] = {}
         self.graph: torch.fx.graph.Graph = torch.fx.graph.Graph()
-        self.environment: Dict[torch.fx.node.Node, torch.fx.node.Node] = {}
+        self.environment: Dict[Node, Node] = {}
         self.targets: Dict[str, Any] = {}
 
     def __repr__(self) -> str:
@@ -28,8 +29,8 @@ class Partition:
             f" nodes: {self.node_names},\n"
             f" inputs: {self.inputs},\n"
             f" outputs: {self.outputs},\n"
-            f" partitions dependent on: {self.partitions_dependent_on},\n"
-            f" partition dependents: {self.partition_dependents}"
+            f" partitions depended on: {self.dependencies},\n"
+            f" partition dependents: {self.dependents}"
         )
 
 
@@ -38,7 +39,7 @@ class Partition:
 def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
-    split_callback: Callable[[torch.fx.node.Node], int],
+    split_callback: Callable[[Node], int],
     qualname_map: Optional[Dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
 ):
@@ -50,7 +51,7 @@ def split_module(
         root_m (torch.nn.Module): root nn module. Not currently used. Included
             because the root nn module is usually transformed via
             torch.fx._symbolic_trace.symbolic_trace (see example below)
-        split_callback (Callable[[torch.fx.node.Node], int]): Callable function
+        split_callback (Callable[[Node], int]): Callable function
             that maps a given Node instance to a numeric partition identifier.
             split_module will use this function as the policy for which operations
             appear in which partitions in the output Module.
@@ -138,8 +139,8 @@ def split_module(
     """
 
     def construct_graph(
-        node: torch.fx.node.Node,
-        base_mod_env: Dict[str, torch.fx.node.Node],
+        node: Node,
+        base_mod_env: Dict[str, Node],
         base_mod_attrs: Dict[str, torch.fx.graph_module.GraphModule],
     ):
         if node.op == "placeholder":
@@ -162,27 +163,37 @@ def split_module(
         return base_mod_env, base_mod_attrs
 
     partitions: Dict[str, Partition] = {}
-    orig_nodes: Dict[str, torch.fx.node.Node] = {}
+    orig_nodes: Dict[str, Node] = {}
 
     def record_cross_partition_use(
-        def_node: torch.fx.node.Node, use_node: Optional[torch.fx.node.Node]
+        def_node: Node, use_node: Optional[Node]
     ):  # noqa: B950
-        def_partition_name = getattr(def_node, "_fx_partition", None)
-        use_partition_name = getattr(use_node, "_fx_partition", None)
-        if def_partition_name != use_partition_name:
-            if def_partition_name is not None:
-                def_partition = partitions[def_partition_name]
+        defined = getattr(def_node, "_fx_partition", None)
+        used = getattr(use_node, "_fx_partition", None)
+        if defined != used:
+            if defined is not None:
+                def_partition = partitions[defined]
                 def_partition.outputs.setdefault(def_node.name)
-                if use_partition_name is not None:
-                    def_partition.partition_dependents.setdefault(use_partition_name)
+                if used is not None:
+                    def_partition.dependents.setdefault(used)
 
-            if use_partition_name is not None:
-                use_partition = partitions[use_partition_name]
+            if used is not None:
+                use_partition = partitions[used]
                 use_partition.inputs.setdefault(def_node.name)
-                if def_partition_name is not None:
-                    use_partition.partitions_dependent_on.setdefault(def_partition_name)
+                if defined is not None:
+                    use_partition.dependencies.setdefault(defined)
 
-    # split nodes into partitions
+    def instantiate_node_partition_mapping(node):
+        partition_name = str(split_callback(node))
+
+        # add node to partitions
+        partition = partitions.get(partition_name)
+        if partition is None:
+            partitions[partition_name] = partition = Partition(partition_name)
+
+        partition.node_names.append(node.name)
+        node._fx_partition = partition_name
+
     for node in m.graph.nodes:
         orig_nodes[node.name] = node
 
@@ -195,7 +206,8 @@ def split_module(
                 node.args[0], lambda n: record_cross_partition_use(n, None)
             )
             continue
-        partition_name = str(split_callback(node))
+
+        instantiate_node_partition_mapping(node)
 
         # add node to partitions
         partition = partitions.get(partition_name)
@@ -216,7 +228,7 @@ def split_module(
     # find partitions with no dependencies
     root_partitions: List[str] = []
     for partition_name, partition in partitions.items():
-        if not len(partition.partitions_dependent_on):
+        if not len(partition.dependencies):
             root_partitions.append(partition_name)
 
     # check partitions for circular dependencies and create topological partition ordering
@@ -224,23 +236,23 @@ def split_module(
     while root_partitions:
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
-        for dependent in partitions[root_partition].partition_dependents:
-            partitions[dependent].partitions_dependent_on.pop(root_partition)
-            if not partitions[dependent].partitions_dependent_on:
+        for dependent in partitions[root_partition].dependents:
+            partitions[dependent].dependencies.pop(root_partition)
+            if not partitions[dependent].dependencies:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
         raise RuntimeError("cycle exists between partitions!")
 
-    # add placeholders to partitions
+    # add placeholders to partition inputs
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
-        for input in partition.inputs:
+        for inp in partition.inputs:
             placeholder = partition.graph.placeholder(
-                input,
-                type_expr=orig_nodes[input].type,
+                inp,
+                type_expr=orig_nodes[inp].type,
             )
-            placeholder.meta = orig_nodes[input].meta.copy()
-            partition.environment[orig_nodes[input]] = placeholder
+            placeholder.meta = orig_nodes[inp].meta.copy()
+            partition.environment[orig_nodes[inp]] = placeholder
 
     # Transform nodes and collect targets for partition's submodule
     for node in m.graph.nodes:
@@ -286,9 +298,9 @@ def split_module(
             partition.environment[node] = new_node
 
     # original module environment dict mapping node names to nodes
-    org_mod_env: Dict[str, torch.fx.node.Node] = {}
+    orig_mod_env: Dict[str, Node] = {}
     # Set up values to construct base module
-    base_mod_env: Dict[str, torch.fx.node.Node] = {}
+    base_mod_env: Dict[str, Node] = {}
     base_mod_graph: torch.fx.graph.Graph = torch.fx.graph.Graph()
     base_mod_attrs: Dict[str, torch.fx.graph_module.GraphModule] = {}
     if not keep_original_order:
@@ -300,7 +312,7 @@ def split_module(
     else:
         # Go through the graph to construct the mapping dict
         for node in m.graph.nodes:
-            org_mod_env[node.name] = node
+            orig_mod_env[node.name] = node
 
     # Do some things iterating over the partitions in topological order again:
     # 1) Finish off submodule Graphs by setting corresponding outputs
@@ -330,11 +342,11 @@ def split_module(
 
         if keep_original_order:
             # first get the attr nodes required by this partition
-            org_mod_attr_nodes: List[torch.fx.node.Node] = [
-                org_mod_env[key] for key in partition.inputs
+            orig_mod_attr_nodes: List[Node] = [
+                orig_mod_env[key] for key in partition.inputs
             ]
             # Construct GraphModule for this partition
-            for node in org_mod_attr_nodes:  # type: ignore[attr-defined]
+            for node in orig_mod_attr_nodes:  # type: ignore[attr-defined]
                 if node in already_constructed_attr_nodes:
                     continue
                 base_mod_env, base_mod_attrs = construct_graph(
