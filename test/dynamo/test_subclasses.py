@@ -94,6 +94,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res, _ = fn(input)
         self.assertFalse(res)
 
+    def test_torch_function_state_nested(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                with torch._C.DisableTorchFunctionSubclass():
+                    x = x + 1
+                # Should reset to the outer state (disabled) after exiting ctx manager
+                return torch._C._is_torch_function_enabled(), torch.add(x, 1.0)
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
+
     def test_torch_function_state_tracing(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -184,7 +197,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             x.sigmoid()
 
         msg = (
-            "Accessing overidden method/attribute sigmoid on a tensor"
+            "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -208,7 +221,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             return x.ndim
 
         msg = (
-            "Accessing overidden method/attribute ndim on a tensor"
+            "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -241,7 +254,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             return x.ndim
 
         msg = (
-            "Accessing overidden method/attribute ndim on a tensor"
+            "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -258,7 +271,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return super().__torch_function__(func, types, args, kwargs)
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(x):
             return x.sigmoid()
 
@@ -267,7 +280,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
-            x.sigmoid = False
+            fn(x)
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+        with torch._dynamo.config.patch(
+            traceable_tensor_subclasses={LocalSubclass}
+        ), self.assertRaisesRegex(
+            TypeError,
+            "'bool' object is not callable",
+        ):
+            LocalSubclass.sigmoid = False
             fn(x)
 
     def test_torch_function_call_on_attr(self):
@@ -600,7 +623,7 @@ class GraphModule(torch.nn.Module):
             context = torch._guards.TracingContext.get()
             val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
-            # Grab info on sources and guards from the shapenv
+            # Grab info on sources and guards from the shapeenv
             nonlocal lower_bound_str
             nonlocal upper_bound_str
             nonlocal curr_var_to_val
@@ -795,13 +818,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
-
-    def test_binary_recompiles_due_to_duck_sizing(self):
-        # Even though the input is unused, we still guard due to duck sizing
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):

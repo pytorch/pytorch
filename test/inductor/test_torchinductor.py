@@ -7,6 +7,7 @@ import gc
 import importlib
 import itertools
 import math
+import operator
 import os
 import random
 import re
@@ -238,11 +239,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
         output_code_log.setLevel(logging.DEBUG)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
         s = log_capture_string.getvalue()
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
-    return s
+    return result, s
 
 
 def check_model(
@@ -833,7 +834,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
@@ -2647,6 +2648,142 @@ class CommonTemplate:
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
 
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(
+                    torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
+                )
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w @ x).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -3111,6 +3248,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
+    @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -3453,6 +3591,17 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
+
+    def test_cat_uint8(self):
+        def fn(x):
+            batch_shape = x.shape[:1]
+            out = torch.cat([x.new_zeros(1).expand(batch_shape + (1,)), x], dim=-1)
+            return out
+
+        self.common(
+            fn,
+            (torch.randint(0, 256, size=(3, 255), dtype=torch.uint8),),
         )
 
     def test_cat_empty(self):
@@ -7462,6 +7611,30 @@ class CommonTemplate:
             ),
         )
 
+    @config.patch(
+        "triton.autotune_pointwise", True
+    )  # needed to introduce config that exceed max shared memory usage
+    def test_large_block_sizes(self):
+        """
+        Inductor will try triton configs like x = 64 and y = 1024 which will
+        result in out of shared memory if dtype is fp32.
+
+        Currently inductor will skip such bad configs and pick the best one
+        from the remaining configs.
+        """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
+
+        @torch.compile
+        def fn(x, y):
+            return x.t() + y
+
+        # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
+        # CI while still keep the same up-rounded size-hints.
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
+        fn(a, b)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7588,7 +7761,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             return kernels
 
-        def test_divisibile_by_16_covers_numel_args(self):
+        def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
             def fn(a: torch.Tensor) -> torch.Tensor:
@@ -7601,13 +7774,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
             # at slot 3 should be in the divisible by 16 descriptor
             arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].meta["configs"][0].divisible_by_16
+                kernels[0].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].meta["configs"][0].divisible_by_16
+                kernels[1].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8116,6 +8289,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+    class NanCheckerTest(TestCase):
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_pass(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            ref = f(x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
+            self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue(
+                re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+            self.assertTrue(
+                re.search(r"assert not .*\.isinf\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fail(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            x[0, 0] = float("nan")
+            with self.assertRaises(AssertionError):
+                torch.compile(f)(x)
 
 
 if HAS_CPU:
