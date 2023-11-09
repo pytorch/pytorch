@@ -880,6 +880,8 @@ class Kernel(CodeGen):
     load_format = None
     store_format = None
 
+    _load_mask: Optional[str]
+
     def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
         if increase_kernel_count:

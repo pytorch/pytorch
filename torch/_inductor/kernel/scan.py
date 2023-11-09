@@ -1,3 +1,5 @@
+from typing import List
+
 import torch
 import torch._prims_common as utils
 from torch._inductor import ir
@@ -191,7 +193,7 @@ def split_cumsum(x, dim):
     x.realize()
     scratch.realize()
 
-    choices: ChoiceCaller = []
+    choices: List[ChoiceCaller] = []
 
     for XBLOCK, num_warps in [
         (512, 4),
