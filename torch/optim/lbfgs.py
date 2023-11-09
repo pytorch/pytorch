@@ -183,7 +183,7 @@ def _strong_wolfe(obj_func,
 
 class LBFGS(Optimizer):
     """Implements L-BFGS algorithm.
-    
+
     Heavily inspired by
     `minFunc<https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
 
