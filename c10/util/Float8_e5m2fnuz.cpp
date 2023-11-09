@@ -136,7 +136,7 @@ C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input) {
       40960.0f,
       49152.0f,
       57344.0f,
-      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::signaling_NaN(),
       -7.62939453125e-06f,
       -1.52587890625e-05f,
       -2.288818359375e-05f,
