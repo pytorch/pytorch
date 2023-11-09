@@ -91,9 +91,11 @@ def simulate_fp8_precision(input, variant):
     exponent_base = exponent_bits - 0x7F
 
     # Add implicit leading 1 to mantissas, i.e. create 1.mmmmmmmm
-    mantissa_val_base = 0x00800000 + mantissa_bits
+    f32_is_normal = exponent_bits != 0
+    mantissa_val_base = f32_is_normal * 0x00800000 + mantissa_bits
 
-    # Shift mantissa to match minimum exponent - denormals in output dtype remain normal in higher precision dtype
+    # Shift mantissa to match minimum exponent - denormals in the lower
+    # precision dtype remain normal in the higher precision dtype
     denormal_bits = torch.maximum(
         minexp - exponent_base, torch.tensor(0, dtype=int_type)
     )
@@ -108,7 +110,7 @@ def simulate_fp8_precision(input, variant):
     # Round ties to nearest even
     ties = (mantissa_val & rounding_mask) == (last_unrounded_bit >> 1)
     is_odd = (mantissa_val_rounded & last_unrounded_bit) != 0
-    mantissa_val_rounded += ties * is_odd * last_unrounded_bit
+    mantissa_val_rounded += (ties & is_odd) * last_unrounded_bit
 
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
