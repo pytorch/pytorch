@@ -1197,21 +1197,7 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            name = name_var.as_python_constant()
-            if name == "data" and all(
-                isinstance(t, variables.TensorVariable) for t in [val, obj]
-            ):
-                unimplemented(
-                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
-                    "need to graph break to apply the aliasing (or track new aliased tensors) "
-                    "to continue to trace the graph"
-                )
-            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
-                unimplemented(
-                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
-                )
-            tx.output.side_effects.store_attr(obj, name, val)
+            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
