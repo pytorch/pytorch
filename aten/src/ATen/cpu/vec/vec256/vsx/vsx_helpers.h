@@ -103,7 +103,7 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 #if defined(__clang__) && !defined(vec_splats)
 C10_ALWAYS_INLINE vint64 vec_splats(const int64_t& a) {
   return vec_splats(a);
- }
+}
 #endif
 // Vectorized min/max which return a if any operand is nan
 template <class T>
