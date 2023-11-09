@@ -895,7 +895,6 @@ class TestOperators(TestCase):
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
-        xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('pca_lowrank', ''),  # randomness
