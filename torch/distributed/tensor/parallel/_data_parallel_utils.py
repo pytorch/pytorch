@@ -14,7 +14,6 @@ def _flatten_tensor(
     return tensor, None
 
 
-@torch._dynamo.disable
 def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
     result = DistributedTensor.from_local(
         tensor,
