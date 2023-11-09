@@ -209,7 +209,7 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return DictKeys(self, **options)
+            return DictKeys(self)
         elif name == "values":
             assert not (args or kwargs)
             return DictValues(self)
