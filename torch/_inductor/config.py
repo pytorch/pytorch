@@ -347,7 +347,7 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 freezing_discard_parameters: bool = False
 
 # flag to decide whether to create a submodule for constant graph.
-split_const_graph: bool = False
+split_const_graph: bool = True
 
 
 # config specific to codegen/cpp.py
