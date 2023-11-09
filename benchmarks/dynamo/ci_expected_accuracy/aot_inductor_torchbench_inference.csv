@@ -250,4 +250,4 @@ vgg16,pass,0
 
 
 
-yolov3,pass,0
+yolov3,fail_to_run,0

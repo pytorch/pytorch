@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import math
-import sys
 import unittest
 
 import torch
@@ -22,14 +21,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import check_model_cuda, TestCase, ToTuple
-
-try:
-    import triton
-    from triton import language as tl
-except ImportError:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("missing triton")  # noqa: TRY200
+from torch.testing._internal.triton_utils import tl, triton
 
 aten = torch.ops.aten
 

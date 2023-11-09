@@ -1,18 +1,9 @@
 # Owner(s): ["module: inductor"]
 
-import sys
-import unittest
 
 from torch._dynamo.test_case import TestCase
 from torch._inductor import config
 from torch._inductor.triton_heuristics import triton_config
-
-try:
-    import triton  # noqa: F401
-except ImportError:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
 
 class TestTritonHeuristics(TestCase):

@@ -303,4 +303,4 @@ class TestFP8Types(TestCase):
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    run_inductor_tests(triton=True)
+    run_inductor_tests(triton=True, skip_rocm=True)

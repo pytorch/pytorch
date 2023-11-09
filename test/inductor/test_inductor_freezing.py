@@ -26,10 +26,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
 )
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 prims = torch.ops.prims
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class TestCase(TorchTestCase):

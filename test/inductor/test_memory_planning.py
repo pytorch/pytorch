@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
 from typing import List
 
 import torch
@@ -12,10 +11,8 @@ from torch._inductor import config
 
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import run_and_get_cpp_code
-from torch.utils._triton import has_triton
 
 
-@unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
@@ -111,4 +108,4 @@ class TestMemoryPlanning(TestCase):
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    run_inductor_tests()
+    run_inductor_tests(triton=True)

@@ -18,8 +18,6 @@ from torch.testing._internal.inductor_utils import (
 )
 
 TestCase = load_test_module(__file__, "inductor.test_inductor_freezing").TestCase
-
-
 aten = torch.ops.aten
 
 

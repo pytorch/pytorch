@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import functools
 import gc
 import unittest
 import warnings
@@ -21,15 +20,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, requires_multigpu
 from torch.utils._python_dispatch import TorchDispatchMode
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
-)
 
 
 def cdata(t):

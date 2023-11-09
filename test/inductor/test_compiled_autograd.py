@@ -12,8 +12,6 @@ from torch._dynamo.testing import load_test_module
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-# note: these tests are not run on windows due to inductor_utils.HAS_CPU
-
 
 def compiler_fn(gm):
     """Same as torch.compile() but counts number of compiles"""

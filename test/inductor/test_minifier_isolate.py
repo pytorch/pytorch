@@ -1,15 +1,11 @@
 # Owner(s): ["module: inductor"]
-import functools
 import sys
 import unittest
 
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import IS_JETSON, skipIfRocm
-from torch.utils._triton import has_triton
-
-_HAS_TRITON = has_triton()
-requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
+from torch.testing._internal.inductor_utils import requires_cuda
 
 
 # These minifier tests are slow, because they must be run in separate

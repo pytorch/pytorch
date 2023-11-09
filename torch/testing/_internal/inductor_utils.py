@@ -1,10 +1,10 @@
 import contextlib
 import os
+import pathlib
 import sys
 import time
 from subprocess import CalledProcessError
 
-from third_party.fbgemm.fbgemm_gpu.test.test_utils import TEST_WITH_ROCM
 from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     TEST_WITH_ASAN,
     TEST_CUDA_GRAPH,
+    TEST_WITH_ROCM,
 )
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
@@ -51,9 +52,7 @@ def test_cpu():
 
 
 HAS_CPU = LazyVal(test_cpu)
-
 HAS_CUDA = has_triton()
-WINDOWS_CI = IS_WINDOWS and IS_CI
 
 
 @register_backend
@@ -495,6 +494,9 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
         (torch._dynamo.config, "assume_static_by_default", False),
         xfail_prop=xfail_prop,
     )
+def filesize(filename: pathlib.Path):
+    assert filename.exists(), f"{filename} is missing"
+    return os.stat(filename).st_size
 
 
 def run_inductor_tests(
@@ -538,7 +540,7 @@ def run_inductor_tests(
     if skip_mac and IS_MACOS:
         sys.stderr.write("Skipping due to mac\n")
         return
-    if triton and not HAS_CUDA:
+    if (triton or big_gpu) and not HAS_CUDA:
         sys.stderr.write("Skipping due to triton\n")
         return
     if big_gpu and not is_big_gpu(0):

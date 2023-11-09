@@ -15,7 +15,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 
 class MyModule(torch.nn.Module):

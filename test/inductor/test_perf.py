@@ -15,10 +15,7 @@ from torch.testing._internal.common_utils import (
 )
 
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
-
-if HAS_CUDA:
-    from torch.testing._internal.triton_utils import add_kernel
+from torch.testing._internal.triton_utils import add_kernel, requires_cuda
 
 aten = torch.ops.aten
 
