@@ -336,7 +336,7 @@ class Replicate(Placement):
 
 
 class _Partial(Placement):
-    # This is a default partial placement with element-wise reduce op
+    # This is a default _Partial placement with element-wise reduce op
     # when doing reduction it follows the contract of `_to_replicate`
     # and `_to_shard` to do the reduction and convert the local tensor
     # to the corresponding state (replicate or shard)
@@ -371,6 +371,11 @@ class _Partial(Placement):
         # The default Partial placement behavior:
         # - moves from Replicate to Partial is just a divison operation
         # - moves from Partial to Replicate is conjugate: a sum operation
+        # TODO: if the _Partial is min/max, etc. the replicate to partial
+        # would be a different operation
+        assert (
+            self.reduce_op == c10d.ReduceOp.SUM
+        ), "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(dim=mesh_dim)
         return tensor / num_chunks
 
