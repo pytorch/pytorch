@@ -44,12 +44,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
 
-    def as_python_constant(self):
-        return self.value
-
-    def python_type(self):
-        return type(self.value)
-
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import VariableBuilder
@@ -212,9 +206,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ]:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
-
-    def python_type(self):
-        return self.value_type
 
     @staticmethod
     @functools.lru_cache(None)
