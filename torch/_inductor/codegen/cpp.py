@@ -2890,6 +2890,21 @@ class KernelGroup:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
+        # TODO: factor this out
+        if config.aot_inductor.abi_compatible:
+            code.writeline(
+                """
+                #define div_floor_integer aoti_torch_div_floor_int64
+                #define div_floor_floating aoti_torch_div_floor_double
+                """
+            )
+        else:
+            code.writeline(
+                """
+                #define div_floor_integer at::native::div_floor_integer
+                #define div_floor_floating at::native::div_floor_floating
+                """
+            )
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
