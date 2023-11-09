@@ -1294,10 +1294,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x * x * x
 
-            torch._inductor.cudagraph_mark_step_begin()
+            torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
-            torch._inductor.cudagraph_mark_step_begin()
+            torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
