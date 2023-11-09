@@ -419,6 +419,53 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         new_op.D.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.D.layout)
         return new_op
 
+    def fix_op_layout(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
+        X: Buffer,
+        W: Buffer,
+        Bias: Optional[Buffer],
+        Y: Buffer,
+    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]
+        # This is a workaround to deal with cases where the input layouts have changed
+        # between autotuning and rendering. This happens if the inputs layout
+        # are FlexibleLayout instances. In this case, we need to update the
+        # op's input layouts. It is a hack, because now the op
+        # we benchmarked is not the same as the op we render,
+        # but there is no simple way to fix this in the autotuner, since that would
+        # potentially disable other optimizations.
+        # @TODO kadeng: This is a workaround. Find a better way to solve the issue of dealing with FlexibleLayout during autotuning.
+        a_layout = X.get_layout()
+        b_layout = W.get_layout()
+        c_layout = Bias.get_layout() if Bias is not None else None
+        d_layout = Y.get_layout()
+        all_match = all(
+            [
+                CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
+                for buf, op_layout in zip(
+                    [X, W, Bias, Y],
+                    [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
+                )
+                if buf is not None
+            ]
+        )
+        if all_match:
+            return op
+        log.warning(
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."
+        )
+        new_op = copy.deepcopy(op)
+
+        if a_layout is not None:
+            new_op.A.layout = CUTLASSGemmTemplate.cutlass_layout(a_layout)
+        if b_layout is not None:
+            new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)
+        if c_layout is not None:
+            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
+        if d_layout is not None:
+            new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
+        return new_op
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
@@ -660,7 +707,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
+        # The layouts might have changed between autotuning and this call if they were FlexibleLayout
+        # we need to adapt, which might lead to suboptimal performance.
+        # @TODO kadeng: Find a way to solve this better
+        op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
