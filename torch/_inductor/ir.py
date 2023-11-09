@@ -2693,7 +2693,7 @@ class Buffer(IRNode):
         #    dynamic; it has i0 as one of the arguments.  We cannot tell this
         #    directly from MultiOutput, we have to look at the input buffer's
         #    uses to work this out.  No big deal.
-        if isinstance(self.layout, MultiOutputLayout):
+        if isinstance(self.layout, (NoneLayout, MultiOutputLayout)):
             return set()
 
         # This kernel defines all unbacked symbols... that it didn't get in as
@@ -3617,20 +3617,33 @@ class ExternKernel(InputsKernel):
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
 
+    def is_legacy_abi_kernel(self):
+        return False
+
     def codegen_kwargs(self):
         if not self.kwargs:
             return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
-            if self.kwargs:
-                assert (
-                    self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel is missing"
+            if self.kwargs and not self.ordered_kwargs_for_cpp_kernel:
+                raise AssertionError("ordered_kwargs_for_cpp_kernel is missing")
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                if isinstance(v, sympy.Expr):
+                    kwargs.append(v)
+                else:
+                    # FIXME We should let ExternKernel have access to the cpp schema where possible.
+                    if hasattr(self, "kwargs_default_value"):
+                        type_ = self.kwargs_default_value.get(arg_name).get("type")
+                    else:
+                        type_ = None
+                    kwargs.append(
+                        V.graph.wrapper_code.val_to_cpp_arg_str(
+                            type_, v, self.is_legacy_abi_kernel()
+                        )
+                    )
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -3796,7 +3809,7 @@ class ExternKernelAlloc(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def codegen(self, wrapper):
+    def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -3806,6 +3819,10 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
+        return kernel, configs
+
+    def codegen(self, wrapper):
+        kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
         new_name = wrapper.define_user_defined_triton_kernel(
@@ -3861,6 +3878,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+        kernel, _ = self.get_kernel_and_configs()
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
@@ -4166,6 +4187,11 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+fbcode_use_proxy_executor = {
+    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+}
+
+
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -4199,41 +4225,43 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if kernel.__module__ == "torch._ops.aten":
-            op_base_name = (
-                kernel.__name__.split(".")[0]
-                if isinstance(kernel, torch._ops.OpOverload)
-                else kernel.__name__
-            )
+        if kernel.namespace == "aten":
+            # Aten Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            op_base_name = kernel.__name__.split(".")[0]
+
             if V.graph.cpp_wrapper:
-                assert isinstance(kernel, torch._ops.OpOverload)
-                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                self.kernel = (
-                    f"at::{op_base_name}"
-                    if kernel._overloadname == "default"
-                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                )
-                schema = kernel._schema
+                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                    self.use_cpp_op_schema = True
+                    self.set_cpp_kernel(kernel)
+                else:
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::{op_base_name}"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+
+                    self.args_default_value = [
+                        {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if not x.kwarg_only
+                    ]
+                    self.ordered_kwargs_for_cpp_kernel = [
+                        x.name for x in schema.arguments if x.kwarg_only
+                    ]
+                    self.kwargs_default_value = {
+                        x.name: {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if x.kwarg_only
+                    }
             else:
                 self.kernel = f"aten.{op_base_name}"
 
-            if schema is not None:
-                self.args_default_value = [
-                    {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if not x.kwarg_only
-                ]
-                self.ordered_kwargs_for_cpp_kernel = [
-                    x.name for x in schema.arguments if x.kwarg_only
-                ]
-                self.kwargs_default_value = {
-                    x.name: {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if x.kwarg_only
-                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
@@ -4242,6 +4270,7 @@ class FallbackKernel(ExternKernelAlloc):
                     "Unable to find HigherOrderOperator kernel name"
                 )
         else:
+            # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
@@ -4284,6 +4313,9 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
+    def is_legacy_abi_kernel(self):
+        return "_scaled_dot_product_flash_attention" in str(self.kernel)
+
     def get_arg_default_value(self, pos):
         assert hasattr(
             self, "args_default_value"
@@ -4303,7 +4335,17 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+
+        if V.graph.cpp_wrapper:
+            args = [
+                V.graph.wrapper_code.val_to_cpp_arg_str(
+                    param.real_type, x, self.is_legacy_abi_kernel()
+                )
+                for param, x in zip(self.op_overload._schema.arguments, args)
+            ]
+        else:
+            args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+
         # Previously, we want to maintain forward-compatibility by skipping
         # default args in the serialized artifacts in fbcode. However,
         # some of our shim interfaces require default values being set.
@@ -4399,7 +4441,7 @@ class FallbackKernel(ExternKernelAlloc):
                     ]
                 )
             else:
-                raise RuntimeError("Unsupported return type")
+                raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
         target = self.op_overload
         returns = target._schema.returns
@@ -4454,6 +4496,15 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             super().codegen(wrapper)
 
+    @staticmethod
+    def tensor_to_layout(output: torch.Tensor):
+        return FixedLayout(
+            output.device,
+            output.dtype,
+            convert_shape_to_inductor(output.size()),
+            convert_shape_to_inductor(output.stride()),
+        )
+
     @classmethod
     def create(cls, kernel, *args, **kwargs):
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
@@ -4469,18 +4520,10 @@ class FallbackKernel(ExternKernelAlloc):
                 schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = FallbackKernel.find_device(tensor_args, example_output)
+        device = cls.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
 
-        def tensor_to_layout(output: torch.Tensor):
-            return FixedLayout(
-                output.device,
-                output.dtype,
-                convert_shape_to_inductor(output.size()),
-                convert_shape_to_inductor(output.stride()),
-            )
-
-        packed = FallbackKernel(
+        packed = cls(
             MultiOutputLayout(device),
             kernel,
             tensor_args,
@@ -4502,7 +4545,7 @@ class FallbackKernel(ExternKernelAlloc):
                 }
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    tensor_to_layout(output),
+                    cls.tensor_to_layout(output),
                     packed,
                     indices,
                 )
@@ -6657,6 +6700,38 @@ class MultiOutputNoSizeAssert(MultiOutput):
         )
 
 
+class Broadcast(InPlaceCollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, src):
+        super().__init__(layout, inputs, constant_args)
+        self.src = src
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
+    @classmethod
+    def create(
+        cls, x: "TensorBox", src: int, tag: str, ranks: List[int], group_size: int
+    ):
+        inplace_inputs = cls.wrap_inputs_as_inplace([x])
+        packed = Broadcast(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
+            inputs=inplace_inputs,
+            constant_args=[tag, ranks, group_size],
+            src=src,
+        )
+        mark_node_as_mutating(packed, inplace_inputs[0])
+        return inplace_inputs[0]
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.broadcast("
+            f"{output_name}, async_op=True, group={output_name}_pg, src={self.src})"
+        )
+
+
 class AllReduceCoalesced(InPlaceCollectiveKernel):
     def __init__(self, layout, inputs, constant_args, reduce_op):
         super().__init__(layout, inputs, constant_args)
@@ -6886,6 +6961,176 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+
+
+# TODO(yifu): replace the CollectiveKernel IR hierarchy with _CollectiveKernel.
+class _CollectiveKernel(FallbackKernel):
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        return True
+
+    # This is identical to FallbackKernel.set_cpp_kernel(), minus the
+    # part that checks against input aliasing and mutation.
+    def set_cpp_kernel(self, kernel):
+        from .codegen.wrapper import get_cpp_op_schema
+
+        self.kernel = kernel._schema.name
+        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_key = (
+            f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+        )
+
+        self.cpp_op_schema = get_cpp_op_schema(kernel)
+        self.ordered_kwargs_for_cpp_kernel = [
+            x.name for x in kernel._schema.arguments if x.kwarg_only
+        ]
+
+    # NOTE: [In-Place Collective Safety]
+    # Between the initiation and completion of an in-place collective, the
+    # input buffers are subject to both volatile reads and volatile writes.
+    # They must not be read, written to or reused by another kernel. To ensure
+    # the constraints, we model collective -> wait_tensor as as two-step
+    # mutation of the input buffers.
+    @classmethod
+    def create_inplace(
+        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+    ) -> None:
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
+
+        packed = cls(
+            NoneLayout(tensor_args[0].get_device()),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            schema=schema,
+        )
+        pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
+
+    # NOTE: [Out-of-Place Collective Safety]
+    # Between the initiation and completion of an out-of-place collective:
+    #
+    # Input buffers:
+    # - Are subject to volatile reads
+    # - Can be read by another kernel
+    # - Must not be written to or reused by another kernel
+    #
+    # Output buffers:
+    # - Are subject to volatile writes
+    # - Must not be read, written to or reused by another kernel
+    #
+    # To ensure the safety of input buffers without sacrificing read
+    # availability, we add input buffers as read deps of wait_tensor kernels.
+    #
+    # To ensure the safety of output buffers, we model wait_tensor as a
+    # mutation to the output buffer. Note we also assumes the user program being
+    # correct and the output buffer is not consumed by kernels other than
+    # wait_tensor.
+    #
+    # TODO(yifu): add a pre-grad pass to validate the correctness of collective
+    # usage in the user program.
+    @classmethod
+    def create_out_of_place(
+        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+    ):
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
+
+        if isinstance(example_output, list):
+            device = cls.find_device(tensor_args, example_output)
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            )
+            packed.outputs = [
+                MultiOutput(
+                    cls.tensor_to_layout(tensor),
+                    packed,
+                    [(list, i)],
+                )
+                for i, tensor in enumerate(example_output)
+            ]
+            return packed.outputs
+        else:
+            packed = cls(
+                cls.tensor_to_layout(example_output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            )
+            packed.outputs = [packed]
+            return packed
+
+
+class _WaitKernel(_CollectiveKernel):
+    def get_volatile_reads(self):
+        inp = self.inputs[0]
+        if isinstance(inp, _CollectiveKernel):
+            # Out-of-place single-output
+            return [inp.inputs[0]]
+        elif isinstance(inp, MultiOutput):
+            # Out-of-place multi-output
+            coll = inp.inputs[0]
+            assert isinstance(coll, _CollectiveKernel)
+            _, idx = inp.indices[0]
+            return [coll.inputs[idx]]
+        else:
+            # In-place requires no additional deps handling for volatile
+            # reads since the inputs are mutated.
+            return []
+
+    @classmethod
+    def create_wait(cls, kernel, inp: TensorBox) -> None:
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inp)
+        packed = cls(
+            NoneLayout(inp.get_device()),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            schema=schema,
+        )
+        MutationOutput(inp.layout, inp, packed)
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        # See [Out-of-Place Collective Safety].
+        volatile_reads = self.get_volatile_reads()
+        for vr in volatile_reads:
+            read_writes.reads.add(dependencies.StarDep(vr.get_name()))
+        return read_writes
 
 
 # NB: recursive structure here reflects val_to_arg_str, avoid
