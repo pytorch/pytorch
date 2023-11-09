@@ -22,19 +22,19 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(devices, rank, opType, seq), simulate_error_(simulate_error) {}
+      : WorkNCCL(devices, rank, opType, seq), simulateError_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
       const override {
-    if (simulate_error_) {
+    if (simulateError_) {
       return std::make_exception_ptr(std::runtime_error("Error"));
     }
     return c10d::ProcessGroupNCCL::WorkNCCL::checkForNCCLErrors(ncclComms);
   }
 
  private:
-  bool simulate_error_;
+  bool simulateError_;
 };
 
 class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
@@ -44,11 +44,11 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
+      : ProcessGroupNCCL(store, rank, size, opts), simulateError_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms) override {
-    if (simulate_error_) {
+    if (simulateError_) {
       return std::make_exception_ptr(std::runtime_error("Error"));
     }
     return c10d::ProcessGroupNCCL::checkForNCCLErrors(ncclComms);
@@ -67,23 +67,23 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        devices, simulate_error_, rank, opType, seq_);
+        devices, simulateError_, rank, opType, seq_);
   }
 
   size_t getNCCLCommCacheSize() {
     return devNCCLCommMap_.size();
   }
 
-  void simulate_error() {
-    simulate_error_ = true;
+  void simulateError() {
+    simulateError_ = true;
   }
 
-  void reset_error() {
-    simulate_error_ = false;
+  void resetError() {
+    simulateError_ = false;
   }
 
  private:
-  bool simulate_error_;
+  bool simulateError_;
 };
 
 class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
@@ -95,18 +95,18 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       c10d::OpType opType,
       uint64_t seq)
       : WorkNCCL(devices, rank, opType, seq),
-        set_timedout_error_(set_timedout_error) {}
+        setTimedoutError_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {
-    if (set_timedout_error_) {
+    if (setTimedoutError_) {
       return false;
     }
     return c10d::ProcessGroupNCCL::WorkNCCL::isCompleted();
   }
 
  private:
-  bool set_timedout_error_;
+  bool setTimedoutError_;
 };
 
 class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
@@ -118,7 +118,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         watchDogDebugInfoFinished_(false),
-        set_timedout_error_(false) {}
+        setTimedoutError_(false) {}
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
@@ -128,15 +128,15 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_, rank, opType, seq_);
+        devices, setTimedoutError_, rank, opType, seq_);
   }
 
-  void set_timedout_error() {
-    set_timedout_error_ = true;
+  void setTimedoutError() {
+    setTimedoutError_ = true;
   }
 
-  void reset_timedout_error() {
-    set_timedout_error_ = false;
+  void resetTimedoutError() {
+    setTimedoutError_ = false;
   }
 
   bool getWatchDogDebugInfoFinishedFlag() {
@@ -162,7 +162,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   bool watchDogDebugInfoFinished_;
 
  private:
-  bool set_timedout_error_;
+  bool setTimedoutError_;
 };
 
 class ProcessGroupNCCLNoHeartbeatCaught
@@ -282,7 +282,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.simulate_error();
+  pg.simulateError();
   work = pg.allreduce(tensors_);
   EXPECT_THROW(work->wait(), std::runtime_error);
 
@@ -310,7 +310,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.set_timedout_error();
+  pg.setTimedoutError();
   work = pg.allreduce(tensors_);
   EXPECT_THROW(work->wait(), c10::DistBackendError);
 
@@ -332,7 +332,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.simulate_error();
+  pg.simulateError();
   work = pg.allreduce(tensors_);
 
   // Should not throw exceptions.
@@ -412,7 +412,7 @@ class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
       ProcessGroupNCCLNoHeartbeatCaught& pg,
       int multiplier) {
     pg.forceSetDesyncDebugFlag();
-    pg.set_timedout_error();
+    pg.setTimedoutError();
     auto work = pg.allreduce(tensors_);
     std::this_thread::sleep_for(
         std::chrono::seconds(heartBeatIntervalInSec * multiplier));
