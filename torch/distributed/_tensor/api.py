@@ -4,6 +4,7 @@ from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -376,7 +377,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 as the original DTensor and use that for gradient computation.
 
         Returns:
-            A :class:`torch.Tensor` object that represents the local tensor of its current rank.
+            A :class:`torch.Tensor` or `AsyncCollectiveTensor` object. it represents the
+            local tensor on its current rank.
 
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
@@ -460,9 +462,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `full_tensor` is differentiable.
         """
-        return self.redistribute(
+        full_tensor = self.redistribute(
             placements=[Replicate()] * self.device_mesh.ndim
         ).to_local(grad_placements=grad_placements)
+
+        if isinstance(full_tensor, funcol.AsyncCollectiveTensor):
+            # synchronously wait for any pending collectives to get the result tensor
+            full_tensor.trigger_wait()
+            full_tensor = full_tensor.elem
+
+        return full_tensor
 
     @property
     def device_mesh(self) -> DeviceMesh:
