@@ -89,10 +89,11 @@ class Unsupported(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
-        self.category = None
+        self.category: Optional[str] = None
         self.add_to_stats()
 
     def remove_from_stats(self):
+        assert self.category is not None
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
