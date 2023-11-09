@@ -7498,7 +7498,7 @@ class CommonTemplate:
             return  # skip testing if OOM
         fn(a, b)
 
-    def test_fuse_large_params_cpu(self):
+    def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
             def f():
