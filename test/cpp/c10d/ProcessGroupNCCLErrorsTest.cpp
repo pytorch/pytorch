@@ -386,11 +386,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
 
 class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
  protected:
-  void watchdogTimeoutTestStepup() {
-    if (skipTest()) {
-      return;
-    }
-
+  void SetUp() override {
+    ProcessGroupNCCLErrorsTest::SetUp();
     std::string timeInterval = std::to_string(heartBeatIntervalInSec);
     ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
     ASSERT_TRUE(
@@ -424,7 +421,12 @@ class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
 };
 
 TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoFinished) {
-  watchdogTimeoutTestStepup();
+  // Need to have this check for every test to make sure we only run the test
+  // when there are GPUs available.
+  if (skipTest()) {
+    return;
+  }
+
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options_);
   watchdogTimeoutTestCommon(pg, 2);
 
@@ -440,7 +442,11 @@ TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoFinished) {
 }
 
 TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoStuck) {
-  watchdogTimeoutTestStepup();
+  // Need to have this check for every test to make sure we only run the test
+  // when there are GPUs available.
+  if (skipTest()) {
+    return;
+  }
   ProcessGroupNCCLDebugInfoStuck pg(store_, 0, 1, options_);
   // Need to keep main thread sleep longer so that we can let heartbeat monitor
   // thread to finish the extra wait and flip the flag.

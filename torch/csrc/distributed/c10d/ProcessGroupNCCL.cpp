@@ -993,24 +993,24 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
-            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TIMEOUT(ms): " << options_->timeout.count()
-            << ", USE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << ", TORCH_DISTRIBUTED_DEBUG: "
-            << std::string(torch_distributed_debug)
+  LOG(INFO)
+      << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options: "
+      << "NCCL version: " << getNcclVersion()
+      << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+      << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+      << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
+      << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+      << ", TIMEOUT(ms): " << options_->timeout.count()
+      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
+      << ", TORCH_DISTRIBUTED_DEBUG: " << std::string(torch_distributed_debug)
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-            << useTensorRegisterAllocatorHook_
+      << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+      << useTensorRegisterAllocatorHook_
 #endif
-            << ", NCCL_DEBUG: " << std::string(nccl_debug)
-            << ", ID=" << this->getID();
+      << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
+      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+      << ", NCCL_DEBUG: " << std::string(nccl_debug)
+      << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -1343,6 +1343,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // kill the whole process.
   if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
+    const auto logMsg = c10::str(
+        "[Rank ",
+        rank_,
+        "] NCCL watchdog is collecting debug info or process is being terminated",
+        "heartbeat monitor thread sleep for some time before abort the process.");
+    LOG(INFO) << logMsg;
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
