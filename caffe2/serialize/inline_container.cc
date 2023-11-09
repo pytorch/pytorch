@@ -408,6 +408,10 @@ PyTorchStreamReader::getRecordMultiReaders(const std::string& name,
 std::tuple<at::DataPtr, size_t>
 PyTorchStreamReader::getRecord(const std::string& name,
   std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+  if(additionalReaders.empty()){
+    // No additional readers or record too small, use single threaded version
+    return getRecord(name);
+  }
 
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -418,8 +422,8 @@ PyTorchStreamReader::getRecord(const std::string& name,
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   auto n = stat.m_uncomp_size;
   valid("retrieving file meta-data for ", name.c_str());
-  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
-    // No additional readers or record too small, use single threaded version
+  if(n < additional_reader_size_threshold_){
+    // Reader size too small, use single threaded version
     return getRecord(name);
   }
 
@@ -457,6 +461,11 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
   std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+  if(additionalReaders.empty()){
+    // No additional readers, use single threaded version
+    return getRecord(name, dst, n);
+  }
+
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
   }
@@ -471,8 +480,8 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
       n);
   valid("retrieving file meta-data for ", name.c_str());
 
-  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
-    // No additional readers, use single threaded version
+  if(n < additional_reader_size_threshold_){
+    // Reader size too small, use single threaded version
     return getRecord(name, dst, n);
   }
 
