@@ -95,7 +95,7 @@ def get_model(args):
         )
         benchmark_cls = getattr(module, "Model", None)
         bm = benchmark_cls(
-            test="train", device=args.device, jit=False, batch_size=args.batch_size
+            test="train", device=args.device, batch_size=args.batch_size
         )
         model, inputs = bm.get_module()
     elif args.toy_model:
