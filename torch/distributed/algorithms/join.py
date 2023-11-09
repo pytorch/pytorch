@@ -35,14 +35,14 @@ class JoinHook:
 class Joinable(ABC):
     r"""
     This defines an abstract base class for joinable classes.
-    
+
     A joinable class
     (inheriting from :class:`Joinable`) should implement :meth:`join_hook`,
     which returns a :class:`JoinHook` instance, in addition to
     :meth:`join_device` and :meth:`join_process_group` that return device and
     process group information, respectively.
     """
-    
+
     @abstractmethod
     def __init__(self):
         super().__init__()
@@ -95,7 +95,7 @@ class _JoinConfig(NamedTuple):
 class Join:
     r"""
     This class defines the generic join context manager, which allows custom hooks to be called after a process joins.
-    
+
     These hooks should shadow the
     collective communications of non-joined processes to prevent hanging and
     erroring and to ensure algorithmic correctness. Refer to :class:`JoinHook`
