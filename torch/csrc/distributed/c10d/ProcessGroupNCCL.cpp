@@ -862,7 +862,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
-      shutdownMode_(false),
+      collectiveDebugInfoMode_(false),
       uid_(process_group_id++) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
@@ -874,8 +874,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
-  heartbeatTimeoutInSec_ =
-      parseEnvVarIntDefault(TORCH_NCCL_HEARTBEAT_TIMEOUT_S, 60 * 2 /*2 Mins*/);
+  heartbeatTimeoutInSec_ = parseEnvVarIntDefault(
+      TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
@@ -1200,14 +1200,15 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // For the normal complete or user interception, monitorWakeUpCV_
       // will get notified, we early return and exit heartbeatMonitor.
       return;
+    }
+
+    // Check the heart beat of watchdog thread.
+    auto heartbeat = heartbeat_;
+    if (heartbeat != heartBeatCounter) {
+      heartBeatCounter = heartbeat;
     } else {
-      auto heartbeat = heartbeat_;
-      if (heartbeat > heartBeatCounter) {
-        heartBeatCounter = heartbeat;
-      } else {
-        // No heartbeat increase detected and timeout.
-        break;
-      }
+      // No heartbeat increase detected and timeout.
+      break;
     }
   }
 
@@ -1222,7 +1223,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       "[Rank ",
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
-      "be a system error and please file a bug to pytorch.");
+      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
+      "especially when your program enters a deadlock state in watchdog"
+      "or destructors. If you see this error, please file a bug to pytorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1232,11 +1235,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || shutdownMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
-    // Leave six mins for desync report generation or process group destroy.
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartbeatTimeoutInSec_ * 3));
+    // Leave another two mins for desync report generation or process group
+    // destroy.
+    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
@@ -1352,7 +1355,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           try {
             // Set shutdown mode, so the heartbeat monitor thread will not abort
             // process immediately.
-            shutdownMode_.store(true);
+            collectiveDebugInfoMode_.store(true);
             auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {

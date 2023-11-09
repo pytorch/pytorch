@@ -47,8 +47,8 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
     "TORCH_NCCL_ENABLE_MONITORING";
 
-constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_S =
-    "TORCH_NCCL_HEARTBEAT_TIMEOUT_S";
+constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC =
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -741,7 +741,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether we are in the shutdown mode when we are trying to get debug info,
   // such as desync report.
-  std::atomic<bool> shutdownMode_;
+  std::atomic<bool> collectiveDebugInfoMode_;
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
