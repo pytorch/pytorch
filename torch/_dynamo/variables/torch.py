@@ -42,12 +42,7 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import (
-    FakeProcessGroupVariable,
-    is_constant_pg_functions,
-    is_from_local,
-    ProcessGroupVariable,
-)
+from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
@@ -589,7 +584,7 @@ class TorchVariable(VariableTracker):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], (ProcessGroupVariable, FakeProcessGroupVariable))
+            assert isinstance(args[0], ProcessGroupVariable)
 
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
