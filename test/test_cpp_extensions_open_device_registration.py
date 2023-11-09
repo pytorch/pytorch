@@ -486,7 +486,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_lazy_init():
             # test lazy init for custom backend
             torch.utils.rename_privateuse1_backend('foo')
-            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu")
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32).to("npu")
             self.assertFalse(self.module.custom_lazy_init_called())
             foo_input_data = input_data.to("foo")
             self.assertTrue(self.module.custom_lazy_init_called())
