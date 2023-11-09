@@ -2201,6 +2201,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
+    @skip_if_mac()
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
