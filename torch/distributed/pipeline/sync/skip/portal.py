@@ -141,7 +141,7 @@ class Portal:
         self.grad = grad
 
     def use_grad(self) -> Tensor:
-        """Retrieve and removes the underlying gradient.
+        """Retrieve and remove the underlying gradient.
 
         The gradient is always ephemeral.
         """
