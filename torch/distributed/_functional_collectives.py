@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only
+    from torch.utils._pytree.api.cxx import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -548,6 +548,12 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
 def _all_reduce_coalesced_meta(self, *args):
     return [torch.empty_like(t) for t in self]
 
+def _all_reduce__meta(inp, *args):
+    return inp
+
+def _all_reduce_coalesced__meta(inputs, *args):
+    return inputs
+
 def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_size):
     def mk_out_tensor(input):
         out_size = list(input.size())
@@ -583,15 +589,15 @@ def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name
         for input in inputs
     ]
 
-def _reduce_scatter_tensor_native_meta(input, group_size, group_name):
-    shape = list(input.size())
+def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
+    shape = list(inp.size())
     shape[0] //= group_size
-    return input.new_empty(shape)
+    return inp.new_empty(shape)
 
-def _reduce_scatter_tensor_coalesced_native_meta(inputs, group_size, group_name):
+def _reduce_scatter_tensor_coalesced_native_meta(inputs, reduce_op, group_size, group_name):
     return [
-        _reduce_scatter_tensor_native_meta(input, group_size, group_name)
-        for input in inputs
+        _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name)
+        for inp in inputs
     ]
 
 def _register_ops():
@@ -611,7 +617,7 @@ def _register_ops():
         op_name = op_def[0:op_def.index('(')]
         backend_impl = getattr(fun_col_impl, f"_{op_name}")
         meta_impl = getattr(my_module, f"_{op_name}_meta")
-        c10_lib.define(op_def)
+        c10_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
         c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
         impl_abstract(f"c10d_functional::{op_name}")(meta_impl)
 
@@ -626,7 +632,9 @@ if not torch._running_with_deploy():
 
     _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
     _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
     _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
     _c10_lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
     _c10_lib_impl.impl("all_gather_into_tensor_coalesced", _all_gather_into_tensor_coalesced_native_meta, "Meta")
