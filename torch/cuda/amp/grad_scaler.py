@@ -15,7 +15,7 @@ __all__ = ["OptState", "GradScaler"]
 
 class _MultiDeviceReplicator:
     """Lazily serves copies of a tensor to requested devices.
-    
+
     Copies are cached per-device.
     """
 
