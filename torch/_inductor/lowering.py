@@ -2927,6 +2927,11 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
+def needs_fallback_due_to_atomic_add_limitations(dtype):
+    # tl.atomic_add does NOT support the following types
+    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+
+
 def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
@@ -2951,8 +2956,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
-    if self.get_dtype() in {torch.int64, torch.bool}:
+    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -3080,6 +3084,10 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
+        or (
+            isinstance(src, TensorBox)
+            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
+        )
         or (
             fn == "aten.scatter_reduce_"
             and reduce == "sum"
@@ -5088,6 +5096,10 @@ try:
     @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(c10d_functional.broadcast)
+    def broadcast(input, src, tag, ranks, group_size):
+        return ir.Broadcast.create(input, src, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
