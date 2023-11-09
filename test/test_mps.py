@@ -417,7 +417,7 @@ def mps_ops_modifier(ops):
         'cdist': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # test blow pass on macOS 12 as it falls back to cpu
         # Argsort case using duplicate indices (undefined behaviour):
@@ -510,7 +510,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_0': None,
         '__rsub__': None,
         'angle': None,
-        'bucketize': None,
         'cauchy_': None,
         'cauchy': None,
         'cholesky': None,
@@ -611,7 +610,6 @@ def mps_ops_modifier(ops):
         'scatter_reducemean': None,
         'scatter_reduceprod': None,
         'scatter_reducesum': None,
-        'searchsorted': None,
         'segment_reduce': None,
         '_segment.reduce': None,
         'segment.reduce': None,
@@ -10946,6 +10944,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.softmin',
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
+        'nextafter',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
