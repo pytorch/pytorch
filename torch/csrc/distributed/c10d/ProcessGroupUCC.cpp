@@ -1512,7 +1512,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
       coll,
       std::unique_ptr<WorkData>(data),
       tensor.device(),
-      inputTensors[0],
+      (getRank() == opts.rootRank) ? inputTensors[0] : outputTensors,
       outputTensors,
       "ucc:scatter");
 }
