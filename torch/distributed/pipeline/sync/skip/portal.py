@@ -121,7 +121,7 @@ class Portal:
             self.tensor = None
 
     def use_tensor(self) -> Optional[Tensor]:
-        """Retrieve the underlying tensor and decreases the tensor  life.
+        """Retrieve the underlying tensor and decreases the tensor life.
 
         When the life becomes 0, it the tensor will be removed.
         """
