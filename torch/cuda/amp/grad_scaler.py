@@ -546,7 +546,7 @@ class GradScaler:
         return self._growth_factor
 
     def set_growth_factor(self, new_factor: float) -> None:
-        r"""Set new scale growth factor.
+        r"""Set a new scale growth factor.
 
         Args:
             new_scale (float):  Value to use as the new scale growth factor.
@@ -558,7 +558,7 @@ class GradScaler:
         return self._backoff_factor
 
     def set_backoff_factor(self, new_factor: float) -> None:
-        r"""Set new scale backoff factor.
+        r"""Set a new scale backoff factor.
 
         Args:
             new_scale (float):  Value to use as the new scale backoff factor.
@@ -570,7 +570,7 @@ class GradScaler:
         return self._growth_interval
 
     def set_growth_interval(self, new_interval: int) -> None:
-        r"""Set new growth interval.
+        r"""Set a new growth interval.
 
         Args:
             new_interval (int):  Value to use as the new growth interval.
