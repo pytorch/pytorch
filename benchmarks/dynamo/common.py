@@ -224,6 +224,7 @@ CI_SKIP[CI("inductor", training=False)] = [
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TorchBench
+    "Background_Matting",  # Accuracy
     "drq",  # Need to update torchbench
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -247,6 +248,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "pyhpc_turbulent_kinetic_energy",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
+    "stable_diffusion_unet",
     # Huggingface
     "GPT2ForSequenceClassification",  # Accuracy https://github.com/pytorch/pytorch/issues/109019
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
@@ -2071,10 +2073,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def skip_accuracy_checks_large_models_dashboard(self):
-        return set()
-
-    @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         return set()
 
@@ -2329,6 +2327,7 @@ class BenchmarkRunner:
 
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
+            inputs_fp64 = None
             fp64_outputs = None
             model_fp64 = None
             try:
@@ -2464,6 +2463,8 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                gc.collect()
+                torch.cuda.empty_cache()
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)

@@ -82,7 +82,7 @@ hf_Reformer,pass,27
 
 
 
-hf_T5_large,pass_due_to_skip,0
+hf_T5_large,eager_2nd_run_OOM,0
 
 
 
@@ -174,7 +174,7 @@ stable_diffusion_text_encoder,pass,7
 
 
 
-stable_diffusion_unet,pass_due_to_skip,0
+stable_diffusion_unet,OOM,5
 
 
 
@@ -194,7 +194,7 @@ timm_vision_transformer,pass,8
 
 
 
-timm_vision_transformer_large,pass_due_to_skip,0
+timm_vision_transformer_large,OOM,0
 
 
 

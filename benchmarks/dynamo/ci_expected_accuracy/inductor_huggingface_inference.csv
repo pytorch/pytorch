@@ -30,7 +30,7 @@ BertForQuestionAnswering,pass,0
 
 
 
-BlenderbotForCausalLM,pass,0
+BlenderbotForCausalLM,infra_error,0
 
 
 
