@@ -233,6 +233,22 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self._spawn_threads()
 
     @parametrize("device", ["cpu", "cuda"])
+    def test_broadcast(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        if dist.get_rank() == 0:
+            tensor = torch.ones([4], device=device)
+        else:
+            tensor = torch.zeros([4], device=device)
+
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+        res = ft_c.broadcast(tensor, 0, mesh)
+        self.assertEqual(res, torch.ones([4], device=device))
+
+    @parametrize("device", ["cpu", "cuda"])
     def test_all_reduce_eager(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
