@@ -12,7 +12,7 @@ namespace {
 
 class ConcatBench : public benchmark::Fixture {
  public:
-  void init(const std::vector<std::vector<int>> input_sizes, int concat_dim) {
+  void init(const std::vector<std::vector<int64_t>> input_sizes, int concat_dim) {
     input_sizes_ = std::move(input_sizes);
     concat_dim_ = concat_dim;
     inputs_.resize(input_sizes_.size());
@@ -166,7 +166,7 @@ class ConcatBench : public benchmark::Fixture {
     }
   }
 
-  std::vector<std::vector<int>> input_sizes_;
+  std::vector<std::vector<int64_t>> input_sizes_;
   int concat_dim_;
   std::vector<at::Tensor> inputs_;
   std::vector<int> output_size_;

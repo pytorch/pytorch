@@ -139,7 +139,7 @@ class SignedLog1pBench : public benchmark::Fixture {
 
  private:
   std::vector<long> input_size_;
-  std::vector<int> input_size_int_;
+  std::vector<int64_t> input_size_int_;
   at::Tensor input_;
   at::Tensor output_;
   at::Tensor ref_;
