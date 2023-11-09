@@ -186,8 +186,6 @@ def _adjust_attributes_of_max_pool(
 
     if isinstance(dilation, int):
         dilation = [dilation] * expand_size
-    else:
-        dilation = dilation  # type: ignore[assignment]
 
     if isinstance(kernel_size, int):
         kernel_shape = [kernel_size] * expand_size

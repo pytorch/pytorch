@@ -1479,7 +1479,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             output_names=["output_0"],
         )
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_1d_ceil_corner(self):
         model = torch.nn.MaxPool1d(
@@ -1488,7 +1488,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_2d_ceil_corner(self):
         model = torch.nn.MaxPool2d(
@@ -1501,7 +1501,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_3d_ceil_corner(self):
         model = torch.nn.MaxPool3d(
@@ -1515,7 +1515,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 51, 52, 45)
         self.run_test(model, x)
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_1d_ceil_corner_with_indices(self):
@@ -1525,7 +1525,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_2d_ceil_corner_with_indices(self):
@@ -1539,7 +1539,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
-    # Enable this when https://github.com/onnx/onnx/pull/5741 is supported by ONNX
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_3d_ceil_corner_with_indices(self):
