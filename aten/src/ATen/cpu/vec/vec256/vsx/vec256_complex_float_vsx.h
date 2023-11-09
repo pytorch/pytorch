@@ -146,8 +146,8 @@ class Vectorized<ComplexFlt> {
     auto mask_complex = Vectorized<ComplexFlt>(
         vec_mergeh(mask._vec0, mask._vec0), vec_mergeh(mask._vec1, mask._vec1));
     return {
-         vec_sel(a._vec0, b._vec0,reinterpret_cast<vbool32>(mask_complex._vec0)),       
-         vec_sel(a._vec1, b._vec1,reinterpret_cast<vbool32>(mask_complex._vec1)),
+        vec_sel(a._vec0, b._vec0,reinterpret_cast<vbool32>(mask_complex._vec0)),       
+        vec_sel(a._vec1, b._vec1,reinterpret_cast<vbool32>(mask_complex._vec1)),
     };
   }
 
@@ -156,8 +156,8 @@ class Vectorized<ComplexFlt> {
       const Vectorized<ComplexFlt>& b,
       const Vectorized<ComplexFlt>& mask) {
     return {
-         vec_sel(a._vec0, b._vec0, reinterpret_cast<vbool32>(mask._vec0)),
-         vec_sel(a._vec1, b._vec1, reinterpret_cast<vbool32>(mask._vec1)),
+        vec_sel(a._vec0, b._vec0, reinterpret_cast<vbool32>(mask._vec0)),
+        vec_sel(a._vec1, b._vec1, reinterpret_cast<vbool32>(mask._vec1)),
     };
   }
 
