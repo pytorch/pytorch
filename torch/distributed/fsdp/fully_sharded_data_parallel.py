@@ -2003,7 +2003,7 @@ def _get_grad_norm(
     norm_type: float,
 ) -> torch.Tensor:
     """
-    Return the gradient norm of parameters ``param``s, where the gradients are viewed as a single vector.
+    Return the gradient norm of parameters ``param`` s, where the gradients are viewed as a single vector.
 
     The returned norm is in FP32 even if parameters/gradients are in a low precision. This is because the downstream
     use of this return value is a reduction across ranks.
