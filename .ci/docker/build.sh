@@ -272,6 +272,7 @@ case "$image" in
     CONDA_CMAKE=yes
     EXECUTORCH=yes
     BUCK2=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
