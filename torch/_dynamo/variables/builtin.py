@@ -1080,7 +1080,9 @@ class BuiltinVariable(VariableTracker):
                             for i, b in enumerate(bases)
                         ]
                     elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C.TensorBase
+                        bases[0] is object
+                        or bases[0] is torch._C.TensorBase
+                        or bases[0] is torch.Tensor
                     ):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
@@ -1198,15 +1200,10 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if name == "data" and all(
-                isinstance(t, variables.TensorVariable)
-                # and not (t.source is None or is_constant_source(t.source))
-                for t in [val, obj]
-            ):
+            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
                 unimplemented(
-                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
-                    "need to graph break to apply the aliasing (or track new aliased tensors) "
-                    "to continue to trace the graph"
+                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
                 )
             tx.output.side_effects.store_attr(obj, name, val)
             return val
