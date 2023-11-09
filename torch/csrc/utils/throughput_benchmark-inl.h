@@ -9,8 +9,8 @@
 
 #include <ATen/Parallel.h>
 #include <c10/core/GradMode.h>
-#include <c10/util/irange.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -64,7 +64,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   callers.reserve(config.num_calling_threads);
 
   bool tls_grad_enabled = c10::GradMode::is_enabled();
-  c10::impl::LocalDispatchKeySet tls_key_set = c10::impl::tls_local_dispatch_key_set();
+  c10::impl::LocalDispatchKeySet tls_key_set =
+      c10::impl::tls_local_dispatch_key_set();
 
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
     callers.emplace_back([&, thread_id]() {
