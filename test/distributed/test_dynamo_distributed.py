@@ -598,7 +598,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 m, inputs, correct_outputs = self.get_model(out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager)
                 # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
                 # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
-                bucket_cap_mb = 5  # 5MB
+                bucket_cap_mb = 3.5  # 4MB
                 ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
 
                 compiler = get_compiler()
@@ -610,7 +610,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 opt_outputs = opt_fn(inputs)
                 self.assertTrue(same(correct_outputs, opt_outputs))
                 if compiler:
-                    self.assertEqual(compiler.compiler_called, 3)
+                    self.assertEqual(compiler.compiler_called, 4)
 
                 output_test(opt_outputs)
 
@@ -618,7 +618,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
                 explain_out = torch._dynamo.explain(ddp_m)(inputs)
                 break_reasons = explain_out.break_reasons
-                self.assertEqual(len(break_reasons), 3)
+                self.assertEqual(len(break_reasons), 4)
                 self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
