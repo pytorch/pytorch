@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 from typing import cast, Dict, Tuple
+
 import torch
 import torch.distributed as dist
 
@@ -36,7 +37,7 @@ def _is_supported(input_size, kernel_size, stride, padding, dilation):
 def tp_convolution(
     op_call: torch._ops.OpOverload,
     *local_tensor_args: Tuple[object, ...],
-    **local_tensor_kwargs: Dict[str, object]
+    **local_tensor_kwargs: Dict[str, object],
 ) -> object:
     assert op_call == aten.convolution.default
     assert len(local_tensor_args) == 9
@@ -73,7 +74,9 @@ def tp_convolution(
         recv_op_right = dist.P2POp(dist.irecv, recv_from_right, right)
         recv_op_left = dist.P2POp(dist.irecv, recv_from_left, left)
 
-        reqs = dist.batch_isend_irecv([send_op_right, send_op_left, recv_op_left, recv_op_right])
+        reqs = dist.batch_isend_irecv(
+            [send_op_right, send_op_left, recv_op_left, recv_op_right]
+        )
         for req in reqs:
             req.wait()
 
@@ -107,7 +110,7 @@ def tp_convolution(
 def tp_convolution_backward(
     op_call: torch._ops.OpOverload,
     *local_tensor_args: Tuple[object, ...],
-    **local_tensor_kwargs: Dict[str, object]
+    **local_tensor_kwargs: Dict[str, object],
 ) -> object:
     assert op_call == aten.convolution_backward.default
     assert len(local_tensor_args) == 11
@@ -145,7 +148,9 @@ def tp_convolution_backward(
         recv_op_right = dist.P2POp(dist.irecv, recv_from_right, right)
         recv_op_left = dist.P2POp(dist.irecv, recv_from_left, left)
 
-        reqs = dist.batch_isend_irecv([send_op_right, send_op_left, recv_op_left, recv_op_right])
+        reqs = dist.batch_isend_irecv(
+            [send_op_right, send_op_left, recv_op_left, recv_op_right]
+        )
         for req in reqs:
             req.wait()
 
@@ -161,9 +166,13 @@ def tp_convolution_backward(
         N, C_out, H_out, _ = grad_out_tensor.shape
         padding = local_tensor_args[5][1]
         if rank == 0:
-            grad_out_tensor = torch.nn.functional.pad(grad_out_tensor, (0, padding), "constant", 0)
+            grad_out_tensor = torch.nn.functional.pad(
+                grad_out_tensor, (0, padding), "constant", 0
+            )
         elif rank == size - 1:
-            grad_out_tensor = torch.nn.functional.pad(grad_out_tensor, (padding, 0), "constant", 0)
+            grad_out_tensor = torch.nn.functional.pad(
+                grad_out_tensor, (padding, 0), "constant", 0
+            )
         else:
             grad_out_tensor = torch.nn.functional.pad(
                 grad_out_tensor, (padding, padding), "constant", 0
@@ -189,7 +198,9 @@ def tp_convolution_backward(
         recv_op_right = dist.P2POp(dist.irecv, recv_from_right, right)
         recv_op_left = dist.P2POp(dist.irecv, recv_from_left, left)
 
-        reqs = dist.batch_isend_irecv([send_op_right, send_op_left, recv_op_left, recv_op_right])
+        reqs = dist.batch_isend_irecv(
+            [send_op_right, send_op_left, recv_op_left, recv_op_right]
+        )
         for req in reqs:
             req.wait()
 
@@ -200,13 +211,17 @@ def tp_convolution_backward(
             )
         elif rank == size - 1:
             grad_in_tensor = grad_in_tensor[:, :, :, d1:]
-            grad_in_tensor[:, :, :, :d2] = torch.add(grad_in_tensor[:, :, :, :d2], recv_from_left)
+            grad_in_tensor[:, :, :, :d2] = torch.add(
+                grad_in_tensor[:, :, :, :d2], recv_from_left
+            )
         else:
             grad_in_tensor = grad_in_tensor[:, :, :, d1:-d2]
             grad_in_tensor[:, :, :, -d1:] = torch.add(
                 grad_in_tensor[:, :, :, -d1:], recv_from_right
             )
-            grad_in_tensor[:, :, :, :d2] = torch.add(grad_in_tensor[:, :, :, :d2], recv_from_left)
+            grad_in_tensor[:, :, :, :d2] = torch.add(
+                grad_in_tensor[:, :, :, :d2], recv_from_left
+            )
 
         local_results = list(local_results)
         local_results[0] = grad_in_tensor

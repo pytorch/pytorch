@@ -1,11 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import cast
 
 import torch
-import torch.distributed as dist
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
@@ -30,8 +27,12 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
     weight_shape = weight_spec.tensor_meta.shape
     N, C_in, H_in, W_in = in_shape[0], in_shape[1], in_shape[2], in_shape[3]
     C_out = weight_shape[0]
-    H_out = (H_in + 2 * padding[0] - dilation[0] * (weight_shape[2] - 1) - 1) // stride[0] + 1
-    W_out = (W_in + 2 * padding[1] - dilation[1] * (weight_shape[3] - 1) - 1) // stride[1] + 1
+    H_out = (H_in + 2 * padding[0] - dilation[0] * (weight_shape[2] - 1) - 1) // stride[
+        0
+    ] + 1
+    W_out = (W_in + 2 * padding[1] - dilation[1] * (weight_shape[3] - 1) - 1) // stride[
+        1
+    ] + 1
     output_shape = [N, C_out, H_out, W_out]
     output_stride = (C_out * H_out * W_out, H_out * W_out, W_out, 1)
     output_dim_map = input_spec.dim_map

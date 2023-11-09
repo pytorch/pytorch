@@ -1,11 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import cast
 import numpy as np
 
 import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 

@@ -32,100 +32,12 @@ except ImportError:
 
 aten = torch.ops.aten
 
-<<<<<<< HEAD
-=======
-_random_ops = {
-    aten.native_dropout.default,
-    aten.normal_.default,
-    aten.rand_like.default,
-    aten.randn_like.default,
-    aten.randint_like.default,
-    aten.randint_like.low_dtype,
-    aten.randint_like.low_dtype_out,
-    aten.uniform_.default,
-    aten.bernoulli_.float,    
-}
-
-
-def wrap(res: object, spec: OutputSpecType) -> object:
-    def to_dt(res, spec):
-        assert spec is not None and isinstance(
-            spec, DTensorSpec
-        ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-        assert spec.tensor_meta is not None
-        return dtensor.DTensor(
-            res,
-            spec.mesh,
-            spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
-            requires_grad=res.requires_grad,
-            stride=spec.tensor_meta.stride,
-        )
-
-    if isinstance(res, torch.Tensor):
-        return to_dt(res, spec)
-    elif isinstance(res, (list, tuple)):
-        assert spec is not None and isinstance(
-            spec, (list, tuple)
-        ), f"output spec does not match with output! Expected list/tuple, got {spec}."
-        res_list = []
-        for e, s in zip(res, spec):
-            # NOTE: local results might return Optional Tensor from ATen op, so we need
-            # to handle that case and make sure we don't wrap None with DTensor.
-            # (i.e. native_layer_norm.backward)
-            if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
-                res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
-            elif e is not None and s is not None:
-                res_list.append(to_dt(e, s))
-            else:
-                res_list.append(None)  # type: ignore[arg-type]
-
-        return tuple(res_list) if isinstance(res, tuple) else res_list
-    else:
-        # if the res contains only non tensor values, we simply return it without rewrapping
-        return res
-
-
-def redistribute_local_args(
-    op_info: OpInfo,
-    suggested_input_schema: OpSchema,
-) -> None:
-    # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
-
-    # TODO: the op schema should probably just remain flattened so that we can avoid this tree flatten
-    # Need to fix all the ops before doing this.
-    if op_info.args_tree_spec is not None:
-        flatten_args_schema_to_reshard = tuple(
-            pytree.tree_leaves(suggested_input_schema.args_schema)
-        )
-    else:
-        flatten_args_schema_to_reshard = suggested_input_schema.args_schema
-
-    new_local_args: List[object] = []
-    for i, arg_spec in enumerate(op_info.flat_args_schema):
-        reshard_arg_spec = flatten_args_schema_to_reshard[i]
-        if isinstance(arg_spec, DTensorSpec):
-            local_tensor = cast(torch.Tensor, op_info.local_args[i])
-            if arg_spec != reshard_arg_spec:
-                resharded_local_tensor = redistribute_local_tensor(
-                    local_tensor, arg_spec, reshard_arg_spec
-                )
-                new_local_args.append(resharded_local_tensor)
-            else:
-                new_local_args.append(local_tensor)
-        else:
-            new_local_args.append(reshard_arg_spec)
-
-    op_info.local_args = tuple(new_local_args)
->>>>>>> support training convolutional networks with DTensor
 
 def decompose_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-<<<<<<< HEAD
     """
     Decomposes a op to core ATen op, this handler is mostly here
     for inference mode usage where the ops are not core aten ops.
@@ -135,15 +47,6 @@ def decompose_handler(
         return r
     else:
         raise RuntimeError("Decomposition failed")
-=======
-    # Redistribute grad_output tensor to the same placement as input tensor
-    args = list(args)
-    if op_call == torch.ops.aten.convolution_backward.default:
-        args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
-    args = tuple(args)
-    out, _, _ = _operator_dispatch(op_call, args, kwargs, sharding_propagator)
-    return out
->>>>>>> support training convolutional networks with DTensor
 
 
 def is_same_size_handler(
@@ -480,29 +383,7 @@ class OpDispatcher:
                 else:
                     res_list.append(None)  # type: ignore[arg-type]
 
-<<<<<<< HEAD
             return tuple(res_list) if isinstance(res, tuple) else res_list
-=======
-        # run local op computation with potentially modified args/kwargs
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        if op_call in _random_ops and is_rng_supported_mesh(mesh):
-            if not random._rng_tracker:
-                raise RuntimeError(
-                    "A CudaRNGStateTracker instance must be instantiated "
-                    "before executing a random op over a DTensor. "
-                    "Try calling random.manual_seed() or distribute_tensor() "
-                    "before executing a DTensor random op."
-                )
-            # For DTensor random operator, run it within a distribute region
-            with random._rng_tracker._distribute_region(
-                cast(DTensorSpec, args_schema[0])
-            ):
-                local_results = op_call(*local_tensor_args, **local_kwargs)
-        elif op_call == torch.ops.aten.convolution.default:
-            local_results = tp_convolution(op_call, *local_tensor_args, **local_kwargs)
-        elif op_call == torch.ops.aten.convolution_backward.default:
-            local_results = tp_convolution_backward(op_call, *local_tensor_args, **local_kwargs)                
->>>>>>> support training convolutional networks with DTensor
         else:
             # if the res contains only non tensor values, we simply return it without rewrapping
             return res

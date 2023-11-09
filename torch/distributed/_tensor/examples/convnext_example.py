@@ -1,19 +1,19 @@
+import os
+import time
+import warnings
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed._tensor import (
-    DTensor,
     DeviceMesh,
-    distribute_tensor,
     distribute_module,
-    Shard,
+    distribute_tensor,
     Replicate,
+    Shard,
 )
-import os
-import warnings
-import time
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -34,7 +34,9 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         if self.data_format == torch.channels_last:
-            return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+            return F.layer_norm(
+                x, self.normalized_shape, self.weight, self.bias, self.eps
+            )
         elif self.data_format == torch.contiguous_format:
             u = x.mean(1, keepdim=True)
             s = (x - u).pow(2).mean(1, keepdim=True)
@@ -46,15 +48,21 @@ class LayerNorm(nn.Module):
 class Block(nn.Module):
     def __init__(self, dim, drop_path=0.0, layer_scale_init_value=1e-6):
         super().__init__()
-        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
+        self.dwconv = nn.Conv2d(
+            dim, dim, kernel_size=7, padding=3, groups=dim
+        )  # depthwise conv
         self.norm = LayerNorm(dim, eps=1e-6, data_format=torch.contiguous_format)
         self.pwconv1 = nn.Conv2d(
             dim, 4 * dim, kernel_size=1, stride=1
         )  # nn.Linear(dim, 4 * dim) # pointwise/1x1 convs, implemented with linear layers
         self.act = nn.GELU()
-        self.pwconv2 = nn.Conv2d(4 * dim, dim, kernel_size=1, stride=1)  # nn.Linear(4 * dim, dim)
+        self.pwconv2 = nn.Conv2d(
+            4 * dim, dim, kernel_size=1, stride=1
+        )  # nn.Linear(4 * dim, dim)
         self.gamma = (
-            nn.Parameter(layer_scale_init_value * torch.ones((dim, 1, 1)), requires_grad=True)
+            nn.Parameter(
+                layer_scale_init_value * torch.ones((dim, 1, 1)), requires_grad=True
+            )
             if layer_scale_init_value > 0
             else None
         )
@@ -81,10 +89,16 @@ class DownSampling(nn.Module):
         self.norm_first = norm_first
         if norm_first:
             self.norm = LayerNorm(dim_in, eps=1e-6, data_format=torch.contiguous_format)
-            self.conv = nn.Conv2d(dim_in, dim_out, kernel_size=down_scale, stride=down_scale)
+            self.conv = nn.Conv2d(
+                dim_in, dim_out, kernel_size=down_scale, stride=down_scale
+            )
         else:
-            self.conv = nn.Conv2d(dim_in, dim_out, kernel_size=down_scale, stride=down_scale)
-            self.norm = LayerNorm(dim_out, eps=1e-6, data_format=torch.contiguous_format)
+            self.conv = nn.Conv2d(
+                dim_in, dim_out, kernel_size=down_scale, stride=down_scale
+            )
+            self.norm = LayerNorm(
+                dim_out, eps=1e-6, data_format=torch.contiguous_format
+            )
 
     def forward(self, x):
         if self.norm_first:
@@ -92,11 +106,13 @@ class DownSampling(nn.Module):
         else:
             return self.norm(self.conv(x))
 
+
 @torch.no_grad()
 def init_weights(m):
     if type(m) == nn.Conv2d or type(m) == nn.Linear or type(m) == nn.LayerNorm:
         nn.init.ones_(m.weight)
         nn.init.zeros_(m.bias)
+
 
 class ConvNeXt(nn.Module):
     def __init__(
@@ -155,10 +171,10 @@ def _conv_fn(
 ) -> None:
     for name, param in module.named_parameters():
         dist_spec = [Replicate()]
-        dist_param = torch.nn.Parameter(distribute_tensor(param, device_mesh, dist_spec))
-        dist_param.register_hook(
-            lambda grad: grad.redistribute(placements=dist_spec)
+        dist_param = torch.nn.Parameter(
+            distribute_tensor(param, device_mesh, dist_spec)
         )
+        dist_param.register_hook(lambda grad: grad.redistribute(placements=dist_spec))
         name = "_".join(name.split("."))
         module.register_parameter(name, dist_param)
 
@@ -178,7 +194,10 @@ def test_tp_convnext_train(rank, world_size):
 
     torch.manual_seed(12)
     model = ConvNeXt(
-        depths=[3, 3, 27, 3], dims=[256, 512, 1024, 2048], drop_path_rate=0.0, num_classes=1000
+        depths=[3, 3, 27, 3],
+        dims=[256, 512, 1024, 2048],
+        drop_path_rate=0.0,
+        num_classes=1000,
     ).to(device)
     model = distribute_module(model, mesh, _conv_fn, input_fn=None, output_fn=None)
 
@@ -186,7 +205,11 @@ def test_tp_convnext_train(rank, world_size):
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=False)
 
     x = torch.randn(*in_shape).to(device).requires_grad_()
-    y_target = torch.empty(output_shape[0], dtype=torch.long).random_(output_shape[1]).to(device)
+    y_target = (
+        torch.empty(output_shape[0], dtype=torch.long)
+        .random_(output_shape[1])
+        .to(device)
+    )
     x = distribute_tensor(x, mesh, [Shard(3)])
     y_target = distribute_tensor(y_target, mesh, [Replicate()])
 
