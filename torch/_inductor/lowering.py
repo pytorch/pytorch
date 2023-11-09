@@ -4496,7 +4496,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = denom - correction
+        denom = sympy.Max(denom - correction, 0)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -4555,7 +4555,8 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     def scale_fn(data):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
-        return data / (N - c)
+        zero = ops.constant(0, dtype)
+        return data / ops.maximum(zero, N - c)
 
     var = make_pointwise(scale_fn)(m2)
 
