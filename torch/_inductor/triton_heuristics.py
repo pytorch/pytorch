@@ -1094,7 +1094,10 @@ def reduction(
         elif reduction_hint == ReductionHint.OUTER:
             return cached_autotune(
                 size_hints,
-                [outer_config],
+                [
+                    outer_config,
+                    triton_config_reduction(size_hints, 64, 4, num_warps=16),
+                ],
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -1129,7 +1132,7 @@ def reduction(
                 # halve the XBLOCK/RBLOCK compared to outer_config
                 # TODO: this may only be beneficial when each iteration of the reduction
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8),
+                triton_config_reduction(size_hints, 64, 4, num_warps=16),
             ],
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
