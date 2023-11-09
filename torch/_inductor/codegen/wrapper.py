@@ -5,7 +5,7 @@ import functools
 import inspect
 import os
 import re
-from itertools import count
+from itertools import chain, count
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
@@ -49,6 +49,10 @@ def buffer_reuse_key(node: ir.Buffer):
 
 
 def is_int(s: str):
+    # Cpp code gen adds L at the end of ints
+    # Lets remove it for checking whether we have an int or not
+    if s and s[-1] == "L":
+        s = s[:-1]
     try:
         int(s)
     except ValueError:
@@ -882,13 +886,15 @@ class WrapperCodeGen(CodeGen):
             else:
                 signature.append(SizeArg(key, arg))
         index_dtype = "tl.int32"
+        inductor_meta = {
+            "kernel_name": name,
+        }
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": constants,
             "configs": [config_of(signature)],
-            "kernel_name": name,
         }
         configs = [
             {
@@ -902,6 +908,7 @@ class WrapperCodeGen(CodeGen):
             f"""
             @user_autotune(
                 configs={configs!r},
+                inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
                 filename=__file__
             )
@@ -1478,7 +1485,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in self.src_to_kernel.values():
+        for kernel in chain(
+            self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+        ):
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1745,8 +1754,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        raise AssertionError(
-            "User defined triton kernels are not supported in CPP mode"
+        if len(grid) != 1:
+            raise NotImplementedError("triton.autotune not yet supported")
+        grid = grid[0]
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            grid=grid,
+            device_index=V.graph.scheduler.current_device.index,
+            cuda=True,
+            triton=True,
         )
 
     def generate_scatter_fallback(
@@ -2296,10 +2313,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_arg_str(self, val):
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        if (
+            config.aot_inductor.abi_compatible
+            and not is_legacy_abi
+            and isinstance(type_, torch.OptionalType)
+        ):
+            if val is None:
+                return "nullptr"
+            if isinstance(val, (bool, int, str, float)):
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
+                return f"&{var_name}"
+            if not isinstance(type_.getElementType(), torch.TensorType):
+                return f"&{self.val_to_arg_str(val)}"
+
+        return self.val_to_arg_str(val)
+
+    def val_to_arg_str(self, val) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            # TODO: add abi-compatible support
+            if config.aot_inductor.abi_compatible:
+                return "0"  # nullptr is not available in C
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
@@ -2324,7 +2359,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
+            # FIXME handle embedded optional types?
+            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"
@@ -2443,7 +2479,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
-            for kernel in self.src_to_kernel.values():
+            for kernel in chain(
+                self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+            ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
         return super().generate(is_inference)
@@ -2475,6 +2513,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 arg,
                 (
                     sympy.Integer,
+                    sympy.Expr,
                     sympy.Symbol,
                     SymbolicCallArg,
                 ),
