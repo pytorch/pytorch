@@ -1103,31 +1103,88 @@ def bitwise_left_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.shift_left(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    """
+    Perform the bitwise OR operation on two tensors.
+
+    This function takes two tensor-like objects as input and performs an element-wise bitwise
+    OR operation on them.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor.
+
+    Returns:
+        TensorLikeType: A tensor resulting from the bitwise OR operation on the input
+        tensors.
+
+    Example:
+        >>> a = torch.tensor([0, 1, 2, 3])
+        >>> b = torch.tensor([1, 0, 3, 2])
+        >>> bitwise_or(a, b)
+        tensor([1, 1, 3, 3])
+    """
     return prims.bitwise_or(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    """
+    Perform bitwise right shift operation on two tensors.
+
+    This function takes two tensor-like objects `a` and `b`, and performs an arithmetic
+    bitwise right shift operation.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor, must have the same shape as `a`.
+
+    Returns:
+        TensorLikeType: A tensor with the same shape as `a` and `b`, where each element
+        is the result of arithmetic bitwise right shift operation on corresponding elements
+        of `a` and `b`.
+
+    Example:
+        >>> a = torch.tensor([10, 20, 30])
+        >>> b = torch.tensor([1, 2, 3])
+        >>> bitwise_right_shift(a, b)
+        tensor([5, 5, 3])
+    """
     return prims.shift_right_arithmetic(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    """
+    Perform bitwise XOR operation on two tensors.
+
+    This function takes two tensor-like objects `a` and `b` as input and performs an
+    element-wise bitwise XOR operation on them.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor.
+
+    Returns:
+        TensorLikeType: A tensor resulting from the bitwise XOR operation on
+        the input tensors.
+
+    Example:
+        >>> a = torch.tensor([9, 8, 7])
+        >>> b = torch.tensor([1, 2, 3])
+        >>> bitwise_xor(a, b)
+        tensor([ 8, 10, 4])
+    """
     return prims.bitwise_xor(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
@@ -1135,6 +1192,30 @@ def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 def copysign(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
+    """
+    Copy the sign of the second input to the first input.
+
+    This function takes two inputs, `a` and `b`, and returns a tensor with the
+    magnitude of `a` and the sign of `b`. If `b` is a scalar, it is converted to a
+    tensor with the same dtype and device as `a`. If `a` and `b` are both tensors,
+    they must be on the same device.
+
+    Args:
+        a: A tensor or a scalar. The magnitude of the output is based on this input.
+        b: A tensor or a scalar. The sign of the output is based on this input.
+
+    Returns:
+        A tensor with the magnitude of `a` and the sign of `b`.
+
+    Raises:
+        RuntimeError: If `a` and `b` are both tensors but are not on the same device.
+
+    Example:
+        >>> a = torch.tensor([1.0, -2.0, 3.0, 4.0])
+        >>> b = torch.tensor([-100.0, 234.0, -398.0, -0.0])
+        >>> copysign(a, b)
+        tensor([-1, 2, -3, 4.])
+    """
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
@@ -1158,7 +1239,29 @@ def div(
     rounding_mode: Optional[str] = None,
 ):
     """
-    Reference implementation of torch.div
+    Implement the division operation with optional rounding modes.
+
+    This function provides a reference implementation of torch.div, which performs element-wise division of
+    two tensors or a tensor and a number. The division can be performed with different rounding modes:
+    true, truncation or flooring.
+
+    Args:
+        a: A tensor or a number to be divided.
+        b: A tensor or a number to divide by.
+        rounding_mode: An optional string specifying the rounding mode. If None, true division is
+        performed. If 'trunc', truncation division is performed. If 'floor', floor division is performed.
+
+    Returns:
+        A tensor resulting from the division operation.
+
+    Raises:
+        ValueError: If the rounding_mode is not one of None, 'trunc', or 'floor'.
+
+    Example:
+        >>> a = torch.tensor([10.5, 3.0, 5.5])
+        >>> b = torch.tensor([2.0, 2.0, 2.0])
+        >>> div(a, b, rounding_mode='trunc')
+        tensor([5., 1., 2.])
     """
     if rounding_mode is None:
         return true_divide(a, b)

@@ -1,3 +1,4 @@
+"""Sharded Optimization."""
 from typing import Iterator, Tuple, Union
 from .api import ShardedOptimizer
 
@@ -12,8 +13,9 @@ def named_params_with_sharded_tensor(
     prefix: str = '',
     recurse: bool = True,
 ) -> Iterator[Tuple[str, Union[nn.Parameter, ShardedTensor]]]:
+    r"""Return an iterator over module parameters.
 
-    r"""Returns an iterator over module parameters (together with the
+    Returns an iterator over module parameters (together with the
     ShardedTensor parameters), yielding both the name of the parameter
     as well as the parameter itself. This is typically passed to a
     :class:torch.distributed._shard.sharded_optim.ShardedOptimizer

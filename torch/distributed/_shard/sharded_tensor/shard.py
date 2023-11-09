@@ -1,3 +1,4 @@
+"""Shard Container."""
 from dataclasses import dataclass
 from typing import List
 
@@ -9,6 +10,8 @@ from torch.distributed.remote_device import _remote_device
 @dataclass
 class Shard:
     """
+    Contain a shard and its associated metadata.
+
     Container which holds the data for a shard as a Tensor and also
     the associated metadata for that shard.
 
@@ -17,11 +20,18 @@ class Shard:
         metadata(:class `torch.distributed._shard.sharded_tensor.ShardMetadata`):
             The metadata for the shard, including offsets, lengths and device placement.
     """
+
     __slots__ = ['tensor', 'metadata']
     tensor: torch.Tensor
     metadata: ShardMetadata
 
     def __post_init__(self):
+        """Verification for a shard.
+
+        Raises:
+            ValueError: If the size of the tensor does not match with the shard sizes in the metadata.
+            ValueError: If the device of the tensor does not match with the device in the metadata.
+        """
         # verification between local tensor and metadata
         if list(self.tensor.size()) != self.metadata.shard_sizes:
             raise ValueError(
@@ -40,7 +50,7 @@ class Shard:
     @classmethod
     def from_tensor_and_offsets(cls, tensor: torch.Tensor, shard_offsets: List[int], rank: int):
         """
-        Creates a Shard of a ShardedTensor from a local torch.Tensor, shard_offsets and rank.
+        Create a Shard of a ShardedTensor from a local torch.Tensor, shard_offsets and rank.
 
         Args:
             tensor(torch.Tensor): Local tensor for the shard.

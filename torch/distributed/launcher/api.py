@@ -137,7 +137,9 @@ class elastic_launch:
 def _get_entrypoint_name(
     entrypoint: Union[Callable, str, None], args: List[Any]
 ) -> str:
-    """Retrieve entrypoint name with the rule:
+    """Retrieve entrypoint name for given entrypoint.
+
+    Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``

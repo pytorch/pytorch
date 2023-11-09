@@ -1,3 +1,4 @@
+"""Timer Request."""
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -17,6 +18,8 @@ log = logging.getLogger(__name__)
 
 class TimerRequest:
     """
+    Represent a countdown timer acquisition and release.
+
     Data object representing a countdown timer acquisition and release
     that is used between the ``TimerClient`` and ``TimerServer``.
     A negative ``expiration_time`` should be interpreted as a "release"
@@ -30,11 +33,20 @@ class TimerRequest:
     __slots__ = ["worker_id", "scope_id", "expiration_time"]
 
     def __init__(self, worker_id: Any, scope_id: str, expiration_time: float):
+        """
+        Initialize a TimerRequest object.
+
+        Args:
+            worker_id (Any): ID of the worker.
+            scope_id (str): ID of the scope.
+            expiration_time (float): expiration time of the timer.
+        """
         self.worker_id = worker_id
         self.scope_id = scope_id
         self.expiration_time = expiration_time
 
     def __eq__(self, other):
+        """Check if two TimerRequest objects are equal."""
         if isinstance(other, TimerRequest):
             return (
                 self.worker_id == other.worker_id
@@ -45,16 +57,14 @@ class TimerRequest:
 
 
 class TimerClient(abc.ABC):
-    """
-    Client library to acquire and release countdown timers by communicating
-    with the TimerServer.
-    """
+    """Acquire and release countdown timers by communicatingwith the TimerServer."""
 
     @abc.abstractmethod
     def acquire(self, scope_id: str, expiration_time: float) -> None:
         """
-        Acquires a timer for the worker that holds this client object
-        given the scope_id and expiration_time. Typically registers
+        Acquire a timer for the worker that holds this client object.
+
+        Given the scope_id and expiration_time. Typically registers
         the timer with the TimerServer.
         """
         pass
@@ -62,22 +72,21 @@ class TimerClient(abc.ABC):
     @abc.abstractmethod
     def release(self, scope_id: str):
         """
-        Releases the timer for the ``scope_id`` on the worker this
-        client represents. After this method is
-        called, the countdown timer on the scope is no longer in effect.
+        Release the timer for the ``scope_id`` on the worker this client represents.
+
+        After this method is called, the countdown timer on the scope is no longer in effect.
         """
         pass
 
 
 class RequestQueue(abc.ABC):
-    """
-    Consumer queue holding timer acquisition/release requests
-    """
+    """Consumer queue holding timer acquisition/release requests."""
 
     @abc.abstractmethod
     def size(self) -> int:
         """
-        Returns the size of the queue at the time this method is called.
+        Return the size of the queue at the time this method is called.
+
         Note that by the time ``get`` is called the size of the queue
         may have increased. The size of the queue should not decrease
         until the ``get`` method is called. That is, the following assertion
@@ -97,15 +106,16 @@ class RequestQueue(abc.ABC):
 
     @abc.abstractmethod
     def get(self, size: int, timeout: float) -> List[TimerRequest]:
-        """
-        Gets up to ``size`` number of timer requests in a blocking fashion
-        (no more than ``timeout`` seconds).
+        """Get up to ``size`` number of timer requests in a blocking fashion.
+
+        Note this gets no more than ``timeout`` seconds.
         """
         pass
 
 
 class TimerServer(abc.ABC):
-    """
+    """Monitor and expire active timers.
+
     Entity that monitors active timers and expires them
     in a timely fashion. This server is responsible for
     reaping workers that have expired timers.
@@ -115,6 +125,8 @@ class TimerServer(abc.ABC):
         self, request_queue: RequestQueue, max_interval: float, daemon: bool = True
     ):
         """
+        Initialize TimerServer.
+
         :param request_queue: Consumer ``RequestQueue``
         :param max_interval: max time (in seconds) to wait
                              for an item in the request_queue
@@ -130,7 +142,8 @@ class TimerServer(abc.ABC):
     @abc.abstractmethod
     def register_timers(self, timer_requests: List[TimerRequest]) -> None:
         """
-        Processes the incoming timer requests and registers them with the server.
+        Process the incoming timer requests and registers them with the server.
+
         The timer request can either be a acquire-timer or release-timer request.
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
@@ -139,32 +152,34 @@ class TimerServer(abc.ABC):
 
     @abc.abstractmethod
     def clear_timers(self, worker_ids: Set[Any]) -> None:
-        """
-        Clears all timers for the given ``worker_ids``.
-        """
+        """Clear all timers for the given ``worker_ids``."""
         pass
 
     @abc.abstractmethod
     def get_expired_timers(self, deadline: float) -> Dict[str, List[TimerRequest]]:
         """
-        Returns all expired timers for each worker_id. An expired timer
-        is a timer for which the expiration_time is less than or equal to
-        the provided deadline.
+        Return all expired timers for each worker_id.
+
+        An expired timer is a timer for which the expiration_time is less than or equal
+        to the provided deadline.
         """
         pass
 
     @abc.abstractmethod
     def _reap_worker(self, worker_id: Any) -> bool:
         """
-        Reaps the given worker. Returns True if the worker has been
-        successfully reaped, False otherwise. If any uncaught exception
-        is thrown from this method, the worker is considered reaped
+        Reap the given worker.
+
+        Returns True if the worker has been successfully reaped, False otherwise. If any
+        uncaught exception is thrown from this method, the worker is considered reaped
         and all associated timers will be removed.
         """
 
     def _reap_worker_no_throw(self, worker_id: Any) -> bool:
         """
-        Wraps ``_reap_worker(worker_id)``, if an uncaught exception is
+        Wrap ``_reap_worker(worker_id)``.
+
+        Wrap ``_reap_worker(worker_id)``, if an uncaught exception is
         thrown, then it considers the worker as reaped.
         """
         try:
@@ -209,6 +224,7 @@ class TimerServer(abc.ABC):
         return [r.scope_id for r in timer_requests]
 
     def start(self) -> None:
+        """Start a watchdog thread."""
         log.info(
             "Starting %s..."
             " max_interval=%s,"
@@ -222,6 +238,7 @@ class TimerServer(abc.ABC):
         self._watchdog_thread.start()
 
     def stop(self) -> None:
+        """Stop watchdog thread."""
         log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
@@ -236,9 +253,7 @@ _timer_client = None
 
 
 def configure(timer_client: TimerClient):
-    """
-    Configures a timer client. Must be called before using ``expires``.
-    """
+    """Configure a timer client. Must be called before using ``expires``."""
     global _timer_client
     _timer_client = timer_client
     log.info("Timer client configured to: %s", type(_timer_client).__name__)
@@ -249,6 +264,8 @@ def expires(
     after: float, scope: Optional[str] = None, client: Optional[TimerClient] = None
 ):
     """
+    Acquire a countdown timer that expires in ``after`` seconds from now.
+
     Acquires a countdown timer that expires in ``after`` seconds from now,
     unless the code-block that it wraps is finished within the timeframe.
     When the timer expires, this worker is eligible to be reaped. The

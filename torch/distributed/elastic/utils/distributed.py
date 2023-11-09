@@ -1,3 +1,4 @@
+"""Torchelastic agent and user worker fail-over distributed implementation."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -31,6 +32,29 @@ def create_c10d_store(
     wait_for_workers: bool = True,
     retries=3,
 ):
+    """
+    Create a c10d store for distributed computing.
+
+    Args:
+        is_server (bool): If True, the current process is the server. If False, the current process
+        is a worker.
+        server_addr (str): The address of the server.
+        server_port (int): The port of the server. Default is -1.
+        world_size (int): The total number of processes involved. Default is 1.
+        timeout (float): The timeout for operations executed against the store. Default is
+        600 seconds (10 minutes).
+        wait_for_workers (bool): If True, the server will wait for all the workers to join
+        before it exits. Default is True.
+        retries (int): The number of times to retry creating the store if the initial
+        attempt fails. Default is 3.
+
+    Raises:
+        ValueError: If server_port is not specified and world_size > 1.
+        RuntimeError: If the specified port is already in use after the specified number of retries.
+
+    Returns:
+        store: The created c10d store.
+    """
     if server_port == -1 and world_size > 1:
         raise ValueError(
             f"server_port must be specified when world_size > 1, got server_port={server_port}, world_size={world_size}"
@@ -90,7 +114,18 @@ def create_c10d_store(
 
 
 def _check_full_rank(store, world_size):
+    """
+    Check if all members have joined.
+
+    Args:
+        store (c10d.Store): The c10d store to use for synchronization.
+        world_size (int): The total number of members in the distributed system.
+
+    Raises:
+        TimeoutError: If a timeout occurs while waiting on members to join
+    """
     idx = store.add(_MEMBER_CHECKIN, 1)
+
     if idx == world_size:
         store.set(_LAST_MEMBER_CHECKIN, "<val_ignored>")
 
@@ -106,6 +141,7 @@ def _check_full_rank(store, world_size):
 
 
 def get_free_port():
+    """Return a free port."""
     sock = get_socket_with_port()
     with closing(sock):
         return sock.getsockname()[1]
@@ -113,7 +149,9 @@ def get_free_port():
 
 def get_socket_with_port() -> socket.socket:
     """
-    Returns a free port on localhost that is "reserved" by binding a temporary
+    Return a free port on localhost that is "reserved".
+
+    Return a free port on localhost that is "reserved" by binding a temporary
     socket on it. Close the socket before passing the port to the entity
     that requires it. Usage example
 
@@ -127,7 +165,6 @@ def get_socket_with_port() -> socket.socket:
         # may grab this port before func() runs
         func(port)
     """
-
     addrs = socket.getaddrinfo(
         host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
     )

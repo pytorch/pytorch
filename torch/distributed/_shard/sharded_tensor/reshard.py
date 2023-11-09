@@ -1,3 +1,4 @@
+"""Shared Tensor Resharding."""
 import copy
 from typing import List, Tuple
 
@@ -21,8 +22,7 @@ from .shard import Shard
 
 
 def get_idx_from_placements(placements, current_rank) -> int:
-    """
-    Return the position of the current rank in the given placements.
+    """Return the position of the current rank in the given placements.
 
     Args:
         placements(List[Union[_remote_device, str]]):
@@ -49,7 +49,8 @@ def build_reshard_metadata(
     sharding_spec: shard_spec.ShardingSpec,
     world_size: int,
 ) -> Tuple[List[ShardMetadata], List[int]]:
-    """
+    """Build resharded metadata given a size, sharding spec, and world_size.
+
     Based the given sharding spec, we calculate the offset and local shard size.
     We then build a ShardMetadata on top of the calculation result.
 
@@ -91,7 +92,8 @@ def reshuffle_local_shard(
     resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
 ) -> Tuple[List[Shard], List[ShardMetadata]]:
-    """
+    """Reshuffle a local shard.
+
     Reshuffle the local shard directly when the reshard dim is same as the original
     sharding dim. Logically we do this in two step:
     1. To collect all shards based on original sharding spec.
@@ -159,8 +161,10 @@ def reshard_local_shard(
     pg: ProcessGroup,
 ) -> Tuple[List[Shard], List[ShardMetadata]]:
     """
-    Reshard a sharded tensor given the ``resharding_spec``. When the reshard dim is
-    different from the original sharding dim, we need to do two steps logically:
+    Reshard a sharded tensor given the ``resharding_spec``.
+
+    When the reshard dim is different from the original sharding dim, we need to do
+    two steps logically:
     1. To collect all shards based on original sharding spec.
     2. Reshard the tensor based on the given resharding spec.
 

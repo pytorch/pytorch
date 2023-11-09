@@ -1,3 +1,4 @@
+"""Local timer."""
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -19,6 +20,8 @@ log = logging.getLogger(__name__)
 
 class LocalTimerClient(TimerClient):
     """
+    Local timer client.
+
     Client side of ``LocalTimerServer``. This client is meant to be used
     on the same host that the ``LocalTimerServer`` is running on and uses
     pid to uniquely identify a worker. This is particularly useful in situations
@@ -27,33 +30,37 @@ class LocalTimerClient(TimerClient):
     """
 
     def __init__(self, mp_queue):
+        """Initialize the client."""
         super().__init__()
         self._mp_queue = mp_queue
 
     def acquire(self, scope_id, expiration_time):
+        """Acquire a local timer with specified scope and expiration time."""
         pid = os.getpid()
         acquire_request = TimerRequest(pid, scope_id, expiration_time)
         self._mp_queue.put(acquire_request)
 
     def release(self, scope_id):
+        """Release a local timer with specified scope."""
         pid = os.getpid()
         release_request = TimerRequest(pid, scope_id, -1)
         self._mp_queue.put(release_request)
 
 
 class MultiprocessingRequestQueue(RequestQueue):
-    """
-    A ``RequestQueue`` backed by python ``multiprocessing.Queue``
-    """
+    """A ``RequestQueue`` backed by python ``multiprocessing.Queue``."""
 
     def __init__(self, mp_queue: mp.Queue):
+        """Initialize the queue."""
         super().__init__()
         self._mp_queue = mp_queue
 
     def size(self) -> int:
+        """Return the queue size."""
         return self._mp_queue.qsize()
 
     def get(self, size, timeout: float) -> List[TimerRequest]:
+        """Return a ``List[TimerRequest]`` within the given size and timeout."""
         requests = []
         wait = timeout
         for _ in range(0, size):
@@ -74,6 +81,8 @@ class MultiprocessingRequestQueue(RequestQueue):
 
 class LocalTimerServer(TimerServer):
     """
+    Local timer server.
+
     Server that works with ``LocalTimerClient``. Clients are expected to be
     subprocesses to the parent process that is running this server. Each host
     in the job is expected to start its own timer server locally and each
@@ -84,10 +93,17 @@ class LocalTimerServer(TimerServer):
     def __init__(
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
     ):
+        """Inititalize the local timer server."""
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
         self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
 
     def register_timers(self, timer_requests: List[TimerRequest]) -> None:
+        """
+        Register timers with the timer registry.
+
+        Args:
+            timer_requests: A list of timer requests.
+        """
         for request in timer_requests:
             pid = request.worker_id
             scope_id = request.scope_id
@@ -100,11 +116,26 @@ class LocalTimerServer(TimerServer):
                 self._timers[(pid, scope_id)] = request
 
     def clear_timers(self, worker_ids: Set[int]) -> None:
+        """
+        Clear timers for the specified worker IDs.
+
+        Args:
+            worker_ids: A set of worker IDs.
+        """
         for (pid, scope_id) in list(self._timers.keys()):
             if pid in worker_ids:
                 self._timers.pop((pid, scope_id))
 
     def get_expired_timers(self, deadline: float) -> Dict[Any, List[TimerRequest]]:
+        """
+        Get a dictionary of expired timers.
+
+        Args:
+            deadline: The deadline to use for determining which timers are expired.
+
+        Returns:
+            A dictionary of expired timers.
+        """
         # pid -> [timer_requests...]
         expired_timers: Dict[Any, List[TimerRequest]] = {}
         for request in self._timers.values():

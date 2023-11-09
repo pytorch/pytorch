@@ -1,11 +1,10 @@
+"""Shard Common Operation Utilities."""
 import torch
 from torch.utils import _pytree as pytree
 from typing import Optional
 
 def _basic_validation(op, args=(), kwargs=None):
-    """
-    Common validation across all ops go in here.
-    """
+    """Validate common things across all operations go in here."""
     from torch.distributed._shard.sharded_tensor import ShardedTensor
 
     if len(args) == 0 and (kwargs is None or len(kwargs) == 0):
@@ -48,6 +47,8 @@ def _register_default_op(op, decorator):
     @decorator(op)
     def tensor_default_op(types, args=(), kwargs=None, pg=None):
         """
+        Handle torch function dispact for default tensor operations.
+
         Handles ``__torch_function__`` dispatch for the default tensor ops that
         behave the same as ``torch.Tensor`` such as ``torch.Tensor.shape`` or
         ``torch.Tensor.dtype``. We simply lower to the real op call with

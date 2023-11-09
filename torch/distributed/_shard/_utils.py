@@ -5,9 +5,7 @@ from typing import Sequence
 DEPRECATE_MSG = "Please use DTensor instead and we are deprecating ShardedTensor."
 
 def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Sequence[int], sizes: Sequence[int]) -> torch.Tensor:
-    """
-    Narrow the tensor according to ``offsets`` and ``sizes``.
-    """
+    """Narrow the tensor according to ``offsets`` and ``sizes``."""
     narrowed_tensor = tensor
     for idx, (offset, size) in enumerate(zip(offsets, sizes)):
         if size < tensor.size(idx):
@@ -22,7 +20,5 @@ def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Sequence[int], sizes: 
     return narrowed_tensor
 
 def narrow_tensor(tensor: torch.Tensor, metadata: ShardMetadata) -> torch.Tensor:
-    """
-    Narrow the tensor according to the metadata
-    """
+    """Narrow the tensor according to the metadata."""
     return narrow_tensor_by_index(tensor, metadata.shard_offsets, metadata.shard_sizes)

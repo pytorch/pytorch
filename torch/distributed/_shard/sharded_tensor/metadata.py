@@ -1,3 +1,4 @@
+"""Shared Tensor Metadata."""
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List
@@ -6,13 +7,15 @@ import torch
 from torch.distributed._shard.metadata import ShardMetadata
 
 class MEM_FORMAT_ENCODING(Enum):
+    """Shared Tensor Memory Format Encoding."""
+
     TORCH_CONTIGUOUS_FORMAT = 0
     TORCH_CHANNELS_LAST = 1
     TORCH_PRESERVE_FORMAT = 2
 
 @dataclass
 class TensorProperties:
-    """ Properties used to create :class:`Tensor` """
+    """Properties used to create :class:`Tensor`."""
 
     # Regular tensor fields
     dtype: torch.dtype = field(default=torch.get_default_dtype())
@@ -22,6 +25,7 @@ class TensorProperties:
     pin_memory: bool = False
 
     def __getstate__(self):
+        """Get state of a shared tensor, unless in an invalid format."""
         # Since torch.memory_format cannot be pickled!
         memory_format = self.memory_format
         if memory_format == torch.contiguous_format:
@@ -45,6 +49,7 @@ class TensorProperties:
         self,
         state,
     ):
+        """Set state of a shared tensor, unless in an invalid format."""
         (self.dtype, self.layout, self.requires_grad, mem_format_encoding, self.pin_memory) = state
 
         if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
@@ -60,6 +65,7 @@ class TensorProperties:
 
     @staticmethod
     def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        """Create a shared tensor from :class:`torch.Tensor`."""
         return TensorProperties(
             dtype=tensor.dtype,
             layout=tensor.layout,
@@ -69,9 +75,7 @@ class TensorProperties:
         )
 @dataclass
 class ShardedTensorMetadata:
-    """
-    Represents metadata for :class:`ShardedTensor`
-    """
+    """Represent metadata for :class:`ShardedTensor`."""
 
     # Metadata about each shard of the Tensor
     shards_metadata: List[ShardMetadata] = field(default_factory=list)

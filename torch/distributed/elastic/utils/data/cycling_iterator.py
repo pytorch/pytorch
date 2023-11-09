@@ -1,3 +1,4 @@
+"""Torchelastic agent and user worker fail-over cycling iterator."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -9,6 +10,8 @@
 
 class CyclingIterator:
     """
+    Cycle through the underlying iterator "n" times.
+
     An iterator decorator that cycles through the
     underlying iterator "n" times. Useful to "unroll"
     the dataset across multiple training epochs.
@@ -23,15 +26,18 @@ class CyclingIterator:
     """
 
     def __init__(self, n: int, generator_fn, start_epoch=0):
+        """Initialize the cycle iterator."""
         self._n = n
         self._epoch = start_epoch
         self._generator_fn = generator_fn
         self._iter = generator_fn(self._epoch)
 
     def __iter__(self):
+        """Return cycle iterator."""
         return self
 
     def __next__(self):
+        """Return next element in the iterator."""
         try:
             return next(self._iter)
         except StopIteration as eod:  # eod == end of data

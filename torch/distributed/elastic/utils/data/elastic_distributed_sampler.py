@@ -1,3 +1,4 @@
+"""Torchelastic agent ElasticDistributedSampler."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -14,8 +15,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 class ElasticDistributedSampler(DistributedSampler):
     """
-    Sampler that restricts data loading to a subset of
-    the dataset for elastic training.
+    Sampler that restricts data loading to a subset of the dataset for training.
 
     It is especially useful in conjunction with
     :class:`torch.nn.parallel.DistributedDataParallel`. In such case, each
@@ -34,6 +34,7 @@ class ElasticDistributedSampler(DistributedSampler):
     """
 
     def __init__(self, dataset, num_replicas=None, rank=None, start_index=0):
+        """Initialize the  :class:`ElasticDistributedSampler`."""
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
         if start_index >= len(dataset):
             raise ValueError(
@@ -47,6 +48,11 @@ class ElasticDistributedSampler(DistributedSampler):
         self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
+        """Iterate over the indices of the dataset.
+
+        Ensures that each replica sees approximately the same number of
+        samples.
+        """
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
@@ -67,4 +73,5 @@ class ElasticDistributedSampler(DistributedSampler):
         return iter(indices)
 
     def __len__(self):
+        """Return the number of samples."""
         return self.num_samples

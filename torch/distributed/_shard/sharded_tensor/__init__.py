@@ -1,4 +1,4 @@
-
+"""Sharded Tensor."""
 import functools
 from typing import List
 
@@ -28,8 +28,9 @@ def empty(sharding_spec: shard_spec.ShardingSpec,
           process_group=None,
           init_rrefs=False) -> ShardedTensor:
     """
-    Returns a :class:`ShardedTensor` filled with uninitialized data.
-        Needs to be called on all ranks in an SPMD fashion.
+    Return a :class:`ShardedTensor` filled with uninitialized data.
+
+    Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
@@ -80,8 +81,9 @@ def ones(sharding_spec: shard_spec.ShardingSpec,
          process_group=None,
          init_rrefs=False) -> ShardedTensor:
     """
-    Returns a :class:`ShardedTensor` with the scalar value 1.
-        Needs to be called on all ranks in an SPMD fashion.
+    Return a :class:`ShardedTensor` with the scalar value 1.
+
+    Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
@@ -131,8 +133,9 @@ def zeros(sharding_spec: shard_spec.ShardingSpec,
           process_group=None,
           init_rrefs=False) -> ShardedTensor:
     """
-    Returns a :class:`ShardedTensor` filled with the scalar value 0.
-        Needs to be called on all ranks in an SPMD fashion.
+    Return a :class:`ShardedTensor` filled with the scalar value 0.
+
+    Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
@@ -184,9 +187,11 @@ def full(sharding_spec: shard_spec.ShardingSpec,
          process_group=None,
          init_rrefs=False) -> ShardedTensor:
     """
-    Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
-        is inferred from fill_value. If dtype is specified, it will override the
-        inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
+    Create a :class:`ShardedTensor` filled with fill_value.
+
+    The tensor’s dtype is inferred from fill_value. If dtype is specified, it will override
+    the inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
+
     Args:
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
@@ -235,9 +240,10 @@ def rand(sharding_spec: shard_spec.ShardingSpec,
          process_group=None,
          init_rrefs=False) -> ShardedTensor:
     """
-    Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
-        on the interval :math:`[0, 1)`. The shape of the tensor is defined by the
-        variable argument `size`. Needs to be called on all ranks in an SPMD fashion.
+    Create a :class:`ShardedTensor` filled with uniform random doubles from :math:`[0, 1)`.
+
+    The shape of the tensor is defined by the variable argument `size`.
+    Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
@@ -288,6 +294,8 @@ def randn(sharding_spec: shard_spec.ShardingSpec,
           process_group=None,
           init_rrefs=False) -> ShardedTensor:
     """
+    Create ShardedTensor from standard normal distribution with mean `0` and variance `1`.
+
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         with mean `0` and variance `1` (also called standard normal distribution). The shape
         of the tensor is defined by the variable argument `size`. Needs to be called on all ranks
@@ -338,7 +346,8 @@ def init_from_local_shards(
         process_group=None,
         init_rrefs=False) -> ShardedTensor:
     """
-    Creates an :class:`ShardedTensor` from local shards and the global metadata.
+    Create an :class:`ShardedTensor` from local shards and the global metadata.
+
     Needs to be called on all ranks in an SPMD fashion.
 
     Args:
@@ -392,8 +401,9 @@ def init_from_local_shards(
 
 def state_dict_hook(module, destination, prefix, local_metadata):
     """
-    Hook to add ShardedTensor to Module's ``state_dict``. Needs to be
-    registered to the Module using
+    Add ShardedTensor to Module's ``state_dict``.
+
+    Needs to be registered to the Module using
     :meth:`torch.nn.Module._register_state_dict_hook`.
     """
     for submodule_name, submodule in module.named_modules():
@@ -404,9 +414,7 @@ def state_dict_hook(module, destination, prefix, local_metadata):
                 destination[key] = attr
 
 def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-    """
-    Pre-load state dict hook to add ShardedTensor to the module.
-    """
+    """Pre-load state dict hook to add ShardedTensor to the module."""
     for submodule_name, submodule in module.named_modules():
         for attr_name in submodule.__dict__.keys():
             mod_prefix = prefix + submodule_name
@@ -417,8 +425,9 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
 
 def custom_sharded_op_impl(func):
     """
-    Provides a way for users to write their own custom sharded operator. This
-    can be used to override existing ShardedTensor operators or write a new
+    Provide a way for users to write their own custom sharded operator.
+
+    This can be used to override existing ShardedTensor operators or write a new
     one not supported by ShardedTensor. If the operator in question is covered
     by ``__torch_function__`` dispatch and has a ShardedTensor as any of its
     parameters, the function provided will be invoked for that operator.
@@ -453,9 +462,7 @@ def custom_sharded_op_impl(func):
     )
 
 def _sharded_op_impl(func):
-    """
-    Decorator to register a default sharded op.
-    """
+    """Register a default sharded op."""
     return functools.partial(
         _decorator_func,
         op=func,

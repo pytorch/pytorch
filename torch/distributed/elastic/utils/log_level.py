@@ -1,3 +1,4 @@
+"""Torchelastic utilities logging level."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -8,7 +9,5 @@
 
 
 def get_log_level() -> str:
-    """
-    Return default log level for pytorch.
-    """
+    """Return default log level for pytorch."""
     return "WARNING"

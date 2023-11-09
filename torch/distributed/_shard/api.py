@@ -1,3 +1,4 @@
+"""Distributed Shard API."""
 from contextlib import contextmanager
 import torch
 import torch.distributed as dist
@@ -19,6 +20,8 @@ def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
 ) -> ShardedTensor:
     """
+    Shard a tensor according to sharding specification.
+
     Given a :class:`torch.Tensor`, it shards that tensor according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be
     used as the ground truth of the data which would be scattered as shards
@@ -76,6 +79,8 @@ def shard_parameter(
         src_rank=0,
         process_group=None):
     """
+    Shard a parameter according to sharding specification.
+
     Given a :class:`torch.nn.Module`, a ``param_name`` for a parameter in that
     module, it shards that parameter according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be
@@ -124,9 +129,7 @@ _CURRENT_PROCESS_GROUP = None
 
 @contextmanager
 def load_with_process_group(process_group):
-    """
-    Context manager to set the process group with which to load a ShardedTensor.
-    """
+    """Context manager to set the process group with which to load a ShardedTensor."""
     global _CURRENT_PROCESS_GROUP
     if _CURRENT_PROCESS_GROUP is not None:
         raise RuntimeError(
@@ -140,7 +143,8 @@ def load_with_process_group(process_group):
 
 def _get_current_process_group():
     """
-    Retrieves the current process group set by ``load_with_process_group``.
+    Retrieve the current process group set by ``load_with_process_group``.
+
     If not set, it just returns the default group.
     """
     global _CURRENT_PROCESS_GROUP
@@ -153,8 +157,7 @@ def _reshard_output(
         module: torch.nn.Module,
         resharding_spec: ShardingSpec) -> torch.nn.Module:
     """
-    Hook a module with output resharding in the forward pass according
-    to the given ``resharding_spec``.
+    Reshard module output in the forward pass according to the given ``resharding_spec``.
 
     Args:
         module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
@@ -173,7 +176,7 @@ def _reshard_output(
 
 def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
-    Hook a module with local shards collection in the forward pass.
+    Set a hook on a module with local shards collection in the forward pass.
 
     This API is typically used to convert a sharded representation back to data parallel
     representation. In particular, it returns the local tensor for this Shard. If the
@@ -210,8 +213,9 @@ def shard_module(
     process_group=None
 ):
     """
-    Shards a given module according to the provided sharding `plan`. This method
-    first shards all the parameters according to the given sharding `plan`. Then if
+    Shards a given module according to the provided sharding `plan`.
+
+    First shards all the parameters according to the given sharding `plan`. Then if
     `output_plan` and `return_local_tensor` are specified in the sharding `plan`, it
     will tag the output of modules according `output_plan`, convert the module's
     output back to data parallel according to `return_local_tensor`.

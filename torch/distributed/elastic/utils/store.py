@@ -1,3 +1,4 @@
+"""Torchelastic store utilities."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -12,6 +13,8 @@ from typing import List
 
 def get_all(store, rank: int, prefix: str, size: int):
     r"""
+    Retrieve all data where idx is in a range from 0 to size.
+
     Given a store and a prefix, the method goes through the array of keys
     of the following format: ``{prefix}{idx}``, where idx is in a range
     from 0 to size, and tries to retrieve the data.
@@ -53,7 +56,8 @@ def synchronize(
     barrier_timeout: float = 300,
 ) -> List[bytes]:
     """
-    Synchronizes ``world_size`` agents between each other using the underlying c10d store.
+    Synchronize ``world_size`` agents between each other using the underlying c10d store.
+
     The ``data`` will be available on each of the agents.
 
     Note: The data on the path is not deleted, as a result there can be stale data if
@@ -69,6 +73,8 @@ def barrier(
     store, rank: int, world_size: int, key_prefix: str, barrier_timeout: float = 300
 ) -> None:
     """
+    Lock synchronous agents per unique ``key_prefix``.
+
     A global lock between agents.
 
     Note: Since the data is not removed from the store, the barrier can be used

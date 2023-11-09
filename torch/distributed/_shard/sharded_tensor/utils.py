@@ -1,3 +1,4 @@
+"""Shared Tensor Utilities."""
 import collections.abc
 import copy
 from typing import Optional, List, Sequence
@@ -63,9 +64,7 @@ def _validate_output_tensor_for_gather(
         )
 
 def _flatten_tensor_size(size) -> torch.Size:
-    """
-    Checks if tensor size is valid, then flatten/return a torch.Size object.
-    """
+    """Check if tensor size is valid, then flatten/return a torch.Size object."""
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
         dims = list(*size)
     else:
@@ -99,7 +98,21 @@ def build_metadata_from_local_shards(
     current_rank: int,
     pg: distributed_c10d.ProcessGroup
 ) -> ShardedTensorMetadata:
+    """
+    Build metadata for a ShardedTensor from local shards.
 
+    Args:
+        local_shards (List[Shard]): List of local shards.
+        global_size (torch.Size): The global size of the tensor.
+        current_rank (int): The current rank of the process.
+        pg (distributed_c10d.ProcessGroup): The process group to use for collective communication.
+
+    Returns:
+        ShardedTensorMetadata: The metadata of the ShardedTensor.
+
+    Raises:
+        ValueError: if local shard tensor properties or placement mismatch.
+    """
     assert len(local_shards) > 0, "must have local shards!"
     local_shard_metadatas: List[ShardMetadata] = []
 
@@ -161,6 +174,19 @@ def build_metadata_from_local_shards(
 
 
 def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]]):
+    """
+    Build the global metadata for a ShardedTensor by gathering metadata from all ranks.
+
+    Args:
+        gathered_metadatas (Sequence[Optional[ShardedTensorMetadata]]): A sequence of
+        ShardedTensorMetadata from all ranks.
+
+    Returns:
+        ShardedTensorMetadata: The global metadata for the ShardedTensor.
+
+    Raises:
+        ValueError: If the ShardedTensor has no local shards on all ranks.
+    """
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 

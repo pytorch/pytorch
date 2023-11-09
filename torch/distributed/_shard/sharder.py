@@ -1,8 +1,11 @@
+"""Torch Distributed Sharder."""
 import abc
 import torch.nn as nn
 
 class Sharder(abc.ABC):
     """
+    Shard advanced strategies not easily be composed by the `ShardingSpec`.
+
     This is an interface which allows user to create more advanced
     sharding strategies that are not easily be composed by the
     `ShardingSpec`.
@@ -11,9 +14,12 @@ class Sharder(abc.ABC):
     take an object of the `Sharder` and call `shard` to shard the module,
     then replace the original module with sharded module returned.
     """
+
     @abc.abstractmethod
     def shard(self, module: nn.Module) -> nn.Module:
         """
+        Shard a module.
+
         Shard a module base on the implementation of this method, and
         return the sharded version of the module.
 

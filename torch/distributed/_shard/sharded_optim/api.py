@@ -1,3 +1,4 @@
+"""Sharded Optimization API."""
 from typing import List, Union, Mapping, Dict, Any
 
 import torch.optim as optim
@@ -6,6 +7,15 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 class ShardedOptimizer(optim.Optimizer):
+    """
+    `ShardedOptimizer` class.
+
+    The `ShardedOptimizer` class is a wrapper around the PyTorch Optimizer class,
+    designed to handle optimization for sharded tensors. It collects all tensors
+    and local shard tensors of ShardedTensor and uses these tensors as
+    parameters for the optimizer.
+    """
+
     def __init__(
         self,
         named_params: Mapping[str, Union[Tensor, ShardedTensor]],
@@ -14,6 +24,8 @@ class ShardedOptimizer(optim.Optimizer):
         **optimizer_kwargs
     ):
         """
+        Collect all tensors and local shard tensors of ShardedTensor.
+
         ShardedOptimizer collects all tensors and local shard tensors of
         ShardedTensor, then use these tensors as ``params`` for optimizers
 
@@ -41,7 +53,7 @@ class ShardedOptimizer(optim.Optimizer):
         self.state = self._optim.state
 
     def zero_grad(self, set_to_none: bool = True):  # type: ignore[override]
-        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
+        r"""Reset the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -58,7 +70,7 @@ class ShardedOptimizer(optim.Optimizer):
         self._optim.zero_grad(set_to_none)
 
     def step(self, closure=None):
-        r"""Performs a single optimization step (parameter update).
+        r"""Perform a single optimization parameter update.
 
         Args:
             closure (Callable): A closure that reevaluates the model and
@@ -72,6 +84,8 @@ class ShardedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
+        state_dict is not implemented.
+
         Returned state and param_groups will contain parameter keys
         instead of parameter indices like torch.optim.Optimizer.
         This allows for advanced functionality like optimizer re-sharding to be implemented.
@@ -81,7 +95,7 @@ class ShardedOptimizer(optim.Optimizer):
 
 
     def load_state_dict(self, state_dict: Mapping[str, Any]):
-        r"""Loads the ShardedOptimizer state.
+        r"""Load the ShardedOptimizer state.
 
         Args:
             state_dict (dict): ShardedOptimizer state. Should be an object returned
@@ -91,7 +105,6 @@ class ShardedOptimizer(optim.Optimizer):
         raise NotImplementedError("ShardedOptimizer load_state_dict not implemented yet!")
 
     def add_param_group(self, param_group: Any):
-        r"""Add a new param group
-        """
+        r"""Add a new param group."""
         # TODO: implement add_param_group
         raise NotImplementedError("ShardedOptimizer add_param_group not implemented yet!")
