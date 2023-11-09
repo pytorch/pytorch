@@ -18,7 +18,7 @@ from torch.utils._pytree import tree_map
 from ._torch_func import TD_HANDLED_FUNCTIONS
 from .base import _is_tensor_collection, CompatibleType, NO_DEFAULT, TensorDictBase
 from .tensordict import _SubTensorDict, TensorDict
-from .utils import _LOCK_ERROR, Buffer, lock_blocked
+from .utils import _LOCK_ERROR, as_decorator, Buffer, lock_blocked
 
 
 def _apply_leaves(data, fn):
@@ -783,6 +783,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
+    @as_decorator()
     def to_module(self, module: nn.Module, return_swap: bool = False):
         ...
 

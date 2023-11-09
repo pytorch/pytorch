@@ -3,10 +3,8 @@ from __future__ import annotations
 import abc
 import collections
 import numbers
-from collections import defaultdict
 from collections.abc import MutableMapping
 from copy import copy
-from numbers import Number
 from textwrap import indent
 from typing import (
     Any,
@@ -311,7 +309,7 @@ class TensorDictBase(MutableMapping):
         ...
 
     @abc.abstractmethod
-    def to_module(self, module: "nn.Module", return_swap: bool = False, swap_dest=None):
+    def to_module(self, module: nn.Module, return_swap: bool = False, swap_dest=None):
         """Writes the content of a TensorDictBase instance onto a given nn.Module attributes, recursively.
 
         Args:
@@ -1923,7 +1921,7 @@ class TensorDictBase(MutableMapping):
     @abc.abstractmethod
     def keys(
         self, include_nested: bool = False, leaves_only: bool = False
-    ) -> "_TensorDictKeysView":
+    ) -> _TensorDictKeysView:
         """Returns a generator of tensordict keys."""
         ...
 
@@ -2680,7 +2678,7 @@ class TensorDictBase(MutableMapping):
         num_workers: int = None,
         chunksize: int = None,
         num_chunks: int = None,
-        pool: "mp.Pool" = None,
+        pool: mp.Pool = None,
     ):
         """Maps a function to splits of the tensordict across one dimension.
 
@@ -2885,11 +2883,18 @@ class TensorDictBase(MutableMapping):
             return False
         _last_op = self._last_op_queue.pop()
         if _last_op is not None:
-            last_op, (args, kwargs) = _last_op
+            last_op, (args, kwargs, out) = _last_op
             if last_op == self.__class__.lock_.__name__:
                 return self.unlock_()
             elif last_op == self.__class__.unlock_.__name__:
                 return self.lock_()
+            if last_op == self.__class__.to_module.__name__:
+                if is_tensor_collection(out):
+                    return self.to_module(*args, **kwargs, swap_dest=out)
+                else:
+                    raise RuntimeError(
+                        "to_module cannot be used as a decorator when return_swap=False."
+                    )
             else:
                 raise NotImplementedError(f"Unrecognised function {last_op}.")
         return self
@@ -2923,7 +2928,7 @@ class TensorDictBase(MutableMapping):
                 del target[key]
         return target
 
-    def to_tensordict(self) -> "TensorDict":
+    def to_tensordict(self) -> TensorDict:
         """Returns a regular TensorDict instance from the TensorDictBase.
 
         Returns:

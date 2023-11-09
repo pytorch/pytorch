@@ -222,9 +222,9 @@ else:
 
 
 def expand_as_right(
-    tensor: Tensor | "TensorDictBase",
-    dest: Tensor | "TensorDictBase",
-) -> Tensor | "TensorDictBase":
+    tensor: Tensor | TensorDictBase,
+    dest: Tensor | TensorDictBase,
+) -> Tensor | TensorDictBase:
     """Expand a tensor on the right to match another tensor shape.
 
     Args:
@@ -687,7 +687,7 @@ def cache(fun):
     """
 
     @wraps(fun)
-    def newfun(_self: "TensorDictBase", *args, **kwargs):
+    def newfun(_self: TensorDictBase, *args, **kwargs):
         if not _self.is_locked:
             return fun(_self, *args, **kwargs)
         cache = _self._cache
@@ -792,19 +792,21 @@ class as_decorator:
         >>> assert not data.is_locked
     """
 
-    def __init__(self, attr):
+    def __init__(self, attr=None):
         self.attr = attr
 
     def __call__(self, func):
         @wraps(func)
         def new_func(_self, *args, **kwargs):
-            _attr_pre = getattr(_self, self.attr)
+            if self.attr is not None:
+                _attr_pre = getattr(_self, self.attr)
             out = func(_self, *args, **kwargs)
-            _attr_post = getattr(_self, self.attr)
-            if _attr_post is not _attr_pre:
-                _self._last_op = (new_func.__name__, (args, kwargs))
+            if self.attr is not None:
+                _attr_post = getattr(_self, self.attr)
+            if self.attr is None or (_attr_post is not _attr_pre):
+                out._last_op = (new_func.__name__, (args, kwargs, _self))
             else:
-                _self._last_op = None
+                out._last_op = None
             return out
 
         return new_func
@@ -918,7 +920,7 @@ def _default_hook(td: T, key: tuple[str, ...]) -> None:
 
 def _get_leaf_tensordict(
     tensordict: T, key: tuple[str, ...], hook: Callable = None
-) -> tuple["TensorDictBase", str]:
+) -> tuple[TensorDictBase, str]:
     # utility function for traversing nested tensordicts
     # hook should return the default value for tensordit.get(key)
     while len(key) > 1:
@@ -997,7 +999,7 @@ def _get_repr_custom(cls, shape, device, dtype, is_shared) -> str:
     return f"{cls.__name__}({s})"
 
 
-def _make_repr(key: str, item: "CompatibleType", tensordict: T) -> str:
+def _make_repr(key: str, item: CompatibleType, tensordict: T) -> str:
     from torch.dict.base import _is_tensor_collection
 
     if _is_tensor_collection(type(item)):
@@ -1040,7 +1042,7 @@ def _td_fields(td: T, keys=None) -> str:
 
 
 def _check_keys(
-    list_of_tensordicts: Sequence["TensorDictBase"],
+    list_of_tensordicts: Sequence[TensorDictBase],
     strict: bool = False,
     include_nested: bool = False,
     leaves_only: bool = False,
@@ -1069,7 +1071,7 @@ def _expand_to_match_shape(
     tensor: Tensor,
     self_batch_dims: int,
     self_device: DeviceType,
-) -> Tensor | "TensorDictBase":
+) -> Tensor | TensorDictBase:
     if hasattr(tensor, "dtype"):
         return torch.zeros(
             (
@@ -1120,7 +1122,7 @@ def _set_max_batch_size(source: T, batch_dims=None):
         curr_dim += 1
 
 
-def _clone_value(value: "CompatibleType", recurse: bool) -> "CompatibleType":
+def _clone_value(value: CompatibleType, recurse: bool) -> CompatibleType:
     from torch.dict.base import _is_tensor_collection
 
     if recurse:
@@ -1213,7 +1215,7 @@ def _unravel_key_to_tuple(key):
 
 
 def unravel_key_list(keys):
-    raise NotImplemented
+    raise NotImplementedError
 
 
 def unravel_key(key):

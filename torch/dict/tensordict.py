@@ -15,7 +15,7 @@ import numpy as np
 from functorch import dim as ftdim
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor
 from torch._C._functorch import _add_batch_dim, _remove_batch_dim
 from torch.jit._shape_functions import infer_size_impl
 from torch.utils._pytree import tree_map
@@ -207,7 +207,7 @@ class TensorDict(TensorDictBase):
 
     @staticmethod
     def from_module(
-        module: "torch.nn.Module", as_module: bool = False, lock: bool = False
+        module: torch.nn.Module, as_module: bool = False, lock: bool = False
     ):
         td_struct = TensorDict({}, [])
         for key, param in module.named_parameters(recurse=False):
@@ -229,7 +229,8 @@ class TensorDict(TensorDictBase):
             td_struct.lock_()
         return td_struct
 
-    def to_module(self, module, return_swap: bool = False, swap_dest=None):
+    @as_decorator()
+    def to_module(self, module, return_swap: bool = True, swap_dest=None):
         # we use __dict__ directly to avoid the getattr/setattr overhead whenever we can
         __dict__ = module.__dict__
         out = None
@@ -244,8 +245,16 @@ class TensorDict(TensorDictBase):
                 out = swap_dest
 
         for key, value in self.items():
-            cls = value.__class__
-            if _is_tensor_collection(cls):
+            if isinstance(value, torch.Tensor):
+                if module.__class__.__setattr__ is __base__setattr__:
+                    # if setattr is the native nn.Module.setattr, we can rely on _set_tensor_dict
+                    local_out = _set_tensor_dict(__dict__, module, key, value)
+                else:
+                    if return_swap:
+                        local_out = getattr(module, key)
+                    # use specialized __setattr__ if needed
+                    setattr(module, key, value)
+            else:
                 for _ in value.keys():
                     # if there is at least one key, we must populate the module.
                     # Otherwise we just go to the next key
@@ -261,15 +270,6 @@ class TensorDict(TensorDictBase):
                     return_swap=return_swap,
                     swap_dest=local_dest,
                 )
-            else:
-                if module.__class__.__setattr__ is __base__setattr__:
-                    # if setattr is the native nn.Module.setattr, we can rely on _set_tensor_dict
-                    local_out = _set_tensor_dict(__dict__, module, key, value)
-                else:
-                    if return_swap:
-                        local_out = getattr(module, key)
-                    # use specialized __setattr__ if needed
-                    setattr(module, key, value)
             if return_swap:
                 # we don't want to do this op more than once
                 if (
@@ -282,7 +282,6 @@ class TensorDict(TensorDictBase):
                     # map out to the local_out device
                     out = out.to(device=local_out.device)
                 out._set_str(key, local_out, inplace=False, validated=True)
-
         return out
 
     def __ne__(self, other: object) -> T | bool:
@@ -585,10 +584,8 @@ class TensorDict(TensorDictBase):
         # new shape dim check
         if len(shape) < len(self.shape):
             raise RuntimeError(
-                "the number of sizes provided ({shape_dim}) must be greater or equal to the number of "
-                "dimensions in the TensorDict ({tensordict_dim})".format(
-                    shape_dim=len(shape), tensordict_dim=tensordict_dims
-                )
+                f"the number of sizes provided ({len(shape)}) must be greater or equal to the number of "
+                f"dimensions in the TensorDict ({tensordict_dims})"
             )
 
         # new shape compatability check
@@ -596,9 +593,7 @@ class TensorDict(TensorDictBase):
             if old_dim != 1 and new_dim != old_dim:
                 raise RuntimeError(
                     "Incompatible expanded shape: The expanded shape length at non-singleton dimension should be same "
-                    "as the original length. target_shape = {new_shape}, existing_shape = {old_shape}".format(
-                        new_shape=shape, old_shape=self.batch_size
-                    )
+                    f"as the original length. target_shape = {shape}, existing_shape = {self.batch_size}"
                 )
 
         def _expand(tensor):
@@ -863,7 +858,7 @@ class TensorDict(TensorDictBase):
         dims_list = [dim if dim >= 0 else self.ndim + dim for dim in dims_list]
         if any(dim < 0 or dim >= self.ndim for dim in dims_list):
             raise ValueError(
-                f"Received an permutation order incompatible with the tensordict shape."
+                "Received an permutation order incompatible with the tensordict shape."
             )
         # note: to allow this to work recursively, we must allow permutation order with fewer elements than dims,
         # as long as this list is complete.
@@ -1441,7 +1436,7 @@ class TensorDict(TensorDictBase):
         prefix = Path(prefix)
 
         def load_metadata(filepath):
-            with open(filepath, "r") as json_metadata:
+            with open(filepath) as json_metadata:
                 metadata = json.load(json_metadata)
                 if metadata["device"] == "None":
                     metadata["device"] = None

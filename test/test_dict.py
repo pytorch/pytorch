@@ -2003,7 +2003,7 @@ class TestTensorDicts(TestCase):
         torch.manual_seed(1)
         td = getattr(self, td_type)
         assert isinstance(td[(("a",))], torch.Tensor)
-        assert isinstance(td.get((("a",))), torch.Tensor)
+        assert isinstance(td.get(("a",)), torch.Tensor)
 
     @parametrize("td_type", TD_TYPES)
     def test_getitem_range(self, td_type):
@@ -2380,7 +2380,7 @@ class TestTensorDicts(TestCase):
                 td.memmap_(os.path.join(tmp_path, "tensordict"))
 
             assert os.path.exists(os.path.join(tmp_path, "tensordict", "meta.json"))
-            with open(os.path.join(tmp_path, "tensordict", "meta.json"), "r") as file:
+            with open(os.path.join(tmp_path, "tensordict", "meta.json")) as file:
                 metadata = json.load(file)
             assert td.batch_size == torch.Size(metadata["shape"])
             device = (
@@ -3850,6 +3850,32 @@ class TestUtils(TestCase):
 
 
 instantiate_parametrized_tests(TestUtils)
+
+
+class TestFuncCall(TestCase):
+    def test_func_call(self):
+        module = nn.Sequential(
+            nn.Linear(3, 4), nn.Tanh(), nn.Sequential(nn.Linear(4, 4), nn.SELU())
+        )
+        x = torch.randn(3)
+        params = TensorDict.from_module(module)
+        params0 = params.clone().zero_()
+        sd = {name: p.clone().zero_() for name, p in module.state_dict().items()}
+        y = module(x)
+        with params0.to_module(module):
+            torch.testing.assert_close(torch.zeros_like(y), module(x))
+        torch.testing.assert_close(y, module(x))
+        with params.to_module(module):
+            torch.testing.assert_close(y, module(x))
+        torch.testing.assert_close(
+            torch.zeros_like(y), torch.func.functional_call(module, params0, (x,))
+        )
+        torch.testing.assert_close(y, module(x))
+        torch.testing.assert_close(y, torch.func.functional_call(module, sd, (x,)))
+        torch.testing.assert_close(y, module(x))
+
+
+instantiate_parametrized_tests(TestFuncCall)
 
 
 class TestTensorDictVmap(TestCase):
