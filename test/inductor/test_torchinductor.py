@@ -368,7 +368,9 @@ def check_model(
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
                 assert correct_val.size() == actual_val.size()
-                strides_equal, _ = torch._prims_common.check_significant_strides(correct_val, actual_val)
+                strides_equal, _ = torch._prims_common.check_significant_strides(
+                    correct_val, actual_val
+                )
                 assert strides_equal
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
