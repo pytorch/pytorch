@@ -1,5 +1,4 @@
-"""Provides an API for writing protocol buffers to event files to be
-consumed by TensorBoard for visualization."""
+"""Provide an API for writing protocol buffers to event files to be consumed by TensorBoard for visualization."""
 
 import os
 import time
@@ -51,7 +50,8 @@ class FileWriter:
     """
 
     def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=""):
-        """Creates a `FileWriter` and an event file.
+        """Create a `FileWriter` and an event file.
+        
         On construction the writer creates a new event file in `log_dir`.
         The other arguments to the constructor control the asynchronous writes to
         the event file.
@@ -77,11 +77,12 @@ class FileWriter:
         )
 
     def get_logdir(self):
-        """Returns the directory where event file will be written."""
+        """Return the directory where event file will be written."""
         return self.event_writer.get_logdir()
 
     def add_event(self, event, step=None, walltime=None):
-        """Adds an event to the event file.
+        """Add an event to the event file.
+
         Args:
           event: An `Event` protocol buffer.
           step: Number. Optional global step value for training process
@@ -97,7 +98,8 @@ class FileWriter:
         self.event_writer.add_event(event)
 
     def add_summary(self, summary, global_step=None, walltime=None):
-        """Adds a `Summary` protocol buffer to the event file.
+        """Add a `Summary` protocol buffer to the event file.
+
         This method wraps the provided summary in an `Event` protocol buffer
         and adds it to the event file.
 
@@ -112,7 +114,7 @@ class FileWriter:
         self.add_event(event, global_step, walltime)
 
     def add_graph(self, graph_profile, walltime=None):
-        """Adds a `Graph` and step stats protocol buffer to the event file.
+        """Add a `Graph` and step stats protocol buffer to the event file.
 
         Args:
           graph_profile: A `Graph` and step stats protocol buffer.
@@ -131,7 +133,7 @@ class FileWriter:
         self.add_event(event, None, walltime)
 
     def add_onnx_graph(self, graph, walltime=None):
-        """Adds a `Graph` protocol buffer to the event file.
+        """Add a `Graph` protocol buffer to the event file.
 
         Args:
           graph: A `Graph` protocol buffer.
@@ -143,6 +145,7 @@ class FileWriter:
 
     def flush(self):
         """Flushes the event file to disk.
+
         Call this method to make sure that all pending events have been written to
         disk.
         """
@@ -150,12 +153,14 @@ class FileWriter:
 
     def close(self):
         """Flushes the event file to disk and close the file.
+        
         Call this method when you do not need the summary writer anymore.
         """
         self.event_writer.close()
 
     def reopen(self):
         """Reopens the EventFileWriter.
+        
         Can be called after `close()` to add more events in the same directory.
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
@@ -164,8 +169,7 @@ class FileWriter:
 
 
 class SummaryWriter:
-    """Writes entries directly to event files in the log_dir to be
-    consumed by TensorBoard.
+    """Writes entries directly to event files in the log_dir to be consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
     in a given directory and add summaries and events to it. The class updates the
@@ -183,8 +187,7 @@ class SummaryWriter:
         flush_secs=120,
         filename_suffix="",
     ):
-        """Creates a `SummaryWriter` that will write out events and summaries
-        to the event file.
+        """Create a `SummaryWriter` that will write out events and summaries to the event file.
 
         Args:
             log_dir (str): Save directory location. Default is
@@ -257,9 +260,9 @@ class SummaryWriter:
 
     def _check_caffe2_blob(self, item):
         """
-        Caffe2 users have the option of passing a string representing the name of
-        a blob in the workspace instead of passing the actual Tensor/array containing
-        the numeric values. Thus, we need to check if we received a string as input
+        Caffe2 users have the option of passing a string representing the name of a blob in the workspace instead of passing the actual Tensor/array containing the numeric values.
+        
+        Thus, we need to check if we received a string as input
         instead of an actual Tensor/array, and if so, we need to fetch the Blob
         from the workspace corresponding to that name. Fetching can be done with the
         following:
@@ -271,7 +274,7 @@ class SummaryWriter:
         return isinstance(item, str)
 
     def _get_file_writer(self):
-        """Returns the default FileWriter instance. Recreates it if closed."""
+        """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
@@ -292,7 +295,7 @@ class SummaryWriter:
         return self.file_writer
 
     def get_logdir(self):
-        """Returns the directory where event files will be written."""
+        """Return the directory where event files will be written."""
         return self.log_dir
 
     def add_hparams(
@@ -391,7 +394,7 @@ class SummaryWriter:
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
-        """Adds many scalar data to summary.
+        """Add many scalar data to summary.
 
         Args:
             main_tag (str): The parent name for the tags
@@ -534,7 +537,7 @@ class SummaryWriter:
         global_step=None,
         walltime=None,
     ):
-        """Adds histogram with raw data.
+        """Add histogram with raw data.
 
         Args:
             tag (str): Data identifier
@@ -1022,7 +1025,8 @@ class SummaryWriter:
         weights=None,
         walltime=None,
     ):
-        """Adds precision recall curve.
+        """Add precision recall curve.
+
         Plotting a precision-recall curve lets you understand your model's
         performance under different threshold settings. With this function,
         you provide the ground truth labeling (T/F) and prediction confidence
@@ -1074,7 +1078,7 @@ class SummaryWriter:
         weights=None,
         walltime=None,
     ):
-        """Adds precision recall curve with raw data.
+        """Add precision recall curve with raw data.
 
         Args:
             tag (str): Data identifier
@@ -1110,8 +1114,7 @@ class SummaryWriter:
     def add_custom_scalars_multilinechart(
         self, tags, category="default", title="untitled"
     ):
-        """Shorthand for creating multilinechart. Similar to ``add_custom_scalars()``, but the only necessary argument
-        is *tags*.
+        """Shorthand for creating multilinechart. Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*.
 
         Args:
             tags (list): list of tags that have been used in ``add_scalar()``
@@ -1129,8 +1132,7 @@ class SummaryWriter:
     def add_custom_scalars_marginchart(
         self, tags, category="default", title="untitled"
     ):
-        """Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument
-        is *tags*, which should have exactly 3 elements.
+        """Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*, which should have exactly 3 elements.
 
         Args:
             tags (list): list of tags that have been used in ``add_scalar()``
@@ -1147,9 +1149,9 @@ class SummaryWriter:
         self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_custom_scalars(self, layout):
-        """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
-        for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called
-        before or after the training loop.
+        """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once for each SummaryWriter() object.
+        
+        Because it only provides metadata to tensorboard, the function can be called before or after the training loop.
 
         Args:
             layout (dict): {categoryName: *charts*}, where *charts* is also a dictionary
@@ -1178,7 +1180,9 @@ class SummaryWriter:
         global_step=None,
         walltime=None,
     ):
-        """Add meshes or 3D point clouds to TensorBoard. The visualization is based on Three.js,
+        """Add meshes or 3D point clouds to TensorBoard.
+        
+        The visualization is based on Three.js,
         so it allows users to interact with the rendered object. Besides the basic definitions
         such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
         Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
@@ -1235,6 +1239,7 @@ class SummaryWriter:
 
     def flush(self):
         """Flushes the event file to disk.
+
         Call this method to make sure that all pending events have been written to
         disk.
         """

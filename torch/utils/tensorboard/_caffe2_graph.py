@@ -41,6 +41,7 @@ def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
 def _rename_tensorflow_style(shapes, blob_name_tracker, ops):
     """
     Convert some of the common names in Caffe2 to tensorflow.
+
     NOTE: The common names in both Caffe2 and Tensorflow are currently
         hardcoded, if either side changes at some point, then this code should
         change as well.
@@ -81,6 +82,7 @@ def _rename_tensorflow_style(shapes, blob_name_tracker, ops):
 def _convert_to_ssa(shapes, blob_name_tracker, ops):
     """
     Convert an operator graph to SSA (i.e. out-of-place).
+
     i.e. blobs will be renamed so that each blob is produced only once.
 
     Args:
@@ -215,8 +217,8 @@ def _rename_all(shapes, blob_name_tracker, ops, rename_fn):
 
 def _add_gradient_scope(shapes, blob_name_tracker, ops):
     """
-    For all operators or blobs with name containing "_grad", add a
-    "GRADIENTS/" scope.
+    For all operators or blobs with name containing "_grad", add a "GRADIENTS/" scope.
+
     Note: breaks graph execution since the blob -> gradient mapping is
     hardcoded.
 
@@ -241,8 +243,7 @@ def _add_gradient_scope(shapes, blob_name_tracker, ops):
 
 def _replace_colons(shapes, blob_name_tracker, ops, repl):
     """
-    `:i` has a special meaning in Tensorflow. This function replaces all colons
-    with $ to avoid any possible conflicts.
+    `:i` has a special meaning in Tensorflow. This function replaces all colons with $ to avoid any possible conflicts.
 
     Args:
         shapes: Dictionary mapping blob names to their shapes/dimensions.
@@ -266,6 +267,7 @@ def _replace_colons(shapes, blob_name_tracker, ops, repl):
 def _fill_missing_operator_names(ops):
     """
     Give missing operators a name.
+
     We expect C2 operators to be generally unnamed. This gives them a scope
     (inferred from their outputs) and a name after their type. Duplicates will
     be postfixed by an index.
@@ -323,8 +325,7 @@ def _tf_device(device_option):
 
 def _add_tf_shape(attr_dict, ints):
     """
-    Converts a list of ints to a TensorShapeProto representing the dimensions of
-    a blob/object.
+    Convert a list of ints to a TensorShapeProto representing the dimensions of a blob/object.
 
     Args:
         attr_dict: Dictionary to update (usually attributes of a Node)
@@ -343,8 +344,7 @@ def _add_tf_shape(attr_dict, ints):
 
 def _set_tf_attr(attr_dict, arg):
     """
-    Add attributes to a node. Key is the arg.name, and values can be shape,
-        floats, strings, ints or an empty list.
+    Add attributes to a node. Key is the arg.name, and values can be shape, floats, strings, ints or an empty list.
 
     Args:
         attr_dict: Dictionary to update (usually attributes of a Node)
@@ -388,7 +388,7 @@ def _set_tf_attr(attr_dict, arg):
 
 def _operator_to_node(shapes, op):
     """
-    Converts an operator to a node in a TF graph.
+    Convert an operator to a node in a TF graph.
 
     Args:
         shapes: Dictionary mapping blob names to their shapes/dimensions.
@@ -477,7 +477,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
 
 def _blob_to_node(producing_ops, shapes, name):
     """
-    Converts a blob (operator input or output) to a node in a TF graph.
+    Convert a blob (operator input or output) to a node in a TF graph.
 
     Args:
         producing_ops: Dictionary of blob name to list of
@@ -512,7 +512,7 @@ def _blob_to_node(producing_ops, shapes, name):
 
 def _clear_debug_info(ops, perform_clear):
     """
-    Removes debug information from operators, they are copious.
+    Remove debug information from operators, they are copious.
 
     Args:
         ops: List of Caffe2 operators
@@ -536,6 +536,7 @@ def _clear_debug_info(ops, perform_clear):
 def _check_if_forward(blob):
     """
     Blobs with names containing '_m' or 'grad' are part of the backward pass.
+
         This function references facebookresearch/Detectron/detectron/utils/net.py.
 
     Args:
@@ -636,7 +637,7 @@ def _operators_to_graph_def(
     custom_rename=None,
 ):
     """
-    Main function to convert set of operators to a graph.
+    Convert a set of operators to a graph using the main function.
 
     Args:
         shapes: Dictionary mapping blob names to their shapes/dimensions.
@@ -760,8 +761,9 @@ def _try_get_shapes(nets):
 
 def model_to_graph_def(model, **kwargs):
     """
-    Convert a Caffe2 model to a Tensorflow graph. This function extracts
-    'param_init_net' and 'net' from the model and passes it to nets_to_graph()
+    Convert a Caffe2 model to a Tensorflow graph.
+    
+    This function extracts 'param_init_net' and 'net' from the model and passes it to nets_to_graph()
     for further processing.
 
     Args:
