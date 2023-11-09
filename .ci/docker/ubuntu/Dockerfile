@@ -146,13 +146,6 @@ COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
 
-ARG BUCK2
-# Build and install buck2, this is needed by Executorch
-COPY ./common/install_buck2.sh install_buck2.sh
-COPY ./common/common_utils.sh common_utils.sh
-RUN if [ -n "${BUCK2}" ]; then bash ./install_buck2.sh; fi
-RUN rm install_buck2.sh common_utils.sh
-
 ARG EXECUTORCH
 # Build and install executorch
 COPY ./common/install_executorch.sh install_executorch.sh

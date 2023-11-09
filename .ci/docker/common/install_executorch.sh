@@ -17,19 +17,54 @@ clone_executorch() {
   pod
 }
 
+install_buck2() {
+  pushd executorch/.ci/docker
+
+  BUCK2_VERSION=$(cat ci_commit_pins/buck2.txt)
+  source common/install_buck.sh
+
+  popd
+}
+
+install_conda_dependencies() {
+  pushd executorch/.ci/docker
+  # Install conda dependencies like flatbuffer
+  conda_install --file conda-env-ci.txt
+  popd
+}
+
+install_pip_dependencies() {
+  pushd executorch/.ci/docker
+
+  # Install all Python dependencies
+  pip_install -r requirements-ci.txt
+
+  # NB: This might be switched to pinned commits later
+  NIGHTLY=$(cat ci_commit_pins/nightly.txt)
+  TORCHAUDIO_VERSION=$(cat ci_commit_pins/audio.txt)
+  TORCHVISION_VERSION=$(cat ci_commit_pins/vision.txt)
+
+  pip_install --pre \
+    torchaudio=="${TORCHAUDIO_VERSION}" \
+    torchvision=="${TORCHVISION_VERSION}" \
+    --index-url https://download.pytorch.org/whl/nightly/cpu
+
+  popd
+}
+
 setup_executorch() {
   pushd executorch
-  # Install all ET dependencies and build executorch
   source .ci/scripts/utils.sh
-  as_jenkins install_pip_dependencies
 
   install_flatc_from_source
-
-  as_jenkins install_executorch
+  pip_install .
   as_jenkins build_executorch_runner "buck2"
+
   popd
 }
 
 clone_executorch
-install_flatc_from_source
+install_buck2
+install_conda_dependencies
+install_pip_dependencies
 setup_executorch
