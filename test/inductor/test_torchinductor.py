@@ -2811,6 +2811,19 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_var_correction(self):
+        def fn(x):
+            dim = -1
+            return (
+                torch.var(x, dim=dim, correction=1.3),
+                torch.var(x, dim=dim, correction=3),
+                torch.var(x, dim=dim, correction=10),
+            )
+
+        self.common(fn, (torch.randn([2, 8]),))
+        # Unrolled reduction
+        self.common(fn, (torch.randn([2, 4]),))
+
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
         @torch._dynamo.optimize("inductor", nopython=True)
