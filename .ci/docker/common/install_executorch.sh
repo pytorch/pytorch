@@ -9,12 +9,13 @@ clone_executorch() {
 
   # Clone the Executorch
   git clone https://github.com/pytorch/executorch.git
-  chown -R jenkins executorch
 
   # and fetch the target commit
   pushd executorch
   git checkout "${EXECUTORCH_PINNED_COMMIT}"
   pod
+
+  chown -R jenkins executorch
 }
 
 install_buck2() {
