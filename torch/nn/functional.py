@@ -436,7 +436,7 @@ def fractional_max_pool2d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None).
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
     Applies 2D fractional max pooling over an input signal composed of several input planes.
 
@@ -535,7 +535,7 @@ def fractional_max_pool3d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None).
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
     Applies 3D fractional max pooling over an input signal composed of several input planes.
 
@@ -644,7 +644,7 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 1D max pooling over an input signal composed of several input
     planes.
@@ -730,7 +730,7 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -816,7 +816,7 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
     Applies a 3D max pooling over an input signal composed of several input
     planes.
@@ -1078,7 +1078,7 @@ def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    adaptive_max_pool1d(input, output_size, return_indices=False).
+    adaptive_max_pool1d(input, output_size, return_indices=False)
 
     Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1119,7 +1119,7 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""adaptive_max_pool2d(input, output_size, return_indices=False).
+    r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1163,7 +1163,7 @@ def adaptive_max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    adaptive_max_pool3d(input, output_size, return_indices=False).
+    adaptive_max_pool3d(input, output_size, return_indices=False)
 
     Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1205,7 +1205,7 @@ adaptive_max_pool3d = boolean_dispatch(
 adaptive_avg_pool1d = _add_docstr(
     torch.adaptive_avg_pool1d,
     r"""
-adaptive_avg_pool1d(input, output_size) -> Tensor.
+adaptive_avg_pool1d(input, output_size) -> Tensor
 
 Applies a 1D adaptive average pooling over an input signal composed of
 several input planes.
