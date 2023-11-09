@@ -162,11 +162,9 @@ def check(first_device, *inputs) -> None:
 
     """
     if not any(torch.is_tensor(input) for input in inputs):
-        raise TypeError(f"inputs do not have any tensors: {inputs}")
+        raise TypeError(f'inputs do not have any tensors: {inputs}')
     if any(torch.is_tensor(input) and input.device != first_device for input in inputs):
-        raise ValueError(
-            "All inputs should be on the same device as the first partition"
-        )
+        raise ValueError('All inputs should be on the same device as the first partition')
 
 
 def scatter(*inputs, chunks: int) -> List[Batch]:
