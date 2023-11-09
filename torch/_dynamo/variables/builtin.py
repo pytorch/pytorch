@@ -1164,8 +1164,10 @@ class BuiltinVariable(VariableTracker):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable.create(member, **options)
-            else:
+            elif source is not None:
                 return VariableBuilder(tx, source)(member)
+            else:
+                return SourcelessBuilder()(tx, member)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 
@@ -1257,7 +1259,7 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import VariableBuilder
+        from .builder import VariableBuilder, SourcelessBuilder
 
         try:
             py_type = obj.python_type()
@@ -1271,7 +1273,7 @@ class BuiltinVariable(VariableTracker):
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
         if py_type is not None:
-            return ConstantVariable.create(py_type)
+            return SourcelessBuilder()(tx, py_type)
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,
