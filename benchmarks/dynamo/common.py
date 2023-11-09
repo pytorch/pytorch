@@ -2328,9 +2328,6 @@ class BenchmarkRunner:
             output_csv(output_filename, headers, fields)
             return accuracy_status
 
-        if name in self.skip_accuracy_checks_large_models_dashboard:
-            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
-
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
@@ -2512,9 +2509,6 @@ class BenchmarkRunner:
         Checks tolerance based on https://pytorch.org/docs/stable/generated/torch.allclose.html.
         """
         tolerance_status = "pass"
-        if name in self.skip_accuracy_checks_large_models_dashboard:
-            tolerance_status = "pass_due_to_skip"
-            return tolerance_status
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
