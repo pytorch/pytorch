@@ -1,4 +1,3 @@
-"""Distributed Shard API."""
 from contextlib import contextmanager
 import torch
 import torch.distributed as dist
