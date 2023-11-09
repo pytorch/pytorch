@@ -422,6 +422,7 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
         results = output_process_fn_grad(results)
 
     flat_results = pytree.tree_leaves(results)
+    flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -467,6 +468,7 @@ def check_backward_formula(op: Callable, args, kwargs,
             )
 
         flat_results = pytree.tree_leaves(results)
+        flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
 
