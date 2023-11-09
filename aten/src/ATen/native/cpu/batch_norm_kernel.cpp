@@ -176,10 +176,7 @@ template <typename scalar_t>
 typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 batch_norm_cpu_collect_stats_contiguous_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
-
-  // keep acc_type as opmath_type will use float type when scalar_t==float
-  // while acc_type uses double for float.
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using Vec = Vectorized<scalar_t>;
   int64_t n_batch = input.size(0);
   int64_t n_channel = input.size(1);
   int64_t image_size = input.numel() / n_batch / n_channel;
@@ -192,27 +189,44 @@ batch_norm_cpu_collect_stats_contiguous_impl(
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      // compute mean per input
-      accscalar_t sum = 0;
-      for (const auto n : c10::irange(n_batch)) {
-        for (const auto i : c10::irange(image_size)) {
-          auto offset = n * n_channel * image_size + c * image_size + i;
-          sum += input_data[offset];
+    // compute mean per input
+      scalar_t sum_val = 0;
+      Vec sum_val_vec = Vec(scalar_t(0));
+      for (int64_t n = 0; n < n_batch; n++) {
+        const scalar_t* input_ptr = input_data + n * n_channel * image_size + c * image_size;
+        int64_t d = 0;
+        for (; d < image_size - (image_size % Vec::size()); d += Vec::size()) {
+          Vec data_vec = Vec::loadu(input_ptr + d);
+          sum_val_vec += data_vec;
+        }
+        for (; d < image_size; d++) {
+          sum_val += input_ptr[d];
         }
       }
-      scalar_t mean = sum / N;
+      sum_val += vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, sum_val_vec);
+      // TODO: use fast version
+      scalar_t mean = sum_val / N;
       mean_data[c] = mean;
 
       // compute variance per input
-      accscalar_t _var_sum = 0;
-      for (const auto n : c10::irange(n_batch)) {
-        for (const auto i : c10::irange(image_size)) {
-          auto offset = n * n_channel * image_size + c * image_size + i;
-          auto x = input_data[offset];
-          _var_sum += (x - mean) * (x - mean);
+      scalar_t var_val = 0;
+      Vec var_vec = Vec(scalar_t(0));
+      Vec mean_vec = Vec(mean);
+      for (int64_t n = 0; n < n_batch; n++) {
+        const scalar_t* input_ptr = input_data + n * n_channel * image_size + c * image_size;
+        int64_t d = 0;
+        for (; d < image_size - (image_size % Vec::size()); d += Vec::size()) {
+          Vec data_vec = Vec::loadu(input_ptr + d);
+          var_vec += (data_vec - mean_vec) * (data_vec - mean_vec);
+        }
+        for (; d < image_size; d++) {
+          scalar_t data_val = input_ptr[d];
+          var_val += (data_val - mean) * (data_val - mean);
         }
       }
-      var_sum_data[c] = _var_sum;
+      // TODO: use fast version
+      var_val += vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, var_vec);
+      var_sum_data[c] = var_val;
     }
   });
 }
