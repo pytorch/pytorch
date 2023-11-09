@@ -862,9 +862,9 @@ class MultiLabelMarginLoss(_Loss):
 
 
 class SmoothL1Loss(_Loss):
-    r"""Creates a criterion that combines L1 and L2 losses based on a user-defined threshold beta.
+    r"""Creates a criterion that uses a squared term or L1 term based on a user-defined threshold beta.
     
-    Creates a criterion that uses a squared term if the absolute
+    The criterion uses a squared term if the absolute
     element-wise error falls below a beta and an L1 term otherwise.
     It is less sensitive to outliers than :class:`torch.nn.MSELoss` and in some cases
     prevents exploding gradients (e.g. see the paper `Fast R-CNN`_ by Ross Girshick).
@@ -1309,7 +1309,7 @@ class CosineEmbeddingLoss(_Loss):
 
 
 class MarginRankingLoss(_Loss):
-    r"""Creates a criterion that computes the relative distance between inputs.
+    r"""Creates a criterion that computes a margin ranking loss between inputs.
     
     This criterion measures the loss given inputs :math:`x1`, :math:`x2`, 
     two 1D mini-batch or 0D `Tensors`, and a label 1D mini-batch or 
@@ -1453,7 +1453,7 @@ class MultiMarginLoss(_WeightedLoss):
 class TripletMarginLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss.
      
-    The loss is computed between a given input tensors :math:`x1`, :math:`x2`, 
+    The loss is computed between input tensors :math:`x1`, :math:`x2`, 
     :math:`x3` and a margin with a value greater than :math:`0`.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n` (i.e., `anchor`, `positive examples` and `negative
