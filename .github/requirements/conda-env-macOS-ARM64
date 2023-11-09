@@ -5,7 +5,7 @@ cmake=3.22.*
 typing-extensions=4.3.0
 dataclasses=0.8
 pip=22.2.2
-pillow=9.2.0
+pillow=10.0.1
 pkg-config=0.29.2
 wheel=0.37.1
 # NB: This is intentionally held back because anaconda main doesn't
