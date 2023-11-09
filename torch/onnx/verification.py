@@ -863,7 +863,7 @@ def verify(
     elif training == torch.onnx.TrainingMode.EVAL:
         model.eval()
     with torch.no_grad(), contextlib.ExitStack() as stack:
-        model_f: Union[str, io.BytesIO] = io.BytesIO()
+        model_f: Union[str, io.BytesIO] = "model.onnx" # io.BytesIO()
         if use_external_data:
             tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
             model_f = os.path.join(tmpdir_path, "model.onnx")
