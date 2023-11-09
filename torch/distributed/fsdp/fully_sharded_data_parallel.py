@@ -933,7 +933,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
-        """Deregister the original parameters and expose the :class:`FlatParameter` s.
+        """Deregister the original parameters and expose the :class:`FlatParameter`.
 
         If a :class:`FlatParameter` is sharded, then
         this refreshes the sharded views before exiting. This method should
