@@ -99,7 +99,7 @@ static NSString *gVersionExtension = @"version";
   [[NSFileManager defaultManager] removeItemAtPath:modelPath error:nil];
 
   if (error) {
-    return NO; // Model could not be compiled
+    return NO; // The model could not be compiled
   }
 
   NSURL *compiledURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
@@ -109,13 +109,13 @@ static NSString *gVersionExtension = @"version";
   }
 
   if (error) {
-    return NO; // Model could not be saved in cache
+    return NO; // The model could not be saved in cache
   }
 
 #if TARGET_OS_IPHONE
   NSURL *versionURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gVersionExtension];
   NSString *currentOSVer = [UIDevice currentDevice].systemVersion;
-  [currentOSVer writeToFile:versionURL.path atomically:YES];
+  [currentOSVer writeToFile:versionURL.path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 #endif
 
   return YES;
