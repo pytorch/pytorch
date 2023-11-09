@@ -86,7 +86,7 @@ def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
 
 def manual_seed(seed: int) -> None:
     r"""Set the seed for generating random numbers for the current GPU.
-    
+
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -109,7 +109,7 @@ def manual_seed(seed: int) -> None:
 
 def manual_seed_all(seed: int) -> None:
     r"""Set the seed for generating random numbers on all GPUs.
-    
+
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -128,7 +128,7 @@ def manual_seed_all(seed: int) -> None:
 
 def seed() -> None:
     r"""Set the seed for generating random numbers to a random number for the current GPU.
-    
+
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -147,7 +147,7 @@ def seed() -> None:
 
 def seed_all() -> None:
     r"""Set the seed for generating random numbers to a random number on all GPUs.
-    
+
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
     """
