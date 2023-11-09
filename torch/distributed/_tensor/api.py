@@ -60,13 +60,24 @@ aten = torch.ops.aten
 #
 class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input: "DTensor", grad_placements: Optional[Sequence[Placement]]):  # type: ignore[override]
+    def forward(  # type: ignore[override]
+        ctx,
+        input: "DTensor",
+        grad_placements: Optional[Sequence[Placement]],
+        async_output: bool,
+    ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
+        local_tensor = input._local_tensor
+        if not async_output and isinstance(local_tensor, funcol.AsyncCollectiveTensor):
+            # synchronously wait for any pending collectives to get the result tensor
+            local_tensor = local_tensor.trigger_wait()
+            local_tensor = local_tensor.elem  # type: ignore[attr-defined]
+
         # We need to return a fresh Tensor object there as autograd metadata
-        # will be inplaced into it. So we don't want to polute the Tensor
-        # object stored in _local_tensor.
-        return input._local_tensor.view_as(input._local_tensor)
+        # will be inplaced into it. So we don't want to pollute the Tensor
+        # object stored in the _local_tensor of this DTensor.
+        return local_tensor.view_as(local_tensor)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -94,6 +105,7 @@ class _ToTorchTensor(torch.autograd.Function):
                 requires_grad=grad_output.requires_grad,
                 stride=tuple(tensor_stride),
             ),
+            None,
             None,
         )
 
@@ -384,7 +396,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             will depend on if the `DTensor` requires_grad or not.
         """
         return _ToTorchTensor.apply(
-            self, grad_placements
+            self, grad_placements, True
         )  # pyre-ignore[16]: autograd func
 
     def redistribute(
@@ -462,16 +474,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `full_tensor` is differentiable.
         """
-        full_tensor = self.redistribute(
-            placements=[Replicate()] * self.device_mesh.ndim
-        ).to_local(grad_placements=grad_placements)
-
-        if isinstance(full_tensor, funcol.AsyncCollectiveTensor):
-            # synchronously wait for any pending collectives to get the result tensor
-            full_tensor.trigger_wait()
-            full_tensor = full_tensor.elem
-
-        return full_tensor
+        redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
+        return _ToTorchTensor.apply(redist_res, grad_placements, False)
 
     @property
     def device_mesh(self) -> DeviceMesh:

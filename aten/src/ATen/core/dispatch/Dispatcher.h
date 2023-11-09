@@ -234,6 +234,8 @@ public:
    */
   void throwIfHasAbstractImplPyStub(OperatorName op_name);
 
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
   /**
    * Register a new operator by name.
    */
