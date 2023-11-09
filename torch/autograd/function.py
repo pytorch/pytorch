@@ -501,7 +501,7 @@ class Function(_SingleLevelFunction):
 
     @staticmethod
     def vmap(info, in_dims, *args):
-        r"""Define vmap behavior for this autograd.Function, override or set ``generate_vmap_rule`` to enable :func:`torch.vmap`.
+        r"""Define vmap behavior for this autograd.Function underneath :func:`torch.vmap`.
 
         This static method sets the behavior for this autograd.Function within
         :func:`torch.vmap`. To enable :func:`torch.vmap`, you can either override this
