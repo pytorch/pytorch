@@ -2464,18 +2464,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod(*args)
 
     def test_pointless_graph_removal(self):
-        for grad_mode in [torch.enable_grad, torch.no_grad]:
-            cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-            @torch.compile(backend=cnt)
-            def fn(x):
-                with torch.enable_grad():
-                    torch._dynamo.graph_break()
-                    return x + 1
+        @torch.compile(backend=cnt)
+        def fn(x):
+            with torch.no_grad():
+                torch._dynamo.graph_break()
+                return x + 1
 
-            fn(torch.randn(4))
-            self.assertEqual(cnt.frame_count, 1)
-            self.assertEqual(cnt.op_count, 1)
+        fn(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
 
     def test_output_aliases_intermediate(self):
         def f(x):
