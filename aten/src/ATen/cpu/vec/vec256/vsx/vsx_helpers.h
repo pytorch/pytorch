@@ -33,7 +33,7 @@ using vuint32  =  __attribute__((altivec(vector__)))  unsigned  int;
 using vuint64  =  __attribute__((altivec(vector__)))  unsigned long long;
 using vfloat32 =  __attribute__((altivec(vector__)))  float;
 using vfloat64 =  __attribute__((altivec(vector__)))  double;
-#endif 
+#endif
 
 #if !defined(vec_float)
 C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
@@ -104,7 +104,7 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 C10_ALWAYS_INLINE vint64 vec_splats(const int64_t& a) {
   return vec_splats(a);
  }
-#endif 
+#endif
 // Vectorized min/max which return a if any operand is nan
 template <class T>
 C10_ALWAYS_INLINE T vec_min_nan(const T& a, const T& b) {
