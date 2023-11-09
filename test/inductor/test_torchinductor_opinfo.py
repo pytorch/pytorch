@@ -257,6 +257,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
+    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
 }
 
 

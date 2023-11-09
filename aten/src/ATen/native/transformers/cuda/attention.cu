@@ -874,7 +874,7 @@ _flash_attention_forward(
       Tensor());
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t> _efficient_attention_forward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]
     const at::Tensor& key, // [b, seqlen, num_heads, K]
     const at::Tensor& value, // [b, seqlen, num_heads, Kv]
