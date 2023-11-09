@@ -625,6 +625,12 @@ class TritonTemplateCaller(ChoiceCaller):
             )
         )
 
+    def info_dict(self) -> dict[str, str]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {
+            "backend": "Triton",
+        }
+
 
 class ExternKernelCaller(ChoiceCaller):
     def __init__(
@@ -691,6 +697,13 @@ class ExternKernelCaller(ChoiceCaller):
                 kwargs=self.kwargs,
             )
         )
+
+    def info_dict(self) -> dict[str, str]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {
+            "backend": "extern",
+            "kernel_call_name": self.choice.call_name(),
+        }
 
 
 class ErrorFromChoice(RuntimeError):
@@ -888,7 +901,13 @@ class AlgorithmSelectorCache(PersistentCache):
         return benchmark
 
     @staticmethod
-    def log_results(name, input_nodes, timings, elapse):
+    def log_results(
+        name: str,
+        input_nodes: List[ir.IRNode],
+        timings: dict[ChoiceCaller, float],
+        elapse: float,
+    ):
+        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(

@@ -338,9 +338,15 @@ class DebugContext:
             )
             pass
 
-    def fopen(self, filename: str):
+    def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
         assert self._path
-        return open(os.path.join(self._path, filename), "w")
+        return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
+
+    @contextlib.contextmanager
+    def fopen_context(self, filename: str, write_mode: str = "w", *args, **kwargs):
+        assert self._path
+        with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
+            yield f
 
     def filename(self, suffix: str):
         assert self._path
@@ -434,6 +440,7 @@ class DebugContext:
 class DebugFormatter:
     def __init__(self, handler):
         self.fopen = handler.fopen
+        self.fopen_context = handler.fopen_context
         self.filename = handler.filename
         self.handler = handler
 
@@ -478,6 +485,59 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+    def log_autotuning_results(
+        self,
+        name: str,
+        input_nodes: List[ir.IRNode],
+        timings: dict["ChoiceCaller", float],  # type: ignore[name-defined]
+        elapse: float,
+    ):
+        import json
+
+        def build_node_info(node: ir.IRNode):
+            node_info = {
+                "name": name,
+                "type": type(node).__name__,
+            }
+            try:
+                node_info["layout"] = str(node.get_layout())
+            except:
+                pass
+            try:
+                node_info["dtype"] = str(node.get_dtpe())
+            except:
+                pass
+            try:
+                node_info["device"] = str(node.get_device())
+            except:
+                pass
+            try:
+                node_info["stride"] = str(node.get_stride())
+            except:
+                pass
+            try:
+                node_info["numel"] = str(node.get_numel())
+            except:
+                pass
+            if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
+                node_info["data"] = build_node_info(node.data)
+            return node_info
+
+        general_properties = {
+            "cuda_device_name": torch.cuda.get_device_name(),
+            "cuda_device_count": torch.cuda.device_count(),
+            "input_nodes": [build_node_info(node) for node in input_nodes],
+            "autotuning_time": elapse,
+        }
+        with self.fopen_context(
+            "autotuning_result_json_list.txt", "at", encoding="utf-8"
+        ) as fd:
+            for caller, time in timings.items():
+                info_dict = dict(caller.info_dict())
+                info_dict.update(general_properties)
+                info_dict["benchmark_result"] = time
+                json.dump(info_dict, fd)
 
 
 @dataclasses.dataclass

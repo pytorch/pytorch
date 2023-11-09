@@ -372,7 +372,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             epilogue_nodes = []
 
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            use_evt = self.supports_evt(op) and ((Bias is not None) or (len(epilogue_nodes)>0))
+            use_evt = self.supports_evt(op) and (
+                (Bias is not None) or (len(epilogue_nodes) > 0)
+            )
             if use_evt:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
                 op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
@@ -470,7 +472,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if all_match:
             return op
         log.warning(
-            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance." # noqa: G004, B950
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
         )
         new_op = copy.deepcopy(op)
 

@@ -910,7 +910,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def debug_str(self) -> str:
         """Longer form printout for trace logs"""
         name = self.get_name()
-        node_typestr = ",".join(type(n).__name__  for n in self.snodes)
+        node_typestr = ",".join(type(n).__name__ for n in self.snodes)
         lines = [
             f"{name}: {type(self).__name__}({node_typestr})",
             f"{name}.writes = {pformat(self.read_writes.writes)}",

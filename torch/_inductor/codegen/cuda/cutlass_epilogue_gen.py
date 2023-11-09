@@ -64,7 +64,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases = dict()
+        self.aliases: Dict[str, str] = dict()
         self.pre_fused_evt = pre_fused_evt
 
     @staticmethod
@@ -313,7 +313,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 if node.name is not None:
-                    formatter.aliases[node.name] = result
+                    formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)
             if _MAGIC_SYMPY_ERROR_STRING in res:

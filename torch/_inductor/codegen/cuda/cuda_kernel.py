@@ -296,16 +296,20 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
+        info_kwargs: Optional[dict],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
+        self.info_kwargs = info_kwargs
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(
+            *args, output_tensor=out
+        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
     def __str__(self):
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
@@ -320,6 +324,22 @@ class CUDATemplateCaller(ChoiceCaller):
                 self.bmreq.hash_key,
             ]
         )
+
+    def info_dict(self) -> dict[str, str]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        if self.info_kwargs is not None and "op" in self.info_kwargs:
+            op = self.info_kwargs["op"]
+            return {
+                "backend": "CUDA",
+                "op_type": type(op).__name__,
+                "tile_shape": str(op.tile_description.tile_shape),
+                "epilogue_schedule": str(op.epilogue_schedule),
+                "kernel_schedule": str(op.kernel_schedule),
+                "element_accumulator": str(op.accumulator_type()),
+                "op_name": str(op.procedural_name()),
+            }
+        else:
+            return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
         return TensorBox.create(
