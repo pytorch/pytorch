@@ -1,4 +1,3 @@
-"""Torchelastic agent ElasticDistributedSampler."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -48,11 +47,6 @@ class ElasticDistributedSampler(DistributedSampler):
         self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self):
-        """Iterate over the indices of the dataset.
-
-        Ensures that each replica sees approximately the same number of
-        samples.
-        """
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
@@ -73,5 +67,4 @@ class ElasticDistributedSampler(DistributedSampler):
         return iter(indices)
 
     def __len__(self):
-        """Return the number of samples."""
         return self.num_samples

@@ -47,8 +47,6 @@ def _register_default_op(op, decorator):
     @decorator(op)
     def tensor_default_op(types, args=(), kwargs=None, pg=None):
         """
-        Handle torch function dispact for default tensor operations.
-
         Handles ``__torch_function__`` dispatch for the default tensor ops that
         behave the same as ``torch.Tensor`` such as ``torch.Tensor.shape`` or
         ``torch.Tensor.dtype``. We simply lower to the real op call with

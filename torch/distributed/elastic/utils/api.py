@@ -1,4 +1,3 @@
-"""Torchelastic agent and user worker fail-over contract utilities."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -15,7 +14,7 @@ from typing import List, Any
 
 def get_env_variable_or_raise(env_name: str) -> str:
     r"""
-    Ty to retrieve environment variable.
+    Try to retrieve environment variable.
 
     Raises ``ValueError`` if no environment variable found.
 
@@ -30,7 +29,6 @@ def get_env_variable_or_raise(env_name: str) -> str:
 
 
 def get_socket_with_port() -> socket.socket:
-    """Get socket and port."""
     addrs = socket.getaddrinfo(
         host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
     )
@@ -53,7 +51,6 @@ class macros:
 
     @staticmethod
     def substitute(args: List[Any], local_rank: str) -> List[str]:
-        """Substitute placeholders in a list of strings using the given local rank."""
         args_sub = []
         for arg in args:
             if isinstance(arg, str):

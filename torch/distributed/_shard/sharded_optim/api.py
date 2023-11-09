@@ -7,15 +7,6 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 class ShardedOptimizer(optim.Optimizer):
-    """
-    `ShardedOptimizer` class.
-
-    The `ShardedOptimizer` class is a wrapper around the PyTorch Optimizer class,
-    designed to handle optimization for sharded tensors. It collects all tensors
-    and local shard tensors of ShardedTensor and uses these tensors as
-    parameters for the optimizer.
-    """
-
     def __init__(
         self,
         named_params: Mapping[str, Union[Tensor, ShardedTensor]],

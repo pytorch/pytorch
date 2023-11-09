@@ -1,4 +1,3 @@
-"""Shard Container."""
 from dataclasses import dataclass
 from typing import List
 
@@ -26,12 +25,6 @@ class Shard:
     metadata: ShardMetadata
 
     def __post_init__(self):
-        """Verification for a shard.
-
-        Raises:
-            ValueError: If the size of the tensor does not match with the shard sizes in the metadata.
-            ValueError: If the device of the tensor does not match with the device in the metadata.
-        """
         # verification between local tensor and metadata
         if list(self.tensor.size()) != self.metadata.shard_sizes:
             raise ValueError(

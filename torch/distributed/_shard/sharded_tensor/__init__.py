@@ -1,4 +1,3 @@
-"""Sharded Tensor."""
 import functools
 from typing import List
 
@@ -294,8 +293,6 @@ def randn(sharding_spec: shard_spec.ShardingSpec,
           process_group=None,
           init_rrefs=False) -> ShardedTensor:
     """
-    Create ShardedTensor from standard normal distribution with mean `0` and variance `1`.
-
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         with mean `0` and variance `1` (also called standard normal distribution). The shape
         of the tensor is defined by the variable argument `size`. Needs to be called on all ranks

@@ -1,4 +1,3 @@
-"""Timer Request."""
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -18,8 +17,6 @@ log = logging.getLogger(__name__)
 
 class TimerRequest:
     """
-    Represent a countdown timer acquisition and release.
-
     Data object representing a countdown timer acquisition and release
     that is used between the ``TimerClient`` and ``TimerServer``.
     A negative ``expiration_time`` should be interpreted as a "release"
@@ -33,20 +30,11 @@ class TimerRequest:
     __slots__ = ["worker_id", "scope_id", "expiration_time"]
 
     def __init__(self, worker_id: Any, scope_id: str, expiration_time: float):
-        """
-        Initialize a TimerRequest object.
-
-        Args:
-            worker_id (Any): ID of the worker.
-            scope_id (str): ID of the scope.
-            expiration_time (float): expiration time of the timer.
-        """
         self.worker_id = worker_id
         self.scope_id = scope_id
         self.expiration_time = expiration_time
 
     def __eq__(self, other):
-        """Check if two TimerRequest objects are equal."""
         if isinstance(other, TimerRequest):
             return (
                 self.worker_id == other.worker_id
@@ -57,30 +45,16 @@ class TimerRequest:
 
 
 class TimerClient(abc.ABC):
-    """Acquire and release countdown timers by communicatingwith the TimerServer."""
-
     @abc.abstractmethod
     def acquire(self, scope_id: str, expiration_time: float) -> None:
-        """
-        Acquire a timer for the worker that holds this client object.
-
-        Given the scope_id and expiration_time. Typically registers
-        the timer with the TimerServer.
-        """
         pass
 
     @abc.abstractmethod
     def release(self, scope_id: str):
-        """
-        Release the timer for the ``scope_id`` on the worker this client represents.
-
-        After this method is called, the countdown timer on the scope is no longer in effect.
-        """
         pass
 
 
 class RequestQueue(abc.ABC):
-    """Consumer queue holding timer acquisition/release requests."""
 
     @abc.abstractmethod
     def size(self) -> int:
@@ -264,8 +238,6 @@ def expires(
     after: float, scope: Optional[str] = None, client: Optional[TimerClient] = None
 ):
     """
-    Acquire a countdown timer that expires in ``after`` seconds from now.
-
     Acquires a countdown timer that expires in ``after`` seconds from now,
     unless the code-block that it wraps is finished within the timeframe.
     When the timer expires, this worker is eligible to be reaped. The

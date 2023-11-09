@@ -1,4 +1,3 @@
-"""Torchelastic logging utilities."""
 #!/usr/bin/env python3
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -18,8 +17,6 @@ from torch.distributed.elastic.utils.log_level import get_log_level
 
 def get_logger(name: Optional[str] = None):
     """
-    Return a simple logger.
-
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
     env. variable or WARNING as default. The function will use the
@@ -35,7 +32,6 @@ def get_logger(name: Optional[str] = None):
 
 
 def _setup_logger(name: Optional[str] = None):
-    """Configure the logger."""
     log = logging.getLogger(name)
     log.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
     return log

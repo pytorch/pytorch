@@ -1,4 +1,3 @@
-"""Shared Tensor Resharding."""
 import copy
 from typing import List, Tuple
 

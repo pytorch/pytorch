@@ -1,4 +1,3 @@
-"""File based local timer."""
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -24,8 +23,6 @@ log = logging.getLogger(__name__)
 
 class FileTimerRequest(TimerRequest):
     """
-    Timer used between the ``FileTimerClient`` and ``FileTimerServer``.
-
     Data object representing a countdown timer acquisition and release
     that is used between the ``FileTimerClient`` and ``FileTimerServer``.
     A negative ``expiration_time`` should be interpreted as a "release"
@@ -37,7 +34,6 @@ class FileTimerRequest(TimerRequest):
     __slots__ = ["version", "worker_pid", "scope_id", "expiration_time", "signal"]
 
     def __init__(self, worker_pid: int, scope_id: str, expiration_time: float, signal: int = 0) -> None:
-        """Initialize a file based local timer."""
         self.version = 1
         self.worker_pid = worker_pid
         self.scope_id = scope_id
@@ -45,7 +41,6 @@ class FileTimerRequest(TimerRequest):
         self.signal = signal
 
     def __eq__(self, other) -> bool:
-        """Check whether two file based local times are equal."""
         if isinstance(other, FileTimerRequest):
             return (
                 self.version == other.version
@@ -57,7 +52,6 @@ class FileTimerRequest(TimerRequest):
         return False
 
     def to_json(self) -> str:
-        """Serialize to JSON."""
         return json.dumps(
             {
                 "version": self.version,
@@ -71,8 +65,6 @@ class FileTimerRequest(TimerRequest):
 
 class FileTimerClient(TimerClient):
     """
-    ``FileTimerClient`` that works with ``FileTimerServer``.
-
     Client side of ``FileTimerServer``. This client is meant to be used
     on the same host that the ``FileTimerServer`` is running on and uses
     pid to uniquely identify a worker.
@@ -91,7 +83,6 @@ class FileTimerClient(TimerClient):
 
     def __init__(self, file_path: str, signal=(signal.SIGKILL if sys.platform != "win32" else
                                                signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
-        """Initialize a file timer client."""
         super().__init__()
         self._file_path = file_path
         self.signal = signal
@@ -122,7 +113,6 @@ class FileTimerClient(TimerClient):
             file.write(json_request + "\n")
 
     def acquire(self, scope_id: str, expiration_time: float) -> None:
-        """Request a file timer with specified pid, scope, expiration, and signal."""
         self._send_request(
             request=FileTimerRequest(
                 worker_pid=os.getpid(),
@@ -146,8 +136,6 @@ class FileTimerClient(TimerClient):
 
 class FileTimerServer:
     """
-    ``FileTimerServer`` that works with ``FileTimerClient``.
-
     Server that works with ``FileTimerClient``. Clients are expected to be
     running on the same host as the process that is running this server.
     Each host in the job is expected to start its own timer server locally
@@ -172,15 +160,6 @@ class FileTimerServer:
         daemon: bool = True,
         log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None
     ) -> None:
-        """
-        Initialize ``FileTimerServer`` with specified arguments.
-
-        Args:
-            file_path: Path to the named pipe for receiving timer requests.
-            max_interval: Maximum allowed interval in seconds between timer events.
-            daemon: Whether to run the server in a separate daemon thread.
-            log_event: Optional callback for logging events.
-        """
         self._file_path = file_path
         self._max_interval = max_interval
         self._daemon = daemon
@@ -198,7 +177,6 @@ class FileTimerServer:
 
 
     def start(self) -> None:
-        """Start the ``FileTimerServer``."""
         log.info(
             "Starting %s..."
             " max_interval=%s,"
@@ -211,7 +189,6 @@ class FileTimerServer:
         self._log_event("watchdog started", None)
 
     def stop(self) -> None:
-        """Stop the ``FileTimerServer``."""
         log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
@@ -225,7 +202,6 @@ class FileTimerServer:
         self._log_event("watchdog stopped", None)
 
     def run_once(self) -> None:
-        """Run once without a stopdog thread."""
         self._run_once = True
         if self._watchdog_thread:
             log.info("Stopping watchdog thread...")
@@ -333,13 +309,11 @@ class FileTimerServer:
                 self._timers[key] = request
 
     def clear_timers(self, worker_pids: Set[int]) -> None:
-        """Clear a list PID's associated timers."""
         for (pid, scope_id) in list(self._timers.keys()):
             if pid in worker_pids:
                 del self._timers[(pid, scope_id)]
 
     def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:
-        """Get timers which are over the specified deadline."""
         # pid -> [timer_requests...]
         expired_timers: Dict[int, List[FileTimerRequest]] = {}
         for request in self._timers.values():

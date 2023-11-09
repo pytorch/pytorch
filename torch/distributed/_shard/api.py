@@ -20,8 +20,6 @@ def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
 ) -> ShardedTensor:
     """
-    Shard a tensor according to sharding specification.
-
     Given a :class:`torch.Tensor`, it shards that tensor according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be
     used as the ground truth of the data which would be scattered as shards
@@ -79,8 +77,6 @@ def shard_parameter(
         src_rank=0,
         process_group=None):
     """
-    Shard a parameter according to sharding specification.
-
     Given a :class:`torch.nn.Module`, a ``param_name`` for a parameter in that
     module, it shards that parameter according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be

@@ -33,18 +33,6 @@ class ShardMetadata:
         shard_sizes: List[int],
         placement: Optional[Union[str, _remote_device]] = None
     ):
-        """
-        Initialize the class with shard offsets, shard sizes and placement.
-
-        Args:
-            shard_offsets (List[int]): A list of offsets for each shard.
-            shard_sizes (List[int]): A list of sizes for each shard.
-            placement (Optional[Union[str, _remote_device]]): The placement of the shards.
-
-        Raises:
-            ValueError: If shard_offsets and shard_sizes don't have same number of elements.
-            ValueError: If any value in shard_offsets or shard_sizes is less than 0.
-        """
         self.shard_offsets = shard_offsets
         self.shard_sizes = shard_sizes
         if isinstance(placement, str):
