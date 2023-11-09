@@ -7,9 +7,7 @@ import torch
 
 
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
-    """
-    Checks the ``__init__`` method of a given ``nn.Module`` to ensure
-    that all instance-level attributes can be properly initialized.
+    """Check the ``__init__`` method of a given ``nn.Module`` to ensure that all instance-level attributes can be properly initialized.
 
     Specifically, we do type inference based on attribute values...even
     if the attribute in question has already been typed using
@@ -32,7 +30,6 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     won't catch it.
 
     Example:
-
         .. code-block:: python
 
             class M(torch.nn.Module):
@@ -107,7 +104,8 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         return True
 
     def visit_Assign(self, node):
-        """
+        """Store assignment state when assigning to a Call Node.
+
         If we're visiting a Call Node (the right-hand side of an
         assignment statement), we won't be able to check the variable
         that we're assigning to (the left-hand side of an assignment).
@@ -129,10 +127,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         self.visiting_class_level_ann = False
 
     def visit_AnnAssign(self, node):
-        """
-        Visit an AnnAssign node in an ``nn.Module``'s ``__init__``
-        method and see if it conforms to our attribute annotation rules.
-        """
+        """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method and see if it conforms to our attribute annotation rules."""
         # If we have a local variable
         try:
             if node.target.value.id != "self":
@@ -184,7 +179,8 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         )
 
     def visit_Call(self, node):
-        """
+        """Determine if a Call node is 'torch.jit.annotate' in __init__.
+
         Visit a Call node in an ``nn.Module``'s ``__init__``
         method and determine if it's ``torch.jit.annotate``. If so,
         see if it conforms to our attribute annotation rules.

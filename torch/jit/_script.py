@@ -1,4 +1,4 @@
-"""TorchScript
+"""TorchScript.
 
 This module contains functionality to support the JIT's scripting frontend, notably:
     - torch.jit.script
@@ -374,7 +374,8 @@ def unpackage_script_module(
     importer: PackageImporter, script_module_id: str
 ) -> torch.nn.Module:
     """
-    Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    Call by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
     if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
@@ -426,7 +427,8 @@ if _enabled:
     ]
 
     class RecursiveScriptClass:
-        """
+        """Wrapper for a TorchScript class instance for use in Python.
+
         An analogue of RecursiveScriptModule for regular objects that are not modules.
         This class is a wrapper around a torch._C.ScriptObject that represents an instance
         of a TorchScript class and allows it to be used in Python.
@@ -503,11 +505,13 @@ if _enabled:
     # which always throws an exception.
 
     class ScriptModule(Module, metaclass=ScriptMeta):
-        r"""
+        r"""Wrapper for C++ torch::jit::Module with methods, attributes, and parameters.
+
         A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same way as on a normal ``nn.Module``.
         """
+
         __jit_unused_properties__ = [
             "code",
             "code_with_constants",
@@ -572,7 +576,8 @@ if _enabled:
             return self._actual_script_module._replicate_for_data_parallel()
 
         def __reduce_package__(self, exporter: PackageExporter):
-            """
+            """Save a ScriptModule inside of a ``torch.package`` archive.
+
             Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
             saving TorchScript objects. Performs act of saving a ScriptModule inside of
             a ``torch.package`` archive.
@@ -588,7 +593,8 @@ if _enabled:
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
         # reason that it retains the existing isinstance(ScriptModule)
         # behavior.
-        r"""
+        r"""Retain the existing isinstance(ScriptModule) behavior.
+
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ``ScriptModule`` can
@@ -610,6 +616,7 @@ if _enabled:
           and compiles it to TorchScript. Scripting allows the use of many `types`_ of values and supports dynamic control flow.
           Many, but not all features of Python are supported by the compiler, so changes to the source code may be necessary.
         """
+
         _disable_script_meta = True
 
         def __init__(self, cpp_module):
@@ -624,8 +631,9 @@ if _enabled:
         @staticmethod
         def _construct(cpp_module, init_fn):
             """
-            Construct a RecursiveScriptModule that's ready for use. PyTorch
-            code should use this to construct a RecursiveScriptModule instead
+            Construct a RecursiveScriptModule that's ready for use.
+
+            PyTorch code should use this to construct a RecursiveScriptModule instead
             of instead of calling `__init__` directly, as it makes sure the
             object is properly finalized (and in the future, we may take
             control of how the RecursiveScriptModule instance is created).
@@ -690,17 +698,18 @@ if _enabled:
 
         @property
         def graph(self):
-            r"""
-            Returns a string representation of the internal graph for the
-            ``forward`` method. See :ref:`interpreting-graphs` for details.
+            r"""Return a string representation of the internal graph for the ``forward`` method.
+
+            See :ref:`interpreting-graphs` for details.
             """
             return self._c._get_method("forward").graph
 
         @property
         def inlined_graph(self):
             r"""
-            Returns a string representation of the internal graph for the
-            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            Return a string representation of the internal graph for the ``forward`` method.
+
+            This graph will be preprocessed to inline all function and method calls.
             See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph  # type: ignore[attr-defined]
@@ -708,15 +717,16 @@ if _enabled:
         @property
         def code(self):
             r"""
-            Returns a pretty-printed representation (as valid Python syntax) of
-            the internal graph for the ``forward`` method. See
-            :ref:`inspecting-code` for details.
+            Return a pretty-printed representation (as valid Python syntax) of the internal graph for the ``forward`` method.
+
+            See :ref:`inspecting-code` for details.
             """
             return self.forward.code  # type: ignore[attr-defined]
 
         @property
         def code_with_constants(self):
-            r"""
+            r"""Return a tuple.
+
             Returns a tuple of:
 
             [0] a pretty-printed representation (as valid Python syntax) of
@@ -730,7 +740,8 @@ if _enabled:
             return (r[0], ConstMap(r[1]))
 
         def save(self, f, **kwargs):
-            r"""
+            r"""Save with a file-like object.
+
             save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` witch accepts a file-like object.
@@ -740,10 +751,11 @@ if _enabled:
             return self._c.save(str(f), **kwargs)
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
-            r"""
+            r"""Add (or update) the bytecode session to the script model.
+
             _save_for_lite_interpreter(f)
 
-            Add (or update) the bytecode session to the script model. The updated model is used
+            The updated model is used
             in lite interpreter for mobile applications.
 
             Args:
@@ -1054,6 +1066,7 @@ def create_script_dict(obj):
 def create_script_list(obj, type_hint=None):
     """
     Create a ``torch._C.ScriptList`` instance with the data from ``obj``.
+
     Args:
         obj (dict): The Python list that is used to initialize the ``ScriptList``
                     returned by this function.
@@ -1072,7 +1085,8 @@ def script(
     _rcb=None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
 ):
-    r"""
+    r"""Script the function.
+
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
     :class:`ScriptFunction`. TorchScript itself is a subset of the Python language, so not all
@@ -1468,7 +1482,8 @@ def _check_directly_compile_overloaded(obj):
 
 
 def interface(obj):
-    r"""
+    r"""Decorate to annotate classes or modules of different types.
+
     This decorator can be used to define an interface that can be used to annotate
     classes or modules of different types. This can be used for to annotate a submodule
     or attribute class that could have different types that implement the same
@@ -1479,7 +1494,6 @@ def interface(obj):
     an interface but whose implementations differ and which can be swapped out.
 
     Example:
-
     .. testcode::
 
         import torch
