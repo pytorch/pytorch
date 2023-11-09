@@ -243,6 +243,7 @@ def split_module(
                 autocast_exits[node] = None
             elif node.target == torch.amp._exit_autocast:
                 assert len(node.args) == 1
+                autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])
                 autocast_exits[node.args[0]] = node
 
@@ -285,6 +286,8 @@ def split_module(
                  f"highest: {highest_partition}, this node's: {pid}")
             highest_partition = pid
 
+        # do not capture cross-partition dependencies for global state nodes as they will be
+        # self-contained - their setup and unwind will be isolated to each partition submodule.
         if node.target not in GLOBAL_STATE_NODES:
             torch.fx.graph.map_arg(
                 node.args, lambda def_node: record_cross_partition_use(def_node, node)
