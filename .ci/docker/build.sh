@@ -266,6 +266,12 @@ case "$image" in
     TRITON=yes
     DOCS=yes
     ;;
+  pytorch-linux-jammy-py3-clang12-executorch)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=12
+    CONDA_CMAKE=yes
+    EXECUTORCH=yes
+    BUCK2=yes
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
@@ -367,6 +373,8 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+       --build-arg "EXECUTORCH=${EXECUTORCH}" \
+       --build-arg "BUCK2=${BUCK2}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
