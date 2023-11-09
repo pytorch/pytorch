@@ -279,7 +279,7 @@ def adam(params: List[Tensor],
          eps: float,
          maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
-    
+  
     See :class:`~torch.optim.Adam` for details.
     """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
