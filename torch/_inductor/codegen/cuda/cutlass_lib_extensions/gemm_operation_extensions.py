@@ -39,6 +39,16 @@ if try_import_cutlass():
         static constexpr auto RoundStyle = cutlass::FloatRoundStyle::round_to_nearest;
         using ElementAcc = ${element_accumulator};
         using ElementD = ${element_d};
+        using ADDMM_EVT =  // alpha * acc + beta * C
+            cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::homogeneous_multiply_add,
+                    ElementD, ElementAcc, RoundStyle>, // beta * C + (alpha * acc)
+              cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementAcc>, // beta
+              cutlass::epilogue::fusion::Sm90SrcFetch, // C
+              cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiplies, ElementAcc,
+                    ElementAcc, RoundStyle>, // alpha * acc
+                cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementAcc>, // alpha
+                cutlass::epilogue::fusion::Sm90AccFetch // acc
+              >>;
         ${epilogue_functor};
         using ${operation_name}_epilogue =
           typename cutlass::epilogue::collective::CollectiveBuilder<
