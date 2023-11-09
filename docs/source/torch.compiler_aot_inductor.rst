@@ -154,7 +154,7 @@ Please be mindful that your path may vary from the one illustrated in this examp
 
     $ mkdir build
     $ cd build
-    $ CMAKE_PREFIX_PATH=/home/$USER/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
+    $ CMAKE_PREFIX_PATH=/path/to/python/install/site-packages/torch/share/cmake cmake ..
     $ cmake --build . --config Release
 
 After the ``aoti_example`` binary has been generated in the ``build`` directory, executing it will
