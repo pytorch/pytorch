@@ -13,6 +13,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/generated/LazyIr.h>
+#include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <algorithm>
 #include <functional>
 
