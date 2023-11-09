@@ -72,8 +72,6 @@ class MultiprocessingRequestQueue(RequestQueue):
 
 class LocalTimerServer(TimerServer):
     """
-    Local timer server.
-
     Server that works with ``LocalTimerClient``. Clients are expected to be
     subprocesses to the parent process that is running this server. Each host
     in the job is expected to start its own timer server locally and each

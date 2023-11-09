@@ -1,4 +1,3 @@
-"""Sharded Optimization."""
 from typing import Iterator, Tuple, Union
 from .api import ShardedOptimizer
 

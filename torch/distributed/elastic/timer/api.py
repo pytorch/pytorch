@@ -45,16 +45,33 @@ class TimerRequest:
 
 
 class TimerClient(abc.ABC):
+    """
+    Client library to acquire and release countdown timers by communicating
+    with the TimerServer.
+    """
     @abc.abstractmethod
     def acquire(self, scope_id: str, expiration_time: float) -> None:
+        """
+         Acquires a timer for the worker that holds this client object
+         given the scope_id and expiration_time. Typically registers
+         the timer with the TimerServer.
+         """
         pass
 
     @abc.abstractmethod
     def release(self, scope_id: str):
+        """
+        Releases the timer for the ``scope_id`` on the worker this
+        client represents. After this method is
+        called, the countdown timer on the scope is no longer in effect.
+        """
         pass
 
 
 class RequestQueue(abc.ABC):
+     """
+     Consumer queue holding timer acquisition/release requests
+     """
 
     @abc.abstractmethod
     def size(self) -> int:
@@ -99,8 +116,6 @@ class TimerServer(abc.ABC):
         self, request_queue: RequestQueue, max_interval: float, daemon: bool = True
     ):
         """
-        Initialize TimerServer.
-
         :param request_queue: Consumer ``RequestQueue``
         :param max_interval: max time (in seconds) to wait
                              for an item in the request_queue

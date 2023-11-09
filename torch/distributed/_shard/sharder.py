@@ -1,4 +1,3 @@
-"""Torch Distributed Sharder."""
 import abc
 import torch.nn as nn
 

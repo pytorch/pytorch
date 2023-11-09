@@ -1,4 +1,3 @@
-"""Sharding operations registry Utilities."""
 import functools
 from inspect import signature
 from .common_op_utils import _basic_validation

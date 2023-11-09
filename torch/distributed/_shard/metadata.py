@@ -52,7 +52,6 @@ class ShardMetadata:
                 raise ValueError('shard_sizes should be >= 0')
 
     def __hash__(self):
-        """Implement hash."""
         def _hash_reduce(a, b):
             return (a << 8) + hash(b)
 

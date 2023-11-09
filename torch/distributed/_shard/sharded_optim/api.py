@@ -75,8 +75,6 @@ class ShardedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        state_dict is not implemented.
-
         Returned state and param_groups will contain parameter keys
         instead of parameter indices like torch.optim.Optimizer.
         This allows for advanced functionality like optimizer re-sharding to be implemented.
