@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
+from typing import List
+
 import numpy as np
 
 import torch
@@ -13,6 +15,7 @@ aten = torch.ops.aten
 @register_prop_rule(aten.slice_backward.default)
 def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
     grad_output_spec, input_sizes, dim, start, end, step = op_schema.args_schema
+    assert isinstance(grad_output_spec, DTensorSpec)
     grad_input_stride = list(np.cumprod(input_sizes[::-1])[:-1][::-1])
     grad_input_stride.append(1)
     dim_map = grad_output_spec.dim_map
@@ -36,7 +39,7 @@ def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.native_layer_norm.default)
 def layer_norm_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec, normalized_shape = op_schema.args_schema[0:2]
-
+    assert isinstance(input_spec, DTensorSpec)
     input_shape = input_spec.tensor_meta.shape
     input_dim = len(input_shape)
     norm_dim = len(normalized_shape)
@@ -88,7 +91,9 @@ def layer_norm_backward_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[1]
     weight_spec = op_schema.args_schema[5]
     bias_spec = op_schema.args_schema[6]
-
+    assert isinstance(input_spec, DTensorSpec)
+    assert isinstance(weight_spec, DTensorSpec)
+    assert isinstance(bias_spec, DTensorSpec)
     grad_input_spec = DTensorSpec.from_dim_map(
         input_spec.mesh,
         [-1 for _ in range(len(input_spec.tensor_meta.shape))],
@@ -104,18 +109,19 @@ def layer_norm_backward_rules(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.bernoulli_.float)
 def bernoulli_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[0]
+    assert isinstance(input_spec, DTensorSpec)
     return OutputSharding(input_spec)
 
 
 @register_prop_rule(aten.nll_loss_forward.default)
 def nll_loss_forward_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[0]
-
-    result_shape = []
-    result_stride = []
+    assert isinstance(input_spec, DTensorSpec)
+    result_shape: List[int] = []
+    result_stride: List[int] = []
     result_dim = 0
-    total_weight_shape = []
-    total_weight_stride = []
+    total_weight_shape: List[int] = []
+    total_weight_stride: List[int] = []
     total_weight_dim = 0
 
     result_tensor_meta = TensorMeta(
@@ -146,4 +152,5 @@ def nll_loss_forward_rules(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.nll_loss_backward.default)
 def nll_loss_backward_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[1]
+    assert isinstance(input_spec, DTensorSpec)
     return OutputSharding(input_spec)

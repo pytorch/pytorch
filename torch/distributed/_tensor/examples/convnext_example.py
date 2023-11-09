@@ -119,8 +119,8 @@ class ConvNeXt(nn.Module):
         self,
         in_chans=3,
         num_classes=10,
-        depths=[1, 1],
-        dims=[2, 4],
+        depths=[1, 1],  # noqa: B006
+        dims=[2, 4],  # noqa: B006
         drop_path_rate=0.0,
         layer_scale_init_value=1e-6,
         head_init_scale=1.0,
@@ -221,9 +221,8 @@ def test_tp_convnext_train(rank, world_size):
     optimizer.step()
     torch.cuda.synchronize(device)
 
-    forward_time = 0
-    backward_time = 0
-    optimizer_step_time = 0
+    forward_time = 0.0
+    backward_time = 0.0
     start = time.time()
     for i in range(ITER_TIME):
         t1 = time.time()

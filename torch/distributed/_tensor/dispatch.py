@@ -38,6 +38,7 @@ def decompose_handler(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
+<<<<<<< HEAD
     """
     Decomposes a op to core ATen op, this handler is mostly here
     for inference mode usage where the ops are not core aten ops.
@@ -47,6 +48,18 @@ def decompose_handler(
         return r
     else:
         raise RuntimeError("Decomposition failed")
+=======
+    # Redistribute grad_output tensor to the same placement as input tensor
+    args = list(args)
+    if op_call == torch.ops.aten.convolution_backward.default:
+        assert isinstance(args[0], dtensor.DTensor) and isinstance(
+            args[1], dtensor.DTensor
+        )
+        args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
+    args = tuple(args)
+    out, _, _ = _operator_dispatch(op_call, args, kwargs, sharding_propagator)
+    return out
+>>>>>>> fix linter errors 2
 
 
 def is_same_size_handler(
