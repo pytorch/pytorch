@@ -20,8 +20,6 @@ class TimerRequest:
     """
     A data object representing a countdown timer acquisition and release that is used between the ``TimerClient`` and ``TimerServer``.
 
-    Data object representing a countdown timer acquisition and release
-    that is used between the ``TimerClient`` and ``TimerServer``.
     A negative ``expiration_time`` should be interpreted as a "release"
     request.
 
