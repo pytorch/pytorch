@@ -483,6 +483,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertEqual(z_cpu, z[0])
             self.assertEqual(z_cpu, z[1])
 
+        def test_open_device_lazy_init():
+            # test lazy init for custom backend
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu")
+            self.assertFalse(self.module.custom_lazy_init_called())
+            foo_input_data = input_data.to("foo")
+            self.assertTrue(self.module.custom_lazy_init_called())
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -499,6 +507,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_faketensor()
         test_open_device_named_tensor()
         test_open_device_quantized()
+        test_open_device_lazy_init()
 
         test_compile_autograd_function_returns_self()
         test_compile_autograd_function_aliasing()

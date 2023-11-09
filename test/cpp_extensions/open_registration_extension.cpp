@@ -1,6 +1,7 @@
 #include <unordered_map>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/LazyInit.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 
@@ -31,6 +32,9 @@ static uint64_t last_abs_saved_value = 0;
 
 static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
+
+static uint64_t lazy_init_counter = 0;
+static uint64_t lazy_init_saved_value = 0;
 // register guard
 namespace at {
 namespace detail {
@@ -193,6 +197,12 @@ struct DummyCustomAllocator final : at::Allocator {
 // Register our dummy allocator
 static DummyCustomAllocator global_custom_alloc;
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
+
+void custom_lazy_init() {
+  lazy_init_counter += 1;
+}
+
+REGISTER_LAZY_INIT(c10::DeviceType::PrivateUse1, &custom_lazy_init);
 
 // basic dummy empty function, so we can directly construct tensors on the custom device
 // This dummy test device will just use the CPU allocator, and ignores pinned memory.
@@ -391,6 +401,15 @@ bool custom_abs_called() {
   return called;
 }
 
+bool custom_lazy_init_called() {
+  bool called = false;
+  if (lazy_init_counter > lazy_init_saved_value) {
+    called = true;
+    lazy_init_saved_value = lazy_init_counter;
+  }
+  return called;
+}
+
 class PrivateGeneratorImpl : public at::CPUGeneratorImpl {
 public:
   // Constructors
@@ -492,6 +511,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
+    m.def("custom_lazy_init_called", &custom_lazy_init_called, "check if our custom lazy init function was called");
     m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
     m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
