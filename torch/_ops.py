@@ -376,10 +376,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -489,6 +486,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+
+        # If the OpOverload was constructed from a Library.def in Python.
+        self._defined_in_python = self.__qualname__ in torch.library._defs
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None

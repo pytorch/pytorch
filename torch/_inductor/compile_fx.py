@@ -236,7 +236,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(  # type: ignore[attr-defined]
+            with config.patch(
                 {
                     "triton.store_cubin": True,
                 }
@@ -366,8 +366,7 @@ def compile_fx_inner(
 
     # Inputs to fx_codegen_and_compile
     # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
-    graph_args = [gm, example_inputs]
+    # of fx_codegen_and_compile changes, the dict should be updated accordingly
     graph_kwargs = {
         "cudagraphs": cudagraphs,
         "num_fixed": num_fixed,
@@ -385,11 +384,11 @@ def compile_fx_inner(
 
     if config.fx_graph_cache and not aot_mode:
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, graph_args, graph_kwargs
+            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
         )
     else:
         compiled_graph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -595,6 +594,7 @@ def fx_codegen_and_compile(
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
+            is_inference=is_inference,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -620,18 +620,8 @@ def fx_codegen_and_compile(
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
-            compiled_graph = CompiledFxGraph(
-                compiled_artifact=compiled_fn,
-                cache_key=graph.cache_key,
-                artifact_path=graph.cache_path,
-                cache_linemap=graph.cache_linemap,
-                device_types=graph.device_types,
-                device_idxs=graph.device_idxs,
-                mutated_inputs=graph.mutated_inputs,
-                mutated_input_idxs=set(graph.mutated_input_idxs),
-                constants=graph.constants,
-                output_strides=output_strides,
-            )
+            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+
     return compiled_graph
 
 
@@ -1018,17 +1008,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):  # type: ignore[attr-defined]
+        with config.patch(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
+                inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(  # type: ignore[attr-defined]
+        with config.patch(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -1120,13 +1110,15 @@ def compile_fx(
         if config.keep_output_stride:
             *_, model_outputs_node = model.graph.nodes
             assert model_outputs_node.op == "output"
-            model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
-                original_output_start_index = context.fw_metadata.num_mutated_inputs
+                original_output_start_index = (
+                    context.fw_metadata.num_mutated_inp_runtime_indices
+                )
             else:
                 original_output_start_index = 0
 
@@ -1245,8 +1237,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):  # type: ignore[attr-defined]
-        return config.get_config_copy()  # type: ignore[attr-defined]
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
@@ -1343,7 +1335,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     @functools.wraps(compiled_fn)
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.tree_flatten(args)[0])
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

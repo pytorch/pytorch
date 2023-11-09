@@ -208,7 +208,7 @@ ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home()
+CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
@@ -1014,8 +1014,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     You can override the default behavior using `TORCH_CUDA_ARCH_LIST` to explicitly specify which
     CCs you want the extension to support:
 
-    TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
-    TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
+    ``TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py``
+    ``TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py``
 
     The +PTX option causes extension kernel binaries to include PTX instructions for the specified
     CC. PTX is an intermediate representation that allows kernels to runtime-compile for any CC >=
