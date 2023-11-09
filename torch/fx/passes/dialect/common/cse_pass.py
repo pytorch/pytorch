@@ -1,19 +1,45 @@
-from typing import Dict, Tuple, Any
+import typing
+from typing import Any, Dict, Tuple
 
 import torch
+
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._pytree import tree_flatten
-
-from torch.fx import GraphModule, Graph
-from torch.fx import Node
 
 aten = torch.ops.aten
 
 
 # stateful ops are banned from CSE
-rand_ops = {aten.dropout, aten._fused_dropout, aten._standard_gamma, aten.bernoulli, aten.multinomial, aten.native_dropout, aten.normal, aten.poisson, aten.binomial, aten.rrelu, aten.rand_like, aten.rand, aten.randint, aten.randn, aten.randperm}  # noqa: E501,B950
+rand_ops = {
+    aten.dropout,
+    aten._fused_dropout,
+    aten._standard_gamma,
+    aten.bernoulli,
+    aten.multinomial,
+    aten.native_dropout,
+    aten.normal,
+    aten.poisson,
+    aten.binomial,
+    aten.rrelu,
+    aten.rand_like,
+    aten.rand,
+    aten.randint,
+    aten.randn,
+    aten.randperm,
+}  # noqa: E501,B950
 
-inplace_ops = {aten.add_, aten.sub_, aten.mul_, aten.div_, aten.pow_, aten.lerp_, aten.relu_, aten.sigmoid_, aten.tanh_}  # noqa: E501
+inplace_ops = {
+    aten.add_,
+    aten.sub_,
+    aten.mul_,
+    aten.div_,
+    aten.pow_,
+    aten.lerp_,
+    aten.relu_,
+    aten.sigmoid_,
+    aten.tanh_,
+}  # noqa: E501
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
@@ -92,7 +118,12 @@ class CSEPass(PassBase):
                          "kwargs": kwargs, "kwargs_spec": kwargs_spec}
 
                 # hash substituted args to a number, do not hash specs because specs are not hashable
-                hash_arg = hash((args, kwargs))
+                hash_args = tuple(arg if not isinstance(arg, typing.Hashable) else str(arg) for arg in args)
+                hash_kwargs = tuple(arg if not isinstance(arg, typing.Hashable) else str(arg) for arg in kwargs)
+                try:
+                    hash_arg = hash((hash_args, hash_kwargs))
+                except TypeError as e:
+                    raise RuntimeError(f"Error hashing args. args: {args}, kwargs: {kwargs}") from e
                 hash_val = (n.target, hash_arg)
 
                 # check if a node has a substitute and can be eliminated

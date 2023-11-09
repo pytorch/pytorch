@@ -178,6 +178,17 @@ class TestCSEPass(TestCase):
         t = torch.randn(2, 2)
         check(self, f, t, 1)
 
+    def test_unhashable(self):
+        def f(x):
+            a = torch.ones_like(x)
+            b = torch.ones_like(x)
+            c_0 = a[:, 0]
+            c_1 = a[:, 0]
+            c_2 = a[0:1, 0:1]
+            c_3 = a[0:1, 0:1]
+            return a + b + c_0 + c_1 + c_2 + c_3
+        t = torch.randn(2, 2)
+        check(self, f, t, 1)
     """
     Generate function with random ops and check if the result is the same
     """
