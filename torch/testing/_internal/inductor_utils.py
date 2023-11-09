@@ -1,5 +1,6 @@
 import contextlib
 import os
+import pathlib
 import time
 from subprocess import CalledProcessError
 
@@ -475,3 +476,6 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
         (torch._dynamo.config, "assume_static_by_default", False),
         xfail_prop=xfail_prop,
     )
+def filesize(filename: pathlib.Path):
+    assert filename.exists(), f"{filename} is missing"
+    return os.stat(filename).st_size

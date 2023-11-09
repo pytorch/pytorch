@@ -27,7 +27,7 @@ from torch.testing._internal.inductor_utils import check_model_cuda, TestCase, T
 try:
     import triton
     from triton import language as tl
-except unittest.SkipTest:
+except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
     raise

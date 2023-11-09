@@ -287,7 +287,7 @@ def normalize_squeeze_default(match: Match, *args, **kwargs):
             )
         else:
             new_squeeze_node = match.graph.call_function(
-                torch.squeeze, args=(squeeze_input, dim)
+                torch.squeeze, args=(squeeze_input,), kwargs={"dim": dim}
             )
     squeeze_node.replace_all_uses_with(new_squeeze_node)
     match.graph.erase_node(squeeze_node)
@@ -663,8 +663,8 @@ class SplitCatSimplifier:
                     args=(
                         split_input,
                         [r[1] - r[0] for r in split_ranges],
-                        split_dim,
                     ),
+                    kwargs={"dim": split_dim},
                 )
                 new_split.meta.update(split_node.meta)
                 counters["inductor"]["scmerge_split_added"] += 1
@@ -748,7 +748,7 @@ class SplitCatSimplifier:
                         continue
                     elif to_stack:
                         stacked_input = graph.call_function(
-                            torch.stack, args=(to_stack, stack_dim)
+                            torch.stack, args=(to_stack,), kwargs={"dim": stack_dim}
                         )
                         to_stack = []
                         stack_dim = None
@@ -773,14 +773,16 @@ class SplitCatSimplifier:
                     user_inputs_new_transformed.append(user_input_new)
                 if to_stack:
                     stacked_input = graph.call_function(
-                        torch.stack, args=(to_stack, stack_dim)
+                        torch.stack, args=(to_stack,), kwargs={"dim": stack_dim}
                     )
                     user_inputs_new_transformed.append(stacked_input)
 
             with graph.inserting_after(user_node):
                 if len(user_inputs_new_transformed) > 1:
                     new_cat_node = graph.call_function(
-                        torch.cat, args=(user_inputs_new_transformed, cat_dim)
+                        torch.cat,
+                        args=(user_inputs_new_transformed,),
+                        kwargs={"dim": cat_dim},
                     )
                     new_cat_node.meta.update(user_node.meta)
                     counters["inductor"]["scmerge_cat_added"] += 1

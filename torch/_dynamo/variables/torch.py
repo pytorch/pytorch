@@ -24,7 +24,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..device_interface import device_interfaces
+from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..utils import (
@@ -431,7 +431,8 @@ class TorchVariable(VariableTracker):
         elif any(
             self.value is method
             for method in [
-                interface_elem.stream for interface_elem in device_interfaces.values()
+                device_interface.stream
+                for _, device_interface in get_registered_device_interfaces()
             ]
         ):
             assert len(args) == 1
