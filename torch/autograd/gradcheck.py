@@ -488,7 +488,7 @@ def get_numerical_jacobian_wrt_specific_input(
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Calculate analytical Jacobian using forward mode AD.
+    """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
 
     Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
     to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
