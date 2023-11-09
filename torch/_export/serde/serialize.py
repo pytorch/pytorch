@@ -11,22 +11,13 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch.export.exported_program as ep
+from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
@@ -991,7 +982,7 @@ class ExportedProgramSerializer:
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
-                example_inputs=None,
+                dialect=exported_program.dialect,
             ),
             serialize_torch_artifact(exported_program.state_dict),
             serialize_torch_artifact(exported_program.tensor_constants),
@@ -1600,7 +1591,7 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
             res.module_call_graph,
-            example_inputs=None,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
             tensor_constants=tensor_constants,
         )
         return upgrader.upgrade(exported_program)

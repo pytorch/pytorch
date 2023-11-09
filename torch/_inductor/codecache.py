@@ -4,7 +4,6 @@ import base64
 import copyreg
 import dataclasses
 import functools
-import getpass
 import hashlib
 import importlib
 import io
@@ -49,7 +48,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import developer_warning, is_linux
+from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
@@ -110,15 +109,6 @@ def _compile_end() -> None:
 
 
 log = logging.getLogger(__name__)
-
-
-@functools.lru_cache(None)
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
 def cpp_wrapper_cache_dir(name: str) -> str:
@@ -586,7 +576,7 @@ class FxGraphHashDetails:
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()  # type: ignore[attr-defined]
+        self.inductor_config = config.save_config()
         self.inductor_code_hash = get_inductor_code_hash()
 
     def debug_str(self) -> str:
@@ -1494,6 +1484,15 @@ def run_command_and_check(cmd: str):
         raise exc.CppCompileError(cmd, e.output) from e
 
 
+@functools.lru_cache(None)
+def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
+    """Returns the path where the AOT Inductor compiled kernels are stored."""
+    if path.endswith(".so"):
+        return os.path.split(path)
+    else:
+        return path, ""
+
+
 class CudaKernelParamCache:
     cache: Dict[str, Dict[str, str]] = dict()
     clear = staticmethod(cache.clear)
@@ -1504,7 +1503,9 @@ class CudaKernelParamCache:
             cubin,
             "cubin",
             hash_type="cubin",
-            specified_dir=config.aot_inductor.output_path,
+            specified_dir=split_aot_inductor_output_path(
+                config.aot_inductor.output_path
+            )[0],
         )
         params["cubin_path"] = path
         cls.cache[key] = params
@@ -1545,14 +1546,24 @@ class AotCodeCache:
         else:
             ld_command = "ld"
             objcopy_command = "objcopy"
+
+        (
+            specified_output_path,
+            specified_so_name,
+        ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
         key, input_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor.output_path,
+            specified_dir=specified_output_path,
         )
 
-        if key not in cls.cache:
+        if key not in cls.cache or (
+            specified_output_path
+            and os.path.dirname(cls.cache[key]) != specified_output_path
+            or specified_so_name
+            and os.path.basename(cls.cache[key]) != specified_so_name
+        ):
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
@@ -1565,7 +1576,11 @@ class AotCodeCache:
                     with open(output_json, "w") as f:
                         f.write(serialized_extern_kernel_nodes)
 
-                output_so = os.path.splitext(input_path)[0] + ".so"
+                output_so = (
+                    config.aot_inductor.output_path
+                    if specified_so_name
+                    else os.path.splitext(input_path)[0] + ".so"
+                )
 
                 if not os.path.exists(output_so):
                     output_o = os.path.splitext(input_path)[0] + ".o"
@@ -1605,7 +1620,7 @@ class AotCodeCache:
                     consts_key, consts_path = write(
                         aot_constants,
                         "bin",
-                        specified_dir=config.aot_inductor.output_path,
+                        specified_dir=specified_output_path,
                     )
 
                     consts_o = os.path.splitext(consts_path)[0] + ".o"

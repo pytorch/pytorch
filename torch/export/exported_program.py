@@ -8,6 +8,7 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -93,7 +94,7 @@ class ExportedProgram:
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        dialect: Optional[str] = None,
+        verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
         tensor_constants: Optional[Dict[str, torch.Tensor]] = None,
     ):
         from torch._export.exported_program import _create_graph_module_for_export
@@ -115,7 +116,16 @@ class ExportedProgram:
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
-        self._dialect = dialect or "ATEN"
+
+        from torch._export.verifier import Verifier
+
+        if verifier is None:
+            verifier = Verifier
+        assert issubclass(verifier, Verifier)
+        self._verifier = verifier
+        # Validate should be always the last step of the constructor.
+        self.verifier().check(self)
+
         self._tensor_constants = tensor_constants or {}
 
     @property
@@ -206,8 +216,14 @@ class ExportedProgram:
         )
 
     @property
-    def dialect(self):
-        return self._dialect
+    @compatibility(is_backward_compatible=False)
+    def verifier(self) -> Any:
+        return self._verifier
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def dialect(self) -> str:
+        return self._verifier.dialect
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -265,7 +281,7 @@ class ExportedProgram:
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
             if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
                 res = res[:assertion_dep_token_index]
 
             res = res[num_mutated:]
@@ -330,7 +346,9 @@ class ExportedProgram:
         from torch._export.passes.lift_constant_tensor_pass import (
             lift_constant_tensor_pass,
         )
-        from torch._export.passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
+        from torch._export.passes.replace_sym_size_ops_pass import (
+            _replace_sym_size_ops_pass,
+        )
         from torch._functorch.aot_autograd import aot_export_module
 
         def _get_placeholders(gm):
@@ -417,16 +435,19 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
+        state_dict = self.state_dict.copy()
+        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            self.state_dict,
+            state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
             self.example_inputs,
-            self.dialect,
+            self.verifier,
             self.tensor_constants,
         )
 
@@ -436,9 +457,8 @@ class ExportedProgram:
                     new_range_constraints, new_equality_constraints
                 )
             )
-        exported_program = lift_constant_tensor_pass(exported_program)
 
-        return exported_program._transform(_ReplaceSymSizeOpPass())
+        return exported_program
 
     def _transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
@@ -457,80 +477,44 @@ class ExportedProgram:
             """
             Update the graph signature's user_input/user_outputs.
             """
-            new_graph_inputs = [
-                node.name for node in new_gm.graph.nodes if node.op == "placeholder"
-            ]
-            num_inputs = (
-                len(old_signature.parameters)
-                + len(old_signature.buffers)
-                + len(
-                    [
-                        s
-                        for s in old_signature.input_specs
-                        if s.kind == InputKind.USER_INPUT
-                    ]
-                )
-            )
+            new_input_specs = []
+            for i, node in enumerate(new_gm.graph.nodes):
+                if node.op != "placeholder":
+                    break
 
-            assert len(new_graph_inputs) == num_inputs, (
-                f"Number of input nodes changed from {len(new_graph_inputs)} "
-                f"to {num_inputs} after transformation. This transformation "
-                "is currently not supported."
-            )
-            num_param_buffers = len(old_signature.buffers) + len(
-                old_signature.parameters
-            )
-            new_user_inputs = new_graph_inputs[num_param_buffers:]
+                assert i < len(
+                    old_signature.input_specs
+                ), "Number of inputs changed after transformation"
+                old_input_spec = old_signature.input_specs[i]
+                arg = (
+                    old_input_spec.arg
+                    if isinstance(old_input_spec.arg, ConstantArgument)
+                    else type(old_input_spec.arg)(node.name)
+                )
+                new_input_specs.append(
+                    InputSpec(old_input_spec.kind, arg, old_input_spec.target)
+                )
 
             output_node = list(new_gm.graph.nodes)[-1]
             assert output_node.op == "output"
-            new_graph_outputs = [arg.name for arg in output_node.args[0]]
 
-            assert len(new_graph_outputs) == len(old_signature.buffers_to_mutate) + len(
-                [
-                    s
-                    for s in old_signature.output_specs
-                    if s.kind == OutputKind.USER_OUTPUT
-                ]
-            ), (
-                f"Number of output nodes changed from {len(new_graph_outputs)} "
-                f"to {len(old_signature.buffers_to_mutate) + len(old_signature.user_outputs)} "
-                "after transformation. This transformation is currently not supported."
-            )
-            new_user_outputs = new_graph_outputs[len(old_signature.buffers_to_mutate) :]
+            new_output_specs = []
+            for i, node in enumerate(output_node.args[0]):
+                assert i < len(
+                    old_signature.output_specs
+                ), "Number of outputs changed after transformation"
+                old_output_spec = old_signature.output_specs[i]
+                arg = (
+                    old_output_spec.arg
+                    if isinstance(old_output_spec.arg, ConstantArgument)
+                    else type(old_output_spec.arg)(node.name)
+                )
+                new_output_specs.append(
+                    OutputSpec(old_output_spec.kind, arg, old_output_spec.target)
+                )
 
-            def make_argument_spec(node) -> ArgumentSpec:
-                val = node.meta["val"]
-                if isinstance(val, torch.Tensor):
-                    return TensorArgument(name=node.name)
-                elif isinstance(val, torch.SymInt):
-                    return SymIntArgument(name=node.name)
-                else:
-                    return ConstantArgument(value=val)
-
-            input_specs, output_specs = _sig_to_specs(
-                user_inputs=set(new_user_inputs),
-                inputs_to_parameters=old_signature.inputs_to_parameters,
-                inputs_to_buffers=old_signature.inputs_to_buffers,
-                user_outputs=set(new_user_outputs),
-                buffer_mutations=old_signature.buffers_to_mutate,
-                grad_params={},
-                grad_user_inputs={},
-                loss_output=None,
-                inputs=[
-                    make_argument_spec(node)
-                    for node in transformed_gm.graph.nodes
-                    if node.op == "placeholder"
-                ],
-                outputs=[
-                    make_argument_spec(node)
-                    for node in pytree.tree_flatten(
-                        next(iter(reversed(transformed_gm.graph.nodes))).args
-                    )[0]
-                ],
-            )
             new_signature = ExportGraphSignature(
-                input_specs=input_specs, output_specs=output_specs
+                input_specs=new_input_specs, output_specs=new_output_specs
             )
             return new_signature
 
@@ -543,7 +527,7 @@ class ExportedProgram:
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
-            self.dialect,
+            self.verifier,
             self.tensor_constants,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
@@ -572,15 +556,7 @@ class ExportedProgram:
         _assertion_graph(*args)
 
     def _validate(self):
-        from torch._export.verifier import Verifier, verify_exported_program_signature
-
-        verify_exported_program_signature(self)
-
-        verifier = Verifier()
-        for gm in self.graph_module.modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            verifier.check_valid(self.graph_module)
+        self.verifier().check(self)
 
 
 def _get_updated_range_constraints(

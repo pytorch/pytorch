@@ -376,7 +376,7 @@ class Tensor(torch._C.TensorBase):
                 self._nested_tensor_strides(),
                 self._nested_tensor_storage_offsets(),
             )
-            return (torch._nested_view_from_buffer, args_nested)
+            return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor

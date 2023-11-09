@@ -23,15 +23,20 @@ from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 try:
-    from torch.utils import _cxx_pytree as pytree
+    from torch.utils._pytree.api import cxx as pytree
 except ImportError:
-    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
+    from torch.utils._pytree.api import python as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 
 _random_ops = {
     aten.native_dropout.default,
     aten.normal_.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+    aten.randint_like.low_dtype_out,
     aten.uniform_.default,
 }
 

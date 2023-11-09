@@ -50,10 +50,6 @@ class CallSpec:
     out_spec: Optional[pytree.TreeSpec]
 
 
-def _correct_name(name):
-    return name.replace(".", "_")
-
-
 def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, tensor_constants, buffers_to_mutate):
     count = 0
     buffer_name_to_node = {}
@@ -75,12 +71,14 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, ten
         # Step 2: Find the all the buffers that were mutated and update them
         if node.op == "output":
             user_output_nodes = []
-            for return_node in node.all_input_nodes:
+            # In the case that the same node is returned multiple times,
+            # node.all_input_nodes will only iterate that node once
+            for return_node in pytree.tree_flatten(node.args)[0]:
                 return_node_name = return_node.name
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
                     # TODO Fix situation here to replace dot with underscore...
-                    buffer_node_name = _correct_name(buffers_to_mutate[return_node_name])
+                    buffer_node_name = buffers_to_mutate[return_node_name].replace('.', '_')
                     assert buffer_node_name in buffer_name_to_node
                     buffer_node = buffer_name_to_node[buffer_node_name]
                     with gm.graph.inserting_before(node):
@@ -174,15 +172,20 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, ten
             body_gm = getattr(gm, body_graph.name)
             inp_pos_to_buffer_name_for_submod = {}
             real_operands = []
+            # TODO Fix situation here to replace dot with underscore...
+            state_dict_for_lookup = {
+                key.replace(".", "_"): value
+                for key, value in state_dict.items()
+            }
             for ix, operand in enumerate(operands):
                 if operand.target in inp_pos_to_param_buffer_name.values():
                     inp_pos_to_buffer_name_for_submod[ix] = operand.target
-                    if operand.target in state_dict:
-                        value = state_dict[operand.target]
+                    if operand.target in state_dict_for_lookup:
+                        value = state_dict_for_lookup[operand.target]
                     elif operand.target in tensor_constants:
                         value = tensor_constants[operand.target]
                     else:
-                        raise RuntimeError("Unable to find value for ", operand.target)
+                        raise RuntimeError(f"Unable to find value for {operand.target}")
                     body_gm.register_buffer(operand.target, value)
                 else:
                     real_operands.append(operand)
@@ -211,18 +214,24 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict,
 
     for name, value in state_dict.items():
         if name in graph_signature.buffers:
-            new_gm.register_buffer(_correct_name(name), value)
-            param_buffer_name_to_corrected_name[name] = _correct_name(name)
+            if "." in name:
+                new_gm.register_buffer(name.replace(".", "_"), value)
+                param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
+            else:
+                new_gm.register_buffer(name, value)
         if name in graph_signature.parameters:
-            new_gm.register_parameter(_correct_name(name), value)
-            param_buffer_name_to_corrected_name[name] = _correct_name(name)
+            if "." in name:
+                new_gm.register_parameter(name.replace(".", "_"), value)
+                param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
+            else:
+                new_gm.register_parameter(name, value)
 
     if tensor_constants is not None and len(tensor_constants) > 0:
         assert hasattr(graph_signature, "lifted_tensor_constants")
         for name, value in tensor_constants.items():
             if name in graph_signature.lifted_tensor_constants:
-                new_gm.register_buffer(_correct_name(name), value)
-                param_buffer_name_to_corrected_name[name] = _correct_name(name)
+                new_gm.register_buffer(name, value)
+                param_buffer_name_to_corrected_name[name] = name
 
     count = 0
     inp_pos_to_param_buffer_name = {}
