@@ -256,8 +256,6 @@ class MetaConverter:
             self.check_for_expired_weak_storages()
             self.check_expired_count = 0
 
-        from torch._dynamo.source import AttrSource
-
         def empty_create(inner_t, inner_src):
             (
                 inner_sizes,
@@ -344,6 +342,7 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
+                    from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
                     if shape_env and not t.is_nested:
@@ -426,6 +425,8 @@ class MetaConverter:
                                 if base.is_nested:
                                     return t._view_func_unsafe(base)
                                 else:
+                                    from torch._dynamo.source import AttrSource
+
                                     # base is ostensibly a standard dense tensor
                                     # fake-ify offsets then return view
                                     offsets_src = AttrSource(source, "_offsets")  # type: ignore[arg-type]
@@ -513,6 +514,8 @@ class MetaConverter:
                         # to the creation function here.
                         # We assume that if the inner tensors of the subclass are given symbolic sizes,
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
+                        from torch._dynamo.source import AttrSource
+
                         if t.is_nested:
                             # For nested tensors, manually do transform_subclass
                             # so we can insert some special processing on ctx
