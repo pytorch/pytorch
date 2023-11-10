@@ -244,7 +244,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return _ASMoutput(output, loss)
 
     def _get_full_log_prob(self, input, head_output):
-        """Given input tensor, and output of `self.head`, compute the log of the full distribution."""
+        """Given input tensor, and output of ``self.head``, compute the log of the full distribution."""
         out = input.new_empty((head_output.size(0), self.n_classes))
         head_logprob = log_softmax(head_output, dim=1)
 
