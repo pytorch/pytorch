@@ -3,6 +3,7 @@ pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_b
 """
 
 import torch
+import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch._dynamo import disable
 import functools
@@ -23,18 +24,22 @@ class AsyncTensor(torch.Tensor):
   This tensor will be materialized by calling any tensor methods on it.
   """
   def __new__(cls, fake_tensor):
-    r = torch.Tensor._make_wrapper_subclass(
-      cls,
-      fake_tensor.size(),
-      dtype=fake_tensor.dtype,
-      device=fake_tensor.device,
-      layout=fake_tensor.layout,
-      requires_grad=fake_tensor.requires_grad,
-    )
-    r._materialized_tensor = None
-    r._handle = None
-    r._fake = fake_tensor
-    return r
+    shape = fake_tensor.shape
+    kwargs = {}
+    kwargs["strides"] = fake_tensor.stride()
+    kwargs["storage_offset"] = fake_tensor.storage_offset()
+    kwargs["device"] = fake_tensor.device
+    kwargs["layout"] = fake_tensor.layout
+    kwargs["requires_grad"] = fake_tensor.requires_grad
+    kwargs["dtype"] = fake_tensor.dtype
+    out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+    return out
+
+  def __init__(self, fake_tensor):
+    super().__init__()
+    self._materialized_tensor = None
+    self._handle = None
+    self._fake = fake_tensor
 
   def async_repr(self):
     return f"AsyncTensor({self._handle}, {self._fake})"
@@ -52,26 +57,6 @@ class AsyncTensor(torch.Tensor):
     AsyncTensor.wait_until_materialized([self])
     return self._materialized_tensor.__format__(format_spec)
 
-  def __getattribute__(self, attr):
-    if attr in dir(torch.Tensor):
-      if self._handle is not None:
-        AsyncTensor.wait_until_materialized([self])
-        return getattr(self._materialized_tensor, attr)
-      else:
-        raise Exception(f"Getting {attr} on an AsyncTensor that doesn't have handle is not allowed")
-    else:
-      return super().__getattribute__(attr)
-
-  def __setattr__(self, attr, value):
-    if attr in dir(torch.Tensor):
-      if self._handle is not None:
-        AsyncTensor.wait_until_materialized([self])
-        return setattr(self._materialized_tensor, attr, value)
-      else:
-        raise Exception(f"Setting {attr} on an AsyncTensor that doesn't have handle is not allowed")
-    else:
-      return super().__setattr__(attr, value)
-
   def handle(self):
     assert self._handle is not None
     handle = self._handle()
@@ -87,10 +72,20 @@ class AsyncTensor(torch.Tensor):
   # NOTE: Any PyTorch reads or mutations in eager region will go through __torch_dispatch__, so we materialize the tensor here.
   @classmethod
   def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-    # TODO: handle tuple / list / etc.
-    # TODO: do the same for kwargs
-    AsyncTensor.wait_until_materialized(args)
-    return func(*args, **kwargs)
+    # TODO: implement randn_like etc. method that doesn't require a materialized tensor as input
+    if func in [torch.ops.aten.ones_like.default]:
+      shape = args[0].shape
+      dtype = args[0].dtype
+      device = args[0].device
+      requires_grad = args[0].requires_grad
+      return torch.ones(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    else:
+      AsyncTensor.wait_until_materialized(args)
+      # TODO: handle tuple / list / etc in args
+      # TODO: handle kwargs
+      assert not kwargs
+      args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, args)
+      return func(*args_materialized)
 
   @staticmethod
   def check_materialized(async_tensors):
@@ -134,7 +129,8 @@ class AsyncFuncHandle:
     self.is_going_to_be_scheduled = True
     gm = self._scheduler()._handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
-    self.outs = self.compiled_fn(list(self.args))
+    args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, self.args)
+    self.outs = self.compiled_fn(list(args_materialized))
     self.cuda_event.record()
 
   def wait_for_completion(self):
