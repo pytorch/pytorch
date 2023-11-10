@@ -461,9 +461,7 @@ class CachingAutotuner(KernelInterface):
             "shared_mem": launcher.bin.shared,
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
-            # This might also add XBLOCK, YBLOCK, ZBLOCK but that is since
-            # no one will read it.
-            **launcher.config.kwargs,
+            "meta": launcher.config.kwargs,
         }
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
@@ -918,7 +916,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 16))
+    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 

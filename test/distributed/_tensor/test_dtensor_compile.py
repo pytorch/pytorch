@@ -15,6 +15,10 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -34,6 +38,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils.checkpoint import checkpoint
 
 
 class SimpleModel(nn.Module):
@@ -282,10 +287,59 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_tp_ac_compile(self):
+        dp_degree = 2
+        tp_degree = self.world_size // dp_degree
+        model = SimpleModel(self.device_type)
+        model_copy = copy.deepcopy(model)
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh(
+            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
+        )
+
+        inp = torch.rand(20, 10, device=self.device_type)
+        parallelize_plan = {
+            "mlp_0.net1": ColwiseParallel(),
+            "mlp_0.net2": RowwiseParallel(),
+            "mlp_1.net1": ColwiseParallel(),
+            "mlp_1.net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
+        tp_model = checkpoint_wrapper(
+            tp_model,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+        )
+        eager_2d = FSDP(tp_model, device_mesh=mesh_2d["dp"], use_orig_params=True)
+
+        tp_model2 = parallelize_module(model_copy, mesh_2d["tp"], parallelize_plan)
+        fsdp_2d = FSDP(
+            tp_model2,
+            device_mesh=mesh_2d["dp"],
+            use_orig_params=True,
+        )
+        # TODO: once aot autograd support is ready we can just use default backend
+        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager")
+
+        # forward pass
+        out = eager_2d(inp)
+        compiled_output = compiled_2d(inp)
+        self.assertEqual(out, compiled_output)
+
+        # backward pass
+        out.sum().backward()
+        compiled_output.sum().backward()
+
+        # compare the gradients:
+        for n, p in zip(fsdp_2d.parameters(), compiled_2d.parameters()):
+            self.assertEqual(n.grad, p.grad)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_compile_dtensor_redistribute_backward(self):
         mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
-        #            device_type="cuda",
-        #            mesh=torch.arange(0, self.world_size).view(data_parallel_size, -1),
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
