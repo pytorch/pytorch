@@ -70,7 +70,7 @@ def context_decorator(ctx, func):
     """
     Like contextlib.ContextDecorator.
 
-    But with the following differences: 
+    But with the following differences:
     1. Is done by wrapping, rather than inheritance, so it works with context
        managers that are implemented from C and thus cannot easily inherit from
        Python classes

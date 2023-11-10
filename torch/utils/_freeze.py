@@ -118,7 +118,7 @@ class Freezer:
     def write_bytecode(self, install_root):
         """
         Write the `.c` files containing the frozen bytecode.
-        
+
         Shared frozen modules evenly across the files.
         """
         bytecode_file_names = [
@@ -217,7 +217,7 @@ class Freezer:
     def compile_file(self, path: Path, top_package_path: Path):
         """
         Compile a Python source file to frozen bytecode.
-        
+
         Append the result to `self.frozen_modules`.
         """
         assert path.is_file()
