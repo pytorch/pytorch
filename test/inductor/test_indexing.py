@@ -230,7 +230,9 @@ class ExprPrinterTests(TorchTestCase):
             expr = FloorDiv(s1, s2)
             self.assertEqual(pexpr(expr), "(s1 // s2)")
             if integer:
-                self.assertEqual(cexpr(expr), "torch::inductor::div_floor_int64(s1, s2)")
+                self.assertEqual(
+                    cexpr(expr), "torch::inductor::div_floor_int64(s1, s2)"
+                )
             else:
                 self.assertEqual(
                     cexpr(expr),

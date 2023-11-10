@@ -326,9 +326,7 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         if expr.is_integer:
             return f"torch::inductor::div_floor_int64({x}, {div})"
-        return (
-            f"torch::inductor::div_floor_double({x}, {div})"
-        )
+        return f"torch::inductor::div_floor_double({x}, {div})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
