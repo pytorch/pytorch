@@ -209,7 +209,7 @@ def shard_module(
     process_group=None
 ):
     """
-    Shards a given module according to the provided sharding `plan`.
+    Shard a given module according to the provided sharding `plan`.
 
     First shards all the parameters according to the given sharding `plan`. Then if
     `output_plan` and `return_local_tensor` are specified in the sharding `plan`, it
