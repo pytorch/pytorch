@@ -67,6 +67,7 @@ manual_torch_name_rule_map = {
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
 }
 
 
@@ -129,8 +130,6 @@ def get_tensor_method():
 
 
 def is_in_graph_function(obj):
-    if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-        obj = obj.__wrapped__
     if obj in get_tensor_method() or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
@@ -156,6 +155,8 @@ def lookup(obj):
         return None
     if id(obj) in _disallowed_function_ids:
         return None
+    if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+        obj = obj.__wrapped__
     rule = get_torch_obj_rule_map().get(obj, None)
     if rule is None and (is_in_graph_function(obj) or is_user_defined_allowed(obj)):
         return TorchInGraphFunctionVariable
