@@ -18,14 +18,15 @@ from torch._dynamo.skipfiles import (
     LEGACY_MOD_INLINELIST,
     MOD_INLINELIST,
 )
-from torch._dynamo.testing import load_test_module
 from torch._dynamo.trace_rules import get_torch_obj_rule_map, load_object
 from torch._dynamo.utils import is_safe_constant, istype
 from torch.fx._symbolic_trace import is_fx_tracing
 
-create_dummy_module_and_function = load_test_module(
-    __file__, "dynamo.utils"
-).create_dummy_module_and_function
+try:
+    from .utils import create_dummy_module_and_function
+except ImportError:
+    from utils import create_dummy_module_and_function
+
 
 ignored_torch_name_rule_set = {
     "torch.ExcludeDispatchKeyGuard",
