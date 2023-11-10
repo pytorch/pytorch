@@ -242,6 +242,9 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   value_ = other->value_;
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
+  // FREEZE the old storage, preventing mutations to it.
+  // this is a huge pain to handle properly in all cases, so we ban it.
+  functional_storage_impl()->freeze();
   // Unsafely swap out the storage with other's storage,
   // disconnecting `self` with its view chain
   storage_ = other->storage_;

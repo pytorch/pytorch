@@ -418,7 +418,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format = suggest_memory_format(t)
+    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     if not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
@@ -576,7 +576,7 @@ class FxGraphHashDetails:
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()  # type: ignore[attr-defined]
+        self.inductor_config = config.save_config()
         self.inductor_code_hash = get_inductor_code_hash()
 
     def debug_str(self) -> str:
@@ -2396,13 +2396,13 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str, device: str = "cuda"
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            device_interface = get_interface_for_device(device)
-            device = torch.device(device, device_interface.current_device())
+            device_interface = get_interface_for_device(device_str)
+            device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device

@@ -412,7 +412,7 @@ or file a github issue."""
                     ):
                         widr = WeakIdRef(arg)
                         tc = torch._guards.TracingContext.get()
-                        # TODO(voz): Doc goes here
+                        # See Note - [On fake tensor policy and fresh fake modes for backends]
                         if tc and widr in tc.weak_tensor_ref_to_fakification_policy:
                             policy = tc.weak_tensor_ref_to_fakification_policy[widr]
                             new_args.append(

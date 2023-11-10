@@ -55,6 +55,23 @@ from .user_defined import UserDefinedVariable
 log = logging.getLogger(__name__)
 
 
+IN_PLACE_DESUGARING_MAP = {
+    operator.iadd: operator.add,
+    operator.isub: operator.sub,
+    operator.imul: operator.mul,
+    operator.ifloordiv: operator.floordiv,
+    operator.itruediv: operator.truediv,
+    operator.imod: operator.mod,
+    operator.imatmul: operator.imatmul,
+    operator.ilshift: operator.lshift,
+    operator.irshift: operator.rshift,
+    operator.ipow: operator.pow,
+    operator.iand: operator.and_,
+    operator.ior: operator.or_,
+    operator.ixor: operator.xor,
+}
+
+
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -489,11 +506,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
-                if self.fn is operator.iadd and isinstance(
+
+                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
                 ):
-                    # Work around weird bug in hf_T5
-                    fn, args = operator.add, [args[1], args[0]]
+                    # In-place operators like += usually mustate tensor
+                    # values, but in the edge case of immutable values they
+                    # re-bind the variable.
+                    #
+                    # The easiest way to keep the graph consistent in this
+                    # scenario is to de-sugar eagerly.
+                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
 
                 if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
@@ -1080,12 +1103,8 @@ class BuiltinVariable(VariableTracker):
                             VariableBuilder(tx, GetItemSource(source, i))(b)
                             for i, b in enumerate(bases)
                         ]
-                    elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C.TensorBase
-                    ):
-                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        unimplemented(f"unexpected sourceless type bases: {bases}")
+                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
@@ -1292,7 +1311,7 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         try:
             py_type = obj.python_type()
@@ -1306,7 +1325,7 @@ class BuiltinVariable(VariableTracker):
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
         if py_type is not None:
-            return ConstantVariable.create(py_type)
+            return SourcelessBuilder()(tx, py_type)
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,

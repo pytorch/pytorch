@@ -561,14 +561,49 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
-class FakificationPolicy:
-    """
-    TODO(voz): Doc goes here
-    """
+# Note - [On fake tensor policy and fresh fake modes for backends]
+#
+# FakeTensorMode does memoization - this memoization is generally fine, but there are some cases
+# where we want to disable memoization in favor of producing fake tensors anew. In dynamo, the
+# case for when this happens is when we call a backend. All backends are invoked with a fresh fake_mode
+# because after dynamo trace, the memoized tensors reflect the state of the fake tensor *at the end* of
+# trace, rather than at the beginning.
+# Consider a motivating example of .data setting mutating metadata
+#
+# def foo(x, y):
+#     x.data = y
+#     return x
+#
+# Where x is size([6]) and y is size([3]). If we run foo(x, y), then x.data is size([3]), and the
+# fake tensor at the beginning of our backend, as memoized, is size([3]). However, this means that
+# the backend sees a tensor of size([3]) which has been resized by the user, and so is not reflective
+# of the state of the tensor at the start of trace! In the case of aot_autograd, this causes us to produce
+# incorrect code (concretely in this example, a view into x sized at ([3]))
+#
+# The solution, therefore, is a fresh fake mode for backends.
+#
+# However, dynamo through our dynamic shapes logic, and automatic_dynamic included, creates a policy
+# to decide which dims are static/duck/dynamic, and in the case of export, apply constraints.
+# If we do not faithfully preserve those policy decisions through to the new fake_mode, we will produce
+# fake tensors in a slightly different way, with different dynamic indices, which in turn may create new symbols
+# where there should not be any.
+#
+# The solution for this is to store a fakification policy, as an instance of FakificationPolicy, on the
+# TracingContext, to be passed in alongside where we call from_tensor.
+#
+# NOTE - an alternative design was considered where we pass a FakificationPolicyStore to the FakeTensorMode
+# constructor, allowing us to query that as the source of truth instead of always passing it through the top
+# at from_tensor creation time. We rejected this because reconciling arguments that may differ between the
+# stored policy and the user provided value for dynamic_dims, constraint_dims, and source is non-trivial.
+# Forcing the user to provide the values in a single place moves this decision closer to the callsite, and
+# forces the caller of from_tensor to think about what it is they want, instead of relying on some hidden
+# internal policy storage.
 
+
+class FakificationPolicy:
     ignore_subclass: bool = False
-    dynamic_dims: Optional[DimList[DimDynamic]] = None
-    constraint_dims: Optional[DimList[DimConstraint]] = None
+    dynamic_dims: Optional[List[Any]] = None  # actually DimDynamic
+    constraint_dims: Optional[List[Any]] = None  # actually DimConstraint
     source: Optional[Source] = None
 
     def __init__(self, ignore_subclass, dynamic_dims, constraint_dims, source):

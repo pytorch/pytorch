@@ -1723,9 +1723,7 @@ def wrap_to_fake_tensor_and_record(
 
         widr = WeakIdRef(e)
         dynamic_dims, constraint_dims = None, None
-        # TODO(voz): Doc
-        # We need to cache this, because it can inadvertenly compute a more static policy in the middle of a trace
-        # ...Why tho???
+        # See Note - [On fake tensor policy and fresh fake modes for backends]
         if widr in TracingContext.get().weak_tensor_ref_to_fakification_policy:
             policy = TracingContext.get().weak_tensor_ref_to_fakification_policy[widr]
             dynamic_dims = policy.dynamic_dims
@@ -1754,7 +1752,7 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims=constraint_dims,
             )
         )
-        # TODO(voz): Doc goes here
+        # See Note - [On fake tensor policy and fresh fake modes for backends]
         policy = FakificationPolicy(
             ignore_subclass, dynamic_dims, constraint_dims, source
         )
@@ -1769,7 +1767,6 @@ def wrap_to_fake_tensor_and_record(
             "size": fake_e.size(),
             "stride": fake_e.stride(),
         }
-        print("dynamo fakification:", e.shape, "->", fake_e.shape)
         return fake_e
     else:
         return e
