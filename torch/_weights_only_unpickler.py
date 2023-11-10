@@ -93,7 +93,8 @@ def _get_allowed_globals():
         rc[f"{tt.__module__}.{tt.__name__}"] = tt
     # Storage classes
     for ts in torch._storage_classes:
-        rc[f"{ts.__module__}.{ts.__name__}"] = ts
+        if ts is not torch.storage.TypedStorage:
+            rc[f"{ts.__module__}.{ts.__name__}"] = ts
     # Rebuild functions
     for f in [
         torch._utils._rebuild_parameter,
