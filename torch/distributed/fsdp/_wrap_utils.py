@@ -31,8 +31,7 @@ def _auto_wrap(
     fsdp_fn: Callable,  # e.g. `FullyShardedDataParallel` or `fully_shard`
 ):
     """
-    Auto wraps modules in ``root_module`` 's tree according to ``policy``
-    following a post-order traversal.
+    Auto wraps modules in ``root_module`` 's tree according to ``policy`` following a post-order traversal.
 
     Precondition: ``root_kwargs`` should contain all arguments except
     ``module``. This function accepts the kwargs dict directly since it gets
@@ -129,7 +128,8 @@ def _validate_frozen_params(
     ignored_params: Set[nn.Parameter],
     use_orig_params: bool,
 ):
-    """
+    """Each module should validate frozen or non-frozen parameters.
+
     This checks that, given ``modules_to_wrap``, each module would manage
     parameters that are uniformly frozen or non-frozen. This uniformity
     requirement is strict for ``use_orig_params=False`` (hard error) and highly
@@ -180,9 +180,10 @@ def _get_post_order_named_modules(
     root_module: nn.Module,
 ) -> List[Tuple[str, nn.Module]]:
     """
-    This returns the named modules following a post-order traversal, which is a
-    valid reverse topological sort. We achieve this using the reverse of a
-    stack-based DFS order instead of reversing ``root_module.named_modules()``
+    Return the named modules following a post-order traversal, which is a valid reverse topological sort.
+
+    We achieve this using the reverse of a stack-based DFS
+    order instead of reversing ``root_module.named_modules()``
     since the former gives the modules in registration order at each level in
     the module tree (as opposed to the reverse), which allows us to error/warn
     on the first registered module that violates the condition.
@@ -225,9 +226,10 @@ def _get_managed_param_to_fqn(
     root_prefix: str,
 ) -> Dict[nn.Parameter, str]:
     """
-    This returns a dict that maps managed parameter to its FQN for the given
-    ``module_to_wrap``. The dict's keys are exactly the parameters that would
-    be managed by the module, where this is achieved by calling this function
+    Return a dict that maps managed parameter to its FQN for the given ``module_to_wrap``.
+
+    The dict's keys are exactly the parameters that would be managed
+    by the module, where this is achieved by calling this function
     on the modules to wrap in reverse topological order, destructively updating
     ``visited_modules``, and not traversing into those modules. The FQNs are
     prefixed from the root (via ``root_prefix``) to be more informative.

@@ -42,12 +42,11 @@ def _post_order_apply(
     root_module: nn.Module,
     fn: Callable[[nn.Module], Optional[nn.Module]],
 ):
-    """
-    This applies ``fn`` to every module in the module tree of ``root_module``
-    following a post-order traversal. If ``fn`` returns an :class:`nn.Module`,
-    then this replaces the original module with the newly returned one in the
-    tree. Otherwise, ``fn`` should return ``None``, in which case the module is
-    not changed.
+    """Apply ``fn`` to every module in the module tree of ``root_module`` following a post-order traversal.
+
+    If ``fn`` returns an :class:`nn.Module`, then this replaces the
+    original module with the newly returned one in the tree. Otherwise,
+    ``fn`` should return ``None``, in which case the module is not changed.
     """
     # Track visited modules to avoid visiting shared modules multiple times
     visited_modules: Set[nn.Module] = {root_module}
@@ -84,8 +83,9 @@ def _construct_wrap_fn(
     target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
     fsdp_fn: Callable,
 ) -> Callable[[nn.Module], Optional[nn.Module]]:
-    """
-    This constructs the "wrap" function to pass to :func:`_post_order_apply`
+    """Construct the "wrap" function.
+
+    It is used to pass to :func:`_post_order_apply`
     based on ``target_module_to_kwargs``, which should be constructed from the
     wrapping policy.
     """
@@ -123,18 +123,16 @@ def _run_mixed_precision_override_policy(
 
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
-    A simple recursive wrap policy that always returns ``True``. This means
-    that every submodule is wrapped by the wrapper class in
+    Recursive wrap policy that always returns ``True``.
+
+    This means that every submodule is wrapped by the wrapper class in
     :func:`_recursive_wrap`.
     """
     return True
 
 
 class _Policy(ABC):
-    """
-    This defines an abstract base class that represents a policy for applying
-    a module-level API.
-    """
+    """Define an abstract base class that represents a policy for applying a module-level API."""
 
     @abstractmethod
     def _run_policy(
@@ -143,10 +141,7 @@ class _Policy(ABC):
         ignored_modules: Set[nn.Module],
         root_kwargs: Dict[str, Any],
     ) -> Dict[nn.Module, Dict[str, Any]]:
-        """
-        This should return a dict ``target_module_to_kwargs`` that maps from
-        each target module to wrap to its kwargs.
-        """
+        """Return a dict ``target_module_to_kwargs`` that maps from each target module to wrap to its kwargs."""
         ...
 
 
@@ -156,11 +151,11 @@ def _module_wrap_policy(
     nonwrapped_numel: int,
     module_classes: Set[Type[nn.Module]],
 ) -> bool:
-    """
-    This auto wrap policy wraps every module that is an instance of any type in
-    ``module_classes`` as its own FSDP instance. The root module given by
-    ``module`` is always wrapped as an FSDP instance regardless. Since the
-    wrapping proceeds bottom up, each FSDP instance manages the parameters in
+    """Wrap every module that is an instance of any type in ``module_classes`` as its own FSDP instance.
+
+    This auto wrap policy. The root module given by ``module`` is always
+    wrapped as an FSDP instance regardless. Since the wrapping
+    proceeds bottom up, each FSDP instance manages the parameters in
     its subtree excluding any already managed by a child FSDP instance.
 
     Args:
@@ -183,10 +178,7 @@ def _module_wrap_policy(
 
 
 class ModuleWrapPolicy(_Policy):
-    """
-    This policy applies to every module of the specified module classes,
-    passing in the kwargs given to the root.
-    """
+    """Apply to every module of the specified module classes, passing in the kwargs given to the root."""
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):
         module_classes_set = set(module_classes)
@@ -221,8 +213,8 @@ class ModuleWrapPolicy(_Policy):
 
 class CustomPolicy(_Policy):
     """
-    This policy takes in a lambda function that maps a given ``nn.Module`` to
-    either ``False``, ``True``, or a kwarg dictionary.
+    Take in a lambda function that maps a given ``nn.Module`` to either ``False``, ``True``, or a kwarg dictionary.
+
     - If the function returns ``False`` or an empty dictionary, then the module
       does not have the API applied.
     - If the function returns ``True``, then the module has the API applied
@@ -278,8 +270,9 @@ def lambda_auto_wrap_policy(
     module: nn.Module, recurse: bool, nonwrapped_numel: int, lambda_fn: Callable
 ) -> bool:
     """
-    A convenient auto wrap policy to wrap submodules based on an arbitrary user
-    function. If `lambda_fn(submodule) == True``, the submodule will be wrapped as
+    Wrap submodules based on an arbitrary user function.
+
+    If `lambda_fn(submodule) == True``, the submodule will be wrapped as
     a `wrapper_cls` unit.
 
     Return if a module should be wrapped during auto wrapping.
@@ -308,11 +301,11 @@ def transformer_auto_wrap_policy(
     nonwrapped_numel: int,
     transformer_layer_cls: Set[Type[nn.Module]],
 ) -> bool:
-    """
+    """Wrap shared embeddings into the same FSDP instance for transformer models.
+
     See :func:`_module_wrap_policy`, where ``transformer_layer_cls`` is the
     same as ``module_classes``. Note that shared parameters must be wrapped in
-    the same FSDP instance, so this auto wrap policy can help wrap shared
-    embeddings into the same FSDP instance for transformer models.
+    the same FSDP instance.
     """
     return _module_wrap_policy(module, recurse, nonwrapped_numel, transformer_layer_cls)
 
@@ -335,10 +328,7 @@ def _or_policy(
     nonwrapped_numel: int,
     policies,
 ) -> bool:
-    """
-    A policy that wraps ``module`` if any policy in the passed in iterable of
-    ``policies`` returns ``True``.
-    """
+    """Wrap ``module`` if any policy in the passed in iterable of ``policies`` returns ``True``."""
     return any(
         policy(module=module, recurse=recurse, nonwrapped_numel=nonwrapped_numel)
         for policy in policies
@@ -355,7 +345,7 @@ def size_based_auto_wrap_policy(
     exclude_wrap_modules: Optional[Set[Type[nn.Module]]] = None,
 ) -> bool:
     """
-    A size-based auto wrap policy.
+    Size-based auto wrap policy.
 
     Args:
         module (nn.Module): Current module being considered.
@@ -441,11 +431,12 @@ def enable_wrap(
 
 
 def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
-    """
-    Annotate that a module should be wrapped. Annotated modules will only be
-    wrapped if inside of an :func:`enable_wrap` context manager. This allows
-    a module to be initialized both with and without a wrapper without code
-    change.
+    """Annotate that a module should be wrapped.
+
+    Annotated modules will only be wrapped if inside of
+    an :func:`enable_wrap` context manager. This allows
+    a module to be initialized both with and without
+    a wrapper without code change.
 
     The class that this function wraps the passed in ``nn.Module`` with is the
     passed in ``wrapper_cls`` argument into ``enable_wrap``. Both
@@ -500,8 +491,7 @@ def _recursive_wrap(
     **kwargs: Any,
 ) -> Tuple[nn.Module, int]:
     """
-    Wraps submodules of ``module`` for which ``auto_wrap_policy`` returns
-    ``True`` with ``wrapper_cls``.
+    Wrap submodules of ``module`` for which ``auto_wrap_policy`` returns ``True`` with ``wrapper_cls``.
 
     Args:
         module (nn.Module): Module to recursively wrap.
@@ -566,7 +556,8 @@ def _recursive_wrap(
 
 class _ConfigAutoWrap:
     """
-    Helper class to wrap modules based on default config args via a context manager.
+    Wrap modules based on default config args via a context manager.
+
     See :func:`enable_wrap` for more information.
     """
 

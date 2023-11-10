@@ -60,8 +60,9 @@ class SimpleProfiler:
 def _get_sharded_module_tree_with_module_name_to_fqns(
     model: torch.nn.Module,
 ) -> Tuple[str, Dict[str, List[str]]]:
-    """
-    It is used for composable fully_shard() code path, it returns
+    """Use for composable fully_shard() code path.
+
+    It returns:
       1. sharded module tree info: each line reprents a submodule name that contats the
     submodule's FQN and its submodule class name, if the submodule is sharded by `fully_shard`,
     the submodule name will add a postfix with ' FULLY SHARDED'. Each increased tree

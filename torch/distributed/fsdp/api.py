@@ -1,7 +1,4 @@
-"""
-This file includes public APIs for FSDP such as the classes used for the
-constructor arguments.
-"""
+"""This file includes public APIs for FSDP such as the classes used for the constructor arguments."""
 
 from dataclasses import dataclass
 from enum import auto, Enum
@@ -30,9 +27,7 @@ __all__ = [
 
 
 class ShardingStrategy(Enum):
-    """
-    This specifies the sharding strategy to be used for distributed training by
-    :class:`FullyShardedDataParallel`.
+    """This specifies the sharding strategy to be used for distributed training by :class:`FullyShardedDataParallel`.
 
     - ``FULL_SHARD``: Parameters, gradients, and optimizer states are sharded.
       For the parameters, this strategy unshards (via all-gather) before the
@@ -70,9 +65,10 @@ class ShardingStrategy(Enum):
 
 
 class BackwardPrefetch(Enum):
-    """
-    This configures explicit backward prefetching, which improves throughput by
-    enabling communication and computation overlap in the backward pass at the
+    """Configure explicit backward prefetching.
+
+    This improves throughput by enabling communication
+    and computation overlap in the backward pass at the
     cost of slightly increased memory usage.
 
     - ``BACKWARD_PRE``: This enables the most overlap but increases memory
@@ -242,7 +238,8 @@ class CPUOffload:
 
 
 class StateDictType(Enum):
-    """
+    """Indicate type of ``state_dict``.
+
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
     The default value is FULL_STATE_DICT to comply the PyTorch convention.
@@ -274,8 +271,9 @@ class StateDictType(Enum):
 @dataclass
 class StateDictConfig:
     """
-    ``StateDictConfig`` is the base class for all ``state_dict`` configuration
-    classes. Users should instantiate a child class (e.g.
+    ``StateDictConfig`` is the base class for all ``state_dict`` configuration classes.
+
+    Users should instantiate a child class (e.g.
     ``FullStateDictConfig``) in order to configure settings for the
     corresponding ``state_dict`` type supported by FSDP.
 
@@ -291,12 +289,12 @@ class StateDictConfig:
 @dataclass
 class FullStateDictConfig(StateDictConfig):
     """
-    ``FullStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.FULL_STATE_DICT``. We recommend enabling both
-    ``offload_to_cpu=True`` and ``rank0_only=True`` when saving full state
-    dicts to save GPU memory and CPU memory, respectively. This config class
-    is meant to be used via the :func:`state_dict_type` context manager as
-    follows:
+    ``FullStateDictConfig`` is a config class meant to be used with ``StateDictType.FULL_STATE_DICT``.
+
+    We recommend enabling both ``offload_to_cpu=True`` and ``rank0_only=True``
+    when saving full state dicts to save GPU memory and CPU memory, respectively.
+    This config class is meant to be used via the :func:`state_dict_type` context
+    manager as follows:
 
         >>> # xdoctest: +SKIP("undefined variables")
         >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -333,8 +331,7 @@ class LocalStateDictConfig(StateDictConfig):
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     """
-    ``ShardedStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.SHARDED_STATE_DICT``.
+    ``ShardedStateDictConfig`` is a config class meant to be used with ``StateDictType.SHARDED_STATE_DICT``.
 
     Attributes:
         _use_dtensor (bool): If ``True``, then FSDP saves the state dict values
@@ -352,10 +349,11 @@ class ShardedStateDictConfig(StateDictConfig):
 @dataclass
 class OptimStateDictConfig:
     """
-    ``OptimStateDictConfig`` is the base class for all ``optim_state_dict``
-    configuration classes.  Users should instantiate a child class (e.g.
-    ``FullOptimStateDictConfig``) in order to configure settings for the
-    corresponding ``optim_state_dict`` type supported by FSDP.
+    ``OptimStateDictConfig`` is the base class for all ``optim_state_dict`` configuration classes.
+
+    Users should instantiate a child class (e.g. ``FullOptimStateDictConfig``)
+    in order to configure settings for the corresponding
+    ``optim_state_dict`` type supported by FSDP.
 
     Attributes:
         offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict's
@@ -369,7 +367,8 @@ class OptimStateDictConfig:
 
 @dataclass
 class FullOptimStateDictConfig(OptimStateDictConfig):
-    """
+    """Define FullOptimStateDictConfig with rank0_only attribute.
+
     Attributes:
         rank0_only (bool): If ``True``, then only rank 0 saves the full state
             dict, and nonzero ranks save an empty dict. If ``False``, then all
@@ -387,8 +386,7 @@ class LocalOptimStateDictConfig(OptimStateDictConfig):
 @dataclass
 class ShardedOptimStateDictConfig(OptimStateDictConfig):
     """
-    ``ShardedOptimStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.SHARDED_STATE_DICT``.
+    ``ShardedOptimStateDictConfig`` is a config class meant to be used with ``StateDictType.SHARDED_STATE_DICT``.
 
     Attributes:
         _use_dtensor (bool): If ``True``, then FSDP saves the state dict values

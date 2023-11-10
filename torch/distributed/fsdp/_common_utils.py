@@ -1,6 +1,4 @@
-"""
-This file includes private common utilities for FSDP.
-"""
+"""This file includes private common utilities for FSDP."""
 
 import logging
 import traceback
@@ -59,10 +57,9 @@ _MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 class _FSDPDeviceHandle:
-    """
-    This is a simple abstraction for FSDP computing devices,
-    which enables custom backends that implement CUDA-like
-    semantics to be integrated with FSDP.
+    """Enable custom backends that implement CUDA-like semantics to be integrated with FSDP.
+
+    This is a simple abstraction for FSDP computing devices.
     """
 
     def __init__(self, device: torch.device, backend: Any = None):
@@ -80,8 +77,8 @@ class _FSDPDeviceHandle:
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return an device handle corresponding to the device, and through this handle,
-        operations with the same semantics as CUDA can be performed on the device.
+        Return an device handle corresponding to the device, and through this handle, operations with the same semantics as CUDA can be performed on the device.
+
         Just return torch.cuda if the device is cuda to make attribute-access faster.
         Custom backend must first register a module with the same name with {device.type} on torch.
         """
@@ -166,9 +163,7 @@ def _get_module_fsdp_state_if_fully_sharded_module(
 
 
 class TrainingState(Enum):
-    """
-    An enum that indicates the state of a ``FullyShardedDataParallel` instance.
-    """
+    """An enum that indicates the state of a ``FullyShardedDataParallel` instance."""
 
     IDLE = auto()
     FORWARD_BACKWARD = auto()
@@ -176,9 +171,7 @@ class TrainingState(Enum):
 
 
 class HandleTrainingState(Enum):
-    """
-    An enum that indicates the state of a ``FlatParamHandle`.
-    """
+    """An enum that indicates the state of a ``FlatParamHandle`."""
 
     IDLE = auto()
     FORWARD = auto()
@@ -195,8 +188,9 @@ def _is_composable(state: _FSDPState):
 @no_type_check
 def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamHandle"]:
     """
-    Returns the ``FlatParamHandle`` s corresponding to ``module``. This is
-    the handle that contains some parameter in ``module``.
+    Return the ``FlatParamHandle`` s corresponding to ``module``.
+
+    This is the handle that contains some parameter in ``module``.
     """
     if _is_composable(state):
         # A valid FSDP state may have no managed parameters and hence no
@@ -214,22 +208,17 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamH
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
-    """Returns if ``module`` has parameters managed by FSDP."""
+    """Return if ``module`` has parameters managed by FSDP."""
     return _module_handle(state, module) is not None
 
 
 def _get_sharding_strategy(handle):
-    """
-    Returns the sharding strategy of the handle.
-    """
+    """Return the sharding strategy of the handle."""
     return handle._sharding_strategy if handle else None
 
 
 def clean_tensor_name(tensor_name: str) -> str:
-    """
-    Cleans the parameter or buffer name by removing any module wrapper
-    prefixes.
-    """
+    """Clean the parameter or buffer name by removing any module wrapper prefixes."""
     tensor_name = tensor_name.replace(FSDP_PREFIX, "")
     # TODO: Explicitly replacing the checkpoint wrapper prefix is not ideal as
     # it couples `CheckpointWrapper` and FSDP and also does not scale for more
@@ -239,25 +228,22 @@ def clean_tensor_name(tensor_name: str) -> str:
 
 
 def _set_fsdp_flattened(tensor: torch.Tensor) -> None:
-    """
-    Sets an attribute on ``tensor`` to mark it as flattened by FSDP. This is to
-    avoid re-flattening it during nested construction.
+    """Set an attribute on ``tensor`` to mark it as flattened by FSDP.
+
+    This is to avoid re-flattening it during nested construction.
     """
     setattr(tensor, FSDP_FLATTENED, True)
 
 
 def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
-    """Returns if ``tensor`` has been marked as flattened by FSDP."""
+    """Return if ``tensor`` has been marked as flattened by FSDP."""
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
 def _named_parameters_with_duplicates(
     module: nn.Module, **kwargs: Any
 ) -> List[Tuple[str, nn.Parameter]]:
-    """
-    This API is required as some modules overwrite `named_parameters()` but do not support
-    `remove_duplicate`.
-    """
+    """Require as some modules overwrite `named_parameters()` but do not support `remove_duplicate`."""
     assert (
         "remove_duplicate" not in kwargs
     ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
@@ -274,9 +260,10 @@ def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
 ) -> Dict[nn.Parameter, List[str]]:
-    """
-    Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
-    we use canonical to mean the fully-qualified name assigned to the parameter
+    r"""
+    Construct a mapping from parameter to a list of its \"canonical\" FQNs.
+
+    Here, we use canonical to mean the fully-qualified name assigned to the parameter
     based on its position in the original nn.Module hierarchy before any wrapper
     or parallelism has been applied to it. This is in contrast to FQNs that may be
     generated after parallelisms or wrappers have been applied to the model.
@@ -387,10 +374,11 @@ def _apply_to_modules(
     *args,
     **kwargs,
 ):
-    """
-    Performs a pre-order traversal of the modules in the hierarchy rooted at
-    ``root_module``, applying ``module_fn`` at each module and finally
-    returning a value using ``return_fn``. The traversal constructs the full
+    """Perform a pre-order traversal of the modules.
+
+    These modules are in the hierarchy rooted at ``root_module``,
+    applying ``module_fn`` at each module and finally returning
+    a value using ``return_fn``. The traversal constructs the full
     module prefix name (e.g. "module.submodule." just like in model state dict)
     and makes that available to ``module_fn``.
 
@@ -451,7 +439,7 @@ def _assert_in_training_states(
     state: _FSDPState,
     training_states: List[TrainingState],
 ) -> None:
-    """Asserts that FSDP is in the states ``_training_states``."""
+    """Assert that FSDP is in the states ``_training_states``."""
     # Raise a `ValueError` instead of using `assert` to ensure that these
     # logical assertions run even if `assert`s are disabled
     if state.training_state not in training_states:
@@ -469,7 +457,8 @@ def _assert_in_training_states(
 
 
 def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
-    """
+    """Return subset of modules.
+
     Returns:
         Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
         parent-less) with respect to the modules in the set itself. In other

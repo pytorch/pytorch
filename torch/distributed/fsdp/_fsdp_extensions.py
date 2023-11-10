@@ -15,8 +15,9 @@ from torch.distributed.fsdp._shard_utils import (
 
 class FSDPExtensions(ABC):
     """
-    This enables some customizable hooks to enable composability with tensor
-    parallelism. To activate these hooks, use :func:`_set_fsdp_extensions` to
+    Enable some customizable hooks to enable composability with tensor parallelism.
+
+    To activate these hooks, use :func:`_set_fsdp_extensions` to
     set a custom :class:`FSDPExtensions` that implements the hooks.
     """
 
@@ -65,10 +66,7 @@ class FSDPExtensions(ABC):
         self,
         tensor: torch.Tensor,
     ) -> Tuple[torch.Tensor, List[Shard]]:
-        """
-        This is to be called before loading a *sharded* model state dict and
-        should return the tensor and list of shards from which to load data.
-        """
+        """Call before loading a *sharded* model state dict and should return the tensor and list of shards from which to load data."""
         ...
 
     @abstractmethod
@@ -77,8 +75,8 @@ class FSDPExtensions(ABC):
         tensor: DTensor,
         parent_mesh: Optional[DeviceMesh],
     ) -> torch.Tensor:
-        """
-        This is to be called before loading a *sharded* DTensor state dict.
+        """Call before loading a *sharded* DTensor state dict.
+
         This gathers tensor in FSDP dimension and returns local tensor of
         TP DTensor.
         """

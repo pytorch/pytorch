@@ -33,8 +33,9 @@ def _writeback_to_local_shard(
     handle: FlatParamHandle,
     writeback_grad: bool,
 ):
-    """
-    For the handle, writes back the this rank's shard of the unsharded
+    """Write back this rank's shard.
+
+    For the handle, writes back this rank's shard of the unsharded
     flattened parameter to the sharded flattened parameter. If
     ``writeback_grad=True``, then writes back to the sharded gradient as
     well.
@@ -70,8 +71,7 @@ def _writeback_to_local_shard(
 
 def _deregister_flat_param(state: _FSDPState, module: nn.Module) -> None:
     """
-    De-registers the flattened parameter from the wrapped module, hiding it
-    from ``nn.Module`` methods.
+    De-registers the flattened parameter from the wrapped module, hiding it from ``nn.Module`` methods.
 
     We do not use ``del`` because we want ``FLAT_PARAM`` to always be an
     attribute but dynamically change whether it is visible to ``nn.Module``
@@ -84,8 +84,7 @@ def _deregister_flat_param(state: _FSDPState, module: nn.Module) -> None:
 
 def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
     """
-    Registers the flattened parameter to the wrapped module, making it
-    visible to ``nn.Module`` methods.
+    Register the flattened parameter to the wrapped module, making it visible to ``nn.Module`` methods.
 
     We do not use :meth:`nn.Module.register_parameter` because we want
     ``FLAT_PARAM`` to always be an attribute but dynamically change whether
@@ -100,8 +99,9 @@ def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
 @contextlib.contextmanager
 def _unflatten_as_params(state: _FSDPState, module: nn.Module) -> Generator:
     """
-    Assumes that the flattened parameter is unsharded. When in the context,
-    de-registers the flattened parameter and unflattens the original
+    Assumes that the flattened parameter is unsharded.
+
+    When in the context, de-registers the flattened parameter and unflattens the original
     parameters as ``nn.Parameter`` views into the flattened parameter.
     After the context, re-registers the flattened parameter and restores
     the original parameters as ``Tensor`` views into the flattened
@@ -162,10 +162,7 @@ def _unshard_fsdp_state_params(
     offload_to_cpu: bool,
     with_grads: bool,
 ):
-    """
-    This unshards the parameters for a single FSDP state ``state`` that
-    corresponds to ``module``.
-    """
+    """Unshard the parameters for a single FSDP state ``state`` that corresponds to ``module``."""
     _validate_unshard_params_args(
         state, writeback, rank0_only, offload_to_cpu, with_grads
     )
@@ -240,7 +237,8 @@ def _unshard_params_recurse(
     offload_to_cpu: bool,
     with_grads: bool,
 ):
-    """
+    """Recursively call :func:`_unshard_fsdp_state_params` on FSDP states if ``recurse=True``.
+
     This is a helper for :func:`_unshard_params` that recursively calls
     :func:`_unshard_fsdp_state_params` on FSDP states if ``recurse=True``.
     NOTE: This runs lazy initialization.
@@ -302,10 +300,7 @@ def _unshard_params(
     offload_to_cpu: bool,
     with_grads: bool,
 ):
-    """
-    This unshards FSDP-managed parameters for all modules with FSDP applied in
-    the module tree rooted at ``module``.
-    """
+    """Unshard FSDP-managed parameters for all modules with FSDP applied in the module tree rooted at ``module``."""
     root_fsdp_states, root_fsdp_modules = _get_fsdp_root_states_with_modules(module)
     with contextlib.ExitStack() as stack:
         for root_fsdp_state, root_fsdp_module in zip(
@@ -327,9 +322,7 @@ def _unshard_params(
 
 
 def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
-    """
-    Deregisters the original parameters; registers the ``FlatParameter``.
-    """
+    """Deregisters the original parameters; registers the ``FlatParameter``."""
     handle = _module_handle(state, module)
     if not handle:
         return
@@ -343,9 +336,7 @@ def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
 
 
 def _register_orig_params(state: _FSDPState, module: nn.Module) -> None:
-    """
-    Deregisters the ``FlatParameter``; registers the original parameters.
-    """
+    """Deregisters the ``FlatParameter``; registers the original parameters."""
     handle = _module_handle(state, module)
     if not handle:
         return

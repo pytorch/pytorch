@@ -19,10 +19,7 @@ def _is_supported_device(tensor: torch.Tensor) -> bool:
 
 
 class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
-    """
-    Lazily serves tensor to request device. This class extends
-    _MultiDeviceReplicator to allow support for "cpu" as a device.
-    """
+    """Lazily serves tensor to request device. This class extends _MultiDeviceReplicator to allow support for "cpu" as a device."""
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
         assert _is_supported_device(master_tensor)
@@ -32,8 +29,9 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
 
 class ShardedGradScaler(GradScaler):
     """
-    ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
-    functionality from GradScaler:
+    ShardedGradScaler helps perform gradient scaling in a shard aware manner.
+
+    It extends functionality from GradScaler:
     * Supports Pytorch DDP and FSDP implementations
     * Support CPU offloaded tensors (as used in fully sharded data parallel[FSDP])
     * Supports the custom Mixed Precision loss dtype (fp16, bf16) that FSDP returns
@@ -303,7 +301,8 @@ class ShardedGradScaler(GradScaler):
             torch.futures.wait_all(future_handles)
 
     def _amp_update_scale_cpu_(self, found_inf: torch.Tensor) -> None:
-        """
+        """Update scale based on 'found_inf' and growth conditions.
+
         If found_inf is 1.0 (True), then scale is multiplied by backoff_factor and growth_tracker is set to zero.
         Otherwise, scale is multiplied by the growth factor when the growth interval is reached.
         """
@@ -322,7 +321,8 @@ class ShardedGradScaler(GradScaler):
 
     def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
         """
-        Updates the scale factor.
+        Update the scale factor.
+
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``
         to reduce it. If ``growth_interval`` unskipped iterations occurred consecutively,
         the scale is multiplied by ``growth_factor`` to increase it.
@@ -336,7 +336,6 @@ class ShardedGradScaler(GradScaler):
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
             been invoked for all optimizers used this iteration.
         """
-
         if not self._enabled:
             return
 
