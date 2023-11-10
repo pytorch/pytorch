@@ -1094,7 +1094,7 @@ Frequently Asked Questions
 
 2. Where can I get ONNX support for my quantized model?
 
-   If you encounter an issue when exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository by prefixing the issue title with ``[ONNX]``.
+   If you encounter an issue when exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository and prefix the issue title with ``[ONNX]``.
 
    If you encounter an issue with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
 
