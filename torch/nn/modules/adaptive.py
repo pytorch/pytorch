@@ -281,7 +281,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     def predict(self, input: Tensor) -> Tensor:
         r"""Return the class with the highest probability for each example in the input minibatch.
 
-        This is equivalent to `self.log_prob(input).argmax(dim=1)`, but is more efficient in some cases.
+        This is equivalent to ``self.log_prob(input).argmax(dim=1)``, but is more efficient in some cases.
 
         Args:
             input (Tensor): a minibatch of examples
