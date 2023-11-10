@@ -6,15 +6,18 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
-from torch.distributed._shard.sharded_tensor import ShardedTensor
+
+from torch.distributed._sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.checkpoint.state_dict import (
     PG,
     set_state_dict,
     STATE,
     StateDictOptions,
 )
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
+
+# avoids circular dependency
 
 
 class VerifyStateDictMixin:
