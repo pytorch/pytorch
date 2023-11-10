@@ -201,12 +201,12 @@ Legend:
 
 def segsum(data):
     r"""Visually reports how the allocator has filled its segments.
-    
-    This printout can help debug fragmentation issues since free fragments 
-    will appear as gaps in this printout.  The amount of free space is reported 
+
+    This printout can help debug fragmentation issues since free fragments
+    will appear as gaps in this printout.  The amount of free space is reported
     for each segment.
-    We distinguish between internal free memory which occurs because the 
-    allocator rounds the allocation size, and external free memory, which are 
+    We distinguish between internal free memory which occurs because the
+    allocator rounds the allocation size, and external free memory, which are
     the gaps between allocations in a segment.
     Args:
         data: snapshot dictionary created from _snapshot()
