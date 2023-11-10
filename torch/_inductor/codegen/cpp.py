@@ -1562,6 +1562,12 @@ class CppVecKernel(CppKernel):
         return self.cse.generate(self.loads, line)
 
     def get_vec_store_line(self, value, var, index, dtype):
+        """
+        Get a store line str that stores `value` into `var` at `index` of `dtype`.
+        :param value: Vectorized type templaterized on `dtype`.
+        :param var: buffer to store into.
+        :index: index into the `var`.
+        """
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
