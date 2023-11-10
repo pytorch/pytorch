@@ -2161,7 +2161,8 @@ if torch._C._has_mkldnn:
         post_op_algorithm,
     ):
         output_shape = list(x.shape)
-        output_shape[-1] = w.shape[0]
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
         assert output_dtype in [torch.float32, torch.bfloat16]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
@@ -3673,6 +3674,11 @@ def meta_masked_scatter(self, mask, source):
     self, mask = _maybe_broadcast(self, mask)
     output = torch.empty_like(self, memory_format=torch.contiguous_format)
     return meta_masked_scatter_(output, mask, source)
+
+
+@register_meta(aten.masked_scatter_backward)
+def meta_masked_scatter_backward(self, mask, sizes):
+    return self.new_empty(sizes)
 
 
 @register_meta(aten.index_put_.default)

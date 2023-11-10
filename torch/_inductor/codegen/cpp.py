@@ -838,6 +838,14 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
+    def add(a, b):
+        return f"decltype({a})({a} + {b})"
+
+    @staticmethod
+    def sub(a, b):
+        return f"decltype({a})({a} - {b})"
+
+    @staticmethod
     def mul(a, b):
         return f"decltype({a})({a} * {b})"
 
@@ -1269,10 +1277,14 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
                     f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
             )
@@ -2740,7 +2752,7 @@ class CppKernelProxy(CppKernel):
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
-        with torch._inductor.config.patch(inplace_buffers=False):  # type: ignore[attr-defined]
+        with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:

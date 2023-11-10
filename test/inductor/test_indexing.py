@@ -237,6 +237,20 @@ class ExprPrinterTests(TorchTestCase):
                     "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
                 )
 
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            s2 = sympy.S(-1)
+            expr = FloorDiv(s1, s2)
+            if integer:
+                self.assertEqual(pexpr(expr), "(-1)*s1")
+                self.assertEqual(cexpr(expr), "(-1L)*s1")
+            else:
+                self.assertEqual(pexpr(expr), "(s1 // (-1))")
+                self.assertEqual(
+                    cexpr(expr),
+                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
+                )
+
     def test_print_Min_Max(self):
         cases = (
             (sympy.Min, "min"),

@@ -4,7 +4,8 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <cmath>
 
-// The functions in this file should be header-only as it is used under ABI-compatibility mode.
+// The functions in this file should be header-only as it is used under
+// ABI-compatibility mode.
 
 namespace c10 {
 
@@ -19,7 +20,8 @@ namespace c10 {
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 template <typename scalar_t>
-inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
+    __ubsan_ignore_float_divide_by_zero__ {
   if (C10_UNLIKELY(b == 0)) {
     // Divide by zero: return standard IEEE result
     return a / b;
