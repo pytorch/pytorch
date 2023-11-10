@@ -6091,13 +6091,13 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_values_offsets(Tensor(a) self, Tensor offsets) -> Tensor(a)
+- func: _nested_view_from_values_offsets(Tensor(a) self, Tensor offsets, Tensor dummy) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch:
     CompositeExplicitAutograd: _nested_view_from_values_offsets
 
-- func: _nested_view_from_values_offsets_copy(Tensor self, Tensor offsets) -> Tensor
+- func: _nested_view_from_values_offsets_copy(Tensor self, Tensor offsets, Tensor dummy) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy

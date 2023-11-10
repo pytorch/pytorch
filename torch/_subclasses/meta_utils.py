@@ -256,6 +256,44 @@ class MetaConverter:
             self.check_for_expired_weak_storages()
             self.check_expired_count = 0
 
+        from torch._dynamo.source import AttrSource
+
+        def empty_create(inner_t, inner_src):
+            (
+                inner_sizes,
+                inner_strides,
+                inner_storage_offset,
+            ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
+            return torch.empty_strided(
+                inner_sizes,
+                inner_strides,
+                dtype=inner_t.dtype,
+                device="meta",
+            )
+
+        def get_symbolic_ragged_size(nt, source):
+            # must be a singleton symint
+            assert (
+                isinstance(nt._size[1], torch.SymInt)
+                and nt._size[1].node.singleton_int() is not None
+            )
+
+            from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+            # Replace the eager ragged size with our freshly
+            # allocated jagged size that has a source
+            ragged_size = shape_env.create_symintnode(
+                shape_env.create_symbol(
+                    nt._size[1],
+                    TensorPropertySource(
+                        source, TensorProperty.SIZE, 1  # type: ignore[arg-type]
+                    ),
+                ),
+                hint=nt._size[1],
+            )
+
+            return ragged_size
+
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
@@ -306,7 +344,6 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
                     if shape_env and not t.is_nested:
@@ -382,7 +419,35 @@ class MetaConverter:
                                 # so the metadata is guaranteed to be the same.
                                 # (2) It is necessary because we don't actually
                                 # want to guard on the base's metadata here.
-                                return t._view_func_unsafe(base)
+
+                                # TODO: Handle type permutations of base and t
+                                #   (jagged, dense)
+                                #   (dense, jagged)
+                                if base.is_nested:
+                                    return t._view_func_unsafe(base)
+                                else:
+                                    # base is ostensibly a standard dense tensor
+                                    # fake-ify offsets then return view
+                                    offsets_src = AttrSource(source, "_offsets")  # type: ignore[arg-type]
+                                    fake_offsets = callback(
+                                        lambda: empty_create(t._offsets, offsets_src)
+                                    )
+
+                                    ragged_size = get_symbolic_ragged_size(t, source)
+
+                                    from torch.nested._internal.nested_tensor import (
+                                        _tensor_symint_registry,
+                                        nested_view_from_values_offsets,
+                                    )
+
+                                    # We're not calling __tensor_unflatten__() since we need a
+                                    # view, but we still want to ensure the fake offsets are
+                                    # associated with a symbolic ragged size.
+                                    _tensor_symint_registry[fake_offsets] = ragged_size
+
+                                    return nested_view_from_values_offsets(
+                                        base, fake_offsets
+                                    )
                             else:
                                 (
                                     sizes,
@@ -440,19 +505,6 @@ class MetaConverter:
                             storage_offset,
                         ) = sym_sizes_strides_storage_offset(t, source)
 
-                    def empty_create(inner_t, inner_src):
-                        (
-                            inner_sizes,
-                            inner_strides,
-                            inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
-                        return torch.empty_strided(
-                            inner_sizes,
-                            inner_strides,
-                            dtype=inner_t.dtype,
-                            device="meta",
-                        )
-
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
@@ -461,15 +513,7 @@ class MetaConverter:
                         # to the creation function here.
                         # We assume that if the inner tensors of the subclass are given symbolic sizes,
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
-                        from torch._dynamo.source import AttrSource
-
                         if t.is_nested:
-                            # Avoid circular import
-                            from torch._dynamo.source import (
-                                TensorProperty,
-                                TensorPropertySource,
-                            )
-
                             # For nested tensors, manually do transform_subclass
                             # so we can insert some special processing on ctx
                             attrs, ctx = t.__tensor_flatten__()
@@ -478,27 +522,12 @@ class MetaConverter:
                                 inner_t = getattr(t, attr)
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
-                                        inner_t, AttrSource(source, attr)
+                                        inner_t, AttrSource(source, attr)  # type: ignore[arg-type]
                                     )
                                 )
-                            # We expect JaggedTensor to have a 'ragged_size' in
-                            # its context
-                            assert isinstance(ctx, dict) and "ragged_size" in ctx
-                            assert (
-                                isinstance(t._size[1], torch.SymInt)
-                                and t._size[1].node.singleton_int() is not None
-                            )
-                            # Replace the eager ragged size with our freshly
-                            # allocated jagged size that has a source
-                            ctx["ragged_size"] = shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    t._size[1],
-                                    TensorPropertySource(
-                                        source, TensorProperty.SIZE, 1
-                                    ),
-                                ),
-                                hint=t._size[1],
-                            )
+
+                            ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
+
                             r = type(t).__tensor_unflatten__(
                                 transformed_tensors_dict, ctx
                             )

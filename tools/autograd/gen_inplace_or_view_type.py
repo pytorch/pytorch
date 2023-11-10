@@ -368,7 +368,10 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             )
             updated_unpacked_args.append(arg_value)
         elif (
-            arg == "nested_size_" or arg == "nested_strides_" or arg == "offsets_"
+            arg == "nested_size_"
+            or arg == "nested_strides_"
+            or arg == "offsets_"
+            or arg == "dummy_"
         ) and arg_type == ConstRefCType(BaseCType(tensorT)):
             # [NOTE] [Nested Arg Types]
             # This is temporary. Nested tensors will be migrating to use SymInts and
