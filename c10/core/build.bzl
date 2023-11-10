@@ -92,22 +92,6 @@ def define_targets(rules):
         alwayslink = True,
     )
 
-    rules.cc_library(
-        name = "impl_cow",
-        srcs = rules.glob([
-            "impl/cow/*.cpp",
-        ]),
-        hdrs = rules.glob([
-            "impl/cow/*.h",
-        ]),
-        deps = [
-            ":base",
-            ":CPUAllocator",
-        ],
-        visibility = ["//c10/test:__pkg__"],
-
-    )
-
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(
