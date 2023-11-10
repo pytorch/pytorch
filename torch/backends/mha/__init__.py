@@ -4,11 +4,13 @@ import torch
 
 _is_fastpath_enabled: bool = True
 
+
 def get_fastpath_enabled() -> bool:
     """Returns whether fast path is enabled, or ``True`` if jit is scripting."""
     if not torch.jit.is_scripting():
         return _is_fastpath_enabled
     return True
+
 
 def set_fastpath_enabled(value: bool) -> None:
     """Sets whether fast path is enabled"""
