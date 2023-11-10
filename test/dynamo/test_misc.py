@@ -7997,6 +7997,9 @@ ShapeEnv not equal: field values don't match:
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
   > Right: {}
+==> source_to_symint_node_cache: values don't match.
+  >  Left: {x.size()[0]: s0, x.size()[1]: s1, x.storage_offset(): 0, x.stride()[0]: s1, x.stride()[1]: 1}
+  > Right: {}
 ==> val_to_var: values don't match.
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
   > Right: {0: 0, 1: 1}

@@ -360,6 +360,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     fake_inp = fake_mode.from_tensor(
                         inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
                     )
+                    # Clear the cache, so that we can properly cover the first dynamic compile.
+                    # Alternatively, remove this line and lower the frame counts by 1 below, as the
+                    # first recompile is accounted for via caching.
+                    shape_env.source_to_symint_node_cache.clear()
                     opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
             self.assertEqual(cnt.op_count, exp_op_count)
