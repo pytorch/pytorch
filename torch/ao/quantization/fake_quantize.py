@@ -119,26 +119,32 @@ class FakeQuantizeBase(ABC, Module):
         return fake_quant_constructor
 
 class FakeQuantize(FakeQuantizeBase):
-    r"""Simulate quantize and dequantize operations in training time.
+    r"""Simulate the quantize and dequantize operations in training time.
 
-    Simulate the quantize and dequantize operations in training time.
     The output of this module is given by::
 
         x_out = (
           clamp(round(x/scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
+
     * :attr:`scale` defines the scale factor used for quantization.
+
     * :attr:`zero_point` specifies the quantized value to which 0 in floating point maps to
+
     * :attr:`fake_quant_enabled` controls the application of fake quantization on tensors, note that
       statistics can still be updated.
+
     * :attr:`observer_enabled` controls statistics collection on tensors
+
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
         allowable values are torch.qint8 and torch.quint8.
 
     Args:
+
         observer (module): Module for observing statistics on input tensors and calculating scale
           and zero-point.
         observer_kwargs (optional): Arguments for the observer module
+
     Attributes:
         activation_post_process (Module): User provided module that collects statistics on the input tensor and
           provides a method to calculate scale and zero-point.
