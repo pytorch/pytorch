@@ -641,7 +641,11 @@ class GraphLowering(torch.fx.Interpreter):
         # this is a constant
         value = getattr(self.module, target)
 
-        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
+        if (
+            config.split_const_graph
+            or config.always_keep_tensor_constants
+            or unsupported_output_tensor(value)
+        ):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
