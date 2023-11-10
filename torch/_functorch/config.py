@@ -9,6 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
+from typing import TYPE_CHECKING
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -33,6 +34,8 @@ cse = True
 # Restricts the amount of computation AOTAutograd can do.
 max_dist_from_bw = 3
 
+if TYPE_CHECKING:
+    from torch._dynamo.config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 
