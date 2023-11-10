@@ -248,7 +248,7 @@ Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& b
     return Tensor();
 }
 
-Tensor FunctionalInverses::_nested_view_from_values_offsets_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& offsets) {
+Tensor FunctionalInverses::_nested_view_from_values_offsets_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& offsets, const Tensor& dummy) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
 }

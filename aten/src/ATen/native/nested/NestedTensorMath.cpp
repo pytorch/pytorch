@@ -861,7 +861,10 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
-Tensor _nested_view_from_values_offsets(const Tensor& values, const Tensor& offsets) {
+Tensor _nested_view_from_values_offsets(
+    const Tensor& values,
+    const Tensor& offsets,
+    const Tensor& dummy) {
   TORCH_INTERNAL_ASSERT(
       false, "_nested_view_from_values_offsets(): expected to be implemented from Python");
   return Tensor();

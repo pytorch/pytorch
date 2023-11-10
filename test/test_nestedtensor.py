@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
 from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     NestedTensor,
+    nested_view_from_values_offsets,
 )
 import contextlib
 
@@ -2979,7 +2980,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3302,7 +3303,8 @@ class TestNestedTensorSubclass(NestedTestCase):
     def test_jagged_view_from_values_offsets(self, device, dtype, requires_grad):
         values = torch.randn(10, 5, device=device, dtype=dtype, requires_grad=requires_grad)
         offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
-        nt = torch._nested_view_from_values_offsets(values, offsets)
+
+        nt = nested_view_from_values_offsets(values, offsets)
 
         expected_dim = values.dim() + 1
         expected_batch_size = offsets.shape[0] - 1
