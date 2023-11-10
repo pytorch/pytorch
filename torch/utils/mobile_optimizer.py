@@ -18,7 +18,7 @@ def optimize_for_mobile(
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
     Optimize a torch script module for mobile deployment.
-    
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
@@ -78,7 +78,7 @@ def optimize_for_mobile(
 def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
     Generate a list of lints for a given torch script module.
-       
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
 

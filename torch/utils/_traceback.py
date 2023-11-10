@@ -145,7 +145,7 @@ def shorten_filename(fn, *, base=None):
 def format_frame(frame, *, base=None, line=False):
     """
     Format a FrameSummary in a short way, without printing full absolute path or code.
-    
+
     The idea is the result fits on a single line.
     """
     extra_line = ""

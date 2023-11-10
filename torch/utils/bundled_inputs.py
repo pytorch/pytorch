@@ -44,7 +44,7 @@ def bundle_inputs(
         _receive_inflate_expr: Optional[List[str]] = None,
 ) -> torch.jit.ScriptModule:
     """Create and return a copy of the specified model with inputs attached.
-    
+
     The original model is not mutated or changed in any way.
 
     Models with bundled inputs can be invoked in a uniform manner by
