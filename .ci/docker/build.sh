@@ -271,7 +271,6 @@ case "$image" in
     CLANG_VERSION=12
     CONDA_CMAKE=yes
     EXECUTORCH=yes
-    BUCK2=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
@@ -375,7 +374,6 @@ docker build \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "BUCK2=${BUCK2}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
