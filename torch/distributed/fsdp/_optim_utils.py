@@ -25,6 +25,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -45,7 +46,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
     _reset_flat_param_grad_info_if_needed,
 )
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.utils._pytree import tree_map_only
 
@@ -299,7 +299,10 @@ def _unflatten_communicated_optim_state(
                 if getattr(osd_config, "_use_dtensor", False):
                     assert fsdp_state._device_mesh is not None
                     optim_state = _ext_chunk_dtensor(
-                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                        optim_state,
+                        fsdp_state.rank,
+                        fsdp_state._device_mesh,
+                        fsdp_state._fsdp_extension,
                     )
                 else:
                     assert fsdp_state.process_group is not None
@@ -309,6 +312,7 @@ def _unflatten_communicated_optim_state(
                         fsdp_state.world_size,
                         fsdp_state._device_handle.device_count(),
                         fsdp_state.process_group,
+                        fsdp_state._fsdp_extension,
                     )
             unflat_state_param[state_name] = optim_state
 
@@ -1455,7 +1459,10 @@ def _unflatten_orig_param_states(
             if getattr(osd_config, "_use_dtensor", False):
                 assert fsdp_state._device_mesh is not None
                 value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state._device_mesh,
+                    fsdp_state._fsdp_extension,
                 )
             else:
                 assert fsdp_state.process_group is not None
@@ -1465,6 +1472,7 @@ def _unflatten_orig_param_states(
                     fsdp_state.world_size,
                     fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
+                    fsdp_state._fsdp_extension,
                 )
         elif not cpu_offload:
             with SimpleProfiler.profile("clone"):
@@ -1721,7 +1729,15 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info[fqn]
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            if fsdp_param_info is None:
+                # This can happen if the not all FSDP instances have all the
+                # parameters. This can happen with FSDP + some MPMD style
+                # parallelism.
+
+                # TODO: it is unclear if we need to do the same check with
+                # non-FSDP managed keys.
+                continue
             state = {} if param_key is None else optim_state_dict[param_key]
             if id(fsdp_param_info) not in all_states:
                 all_states[id(fsdp_param_info)] = {}

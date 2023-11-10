@@ -6,7 +6,7 @@ from typing import Any, Tuple
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
@@ -18,13 +18,32 @@ prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
+"""
+The quantization.py file primarily incorporates passes related to quantization fusion
+in inductor, includes:
+1. Dequant Promotion;
+2. Conv/GEMM weight prepack with oneDNN Library;
+3. Conv/GEMM quantization fusion with output quant node (if have);
+4. Other pointwise operators' quantization fusion like: qmaxpool2d, qcat and more;
 
-def _generate_pattern_with_dtype_convert(pattern, dtype=Arg()):
-    return CallFunction(
-        prims.convert_element_type.default,
-        pattern,
-        dtype,
-    )
+It also involves int8-mixed-fp32 and int8-mixed-bf16 quantization. The main difference
+of patterns for int8-mixed-bf16, comparing with int8-mixed-fp32, is
+1. There is to(dtype=torch.bfloat16) node at the inputs of activation and weight for Conv/GEMM.
+2. There is to(dtype=torch.float32) node at the outputs of Conv/GEMM before inputs to next quant node.
+Refer to: https://github.com/pytorch/pytorch/issues/111640 for detail design of int8-mixed-bf16
+quantization.
+"""
+
+
+def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+    if dtype_convert:
+        return CallFunction(
+            prims.convert_element_type.default,
+            pattern,
+            dtype,
+        )
+    else:
+        return pattern
 
 
 """
@@ -58,9 +77,11 @@ dequantize_per_channel_weight_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
-dequantize_per_channel_to_bf16_weight_pattern = _generate_pattern_with_dtype_convert(
-    dequantize_per_channel_weight_pattern,
-    KeywordArg("autocast_wgt_dtype"),
+dequantize_per_channel_to_bf16_weight_pattern = (
+    _may_generate_pattern_with_dtype_convert(
+        dequantize_per_channel_weight_pattern,
+        KeywordArg("autocast_wgt_dtype"),
+    )
 )
 
 dequantize_per_channel_clone_weight_pattern = CallFunction(
@@ -167,11 +188,10 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                         aten.round.default,
                         CallFunction(
                             aten.mul.Tensor,
-                            computation_call
-                            if dtype == torch.float32
-                            else _generate_pattern_with_dtype_convert(
+                            _may_generate_pattern_with_dtype_convert(
                                 computation_call,
                                 KeywordArg("autocast_output_quant_dtype"),
+                                dtype != torch.float32,
                             ),
                             KeywordArg("o_inv_scale"),
                         ),
@@ -998,7 +1018,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         )
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
@@ -1072,11 +1092,10 @@ def _generate_dequant_convolution_node_pattern(
     assert dtype in [torch.float32, torch.bfloat16]
     dequant_convolution_node_pattern = CallFunction(
         aten.convolution.default,
-        dequantize_per_tensor_activation_pattern
-        if dtype == torch.float32
-        else _generate_pattern_with_dtype_convert(
+        _may_generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
             KeywordArg("autocast_act_dtype"),
+            dtype != torch.float32,
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1187,7 +1206,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
         bias = kwargs["b"] if "b" in kwargs else None
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
@@ -1266,12 +1285,35 @@ def _generate_qlinear_weight_prepack_patterns():
 def _register_quantization_weight_pack_pass():
     for dtype in [torch.float32, torch.bfloat16]:
         # Step 1: Dequant promotion for int8-mixed-fp32/bf16
+        # Transform
+        # graph 1:
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        # into:
+        # graph 2:
+        #            quant
+        #      + - - / - \ - - +
+        #      |dequant dequant|
+        #      |    |      |   |
+        #      | node1 node2   |
+        #      + - | - - - | - +
+        #        quant   quant
+        # In graph 1, the dequant node is shared by node1 and node2,
+        # as a result, neither node1 nor node2 could form an int8
+        # fusion pattern.
+        # After this transformation, the graph 2 could hit the int8
+        # fusion pattern: dequant-node-quant, respectively for
+        # node1 and node2.
         _register_dequant_promotion_pass(
-            dequantize_per_tensor_activation_pattern
-            if dtype == torch.float32
-            else _generate_pattern_with_dtype_convert(
+            _may_generate_pattern_with_dtype_convert(
                 dequantize_per_tensor_activation_pattern,
                 KeywordArg("autocast_act_dtype"),
+                dtype != torch.float32,
             ),
             pass_number=0,
             dtype=dtype,

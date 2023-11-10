@@ -14,6 +14,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
+#include <ATen/native/IndexingUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -211,20 +212,20 @@ T spatialBlockReduceX(T *shared, T val) {
   return shared[0];
 }
 
-template <typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+template <typename scalar_t, typename accscalar_t, typename outscalar_t, typename index_t, template<typename, typename, typename> class Epilogue>
 __global__ void cunn_SpatialSoftMaxForward(
     outscalar_t *output, const scalar_t *input,
-    uint32_t outer_size, uint32_t dim_size, uint32_t inner_size)
+    index_t outer_size, index_t dim_size, index_t inner_size)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
-  const uint32_t outer_stride = inner_size * dim_size;
-  const uint32_t dim_stride = inner_size;
+  const index_t outer_stride = inner_size * dim_size;
+  const index_t dim_stride = inner_size;
 
-  for (uint32_t outer_index = blockIdx.x; outer_index < outer_size; outer_index += gridDim.x) {
-    const uint32_t outer_offset = outer_index * outer_stride;
-    for (uint32_t inner_index = blockIdx.y * blockDim.y + threadIdx.y; inner_index < inner_size; inner_index += blockDim.y * gridDim.y) {
-      const uint32_t data_offset = outer_offset + inner_index;
+  for (index_t outer_index = blockIdx.x; outer_index < outer_size; outer_index += gridDim.x) {
+    const index_t outer_offset = outer_index * outer_stride;
+    for (index_t inner_index = blockIdx.y * blockDim.y + threadIdx.y; inner_index < inner_size; inner_index += blockDim.y * gridDim.y) {
+      const index_t data_offset = outer_offset + inner_index;
       ////////////////////////////////////////////////////////////
       // These two blocks are really equivalent, but specializing on
       // blockDim.x == 1 makes the kernel faster when it's unused.
@@ -234,33 +235,33 @@ __global__ void cunn_SpatialSoftMaxForward(
 
       if (blockDim.x > 1) {
         accscalar_t max_input = at::numeric_limits<accscalar_t>::lowest();
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
         }
         max_input = spatialBlockReduceX<accscalar_t, Max>(sdata,max_input);
 
         accscalar_t sum = 0;
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
                  - max_input);
         sum = spatialBlockReduceX<accscalar_t, Add>(sdata, sum);
 
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_input, sum);
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       } else {
         accscalar_t max_input = at::numeric_limits<accscalar_t>::lowest();
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
         }
         accscalar_t sum = 0;
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           sum += std::exp(static_cast<accscalar_t>(input[data_offset + d * dim_stride])
                  - max_input);
         Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_input, sum);
-        for (uint32_t d = threadIdx.x; d < dim_size; d += blockDim.x)
+        for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       }
     }
@@ -791,25 +792,29 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       dim3 grid, block;
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-        if (!half_to_float) {
-            SpatialSoftMax_getLaunchSizes<accscalar_t>(
-                &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>,
-                outer_size, dim_size, inner_size,
-                grid, block, smem_size);
-            cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>
-              <<<grid, block, smem_size, stream>>>(
-              output.mutable_data_ptr<scalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-        } else {
-            SpatialSoftMax_getLaunchSizes<accscalar_t>(
-                &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
-                outer_size, dim_size, inner_size,
-                grid, block, smem_size);
-            cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>
-              <<<grid, block, smem_size, stream>>>(
-              output.mutable_data_ptr<accscalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
+        AT_DISPATCH_INDEX_TYPES(
+            at::native::canUse32BitIndexMath(input, INT_MAX) ? ScalarType::Int : ScalarType::Long,
+        "host_softmax_launcher", [&] {
+            if (!half_to_float) {
+                SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                    &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, index_t, Epilogue>,
+                    outer_size, dim_size, inner_size,
+                    grid, block, smem_size);
+                cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, index_t, Epilogue>
+                  <<<grid, block, smem_size, stream>>>(
+                  output.mutable_data_ptr<scalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            } else {
+                SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                    &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, index_t, Epilogue>,
+                    outer_size, dim_size, inner_size,
+                    grid, block, smem_size);
+                cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, index_t, Epilogue>
+                  <<<grid, block, smem_size, stream>>>(
+                  output.mutable_data_ptr<accscalar_t>(), input.const_data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+         });
       });
     }
   }

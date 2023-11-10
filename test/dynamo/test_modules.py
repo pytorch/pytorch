@@ -21,10 +21,10 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-try:
-    from . import test_functions
-except ImportError:
-    import test_functions
+
+test_functions = torch._dynamo.testing.load_test_module(
+    __file__, "dynamo.test_functions"
+)
 
 
 class BasicModule(torch.nn.Module):
@@ -1046,11 +1046,11 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
-    test_modulelist = make_test(CustomGetItemModuleList())
+    test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
-    test_moduledict = make_test(CustomGetItemModuleDict())
+    test_moduledict_custom = make_test(CustomGetItemModuleDict())
     test_parameterdict = make_test(ParameterDict())
-    test_parameterdict = make_test(CustomGetItemParameterDict())
+    test_parameterdict_custom = make_test(CustomGetItemParameterDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
