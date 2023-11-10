@@ -4088,7 +4088,6 @@ def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -4109,9 +4108,11 @@ def scaled_dot_product_flash_attention(
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
-        lambda: "q, k, v must be a 4 dimensional tensor",
+        lambda: f"q, k, v must be a 4 dimensional tensor, got {query.dim()}, {key.dim()}, {value.dim()}",
     )
-    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        dropout_p == 0.0, lambda: f"dropout probability must be zero, got {dropout_p}"
+    )
     torch._check(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
@@ -4135,7 +4136,7 @@ def scaled_dot_product_flash_attention(
         requires_grad=query.requires_grad,
     )
     output, _ = aten._scaled_dot_product_attention_math.default(
-        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+        query, key, value, None, dropout_p, is_causal, None, scale=scale
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
