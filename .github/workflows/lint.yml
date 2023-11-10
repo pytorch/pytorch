@@ -15,7 +15,7 @@ on:
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   lintrunner:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@release/2.1
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -62,7 +62,7 @@ jobs:
         exit $RC
 
   quick-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@release/2.1
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -103,7 +103,7 @@ jobs:
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           submodules: false
           fetch-depth: -1
@@ -116,7 +116,7 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@release/2.1
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -151,7 +151,7 @@ jobs:
         exit $RC
 
   toc:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@release/2.1
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -189,7 +189,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@release/2.1
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -210,7 +210,7 @@ jobs:
     runs-on: linux.20_04.4x
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           submodules: false
           fetch-depth: 1
@@ -240,7 +240,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           submodules: false
           fetch-depth: 1
