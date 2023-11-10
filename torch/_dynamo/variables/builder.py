@@ -1769,6 +1769,7 @@ def wrap_to_fake_tensor_and_record(
             "size": fake_e.size(),
             "stride": fake_e.stride(),
         }
+        print("dynamo fakification:", e.shape, "->", fake_e.shape)
         return fake_e
     else:
         return e

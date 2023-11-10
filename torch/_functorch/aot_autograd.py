@@ -4318,6 +4318,7 @@ def create_aot_dispatcher_function(
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=policy.ignore_subclass, dynamic_dims=policy.dynamic_dims, constraint_dims=policy.constraint_dims, source=policy.source)
                 else:
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes)
+                print("aot_autograd fakification:", x.shape, "->", out.shape)
                 return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
