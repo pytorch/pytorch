@@ -17,7 +17,8 @@ log = logging.getLogger(__name__)
 
 class TimerRequest:
     """
-    A data object representing a countdown timer acquisition and release that is used between the ``TimerClient`` and ``TimerServer``.
+    A data object representing a countdown timer acquisition and release that is used between
+    the ``TimerClient`` and ``TimerServer``.
 
     A negative ``expiration_time`` should be interpreted as a "release"
     request.
@@ -69,10 +70,9 @@ class TimerClient(abc.ABC):
 
 
 class RequestQueue(abc.ABC):
-     """
-     Consumer queue holding timer acquisition/release requests
-     """
-
+    """
+    Consumer queue holding timer acquisition/release requests
+    """
     @abc.abstractmethod
     def size(self) -> int:
         """
