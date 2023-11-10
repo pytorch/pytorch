@@ -1,17 +1,11 @@
 # Owner(s): ["module: inductor"]
 import copy
-import importlib
 import itertools
-import os
 import sys
 import unittest
 
 import torch
 from torch import nn
-
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
 
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
@@ -19,7 +13,7 @@ from torch._inductor import config as inductor_config
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import copy_tests, HAS_CPU, HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -28,11 +22,6 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-from inductor.test_torchinductor import copy_tests
 
 
 class ConvOp(nn.Module):

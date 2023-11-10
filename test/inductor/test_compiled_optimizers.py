@@ -1,7 +1,4 @@
 # Owner(s): ["module: inductor"]
-
-import sys
-import unittest
 import weakref
 
 from copy import deepcopy
@@ -15,20 +12,15 @@ from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rp
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    HAS_CPU,
+    HAS_CUDA,
+    requires_cuda,
+)
 
 aten = torch.ops.aten
-
-try:
-    try:
-        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
-    except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, requires_cuda
-except (unittest.SkipTest, ImportError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 
 def compile_opt(opt_compiled, closure=None):
