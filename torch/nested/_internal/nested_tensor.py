@@ -205,15 +205,12 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
-        ctx.kwargs = {
-            "ragged_size": x._size[x._ragged_idx],
-        }
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(gO, offsets=offsets, **ctx.kwargs)
+        return NestedTensor(gO, offsets=offsets)
 
 
 # Not actually a view!
