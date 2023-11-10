@@ -29,10 +29,12 @@
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <iostream>
+
 #include <cstdint>
 #include <tuple>
 
-#include<iostream>
+#include <ATen/ops/zeros.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/core/Tensor.h>
@@ -64,7 +66,10 @@
 #include <c10/util/Exception.h>
 
 // OORT headers
-#include <ATen/native/transformers/hip/oort/kernels/attn_fwd.h>
+#include <oort/attn_fwd.h>
+#include <oort/bwd_kernel_dk_dv.h>
+#include <oort/bwd_kernel_dq.h>
+#include <oort/bwd_preprocess.h>
 
 namespace pytorch_flash {
 
@@ -311,7 +316,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16, 
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
     if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
@@ -434,7 +439,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     at::Tensor seed_t, offset_t;
 
-    
+
     if (p_dropout > 0.0)  {
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
@@ -467,99 +472,98 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
 
-    
+
     //reorder tensors and make contiguous
     at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
     at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
     at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
-    at::Tensor output_t =out.permute({0,2,1,3}).contiguous();
-    
-    at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
+    at::Tensor output_t = out.permute({0,2,1,3}).contiguous();
+
+    at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(q.device()));
 
     dim3  grid;
     grid.x = (q_t.sizes()[2] + 32 - 1) / 32;	// BLOCK_M = 32
     grid.y = q_t.sizes()[0] * q_t.sizes()[1];
     grid.z = 1;
-    dim3 block { 64 * 4, 1, 1 };
+    dim3 block { 64 * 4, 1, 1 };  // compiled triton kernel intrinsic
 
+    at::Tensor softmax_fa_t = at::zeros({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(q.dtype()).device(q.device())); // TODO:: Go back to at::empty for performance if this isn't needed after looking at dropout issues.
 
-    at::Tensor softmax_fa_t = at::empty({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
-    
      if(q_dtype == at::kHalf)
        {
 	if (is_causal)
 	  {
-	    constexpr int				        STAGE = 3;
-	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
-	    auto					        err   = fwd_opt(grid, block,
-							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
-								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-							        *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
-	 } 
+	    constexpr int                                 STAGE = 3;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true> fwd_opt;
+	    auto                                          err   = fwd_opt(grid, block,
+                                                                      (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                      softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
+                                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                      output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+                                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                      *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
+	 }
 	else
 	  {
-	    constexpr int			                STAGE = 1;
-	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
-	    auto				                err   = fwd_opt(grid, block,
-							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
-								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
+	    constexpr int STAGE                               = 1;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true> fwd_opt;
+	    auto                                          err = fwd_opt(grid, block,
+                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
 	  }
        }
      else if (q_dtype == at::kBFloat16)
        {
      	if (is_causal)
      	  {
-     	    constexpr int				        STAGE = 3;
-	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
-     	    auto					        err   = fwd_opt(grid, block,
-     							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
-     								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-     								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-     								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-     								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
+     	    constexpr int                             STAGE = 3;
+            oort::attn_fwd<STAGE,32,64,32,true,true,true> fwd_opt;
+            auto					        err             = fwd_opt(grid, block,
+                                                                      (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                      softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
+                                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                      output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+                                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                      *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
      	  }
      	else
      	  {
-     	    constexpr int			                STAGE = 1;
-	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
-     	    auto				                err   = fwd_opt(grid, block,
-     							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
-     								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-     								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-     								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-     								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
+     	    constexpr int                                 STAGE = 1;
+            oort::attn_fwd<STAGE,32,64,32,true,true,true> fwd_opt;
+     	    auto				                err             = fwd_opt(grid, block,
+                                                                          (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                          softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
+                                                                          q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                          k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                          v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                          output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+                                                                          q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                          *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
      	  }
        }
 
      //undo reorder tensors
-     q_t.permute({0,2,1,3}).contiguous();
-     k_t.permute({0,2,1,3}).contiguous();
-     v_t.permute({0,2,1,3}).contiguous();
-     output_t.permute({0,2,1,3}).contiguous();
-  
+     q_padded = q_t.permute({0,2,1,3}).contiguous();
+     k_padded = k_t.permute({0,2,1,3}).contiguous();
+     v_padded = v_t.permute({0,2,1,3}).contiguous();
+     out = output_t.permute({0,2,1,3}).contiguous();
+
      hipStreamSynchronize(stream);
-  
+
      if (seqlenq_ngroups_swapped) {
        out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
        q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
-       softmax_fa_t = softmax_fa_t.reshape({batch_size, num_heads_k * seqlen_q, 1}); // JCG we have different dims. Verify
+       //softmax_fa_t = softmax_fa_t.reshape({batch_size, num_heads_k * seqlen_q, 1}); // JCG we have different dims. Verify
      }
      return {out, q_padded, k_padded, v_padded, softmax_fa_t, seed_t, offset_t, p};
 }
@@ -653,6 +657,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     const int head_size = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
+
+    TORCH_CHECK((seqlen_q == seqlen_k) && is_causal, "For backwards kernel seqlen_q must equal seqlen_k for causal kernels")
+
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
     TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
@@ -772,29 +779,264 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
 
     //JCG TODO WE GO IN HERE TODO backwards
+    //reorder tensors and make contiguous
+    at::Tensor q_t = q.permute({0,2,1,3}).contiguous();
+    at::Tensor k_t = k.permute({0,2,1,3}).contiguous();
+    at::Tensor v_t = v.permute({0,2,1,3}).contiguous();
+    at::Tensor out_t = out.permute({0,2,1,3}).contiguous();
 
-    // _bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
-    // 						   o, do,
-    // 						   do_scaled, delta,
-    // 						   BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
-    // 						   );
-       
-     
-    // _bwd_kernel[(ctx.grid[1],)](
-    // 				q, k, v, ctx.sm_scale,
-    // 				o, do_scaled,
-    // 				dq, dk, dv,
-    // 				L, delta,
-    // 				q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-    // 				k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-    // 				v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-    // 				q.shape[0], q.shape[1], q.shape[2],
-    // 				block_scale * ctx.grid[0],
-    // 				BLOCK_M=BLOCK, BLOCK_N=BLOCK,
-    // 				BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
-    // 				CAUSAL=ctx.causal,
-    // 				num_stages=1,
-    // 				);    
+    //reorder tensors and make contiguous
+    at::Tensor dq_t = dq.permute({0,2,1,3}).contiguous();
+    at::Tensor dk_t = dk.permute({0,2,1,3}).contiguous();
+    at::Tensor dv_t = dv.permute({0,2,1,3}).contiguous();
+    at::Tensor dout_t = dout.permute({0,2,1,3}).contiguous();
+
+    dim3  grid;
+    grid.x = (q_t.sizes()[2] + 64 - 1) / 64;	// BLOCK_M = 64
+    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
+    grid.z = 1;
+    dim3 block { 64 * 4, 1, 1 };
+
+    at::Tensor new_do = at::empty_like(dout_t);
+    at::Tensor L = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(q.device())); // may need to recompute
+    at::Tensor delta = at::empty_like(L);
+
+    // Preprocess
+    if(q_dtype == at::kHalf)
+      {
+        oort::bwd_preprocess<64,64> pre_opt;
+        auto                        err   = pre_opt(grid, block,
+                                                    (__fp16*)(out_t.data_ptr()), (__fp16*)(dout_t.data_ptr()),
+                                                    (__fp16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
+                                                    stream);
+      }
+    else if (q_dtype == at::kBFloat16)
+      {
+        oort::bwd_preprocess<64,64> pre_opt;
+        auto                        err   = pre_opt(grid, block,
+                                                    (__bf16*)(out_t.data_ptr()), (__bf16*)(dout_t.data_ptr()),
+                                                    (__bf16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
+                                                    stream);
+      }
+
+    // dk, dv and then dq
+    grid.x = (q_t.sizes()[2] + 16 - 1) / 16;	// BLOCK_M = 16
+    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
+    grid.z = 1;
+
+    if((is_causal == true) && (is_dropout == true))
+      {
+        if(q_dtype == at::kHalf)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                    (__fp16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+          }
+        else if (q_dtype == at::kBFloat16)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                    (__bf16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+          }
+      }
+    else if((is_causal == true) && (is_dropout == false))
+      {
+        if(q_dtype == at::kHalf)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                    (__fp16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+          }
+        else if (q_dtype == at::kBFloat16)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                    (__bf16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+          }
+      }
+    else if((is_causal == false) && (is_dropout == true))
+      {
+        if(q_dtype == at::kHalf)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                    (__fp16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+          }
+        else if (q_dtype == at::kBFloat16)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                    (__bf16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+          }
+      }
+    else
+      {
+                if(q_dtype == at::kHalf)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                                    (__fp16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+          }
+        else if (q_dtype == at::kBFloat16)
+          {
+            oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
+            auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                             *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+
+            oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
+            auto				                    dq_err = dq_opt(grid, block,
+                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                                    (__bf16*)dq_t.data_ptr(), (float*)(L.data_ptr()),(float*)(delta.data_ptr()),
+                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                                    *(uint64_t*)(philox_args.seed_.val), *(uint32_t*)(philox_args.offset_.val), stream);
+          }
+      }
+
+    //undo reorder tensors for returns
+    dq = dq_t.permute({0,2,1,3}).contiguous();
+    dk = dk_t.permute({0,2,1,3}).contiguous();
+    dv = dv_t.permute({0,2,1,3}).contiguous();
 
     // For MQA/GQA we need to sum dK and dV across the groups
     if (num_heads_k != num_heads) {
@@ -830,7 +1072,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_WARN("[mha_varlen_bwd not supported on ROCm");
 
     at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
-    
+
     return { q, k, v, softmax_d };
 }
 } // namespace pytorch_fmha

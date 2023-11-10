@@ -1307,6 +1307,7 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
+    include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

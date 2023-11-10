@@ -152,3 +152,6 @@
 [submodule "third_party/composable_kernel"]
 	path = third_party/composable_kernel
 	url = https://github.com/ROCmSoftwarePlatform/composable_kernel
+[submodule "third_party/oort"]
+	path = third_party/oort
+	url = git@github.com:ROCmSoftwarePlatform/oort.git
