@@ -2717,7 +2717,7 @@ class <lambda>(torch.nn.Module):
             x.t_()
             return (x * 2,)
         mod = TestMod(fn)
-        inp = torch.randn(2)
+        inp = torch.randn(2, 4)
         with self.assertRaisesRegex(
             RuntimeError, "Found an input that received a metadata mutation"
         ):
