@@ -5,6 +5,13 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/cow/COW.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_lazy_clone.h>
+#endif
+
 namespace at::native {
 
 Tensor _lazy_clone(Tensor const& self) {
