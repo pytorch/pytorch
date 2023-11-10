@@ -457,7 +457,7 @@ def _assert_in_training_states(
 
 
 def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
-    """Return subset of modules.
+    """Return a subset of root modules.
 
     Returns:
         Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
