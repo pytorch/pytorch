@@ -10,6 +10,7 @@ namespace impl {
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct RawTensorInfo {
   TensorImplAddress impl_;
   StorageImplData storage_;
