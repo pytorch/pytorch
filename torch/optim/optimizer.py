@@ -846,9 +846,7 @@ class Optimizer:
         ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        r"""Perform a single optimization step.
-
-        Parameter update
+        r"""Perform a single optimization step (parameter update).
 
         Args:
             closure (Callable): A closure that reevaluates the model and
