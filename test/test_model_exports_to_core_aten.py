@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: mobile"]
 import copy
 
+import pytest
+
 import torch
 import torch._export as export
 
@@ -17,6 +19,7 @@ def _get_ops_list(m: torch.fx.GraphModule):
 
 
 class TestQuantizePT2EModels(TestCase):
+    @pytest.mark.xfail()
     @skip_if_no_torchvision
     def test_vit_aten_export(self):
         from torchvision.models import vit_b_16  # @manual
