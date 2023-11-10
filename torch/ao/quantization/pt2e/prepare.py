@@ -29,6 +29,7 @@ __all__ = [
     "prepare",
 ]
 
+
 def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
     """Find the root node for the sharing tree
     Args:
@@ -177,21 +178,22 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
             # find root_qspec for `arg` Node (the output of previous node)
             assert isinstance(input_edge, tuple)
             arg, n = input_edge
-            arg_as_output_root_qspec = None
-            if arg in edge_or_node_to_qspec:
-                arg_as_output_qspec = edge_or_node_to_qspec[arg]
-                arg_as_output_root_qspec = _find_root_qspec(arg_as_output_qspec, edge_or_node_to_qspec, shared_with_map)
-            # TODO: add assertions for types of root qspecs
-            if (
-                arg_as_output_root_qspec is not None and
-                _has_same_dtype(arg_as_output_root_qspec, input_edge_root_qspec) and
-                _has_same_is_dynamic(arg_as_output_root_qspec, input_edge_root_qspec)
-            ):
-                # the input arg to the node should reuse the existing output observer for arg
-                # since dtype is the same (we may want to extend this to be a more strict check
-                # in the future)
-                # so we point from `input_edge` to `arg` (output of the argument)
-                _union(arg, input_edge, shared_with_map)
+            if n.meta["quantization_annotation"].allow_implicit_sharing:
+                arg_as_output_root_qspec = None
+                if arg in edge_or_node_to_qspec:
+                    arg_as_output_qspec = edge_or_node_to_qspec[arg]
+                    arg_as_output_root_qspec = _find_root_qspec(arg_as_output_qspec, edge_or_node_to_qspec, shared_with_map)
+                # TODO: add assertions for types of root qspecs
+                if (
+                    arg_as_output_root_qspec is not None and
+                    _has_same_dtype(arg_as_output_root_qspec, input_edge_root_qspec) and
+                    _has_same_is_dynamic(arg_as_output_root_qspec, input_edge_root_qspec)
+                ):
+                    # the input arg to the node should reuse the existing output observer for arg
+                    # since dtype is the same (we may want to extend this to be a more strict check
+                    # in the future)
+                    # so we point from `input_edge` to `arg` (output of the argument)
+                    _union(arg, input_edge, shared_with_map)
             _update_shared_with(input_edge, qspec, shared_with_map)
 
     # now that we get the sharing relations between all edges and nodes, we can assingn group ids
