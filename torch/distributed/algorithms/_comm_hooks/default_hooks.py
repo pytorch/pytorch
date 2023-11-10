@@ -42,8 +42,7 @@ class DefaultState:
         return float(factor)
 
 class LowPrecisionState(DefaultState):
-    """
-    Stores state needed to perform gradient communication in a lower precision within a communication hook.
+    """Stores state needed to perform gradient communication in a lower precision within a communication hook.
 
     Communication hook will cast gradients back to the original parameter precision
     specified by ``parameter_type`` (default: torch.float32).
