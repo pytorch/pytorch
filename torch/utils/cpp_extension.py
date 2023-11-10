@@ -2344,17 +2344,12 @@ def _write_ninja_file(path,
     if with_cuda:
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
-        # --generate-dependencies-with-compile was added in CUDA 10.2.
-        # Compilation will work on earlier CUDA versions but header file
-        # dependencies are not correctly computed.
-        required_cuda_version = '11.0'
-        if torch.version.cuda is not None and TorchVersion(torch.version.cuda) >= required_cuda_version:
-            cuda_compile_rule.append('  depfile = $out.d')
-            cuda_compile_rule.append('  deps = gcc')
-            # Note: non-system deps with nvcc are only supported
-            # on Linux so use --generate-dependencies-with-compile
-            # to make this work on Windows too.
-            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
+        cuda_compile_rule.append('  depfile = $out.d')
+        cuda_compile_rule.append('  deps = gcc')
+        # Note: non-system deps with nvcc are only supported
+        # on Linux so use --generate-dependencies-with-compile
+        # to make this work on Windows too.
+        nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
         cuda_compile_rule.append(
             f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 
