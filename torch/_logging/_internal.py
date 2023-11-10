@@ -660,13 +660,22 @@ class TorchLogsFormatter(logging.Formatter):
         record.asctime = self.formatTime(record, self.datefmt)
 
         # exception handling - copied from logging.Formatter.format
+        s = record.message
         if record.exc_info:
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
             if not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            if s[-1:] != "\n":
+                s = s + "\n"
+            s = s + record.exc_text
+        if record.stack_info:
+            if s[-1:] != "\n":
+                s = s + "\n"
+            s = s + self.formatStack(record.stack_info)
 
-        lines = record.message.split("\n")
+        lines = s.split("\n")
         record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
