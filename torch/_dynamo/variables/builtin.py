@@ -1102,14 +1102,8 @@ class BuiltinVariable(VariableTracker):
                             VariableBuilder(tx, GetItemSource(source, i))(b)
                             for i, b in enumerate(bases)
                         ]
-                    elif len(bases) == 1 and (
-                        bases[0] is object
-                        or bases[0] is torch._C.TensorBase
-                        or bases[0] is torch.Tensor
-                    ):
-                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        unimplemented(f"unexpected sourceless type bases: {bases}")
+                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
@@ -1280,7 +1274,7 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         try:
             py_type = obj.python_type()
@@ -1294,7 +1288,7 @@ class BuiltinVariable(VariableTracker):
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
         if py_type is not None:
-            return ConstantVariable.create(py_type)
+            return SourcelessBuilder()(tx, py_type)
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,
