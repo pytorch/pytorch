@@ -53,10 +53,10 @@ class TimerClient(abc.ABC):
     @abc.abstractmethod
     def acquire(self, scope_id: str, expiration_time: float) -> None:
         """
-         Acquires a timer for the worker that holds this client object
-         given the scope_id and expiration_time. Typically registers
-         the timer with the TimerServer.
-         """
+        Acquires a timer for the worker that holds this client object
+        given the scope_id and expiration_time. Typically registers
+        the timer with the TimerServer.
+        """
         pass
 
     @abc.abstractmethod
