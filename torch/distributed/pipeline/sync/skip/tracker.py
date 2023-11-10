@@ -114,7 +114,7 @@ class SkipTrackerThroughPotals(SkipTracker):
 
     def load(self, batch: Batch, ns: Namespace, name: str) -> Optional[Tensor]:
         """Load a skip tensor from the corresponding portal to pop.
-        
+
         The given micro-batch is connected to the portal with :class:`Fork`.
         """
         if not self.skip_layout.requires_copy(ns, name):
@@ -131,7 +131,7 @@ class SkipTrackerThroughPotals(SkipTracker):
         self, batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream, ns: Namespace, name: str,
     ) -> None:
         """Copy the skip tensor in the corresponding portal.
-  
+
         The given micro-batch and the portal will be tied with :class:`Fork` and
         :class:`Join`.
         """

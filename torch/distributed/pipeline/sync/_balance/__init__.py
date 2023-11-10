@@ -50,7 +50,7 @@ def balance_by_time(
     device: Device = torch.device("cuda"),
 ) -> List[int]:
     """Naive automatic balancing by elapsed time per layer.
-    
+
     ::
 
         sample = torch.empty(128, 3, 224, 224)

@@ -23,7 +23,7 @@ Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 class NoChunk:
     """
     Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor should not be chunked on the batch dimension.
-    
+
     Instead it will be replicated as-is across all micro-batches.
     This is useful for tensors which might not have any 'batch' semantics for the model.
     """
