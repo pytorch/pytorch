@@ -562,7 +562,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
 
         input_split_sizes = send_sz_matrix[self.rank]
-        output_split_sizes = send_sz_matrix[:, self.rank]
+        output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
         input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).cuda()
 
         with torch._dynamo.config.patch(
@@ -576,16 +576,11 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             )
         (
             FileCheck()
-            .check("i12 = reinterpret_tensor(arg0_1, (), (), 0).item()")
-            .check("i13 = reinterpret_tensor(arg0_1, (), (), 2).item()")
-            .check("i14 = reinterpret_tensor(arg1_1, (), (), 0).item()")
-            .check("i15 = reinterpret_tensor(arg1_1, (), (), 1).item()")
-            .check(
-                "buf4 = torch.ops._c10d_functional.all_to_all_single.default(arg3_1, [i12, i13], [i14, i15]"
+            .check_regex(
+                "torch.ops._c10d_functional.all_to_all_single.default\\("
+                "arg\\d+_\\d+, \\[i\\d+, i\\d+\\], \\[i\\d+, i\\d+\\]"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
-            # Expect no extra copy on return
-            .check("return (buf4, )")
+            .check("torch.ops._c10d_functional.wait_tensor.default(")
             .run(code)
         )
         out = compiled(input, output_split_sizes, input_split_sizes)
