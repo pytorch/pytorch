@@ -1177,10 +1177,6 @@ class BuiltinVariable(VariableTracker):
                 return build_checkpoint_variable(**options)
             elif trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
-            elif is_allowed(member):
-                return TorchVariable(member, **options)
-            elif ConstantVariable.is_literal(member):
-                return ConstantVariable.create(member, **options)
             elif source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
@@ -1282,9 +1278,6 @@ class BuiltinVariable(VariableTracker):
             py_type = obj.python_type()
         except NotImplementedError:
             py_type = None
-
-        if istype(obj, variables.TupleVariable):
-            return BuiltinVariable(py_type)
 
         if py_type is not None and obj.source:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
