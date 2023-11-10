@@ -1459,10 +1459,11 @@ In-place version of :func:`~threshold`.
 )
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Apply the rectified linear unit function element-wise.
+def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""relu(input, inplace=False) -> Tensor
 
-    See :class:`~torch.nn.ReLU` for more details.
+    Applies the rectified linear unit function element-wise. See
+    :class:`~torch.nn.ReLU` for more details.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu, (input,), input, inplace=inplace)
@@ -1483,11 +1484,14 @@ In-place version of :func:`~relu`.
 )
 
 
-def glu(input: Tensor, dim: int = -1) -> Tensor:
-    r"""Apply the gated linear unit function.
+def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+    r"""
+    glu(input, dim=-1) -> Tensor
 
-    Computes:
-    .. math :: \text{GLU}(a, b) = a \otimes \sigma(b)
+    The gated linear unit. Computes:
+
+    .. math ::
+        \text{GLU}(a, b) = a \otimes \sigma(b)
 
     where `input` is split in half along `dim` to form `a` and `b`, :math:`\sigma`
     is the sigmoid function and :math:`\otimes` is the element-wise product between matrices.
@@ -1505,10 +1509,11 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
-    r"""Apply the HardTanh function element-wise.
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
-    See :class:`~torch.nn.Hardtanh` for more
+    Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
     """
     if has_torch_function_unary(input):
@@ -1530,8 +1535,8 @@ In-place version of :func:`~hardtanh`.
 )
 
 
-def relu6(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Apply a modification of the ReLU with activation limited to maximum size of 6.
+def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
@@ -1570,8 +1575,8 @@ In-place version of :func:`~elu`.
 )
 
 
-def selu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Apply the Scaled Exponential Linear Unit (ELU) function element-wise.
+def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
     :math:`\text{SELU}(x) = scale * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
@@ -1599,8 +1604,8 @@ In-place version of :func:`~selu`.
 )
 
 
-def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Apply CELU, a continously differentiable ELU.
+def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
     :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
@@ -1626,9 +1631,11 @@ In-place version of :func:`~celu`.
 )
 
 
-def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
-    r"""Apply LeakyReLU element-wise.
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""
+    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
+    Applies element-wise,
     :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     See :class:`~torch.nn.LeakyReLU` for more details.
@@ -1674,8 +1681,10 @@ See :class:`~torch.nn.PReLU` for more details.
 
 def rrelu(
     input: Tensor, lower: float = 1.0 / 8, upper: float = 1.0 / 3, training: bool = False, inplace: bool = False
-) -> Tensor:
-    r"""Randomized leaky ReLU.
+) -> Tensor:  # noqa: D400,D402
+    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
+
+    Randomized leaky ReLU.
 
     See :class:`~torch.nn.RReLU` for more details.
     """
@@ -1739,10 +1748,10 @@ See :class:`~torch.nn.Hardshrink` for more details.
 """)
 
 
-def tanhshrink(input):
-    r"""Apply the TanhShrink function element-wise.
+def tanhshrink(input):  # noqa: D400,D402
+    r"""tanhshrink(input) -> Tensor
 
-    Function :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
+    Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
 
     See :class:`~torch.nn.Tanhshrink` for more details.
     """
@@ -1751,10 +1760,10 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
-def softsign(input):
-    r"""Apply the SoftSign function element-wise.
+def softsign(input):  # noqa: D400,D402
+    r"""softsign(input) -> Tensor
 
-    Function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
+    Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
 
     See :class:`~torch.nn.Softsign` for more details.
     """
@@ -1953,18 +1962,19 @@ See :class:`~torch.nn.Softshrink` for more details.
 )
 
 
-def tanh(input):
-    r"""Apply hyperbolic tangent (tanh) function element-wise.
+def tanh(input):  # noqa: D400,D402
+    r"""tanh(input) -> Tensor
 
-     Applies :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
+    Applies element-wise,
+    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
 
     See :class:`~torch.nn.Tanh` for more details.
     """
     return input.tanh()
 
 
-def sigmoid(input):
-    r"""Compute sigmoid element-wise.
+def sigmoid(input):  # noqa: D400,D402
+    r"""sigmoid(input) -> Tensor
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
 
@@ -3274,8 +3284,10 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Calculate the mean element-wise absolute value difference.
+) -> Tensor:  # noqa: D400,D402
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+
+    Function that takes the mean element-wise absolute value difference.
 
     See :class:`~torch.nn.L1Loss` for details.
     """
@@ -3303,9 +3315,10 @@ def mse_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the element-wise mean squared error.
+) -> Tensor:  # noqa: D400,D402
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
+    Measures the element-wise mean squared error.
     See :class:`~torch.nn.MSELoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3334,8 +3347,8 @@ def margin_ranking_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the margin ranking loss.
+) -> Tensor:  # noqa: D400,D402
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
@@ -3370,12 +3383,8 @@ def hinge_embedding_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the loss given an input tensor x and a labels tensor y (containing `1` or `-1`).
-
-    Usually used for measuring whether two inputs are similar or dissimilar,
-    e.g. using the L1 pairwise distance as x,
-    and is typically used for learning nonlinear embeddings or semi-supervised learning.
+) -> Tensor:  # noqa: D400,D402
+    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
@@ -3403,8 +3412,8 @@ def multilabel_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the multi-label margin loss.
+) -> Tensor:  # noqa: D400,D402
+    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
@@ -3431,9 +3440,9 @@ def soft_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""
-    Optimize a two-class classification logistic loss between input tensor x and target tensor y (containing `1` or `-1`).
+    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -3455,10 +3464,8 @@ def multilabel_soft_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute a multi-label one-versus-all loss based on max-entropy.
-
-    Creates a criterion between input x and target y of size (N,C) for optimisation.
+) -> Tensor:  # noqa: D400,D402
+    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -3505,13 +3512,8 @@ def cosine_embedding_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the Cosine Embedding loss.
-
-    Creates a criterion that measures the loss given input tensors x1,x2
-    and a Tensor label y with values 1 or -1.
-    Used for measuring whether two inputs are similar or dissimilar, using the cosine similarity,
-    and is typically used for learning nonlinear embeddings or semi-supervised learning.
+) -> Tensor:  # noqa: D400,D402
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
@@ -3543,8 +3545,8 @@ def multi_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""Compute the multi margin loss.
+) -> Tensor:  # noqa: D400,D402
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
