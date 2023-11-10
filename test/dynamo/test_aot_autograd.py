@@ -456,7 +456,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -509,7 +512,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
@@ -544,7 +550,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -593,7 +602,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -639,7 +651,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['a'] is L['b']""")
+        self.assertExpectedInline(
+            failure_reason,
+            """L['a'] is L['b']""",
+        )
 
         torch._dynamo.reset()
 
@@ -957,6 +972,7 @@ SeqNr|OrigAten|SrcFn
             torch.set_grad_enabled(True)
             y = f_compiled(x)
             self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
             self.assertEqual(y_ref, y)
 
             self.assertIsNone(y_ref[0].grad_fn)

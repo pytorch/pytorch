@@ -494,7 +494,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if like is not None:
         raise NotImplementedError("'like' parameter is not supported.")
     if order != "K":
-        raise NotImplementedError
+        raise NotImplementedError()
 
     # a happy path
     if (
@@ -506,6 +506,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
         return obj
 
     if isinstance(obj, (list, tuple)):
+        # FIXME and they have the same dtype, device, etc
         if obj and all(isinstance(x, torch.Tensor) for x in obj):
             # list of arrays: *under torch.Dynamo* these are FakeTensors
             obj = torch.stack(obj)

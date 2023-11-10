@@ -631,6 +631,7 @@ class DistributedDataParallel(Module, Joinable):
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
+        device_mesh=None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -688,7 +689,7 @@ class DistributedDataParallel(Module, Joinable):
                 f"the same type of devices, but input module parameters locate in {distinct_device_types}.",
             )
 
-        self.device_type = list(distinct_device_types)[0]
+        self.device_type = next(iter(distinct_device_types))
 
         if (
             device_ids is None
@@ -718,15 +719,26 @@ class DistributedDataParallel(Module, Joinable):
 
             self.output_device = _get_device_index(output_device, True)
 
-        if process_group is None:
+        if process_group and device_mesh is not None:
+            raise RuntimeError(
+                "Cannot specify both process_group and device_mesh arguments."
+            )
+        elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
-        else:
+        elif device_mesh is None:
             self.process_group = process_group
+        else:
+            if device_mesh.ndim != 1:
+                raise RuntimeError(
+                    f"Only 1D device mesh is supported, but got {device_mesh}."
+                )
+            self.device_mesh = device_mesh
+            self.process_group = device_mesh.get_dim_groups(mesh_dim=0)
 
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self._module_parameters)[0].device
+        self.device = next(iter(self._module_parameters)).device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
