@@ -6,7 +6,9 @@ import torch
 
 def is_available() -> bool:
     """
-    Returns ``True`` if the distributed package is available. Otherwise,
+    Return ``True`` if the distributed package is available.
+
+    Otherwise,
     ``torch.distributed`` does not expose any other APIs. Currently,
     ``torch.distributed`` is available on Linux, MacOS and Windows. Set
     ``USE_DISTRIBUTED=1`` to enable it when building PyTorch from source.
@@ -30,7 +32,7 @@ if is_available():
         Store,
         FileStore,
         TCPStore,
-        ProcessGroup,
+        ProcessGroup as ProcessGroup,
         Backend as _Backend,
         PrefixStore,
         Reducer,

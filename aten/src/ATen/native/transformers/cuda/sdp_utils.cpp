@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -42,7 +43,7 @@
 namespace sdp {
 namespace {
 // flash_attention V2 is universally faster than efficient_attention and Math
-std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
+std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
@@ -50,7 +51,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   return default_order;
 }
 
-bool use_tensor_cores(sdp_params params, cudaDeviceProp* dprops, bool is_half) {
+bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
   if (dprops->major >= 8) {
     return true;
   }
@@ -59,7 +60,7 @@ bool use_tensor_cores(sdp_params params, cudaDeviceProp* dprops, bool is_half) {
   }
   return false;
 }
-int64_t minimum_gemm_alignment(sdp_params params) {
+int64_t minimum_gemm_alignment(sdp_params const& params) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_half = (params.query.dtype() == at::kHalf) ||
       (params.query.dtype() == at::kBFloat16);
@@ -75,7 +76,7 @@ int64_t minimum_gemm_alignment(sdp_params params) {
   return matmul_alignment_mn;
 }
 
-bool check_head_dim_size_flash(sdp_params params, bool debug) {
+bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
   const auto query_size_last = params.query.sym_size(-1);
@@ -117,7 +118,7 @@ bool check_head_dim_size_flash(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
+bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
@@ -168,7 +169,7 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
-bool check_flash_attention_hardware_support(sdp_params params, bool debug) {
+bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
@@ -187,7 +188,7 @@ bool check_flash_attention_hardware_support(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
+bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
@@ -207,7 +208,7 @@ bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
 }
 
 bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
-    sdp_params params,
+    sdp_params const& params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 64 And the device is between in the range [sm86, sm89]
@@ -229,15 +230,32 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   return true;
 }
 
-bool use_flash_attention(sdp_params params, bool debug) {
+
+bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
+  // FlashAttention 2 updated the default mask meaning for causal in this PR:
+  // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
+  // for non-square masks. We will not support non-square masks for causal w/ FAV2
+  if (params.is_causal && params.query.sym_size(-2) != params.key.sym_size(-2)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k. ",
+          "Got seqlen_q: ", params.query.sym_size(-2), " seqlen_k: ",
+          params.key.sym_size(-2), ". If you would like to use causal attention with non-square masks, please see CausalAttnMask.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with flash attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
 
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
-  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
+  constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
@@ -248,6 +266,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_last_dim_stride_equals_1,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90,
+      check_flash_causal_non_square_seqlens,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -266,9 +285,9 @@ bool use_flash_attention(sdp_params params, bool debug) {
   }
 }
 
-bool use_mem_efficient_attention(sdp_params params, bool debug) {
+bool use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with memory efficient attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
 #endif
   // Constraints specific to mem efficient attention
@@ -278,7 +297,7 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
+  constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
       check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
@@ -302,7 +321,7 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
 }
 } // namespace
 
-SDPBackend select_sdp_backend(sdp_params kernel_params) {
+SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
   // 2. Mem Efficient Attention
@@ -355,7 +374,7 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
   return SDPBackend::error;
 }
 
-bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+bool check_for_seq_len_1_nested_tensor(sdp_params const& params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;

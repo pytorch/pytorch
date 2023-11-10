@@ -1173,8 +1173,7 @@ op_db: List[OpInfo] = [
         "linalg.cross",
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
         op=torch.linalg.cross,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
         error_inputs_func=error_inputs_cross,
@@ -1323,8 +1322,7 @@ op_db: List[OpInfo] = [
         "linalg.vecdot",
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
-        dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1668,7 +1666,7 @@ op_db: List[OpInfo] = [
         "linalg.multi_dot",
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)

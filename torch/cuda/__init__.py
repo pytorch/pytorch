@@ -537,6 +537,21 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
+def _set_stream_by_id(stream_id, device_index, device_type):
+    r"""set stream specified by the stream id, device index and
+        device type
+
+    Args: stream_id (int): stream id in stream pool
+          device_index (int): device index in topo
+          device_type (int): enum device type
+    """
+    torch._C._cuda_setStream(
+        stream_id=stream_id,
+        device_index=device_index,
+        device_type=device_type,
+    )
+
+
 def set_stream(stream: Stream):
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
@@ -548,7 +563,7 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    torch._C._cuda_setStream(
+    _set_stream_by_id(
         stream_id=stream.stream_id,
         device_index=stream.device_index,
         device_type=stream.device_type,
@@ -738,7 +753,8 @@ def device_count() -> int:
     r"""Return the number of GPUs available."""
     if not _is_compiled():
         return 0
-    nvml_count = _device_count_nvml()
+    # bypass _device_count_nvml() if rocm (not supported)
+    nvml_count = -1 if torch.version.hip else _device_count_nvml()
     return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
 
 

@@ -132,7 +132,7 @@ class GraphModuleOpUpgrader:
     def _populate_passes(upgraders: List[Tuple[str, str]]) -> List[UpgraderPass]:
         """Given a list of upgraders, loop through it from lower version to higher version and create passes for all
         upgraders. se torch.Library API to register old ops. Op name will be
-        <name>_<valid_from_ver>_<valid_till_ver>. Register upgarders as CompositeImplicitAutograd kernels. For example:
+        <name>_<valid_from_ver>_<valid_till_ver>. Register upgraders as CompositeImplicitAutograd kernels. For example:
 
         lib = Library("aten", "FRAGMENT")
         lib.define(old_schema)
@@ -196,6 +196,5 @@ class GraphModuleOpUpgrader:
             upgraded_program = exported_program._transform(_pass)
             # NB: we have to retrace the graph_module instead of ep because of some failure.
             exported_program = export(upgraded_program.module(), inputs, {})
-            exported_program._call_spec = upgraded_program.call_spec
 
         return exported_program

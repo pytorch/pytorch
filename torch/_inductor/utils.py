@@ -4,6 +4,7 @@ import collections
 import contextlib
 import enum
 import functools
+import getpass
 import inspect
 import itertools
 import logging
@@ -22,10 +23,12 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterable,
     List,
     NamedTuple,
     Optional,
+    Protocol,
     Set,
     TypeVar,
     Union,
@@ -100,7 +103,11 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     filtered_events = EventList(
-        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+        ]
     )
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
@@ -135,8 +142,8 @@ def do_bench(*args, **kwargs):
             # NB: Lazily load triton, as importing triton is slow
             # see https://github.com/openai/triton/issues/1599
             from triton.testing import do_bench as triton_do_bench
-        except ImportError:
-            raise NotImplementedError("requires Triton")
+        except ImportError as exc:
+            raise NotImplementedError("requires Triton") from exc
 
         # triton PR https://github.com/openai/triton/pull/1513 change the
         # quantile fields name from 'percentiles' to 'quantiles'
@@ -256,6 +263,29 @@ def convert_shape_to_symint(
     ]
 
 
+def is_view(op: torch._ops.OpOverload):
+    """
+    Does this op overload have aliasing
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    return any(a.alias_info is not None for a in op._schema.arguments)
+
+
+def is_pointwise_use(use):
+    if not use.op == "call_function":
+        return False
+
+    if not (
+        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
+    ):
+        return False
+
+    if use.target is operator.getitem or is_view(use.target):
+        return all(is_pointwise_use(u) for u in use.users)
+
+    return torch.Tag.pointwise in use.target.tags
+
+
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
     g_args = []
@@ -306,7 +336,7 @@ def print_performance(
     fn, args=(), times=10, repeat=10, baseline=1.0, device: str = "cuda"
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
-    took = torch.median(timings)
+    took = torch.median(timings) / times
     print(f"{took/baseline:.6f}")
     return took
 
@@ -334,7 +364,36 @@ def pad_listlike(x, size):
         return x
 
 
-def cache_on_self(fn):
+# Used to ensure that iterating over a set is deterministic
+def tuple_sorted(x):
+    if len(x) == 0:
+        return []
+
+    def sort_func(elem):
+        if isinstance(elem, str):
+            return elem
+        else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
+            return elem.get_name()
+
+    return sorted(x, key=sort_func)
+
+
+RV = TypeVar("RV", covariant=True)
+
+
+# FIXME this should take in a ParamSpec too
+class CachedFunction(Generic[RV], Protocol):
+    @staticmethod
+    def clear_cache(self) -> None:
+        ...
+
+    def __call__(self, *args, **kwargs) -> RV:
+        ...
+
+
+def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -343,7 +402,12 @@ def cache_on_self(fn):
             setattr(self, key, fn(self))
         return getattr(self, key)
 
-    return wrapper
+    def clear_cache(self):
+        if hasattr(self, key):
+            delattr(self, key)
+
+    wrapper.clear_cache = clear_cache  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
 
 
 def aggregate_origins(node_schedule):
@@ -379,11 +443,12 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
-            if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"][1], str):
-                    sources.append(origin.meta["source_fn"][1])
+            if origin.op == "call_function" and "source_fn_stack" in origin.meta:
+                source_fn = origin.meta["source_fn_stack"][-1]
+                if isinstance(source_fn[1], str):
+                    sources.append(source_fn[1])
                 else:
-                    sources.append(origin.meta["source_fn"][1].__name__)
+                    sources.append(source_fn[1].__name__)
         sources = sorted(set(sources))
     elif descriptive_names == "inductor_node":
         sources = [
@@ -494,7 +559,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
             return sympy_symbol(key)
         return key
 
-    return expr.xreplace(
+    return sympy.sympify(expr).xreplace(
         {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
     )
 
@@ -516,6 +581,7 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
         "run_with_rng_state",
+        "aten._local_scalar_dense",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -544,6 +610,15 @@ instance_descriptor = collections.namedtuple(
     ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
     defaults=[tuple(), tuple(), tuple(), tuple()],
 )
+
+
+@functools.lru_cache(None)
+def cache_dir() -> str:
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
 @contextlib.contextmanager
@@ -645,6 +720,9 @@ class IndentedBuffer:
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
+
+    def newline(self):
+        self.writeline("\n")
 
     def writeline(self, line):
         if isinstance(line, LineContext):
@@ -769,6 +847,10 @@ def use_triton_template(layout, *, enable_int32=False):
 def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
+    # Do not use cutlass template on ROCm
+    if torch.version.hip:
+        return False
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
@@ -838,7 +920,7 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 @contextlib.contextmanager
 def override_lowering(aten_op, override_fn):
     """
-    Override the lowering of aten_op with overide_fn.
+    Override the lowering of aten_op with override_fn.
     The first argument of override_fn is the original lowering fn.
     """
     from torch._inductor import lowering
@@ -1130,6 +1212,7 @@ def try_find_schema(schemas, args, kwargs):
     return None
 
 
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1143,6 +1226,7 @@ def get_device_tflops(dtype):
         return get_max_simd_tflops(torch.float32)
 
 
+@functools.lru_cache(None)
 def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
@@ -1161,6 +1245,31 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def has_free_symbols(itr: Iterable[Any]):
+    return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
+
+
 # Placeholder strings used in triton codegen.
 class Placeholder(enum.Enum):
     # The placeholder for the actual name of a triton kernel.
@@ -1173,67 +1282,34 @@ class Placeholder(enum.Enum):
 
 
 # A utility function for easier AOTInductor testing
-aot_inductor_launcher = """
-    #include <c10/cuda/CUDAStream.h>
-    #include <torch/csrc/inductor/aoti_runtime/interface.h>
-    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+def aot_inductor_launcher(so_path: str, device: str):
+    if device == "cuda":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
-    class RAIIModelContainer {
-    public:
-        RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-                &container_handle,
-                1 /*num_models*/,
-                false /*is_cpu*/,
-                nullptr /*cubin_dir*/));
-        }
+            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
 
-        ~RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(
-                AOTInductorModelContainerDelete(container_handle));
-        }
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
 
-        AOTInductorModelContainerHandle get() const {
-            return container_handle;
-        }
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    elif device == "cpu":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner.h>
 
-    private:
-        AOTInductorModelContainerHandle container_handle;
-    };
+            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
 
-    // Global instance
-    RAIIModelContainer model_container;
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
 
-    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
-        auto input_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
-
-        // For outputs, we only allocate a vector to hold returned tensor handles,
-        // not allocating the actual output tensor storage here
-        size_t num_outputs;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerGetNumOutputs(
-                model_container.get(),
-                &num_outputs));
-        std::vector<AtenTensorHandle> output_handles(num_outputs);
-
-        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
-        const auto stream_id = cuda_stream.stream();
-        AOTInductorStreamHandle stream_handle =
-            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-
-        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            model_container.get(),
-            input_handles.data(),
-            input_tensors.size(),
-            output_handles.data(),
-            output_handles.size(),
-            stream_handle,
-            proxy_executor_handle));
-
-        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-            output_handles.data(), output_handles.size());
-    }
-"""
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    else:
+        raise RuntimeError(f"Unsupported device: {device}")

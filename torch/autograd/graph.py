@@ -1,7 +1,7 @@
 import abc
 import contextlib
 import weakref
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
@@ -15,6 +15,8 @@ __all__ = [
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
+    "GradientEdge",
+    "get_gradient_edge",
     "increment_version",
 ]
 
@@ -131,6 +133,33 @@ class Node(abc.ABC):
             ) or issubclass(C, torch.autograd.function.BackwardCFunction):
                 return True
         return NotImplemented
+
+
+GradientEdge = namedtuple("GradientEdge", ("node output_nr"))
+GradientEdge.__doc__ = """\
+Object representing a given gradient edge within the autograd graph.
+To get the gradient edge where a given Tensor gradient will be computed,
+you can do ``edge = autograd.graph.get_gradient_edge(tensor)``.
+"""
+
+
+def get_gradient_edge(tensor):
+    """This function can be used to get the gradient edge where the gradient of
+    the given Tensor will be computed. In particular, it is equivalent to call
+    ``g = autograd.grad(loss, input)`` and ``g = autograd.grad(loss, get_gradient_edge(input))``.
+    """
+    if not tensor.requires_grad:
+        raise RuntimeError(
+            "It is not possible to get the gradient edge for a Tensor that does not require gradients"
+        )
+    grad_fn = tensor.grad_fn
+    if grad_fn is None:
+        # Do an op to force AccumulateGrad lazy creation and get it
+        grad_fn = tensor.view_as(tensor).grad_fn.next_functions[0][0]
+
+    # Note that output_nr default to 0 which is the right value
+    # for the AccumulateGrad node.
+    return GradientEdge(grad_fn, tensor.output_nr)
 
 
 def increment_version(tensor):

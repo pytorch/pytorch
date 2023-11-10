@@ -11,6 +11,9 @@ option_parser = OptionParser.new do |opts|
  opts.on('-l', '--lite ', 'use lite interpreter') { |value|
     options[:lite] = value
  }
+ opts.on('-b', '--benchmark', 'build app to run benchmark') { |value|
+    options[:benchmark] = value
+ }
 end.parse!
 puts options.inspect
 
@@ -26,6 +29,7 @@ end
 puts "Setting up TestApp.xcodeproj..."
 project = Xcodeproj::Project.open(xcodeproj_path)
 targets = project.targets
+test_target = targets.last
 header_search_path      = ['$(inherited)', "#{install_path}/include"]
 libraries_search_path   = ['$(inherited)', "#{install_path}/lib"]
 other_linker_flags      = ['$(inherited)', "-all_load"]
@@ -41,9 +45,12 @@ targets.each do |target|
         else
             config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = ['$(inherited)']
         end
+        if (options[:benchmark])
+            config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'].append("RUN_BENCHMARK")
+        end
         dev_team_id = options[:team_id]
         if dev_team_id
-            config.build_settings['DEVELOPMENT_TEAM']   = dev_team_id
+            config.build_settings['DEVELOPMENT_TEAM'] = dev_team_id
         end
     end
 end
@@ -107,6 +114,11 @@ puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate', 'UIKit']
 targets.each do |target|
+    # NB: All these libraries and frameworks have already been linked by TestApp, adding them
+    # again onto the test target will cause the app to crash on actual devices
+    if (target == test_target)
+        next
+    end
     target.frameworks_build_phases.clear
     for lib in libs do
         path = "#{install_path}/lib/#{lib}"
