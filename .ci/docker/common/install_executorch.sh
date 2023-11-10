@@ -60,7 +60,7 @@ setup_executorch() {
 
   install_flatc_from_source
   pip_install .
-  as_jenkins build_executorch_runner "buck2"
+  build_executorch_runner "buck2"
 
   popd
 }
