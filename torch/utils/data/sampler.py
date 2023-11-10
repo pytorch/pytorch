@@ -1,7 +1,9 @@
 import torch
+import numpy as np
 from torch import Tensor
 
-from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
+from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union, Literal
+from collections import Counter
 
 __all__ = [
     "BatchSampler",
@@ -10,6 +12,7 @@ __all__ = [
     "SequentialSampler",
     "SubsetRandomSampler",
     "WeightedRandomSampler",
+    "BalancedSampler",
 ]
 
 T_co = TypeVar('T_co', covariant=True)
@@ -236,6 +239,51 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __len__(self) -> int:
         return self.num_samples
+
+
+class BalancedSampler(Sampler[int]):
+    r"""Samples elements balancing the dataset. If strategy is 'oversample', the elements of the minority classes are
+    returned several times until the size of the majority class is reached (every instance is taken at least one time).
+    If strategy is 'undersample', some elements of the majority classes are not returned with the aim of equalizing the
+    number of the minority classes.
+
+    Args:
+        targets (List): list of dataset targets to sample from
+        strategy ('oversample' | 'undersample'): sampling strategy
+    """
+    def __init__(self, targets: List, strategy: Literal['oversample', 'undersample']) -> None:
+        self.targets = targets
+        self.strategy = strategy
+        self.counts = dict(Counter(targets))
+        self.min_class_count, self.max_class_count = (min(self.counts.values()), max(self.counts.values()))
+
+    def count_classes_with_indexes(self):
+        targets = np.array(self.targets)
+        class_ids = {x: np.where(targets == x)[0] for x in self.counts.keys()}
+        return class_ids
+
+    def __iter__(self) -> Iterator[int]:
+        class_ids = self.count_classes_with_indexes()
+
+        if self.strategy == 'oversample':
+            oversample_classes = [np.concatenate((class_ids[x],
+                                  np.random.choice(class_ids[x], self.max_class_count - self.counts[x])),
+                                  dtype=np.int32)
+                                  if self.max_class_count - self.counts[x] > 0 else class_ids[x]
+                                  for x in class_ids.keys()]
+            yield from np.random.permutation(np.concatenate(oversample_classes))
+
+        elif self.strategy == 'undersample':
+            undersample_classes = [np.random.choice(class_ids[x], self.min_class_count, replace=False)
+                                   for x in class_ids.keys()]
+            yield from np.random.permutation(np.concatenate(undersample_classes))
+
+        else:
+            raise ValueError("strategy is not in ('oversample', 'undersample')")
+
+    def __len__(self) -> int:
+        return len(self.counts) * self.min_class_count if self.strategy == 'undersample' \
+            else len(self.counts) * self.max_class_count
 
 
 class BatchSampler(Sampler[List[int]]):
