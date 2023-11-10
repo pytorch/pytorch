@@ -19,6 +19,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -234,9 +235,8 @@ class OptimizedModule(torch.nn.Module):
         prefix = "_orig_mod"
         processed_state_dict = {}
         for key in state_dict:
-            if key.startswith(prefix):
-                clean_key = key[(len(prefix) + 1):]
-                processed_state_dict[clean_key] = state_dict[key]
+            clean_key = key[(len(prefix) + 1):] if key.startswith(prefix) else key
+            processed_state_dict[clean_key] = state_dict[key]
         return self._orig_mod.load_state_dict(state_dict=processed_state_dict, strict=strict, assign=assign)
 
 

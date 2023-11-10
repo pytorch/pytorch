@@ -2271,6 +2271,43 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_state_dict_pass_through(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+        
+        # The state-dict doesn't contain the `_orig_mod` prefix
+        self.assertEqual(mod.state_dict(), opt_mod.state_dict())
+        self.assertEqual(opt_mod.state_dict(), opt_mod._orig_mod.state_dict())
+
+        # Load the state-dict of an `OptimizedModule` into a regular `nn.Module`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(mod.parameters()))
+        new_mod.load_state_dict(opt_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(mod.parameters()))
+
+        # Load the state-dict of a regular `nn.Module` into an `OptimizedModule`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        opt_mod.load_state_dict(new_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        self.assertEqual(list(opt_mod.parameters()), list(opt_mod._orig_mod.parameters()))
+
+        # For backward-compatibility, load a state-dict with keys prefixed with `_orig_mod`
+        old_mod = MockModule()
+        state_dict = old_mod.state_dict()
+        legacy_opt_state_dict = {("_orig_mod." + k):v for k, v in state_dict.items()}
+        
+        new_mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(new_mod)
+        self.assertNotEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        opt_mod.load_state_dict(legacy_opt_state_dict)
+        self.assertEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        self.assertEqual(opt_mod.state_dict(), old_mod.state_dict())
+        self.assertEqual(old_mod.state_dict(), new_mod.state_dict())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
