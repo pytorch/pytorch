@@ -1880,7 +1880,8 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta([aten.mm.default])
+@register_meta(aten.mm)
+@out_wrapper()
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
