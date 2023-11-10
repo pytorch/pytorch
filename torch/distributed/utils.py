@@ -14,8 +14,7 @@ __all__ = []  # type: ignore[var-annotated]
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
     """
-    Turn argument list into separate key list and value list (unpack_kwargs does the opposite).
-
+    Turn argument list into separate key list and value list (unpack_kwargs does the opposite)
     Inspiration: https://github.com/facebookresearch/fairscale/blob/eeb6684/fairscale/internal/containers.py#L70
     Usage::
 
@@ -46,8 +45,7 @@ def _cast_forward_inputs(
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    Cast floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-
+    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
     This respects the existing ``requires_grad`` on the tensors.
     """
     if dtype is None:
@@ -87,7 +85,9 @@ def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_te
 
 
 def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
-    r"""Recursively moves input to the target_device."""
+    r"""
+    Recursively moves input to the target_device.
+    """
 
     def to_map(obj):
         if isinstance(obj, (torch.Tensor, PackedSequence)):
@@ -138,7 +138,8 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
 
 
 def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
-    """Alternate to ``assert`` when in the backward context to print the error message ``s`` since otherwise, it is swallowed."""
+    """This is used as an alternate to ``assert`` when in the backward context
+    to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
@@ -272,8 +273,6 @@ def _sync_module_states(
     broadcast_buffers: bool = True,
 ) -> None:
     """
-    Sync ``module``'s parameters and buffers state.
-
     Syncs ``module``'s parameters and buffers state so that all ranks contain
     the same module state across all ranks. Note that this API assumes that all
     parameter shapes are consistent before running the synchronization. This can
@@ -298,7 +297,10 @@ def _sync_params_and_buffers(
     broadcast_bucket_size: int,
     src: int,
 ) -> None:
-    """Synchronize ``module_states`` (list of tensors) across all processes by broadcasting them from rank 0."""
+    """
+    Synchronizes ``module_states`` (list of tensors) across all processes by
+    broadcasting them from rank 0.
+    """
     if len(module_states) > 0:
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src

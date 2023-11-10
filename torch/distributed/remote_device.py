@@ -78,7 +78,10 @@ class _remote_device:
             return False
 
     def worker_name(self) -> Optional[str]:
-        """Return the name of remote worker representing the remote device and ``None`` if no worker name is available."""
+        """
+        Returns the name of remote worker representing the remote device.
+        Returns ``None`` if no worker name is available.
+        """
         return self._worker_name
 
     def rank(self) -> Optional[int]:
@@ -89,7 +92,9 @@ class _remote_device:
         return self._rank
 
     def device(self) -> torch.device:
-        """Return the local device on the remote worker."""
+        """
+        Returns the local device on the remote worker.
+        """
         return self._device  # type: ignore[return-value]
 
     def __repr__(self):

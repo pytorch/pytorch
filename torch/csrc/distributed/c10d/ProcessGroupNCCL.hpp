@@ -44,12 +44,6 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
-constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
-    "TORCH_NCCL_ENABLE_MONITORING";
-
-constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC =
-    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC";
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
@@ -642,22 +636,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void logWorkEnd(WorkNCCL& work);
 
  protected:
-  // Function that runs as part of a separate thread aside from watchdog
-  // thread because we need to check the heartbeat from watchdog thread
-  // so that when we get stuck in some NCCL/CUDA calls,
-  // we can dump the debugging information and abort the process.
-  virtual void heartbeatMonitor();
-
-  // Function that directly trigger std::abort so that the whole process
-  // gets terminated.
-  virtual void terminateProcess(std::string errMsg);
-
-  // When watchdog timeout, this function will be called and return debug info
-  // for users. For now we only get information from retrieveDesyncReport.
-  // We are working on enabling more useful debug information for watchdog
-  // timeout.
-  virtual std::string getNCCLWatchdogDebugInfo();
-
   static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
@@ -720,20 +698,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
 
-  // Heartbeat of watchdog thread.
-  uint64_t heartbeat_;
-
-  // The time interval used for deciding whether there is no watchdog heartbeat.
-  int heartbeatTimeoutInSec_;
-
-  // We gate the heartbeat monitor thread so that we can roll it out gradually.
-  std::atomic<bool> monitorThreadEnabled_;
-
-  // Monitor thread which checks the heartbeat of Watchdog thread.
-  // If the monitor thread finds there is no heartbeat, it will dump debug info
-  // and then kill the watchdog thread to avoid hang.
-  std::thread ncclHeartbeatMonitorThread_;
-
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
@@ -742,27 +706,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
 
-  // Whether or not we should terminate the heartbeat monitoring threads.
-  std::atomic<bool> terminateHeartbeatMonitorThread_;
-
-  // Whether we are in the shutdown mode when we are trying to get debug info,
-  // such as desync report.
-  std::atomic<bool> collectiveDebugInfoMode_;
-
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
 
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
-  // Mutex to Guard monitorWakeUpCV_
-  std::mutex monitorMutex_;
-
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
-
-  // Condition Variable for monitor thread to wake up early
-  std::condition_variable monitorWakeUpCV_;
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;

@@ -1567,6 +1567,7 @@
     "propagate_annotation"
   ],
   "torch.ao.quantization.quantizer.xnnpack_quantizer_utils": [
+    "convert_scalars_to_attrs",
     "register_annotator"
   ],
   "torch.backends.xeon.run_cpu": [

@@ -473,24 +473,6 @@ def prod_dim_int(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.split.Tensor, "self: jt, split_size: any, dim: any"
-)
-def split_tensor(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-
-    _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split")
-
-    return tuple(
-        NestedTensor(values=x, **extract_kwargs(inp))
-        for x in func(inp._values, **new_kwargs)
-    )
-
-
-@register_jagged_func(
     torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any"
 )
 def split_with_sizes_default(func, *args, **kwargs):
@@ -499,12 +481,19 @@ def split_with_sizes_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
+    values = inp._values
 
-    _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split_with_sizes")
+    # hack to split on the last dim
+    dim = new_kwargs["dim"]
+    if dim != -1:
+        raise RuntimeError(
+            "split_with_sizes(): only supported for NestedTensor on dim = -1 for now"
+        )
 
+    split_sizes = new_kwargs["split_sizes"]
     return [
         NestedTensor(values=x, **extract_kwargs(inp))
-        for x in func(inp._values, **new_kwargs)
+        for x in torch.split(values, split_sizes, -1)
     ]
 
 
@@ -739,23 +728,6 @@ def native_layer_norm_default(func, *args, **kwargs):
 
     output, mean, std = func(inp._values, **new_kwargs)
     return (NestedTensor(output, **extract_kwargs(inp)), mean, std)
-
-
-@register_jagged_func(
-    torch.ops.aten.native_layer_norm_backward.default,
-    "grad_out: jt, input: jt, normalized_shape: any, mean: any, rstd: any, weight: any?, bias: any?, output_mask: any",
-)
-def native_layer_norm_backward_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    grad_out = new_kwargs.pop("grad_out")
-    inp = new_kwargs.pop("input")
-    d_input, d_gamma, d_beta = func(grad_out._values, inp._values, **new_kwargs)
-    if d_input is None:
-        return (None, d_gamma, d_beta)
-
-    return (NestedTensor(d_input, **extract_kwargs(inp)), d_gamma, d_beta)
 
 
 @register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")

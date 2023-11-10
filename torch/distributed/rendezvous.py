@@ -20,8 +20,7 @@ _rendezvous_handlers = {}
 
 
 def register_rendezvous_handler(scheme, handler):
-    """
-    Register a new rendezvous handler.
+    """Registers a new rendezvous handler.
 
     Before we can run collective algorithms, participating processes
     need to find each other and exchange information to be able to
@@ -146,9 +145,8 @@ def _torchelastic_use_agent_store() -> bool:
 
 def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
     """
-    Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
-
-    The TCPStore server is assumed to be hosted
+    Smartly creates a c10d Store object on ``rank`` based on whether
+    we need to re-use agent store. The TCPStore server is assumed to be hosted
     on ``hostname:port``.
 
     If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that

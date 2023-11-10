@@ -1186,14 +1186,12 @@ def unfold(x, dimension, size, step):
     if ndim == 0:
         return slice_(unsqueeze(x, 0), end=size)
 
-    dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, dim_size)
+    sizevars.guard_leq(size, sizes[dim])
     sizevars.guard_lt(0, step)
 
-    new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
+    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -2216,7 +2214,6 @@ make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
-make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 make_fallback(aten.triangular_solve)
@@ -2929,11 +2926,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
-def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
-
-
 def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
@@ -2958,7 +2950,8 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
+    if self.get_dtype() in {torch.int64, torch.bool}:
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -3086,10 +3079,6 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
-        or (
-            isinstance(src, TensorBox)
-            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
-        )
         or (
             fn == "aten.scatter_reduce_"
             and reduce == "sum"
@@ -5099,10 +5088,6 @@ try:
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(c10d_functional.broadcast)
-    def broadcast(input, src, tag, ranks, group_size):
-        return ir.Broadcast.create(input, src, tag, ranks, group_size)
-
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
@@ -5146,97 +5131,6 @@ try:
                 self, output_split_sizes, input_split_sizes, tag, ranks, group_size
             )
         )
-
-    _c10d_functional = torch.ops._c10d_functional
-
-    @register_lowering(_c10d_functional.all_reduce)
-    def _all_reduce(inp, reduce_op, group_name):
-        inp = clone(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_)
-    def _all_reduce_(inp, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
-        inputs = [clone(inp) for inp in inputs]
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor)
-    def _all_gather_into_tensor(inp, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor.default,
-                inp,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor_coalesced.default,
-                inputs,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor.default,
-                inp,
-                reduce_op,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor_coalesced.default,
-                inputs,
-                reduce_op,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.wait_tensor)
-    def _wait_tensor(inp):
-        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
-        return inp
 
 except ImportError:
     log.info(

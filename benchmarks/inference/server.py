@@ -1,11 +1,11 @@
 import argparse
+import json
 import os.path
 import subprocess
 import time
 from queue import Empty
 
 import numpy as np
-import pandas as pd
 
 import torch
 import torch.multiprocessing as mp
@@ -86,7 +86,7 @@ class FrontendWorker(mp.Process):
                 gpu_utilizations.append(float(gpu_utilization))
             time.sleep(0.1)
 
-        self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
+        self.metrics_dict["GPU_utilization"] = np.array(gpu_utilizations).mean()
 
     def _send_requests(self):
         """
@@ -199,7 +199,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compile", default=True, action=argparse.BooleanOptionalAction
     )
-    parser.add_argument("--output_file", type=str, default="output.csv")
     args = parser.parse_args()
 
     downloaded_checkpoint = False
@@ -242,13 +241,8 @@ if __name__ == "__main__":
         frontend.join()
         backend.join()
 
-        metrics_dict = {k: [v] for k, v in metrics_dict._getvalue().items()}
-        output = pd.DataFrame.from_dict(metrics_dict, orient="columns")
-        output_file = "./results/" + args.output_file
-        is_empty = not os.path.isfile(output_file)
-
-        with open(output_file, "a+", newline="") as file:
-            output.to_csv(file, header=is_empty, index=False)
+        output_str = json.dumps(metrics_dict._getvalue())
+        print(output_str)
 
     finally:
         # Cleanup checkpoint file if we downloaded it

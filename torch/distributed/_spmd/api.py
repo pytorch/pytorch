@@ -32,8 +32,8 @@ from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 
 class Override(ABC):
-    r"""Override the tracing and transformation behavior of :meth:`~torch.distributed._spmd.compile`.
-
+    r"""
+    Override the tracing and transformation behavior of :meth:`~torch.distributed._spmd.compile`.
     This is useful when any part of the model is not traceable or if you prefer
     to not trace it due to any reason. More specifically, users can implement
     :meth:`torch.distributed._spmd.Override.replacement` to replace an original
@@ -47,10 +47,10 @@ class Override(ABC):
 
     @abstractmethod
     def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
-        r"""Implement this method to return a new :class:`nn.Module` instance to replace the ``orig_submodule``
-        argument in the model.
-
-        This helps if ``orig_submodule`` is not traceable or should not be traced.
+        r"""
+        Implement this method to return a new :class:`nn.Module` instance to
+        replace the ``orig_submodule`` argument in the model. This helps if
+        ``orig_submodule`` is not traceable or should not be traced.
 
         Args:
             fqn (str): fully quantified name of the submodule.
@@ -58,7 +58,6 @@ class Override(ABC):
 
         Returns:
             A new :class:`nn.Module` instance to replace the original one.
-
         """
         pass
 
@@ -84,7 +83,6 @@ class Override(ABC):
 
         Returns:
             The :class:`fx.Graph` after transformation.
-
         """
         pass
 
@@ -100,7 +98,8 @@ class _PyTreeCodeGenOutputsOnly(_PyTreeCodeGen):
 
 
 def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    """Move the responsibility of flattening the input arguments from the graph module to the caller.
+    """Move the responsibility of flattening the input arguments from the
+    graph module to the caller.
 
     Example:
 
@@ -109,7 +108,6 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
         gm = gm(to_caller_flattened_graph_module)
 
         output = gm(*pytree.flatten(my_struct)[0])
-
     """
     # pyre-ignore[16]
     gm._graph._codegen = _PyTreeCodeGenOutputsOnly(
@@ -502,9 +500,9 @@ def compile(
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
     parallel_mode: Optional[ParallelMode] = None,
 ):
-    r"""Compile and optimize a callable, which can be a train step within a training loop.
-
-    This method will extract :class:`nn.Module` and :class:`torch.optim.Optimizer`
+    r"""
+    Compile and optimize a callable, which can be a train step within a training
+    loop. This method will extract :class:`nn.Module` and :class:`torch.optim.Optimizer`
     instances from the input arguments and trace operations applied to their
     parameters and states.
 
@@ -521,7 +519,6 @@ def compile(
             that specifies how to parallelize the callable. Each ParallelMode
             would have its own strategy to partition the model and the captured
             graph (Default: ``None``)
-
     """
 
     def inner(func: Callable):

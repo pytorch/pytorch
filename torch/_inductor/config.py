@@ -1,6 +1,5 @@
 import os  # noqa: C101
 import sys
-from typing import TYPE_CHECKING
 
 import torch
 
@@ -615,8 +614,6 @@ _save_config_ignore = {
     "trace.upload_tar",
 }
 
-if TYPE_CHECKING:
-    from torch._dynamo.config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 

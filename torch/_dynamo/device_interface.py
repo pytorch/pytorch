@@ -1,10 +1,9 @@
 import inspect
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
+from typing import Any, Dict, Union
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
 
-get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 else:
@@ -152,13 +151,13 @@ class CudaInterface(DeviceInterface):
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
-    stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
+    stream = staticmethod(torch.cuda.stream)
     current_stream = staticmethod(torch.cuda.current_stream)
-    set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
-    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
+    set_stream = staticmethod(torch.cuda.set_stream)
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
     synchronize = staticmethod(torch.cuda.synchronize)
-    get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
+    get_device_properties = staticmethod(torch.cuda.get_device_properties)
+    get_raw_stream = staticmethod(get_cuda_stream)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -171,20 +170,18 @@ class CudaInterface(DeviceInterface):
         return major * 10 + min
 
 
-device_interfaces: Dict[str, Type[DeviceInterface]] = {}
+device_interfaces: Dict[str, DeviceInterface] = {}
 
 
-def register_interface_for_device(device: str, device_interface: Type[DeviceInterface]):
+def register_interface_for_device(device: str, device_interface: DeviceInterface):
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: str) -> Type[DeviceInterface]:
-    if device in device_interfaces:
-        return device_interfaces[device]
-    raise NotImplementedError(f"No interface for device {device}")
+def get_interface_for_device(device: str):
+    return device_interfaces[device] if device in device_interfaces else None
 
 
-def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterface]]]:
+def get_registered_device_interfaces():
     return device_interfaces.items()
 
 

@@ -286,33 +286,6 @@ class OptimizeForInferenceTemplate(TestCase):
             torch._dynamo.mark_dynamic(inp2, 1)
             self.assertEqual(fn(inp2), fn_opt(inp2))
 
-    @requires_cuda()
-    def test_conv_multiple_uses(self):
-        from torch import nn
-
-        class ToyModel(nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.bn1 = nn.BatchNorm2d(1)
-                self.bn1.weight.data.normal_()
-
-            def forward(self, x, y):
-                return self.conv1(x) + self.bn1(self.conv1(y))
-
-        model = ToyModel()
-        model.eval().cuda()
-
-        a = torch.rand(64, 1, 32, 32).cuda()
-        b = torch.rand(64, 1, 32, 32).cuda()
-
-        output = model(a, b)
-
-        with torch.no_grad():
-            output2 = torch.compile(model)(a, b)
-
-        self.assertEqual(output, output2)
-
     def test_unfolded_bn(self):
         x = torch.rand([3, 32, 15, 15]).to(self.device)
 

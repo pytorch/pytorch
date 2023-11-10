@@ -28,7 +28,6 @@ class Vectorized<int64_t> {
   using vec_internal_type = vint64;
   using vec_internal_mask_type = vbool64;
   using size_type = int;
-  using ElementType = signed long long;
   static constexpr size_type size() {
     return 4;
   }

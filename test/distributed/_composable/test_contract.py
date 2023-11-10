@@ -25,7 +25,7 @@ class ToyModel(nn.Module):
 
 
 class TestContract(TestCase):
-    @skipIfTorchDynamo("Dynamo does not support the state key")
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
     def test_add_hooks(self):
         def forward_pre_hook(
             module: nn.Module, inp: Tuple[torch.Tensor]
@@ -69,7 +69,7 @@ class TestContract(TestCase):
         for p1, p2 in zip(model.parameters(), model_with_hooks.parameters()):
             self.assertEqual(p1, p2)
 
-    @skipIfTorchDynamo("Dynamo does not support the state key")
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
     def test_modify_fqn(self):
         class ModelWrapper(nn.Module):
             def __init__(self, module):
@@ -91,7 +91,7 @@ class TestContract(TestCase):
         ):
             wrap_module(model.seq1)
 
-    @skipIfTorchDynamo("Dynamo does not support the state key")
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
     def test_state(self):
         def check_and_update_state_hook(
             module: nn.Module, inp: Tuple[torch.Tensor]
@@ -115,7 +115,7 @@ class TestContract(TestCase):
         model(torch.zeros(10, 10), torch.zeros(10, 10))
         self.assertEqual(api.state(model.seq1).dummy_state, 8)
 
-    @skipIfTorchDynamo("Dynamo does not support the state key")
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
     def test_registry(self):
         @contract()
         def api1(module: nn.Module) -> nn.Module:

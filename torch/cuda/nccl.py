@@ -36,8 +36,7 @@ def version():
     major = ver >> 32
     minor = (ver >> 16) & 65535
     patch = ver & 65535
-    suffix = torch._C._nccl_version_suffix().decode("utf-8")
-    return (major, minor, patch, suffix)
+    return (major, minor, patch)
 
 
 def unique_id():

@@ -6,7 +6,7 @@ from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModul
 
 
 def is_available():
-    r"""Return whether PyTorch is built with MKL-DNN support."""
+    r"""Returns whether PyTorch is built with MKL-DNN support."""
     return torch._C._has_mkldnn
 
 
@@ -17,8 +17,7 @@ VERBOSE_ON_CREATION = 2
 
 class verbose:
     """
-    On-demand oneDNN (former MKL-DNN) verbosing functionality.
-
+    On-demand oneDNN (former MKL-DNN) verbosing functionality
     To make it easier to debug performance issues, oneDNN can dump verbose
     messages containing information like kernel size, input data size and
     execution duration while executing the kernel. The verbosing functionality

@@ -145,16 +145,6 @@ Kernel implementations (for eager runtime only) - should never be traced by torc
 These functions should all be bound to dispatcher ops.  During tracing, the op itself should be
 captured in the graph and the backend should implement the op however it prefers.
 """
-def _broadcast(self, src, tag, ranks, group_size):
-    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
-    assert group is not None
-
-    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
-    work = dist.broadcast(inplace_tensor, src, group=group, async_op=True)
-    _register_tensor_work(inplace_tensor, work)
-
-    return inplace_tensor
-
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, group_size):
     op = _str_to_reduce_op(reduceOp)

@@ -27,12 +27,6 @@ PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
   return PyInt_FromLong(version());
 }
 
-PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
-  HANDLE_TH_ERRORS
-  return PyBytes_FromString(version_suffix());
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;

@@ -592,6 +592,7 @@ class TestPythonDispatch(TestCase):
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
 $2: f32[1] = input('grad_y')
+True = torch._ops.aten.is_same_size.default($1, $2)
 $3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
@@ -851,6 +852,7 @@ $0: f32[1] = input('x')
 $1: f32[1] = input('x.grad')
 $2: f32[1] = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3: f32[1] = input('grad_output')
+True = torch._ops.aten.is_same_size.default($2, $3)
 $4: f32[1] = torch._ops.aten.mul.Tensor($3, 2)
 $5: f32[1] = torch._ops.aten.mul.Tensor($4, $0)
 $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
@@ -2110,7 +2112,7 @@ def forward(self, x_1):
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func.overloadpacket == torch.ops.aten.dim:
                     return data.dim()
-                if func.overloadpacket == torch.ops.aten.numel:
+                if func.overloadpacket == torch.ops.aten.sym_numel:
                     numel_called[0] = True
                     return None
                 return NotImplemented

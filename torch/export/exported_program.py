@@ -122,8 +122,10 @@ class ExportedProgram:
             verifier = Verifier
         assert issubclass(verifier, Verifier)
         self._verifier = verifier
+
         # Validate should be always the last step of the constructor.
-        self.verifier().check(self)
+        # TODO(zhxchen17) Uncomment the following line.
+        # self.verifier().check(self)
 
     @property
     @compatibility(is_backward_compatible=False)

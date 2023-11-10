@@ -161,91 +161,39 @@ Tensor pool2d(
       },
       self_arg.scalar_type(),
   };
-  if (v_self.is_quantized()) {
-    v_output.set_is_quantized();
-    v_output.set_scale(v_self.get_scale());
-    v_output.set_zero_point(v_self.get_zero_point());
-  }
 
-  api::UniformParamsBuffer params;
-  if (v_self.is_quantized()) {
-    const struct Block final {
-      uvec3 extents;
-      int32_t range;
-      ivec4 kernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilation;
-      vec2 scale;
-      ivec2 zero_point;
-    } block{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-            safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-            safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
-        },
-        {
-            safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-            safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-            safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-            safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<float>(v_self.get_scale()),
-            0.0f,
-        },
-        {
-            safe_downcast<int32_t>(v_self.get_zero_point()),
-            0u,
-        },
-    };
-    params = api::UniformParamsBuffer(context, block);
-  } else {
-    const struct Block final {
-      uvec3 extents;
-      int32_t range;
-      ivec4 kernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilation;
-    } block{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-            safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-            safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
-        },
-        {
-            safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-            safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-            safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-            safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        },
-    };
-    params = api::UniformParamsBuffer(context, block);
-  }
+  const struct Block final {
+    uvec3 extents;
+    int32_t range;
+    ivec4 kernel;
+    ivec2 stride;
+    ivec2 padding;
+    ivec2 dilation;
+  } block{
+      v_output.extents(),
+      safe_downcast<int32_t>(
+          kernel[Layout::Parameter::width] * kernel[Layout::Parameter::height]),
+      {
+          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+          safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
+          safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
+      },
+      {
+          safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+          safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+          safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+          safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+          safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+          safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+  };
 
+  api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -296,34 +244,14 @@ Tensor max_pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode) {
-  if (self_arg.scalar_type() == kQUInt8) {
-    return pool2d(
-        self_arg,
-        kernel_arg,
-        stride_arg,
-        padding_arg,
-        dilation_arg,
-        ceil_mode,
-        VK_KERNEL(quantized_max_pool2d_quint8));
-  } else if (self_arg.scalar_type() == kQInt8) {
-    return pool2d(
-        self_arg,
-        kernel_arg,
-        stride_arg,
-        padding_arg,
-        dilation_arg,
-        ceil_mode,
-        VK_KERNEL(quantized_max_pool2d_qint8));
-  } else {
-    return pool2d(
-        self_arg,
-        kernel_arg,
-        stride_arg,
-        padding_arg,
-        dilation_arg,
-        ceil_mode,
-        VK_KERNEL(max_pool2d));
-  }
+  return pool2d(
+      self_arg,
+      kernel_arg,
+      stride_arg,
+      padding_arg,
+      dilation_arg,
+      ceil_mode,
+      VK_KERNEL(max_pool2d));
 }
 
 #ifdef USE_VULKAN_API

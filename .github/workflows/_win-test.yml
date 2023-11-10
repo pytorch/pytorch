@@ -161,7 +161,6 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/

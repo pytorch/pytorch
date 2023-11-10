@@ -60,10 +60,11 @@ find_package(CUDAToolkit REQUIRED)
 
 cmake_policy(POP)
 
-if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
-  message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
+if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
+    NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
+  message(FATAL_ERROR "Found two conflicting CUDA installs:\n"
                       "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
-                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
+                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
 endif()
 
 if(NOT TARGET CUDA::nvToolsExt)

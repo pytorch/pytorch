@@ -12,7 +12,6 @@ import os
 import shutil
 import signal
 import socket
-from string import Template
 import tempfile
 import uuid
 from typing import Any, Dict, Optional, Tuple
@@ -80,16 +79,6 @@ class LocalElasticAgent(SimpleElasticAgent):
     be propagated to the worker processes to allow them to connect to the same
     named pipe that ```LocalElasticAgent``` uses.
 
-    Logs are written to the specified log directory. Each log line will be by default
-    prefixed by ``[${role_name}${local_rank}]:`` (e.g. ``[trainer0]: foobar``).
-    Log prefixes can be customized by passing a `template string
-    <https://docs.python.org/3/library/string.html#template-strings>`_ as the
-    ``log_line_prefix_template`` argument.
-    The following macros (identifiers) are substituted at runtime:
-    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
-    global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
-
-
     Example launching function
 
     ::
@@ -140,14 +129,12 @@ class LocalElasticAgent(SimpleElasticAgent):
         start_method="spawn",
         exit_barrier_timeout: float = 300,
         log_dir: Optional[str] = None,
-        log_line_prefix_template: Optional[str] = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
         self._pcontext: Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
-        self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
@@ -242,7 +229,6 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}
-        log_line_prefixes: Optional[Dict[int, str]] = {} if self._log_line_prefix_template else None
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -268,14 +254,6 @@ class LocalElasticAgent(SimpleElasticAgent):
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
 
-
-            if self._log_line_prefix_template:
-                log_line_prefix = Template(self._log_line_prefix_template).safe_substitute(
-                    role_name=spec.role,
-                    rank=worker.global_rank,
-                    local_rank=local_rank,)
-                log_line_prefixes[local_rank] = log_line_prefix
-
             envs[local_rank] = worker_env
             worker_args = list(spec.args)
             worker_args = macros.substitute(worker_args, str(local_rank))
@@ -296,7 +274,6 @@ class LocalElasticAgent(SimpleElasticAgent):
             args=args,
             envs=envs,
             log_dir=attempt_log_dir,
-            log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
             redirects=spec.redirects,
             tee=spec.tee,

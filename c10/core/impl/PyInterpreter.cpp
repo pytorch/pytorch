@@ -81,9 +81,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   c10::Layout layout(const TensorImpl* self) const override {
     PANIC(layout);
   }
-  int64_t numel(const TensorImpl* self) const override {
-    PANIC(numel);
-  }
   c10::SymInt sym_numel(const TensorImpl* self) const override {
     PANIC(sym_numel);
   }

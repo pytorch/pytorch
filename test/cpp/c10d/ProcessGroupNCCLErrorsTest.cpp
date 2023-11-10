@@ -1,5 +1,4 @@
 #include <chrono>
-#include <thread>
 
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
@@ -22,19 +21,19 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       int rank,
       c10d::OpType opType,
       uint64_t seq)
-      : WorkNCCL(devices, rank, opType, seq), simulateError_(simulate_error) {}
+      : WorkNCCL(devices, rank, opType, seq), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
       const override {
-    if (simulateError_) {
+    if (simulate_error_) {
       return std::make_exception_ptr(std::runtime_error("Error"));
     }
     return c10d::ProcessGroupNCCL::WorkNCCL::checkForNCCLErrors(ncclComms);
   }
 
  private:
-  bool simulateError_;
+  bool simulate_error_;
 };
 
 class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
@@ -44,11 +43,11 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCL(store, rank, size, opts), simulateError_(false) {}
+      : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms) override {
-    if (simulateError_) {
+    if (simulate_error_) {
       return std::make_exception_ptr(std::runtime_error("Error"));
     }
     return c10d::ProcessGroupNCCL::checkForNCCLErrors(ncclComms);
@@ -67,23 +66,23 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        devices, simulateError_, rank, opType, seq_);
+        devices, simulate_error_, rank, opType, seq_);
   }
 
   size_t getNCCLCommCacheSize() {
     return devNCCLCommMap_.size();
   }
 
-  void simulateError() {
-    simulateError_ = true;
+  void simulate_error() {
+    simulate_error_ = true;
   }
 
-  void resetError() {
-    simulateError_ = false;
+  void reset_error() {
+    simulate_error_ = false;
   }
 
  private:
-  bool simulateError_;
+  bool simulate_error_;
 };
 
 class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
@@ -95,18 +94,18 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       c10d::OpType opType,
       uint64_t seq)
       : WorkNCCL(devices, rank, opType, seq),
-        setTimedoutError_(set_timedout_error) {}
+        set_timedout_error_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {
-    if (setTimedoutError_) {
+    if (set_timedout_error_) {
       return false;
     }
     return c10d::ProcessGroupNCCL::WorkNCCL::isCompleted();
   }
 
  private:
-  bool setTimedoutError_;
+  bool set_timedout_error_;
 };
 
 class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
@@ -117,8 +116,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
-        watchDogDebugInfoFinished_(false),
-        setTimedoutError_(false) {}
+        set_timedout_error_(false) {}
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
@@ -128,103 +126,19 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        devices, setTimedoutError_, rank, opType, seq_);
+        devices, set_timedout_error_, rank, opType, seq_);
   }
 
-  void setTimedoutError() {
-    setTimedoutError_ = true;
+  void set_timedout_error() {
+    set_timedout_error_ = true;
   }
 
-  void resetTimedoutError() {
-    setTimedoutError_ = false;
+  void reset_timedout_error() {
+    set_timedout_error_ = false;
   }
-
-  bool getWatchDogDebugInfoFinishedFlag() {
-    return watchDogDebugInfoFinished_;
-  }
-
-  // In the constructor of ProcessGroupNCCL. We don't allow the watchdog thread
-  // to run any handling or desync report when the main thread is block wait.
-  // Even if users set handling and turn on desyncDebug flag, they will get
-  // reset. For the ease of unit test, we want the main thread to be block wait,
-  // so we have this hack to manually set the desync debug flag after PG
-  // creation.
-  void forceSetDesyncDebugFlag() {
-    desyncDebug_ = true;
-  }
-
- protected:
-  std::string getNCCLWatchdogDebugInfo() override {
-    LOG(INFO) << "overridden getNCCLWatchdogDebugInfo called";
-    watchDogDebugInfoFinished_ = true;
-    return "";
-  }
-  bool watchDogDebugInfoFinished_;
 
  private:
-  bool setTimedoutError_;
-};
-
-class ProcessGroupNCCLNoHeartbeatCaught
-    : public ProcessGroupNCCLTimedOutErrors {
- public:
-  ProcessGroupNCCLNoHeartbeatCaught(
-      const c10::intrusive_ptr<c10d::Store>& store,
-      int rank,
-      int size,
-      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLTimedOutErrors(store, rank, size, opts),
-        hasMonitorThreadCaughtError_(false) {}
-
-  std::mutex& getWatchdogMutex() {
-    return workMetaListMutex_;
-  }
-
-  bool getErrorCaughtFlag() {
-    return hasMonitorThreadCaughtError_;
-  }
-
- protected:
-  // Override the heartbeat monitor function to make sure that we capture
-  // the exception in the monitor thread because we cannot try-catch it in
-  // the main thread and we set a flag for the main thread to check.
-  void heartbeatMonitor() override {
-    try {
-      c10d::ProcessGroupNCCL::heartbeatMonitor();
-    } catch (std::runtime_error& e) {
-      hasMonitorThreadCaughtError_ = true;
-    }
-  }
-
-  // It's really hard to unit test std::abort. So we override it instead.
-  // Commented this override, we do see process aborted with core dump without
-  // this override.
-  void terminateProcess(std::string errMsg) override {
-    throw std::runtime_error(errMsg);
-  }
-
-  bool hasMonitorThreadCaughtError_;
-};
-
-class ProcessGroupNCCLDebugInfoStuck
-    : public ProcessGroupNCCLNoHeartbeatCaught {
- public:
-  ProcessGroupNCCLDebugInfoStuck(
-      const c10::intrusive_ptr<c10d::Store>& store,
-      int rank,
-      int size,
-      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLNoHeartbeatCaught(store, rank, size, opts) {}
-
- protected:
-  // Override the heartbeat monitor function to set a long timeout to mimic the
-  // stuck in getting debug info.
-  std::string getNCCLWatchdogDebugInfo() override {
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartbeatTimeoutInSec_ * 20));
-    watchDogDebugInfoFinished_ = true;
-    return "";
-  }
+  bool set_timedout_error_;
 };
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
@@ -244,8 +158,6 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    // Enable LOG(INFO) messages.
-    c10::initLogging();
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
     store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
@@ -282,7 +194,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.simulateError();
+  pg.simulate_error();
   work = pg.allreduce(tensors_);
   EXPECT_THROW(work->wait(), std::runtime_error);
 
@@ -310,7 +222,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.setTimedoutError();
+  pg.set_timedout_error();
   work = pg.allreduce(tensors_);
   EXPECT_THROW(work->wait(), c10::DistBackendError);
 
@@ -332,7 +244,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
-  pg.simulateError();
+  pg.simulate_error();
   work = pg.allreduce(tensors_);
 
   // Should not throw exceptions.
@@ -342,121 +254,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // Verify the work item failed.
   EXPECT_TRUE(work->isCompleted());
   EXPECT_FALSE(work->isSuccess());
-
-  // Communicators might be aborted here, further operations would fail.
-}
-
-TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
-  if (skipTest()) {
-    return;
-  }
-
-  int heartBeatIntervalInSec = 2;
-  std::string timeInterval = std::to_string(heartBeatIntervalInSec);
-  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ASSERT_TRUE(
-      setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
-      0);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
-  auto options = c10d::ProcessGroupNCCL::Options::create();
-  // Set a long watchdog timeout, so that we have enough time to lock the
-  // watchdog and let the heartbeat monitor thread to kick in.
-  options->timeout = std::chrono::milliseconds(30000);
-  ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options);
-
-  // Normal collective case.
-  auto work = pg.allreduce(tensors_);
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-
-  work = pg.allreduce(tensors_);
-  {
-    // Now run all reduce with errors.
-    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
-    LOG(INFO) << "Lock watchdog thread.";
-    // Wait long enough before monitor thread throws exceptions.
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartBeatIntervalInSec * 3));
-    // Check the monitoring thread launched and exception thrown.
-    EXPECT_TRUE(pg.getErrorCaughtFlag());
-  }
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-}
-
-class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
- protected:
-  void SetUp() override {
-    ProcessGroupNCCLErrorsTest::SetUp();
-    std::string timeInterval = std::to_string(heartBeatIntervalInSec);
-    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-    ASSERT_TRUE(
-        setenv(
-            c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
-        0);
-    ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
-    ASSERT_TRUE(setenv(c10d::NCCL_DESYNC_DEBUG, "1", 1) == 0);
-    // We cannot capture the exception thrown in watchdog thread without making
-    // lots of changes to the code. So we don't let the watchdog throw
-    // exception.
-    ASSERT_TRUE(setenv(c10d::NCCL_ASYNC_ERROR_HANDLING, "0", 1) == 0);
-    options_ = c10d::ProcessGroupNCCL::Options::create();
-    // Set a super short watchdog timeout.
-    options_->timeout = std::chrono::milliseconds(100);
-  }
-
-  void watchdogTimeoutTestCommon(
-      ProcessGroupNCCLNoHeartbeatCaught& pg,
-      int multiplier) {
-    pg.forceSetDesyncDebugFlag();
-    pg.setTimedoutError();
-    auto work = pg.allreduce(tensors_);
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartBeatIntervalInSec * multiplier));
-    EXPECT_THROW(work->wait(), c10::DistBackendError);
-  }
-
-  const int heartBeatIntervalInSec = 2;
-  c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> options_;
-};
-
-TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoFinished) {
-  // Need to have this check for every test to make sure we only run the test
-  // when there are GPUs available.
-  if (skipTest()) {
-    return;
-  }
-
-  ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options_);
-  watchdogTimeoutTestCommon(pg, 2);
-
-  // The flag is true shows that the heartbeat monitor thread does not kill
-  // the watchdog thread when it is getting debug info such as desync debug
-  // info.
-  EXPECT_TRUE(pg.getWatchDogDebugInfoFinishedFlag());
-  // The flag is false shows that the heartbeat monitor thread does not
-  // trigger process abort if getting debug info and destroy PG is fast.
-  EXPECT_FALSE(pg.getErrorCaughtFlag());
-
-  // Communicators might be aborted here, further operations would fail.
-}
-
-TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoStuck) {
-  // Need to have this check for every test to make sure we only run the test
-  // when there are GPUs available.
-  if (skipTest()) {
-    return;
-  }
-  ProcessGroupNCCLDebugInfoStuck pg(store_, 0, 1, options_);
-  // Need to keep main thread sleep longer so that we can let heartbeat monitor
-  // thread to finish the extra wait and flip the flag.
-  watchdogTimeoutTestCommon(pg, 4);
-  // The flag is false shows that we get stuck in getting debug info such as
-  // desync debug info in the watchdog thread.
-  EXPECT_FALSE(pg.getWatchDogDebugInfoFinishedFlag());
-  // The flag is true shows that the heartbeat monitor thread does trigger
-  // process abort if getting debug info gets stuck.
-  EXPECT_TRUE(pg.getErrorCaughtFlag());
 
   // Communicators might be aborted here, further operations would fail.
 }

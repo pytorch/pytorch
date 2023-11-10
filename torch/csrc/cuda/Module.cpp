@@ -12,6 +12,8 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
+
 #endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -1354,7 +1356,12 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
+#else
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+#endif
 #endif
   Py_RETURN_NONE;
 }
@@ -1484,10 +1491,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
-    {"_nccl_version_suffix",
-     THCPModule_nccl_version_suffix,
-     METH_NOARGS,
-     nullptr},
     {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
     {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
     {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},

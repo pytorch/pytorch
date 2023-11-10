@@ -68,9 +68,8 @@ class TensorParallelTest(DTensorTestBase):
     @with_comms
     def test_tp_transform_with_uncovered_op(self):
         model = DummyModel().to(device=self.device_type)
-        inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
-        with torch.no_grad():
-            res = model(*inputs)
+        inputs = (torch.randn(7, 3).to(device=self.device_type),)
+        res = model(*inputs)
         exported_program = torch._export.export(
             model,
             inputs,
@@ -84,8 +83,7 @@ class TensorParallelTest(DTensorTestBase):
             {"fc": ColwiseParallel},
         )
         tp_model = tp_exported_program.module()
-        with torch.no_grad():
-            tp_res = tp_model(*inputs)
+        tp_res = tp_model(*inputs)
         self.assertEqual(res, tp_res)
         # Expect all_gather to be inserted to distributed sharded fc resutls
         self.assert_has_c10d_ops(

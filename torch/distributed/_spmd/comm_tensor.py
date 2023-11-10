@@ -56,9 +56,9 @@ def _get_tracer() -> Optional[torch.fx.Tracer]:
 
 class CommTensor(torch.Tensor):
     r"""
-    A Tensor subclass to wrap input tensors for collective communications.
+    A Tensor subclass to wrap input tensors for collective communications. This
+    Tensor subclass works for both eager and tracing mode.
 
-    This Tensor subclass works for both eager and tracing mode.
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
     handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``

@@ -76,11 +76,9 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # to define a ForkingPickler serialization mode for the class.
 #
 # NB: If you add a new method to Tensor, you must update
-# torch/_C/__init__.pyi.in to add a type annotation for your method;
+# torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
-    _dynamo_static_input_type: str  # Set in `mark_static_address`
-
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)

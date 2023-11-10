@@ -112,7 +112,6 @@ def emit_metric(
         EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
         EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
-        EnvVarMetric("job_id", "JOB_ID", type_conversion_fn=int),
     ]
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.

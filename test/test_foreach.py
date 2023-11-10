@@ -131,7 +131,6 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm")
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
     )
@@ -342,10 +341,10 @@ class TestForeach(TestCase):
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0], device=device, dtype=dtype)]]:
+        for tensors in [[torch.randn([0])]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 

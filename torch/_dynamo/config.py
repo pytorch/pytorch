@@ -4,7 +4,6 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
 from . import external_utils
@@ -126,7 +125,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses: Set[Type[Any]] = set()
+traceable_tensor_subclasses = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -149,7 +148,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
+skipfiles_inline_module_allowlist = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -346,9 +345,6 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
-if TYPE_CHECKING:
-    from .config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 

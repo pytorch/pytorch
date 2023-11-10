@@ -11,9 +11,8 @@ from argparse import Action
 
 class env(Action):
     """
-    Get argument values from ``PET_{dest}`` before defaultingto the given ``default`` value.
-
-    For flags (e.g. ``--standalone``)
+    Gets argument values from ``PET_{dest}`` before defaulting
+    to the given ``default`` value. For flags (e.g. ``--standalone``)
     use ``check_env`` instead.
 
     .. note:: when multiple option strings are specified, ``dest`` is
@@ -21,6 +20,7 @@ class env(Action):
               the env var to set is ``PET_FOO`` not ``PET_F``)
 
     Example:
+
     ::
 
      parser.add_argument("-f", "--foo", action=env, default="bar")
@@ -59,9 +59,8 @@ class env(Action):
 
 class check_env(Action):
     """
-    Check whether the env var ``PET_{dest}`` exists before defaulting to the given ``default`` value.
-
-    Equivalent to
+    For flags, checks whether the env var ``PET_{dest}`` exists
+    before defaulting to the given ``default`` value. Equivalent to
     ``store_true`` argparse built-in action except that the argument can
     be omitted from the commandline if the env var is present and has a
     non-zero value.
@@ -71,6 +70,7 @@ class check_env(Action):
               when present and ``False`` otherwise.
 
     Example:
+
     ::
 
      parser.add_argument("--verbose", action=check_env)

@@ -227,9 +227,8 @@ def _chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    Shard a tensor to chunks along the first dimension.
-
-    The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
+    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    corresponding chunk as the local tensor to create a DTensor.
     """
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh is None:
@@ -300,7 +299,9 @@ def _all_gather_dtensor(
     tensor: DTensor,
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
-    """All gather a DTensor in its FSDP dimension and return the local tensor."""
+    """
+    All gather a DTensor in its FSDP dimension and return the local tensor.
+    """
     assert parent_mesh == tensor.device_mesh
 
     placements = list(copy.deepcopy(tensor.placements))
@@ -317,7 +318,6 @@ def _all_gather_dtensor(
 class DTensorExtensions(FSDPExtensions):
     """
     DTensorExtension is the TensorFlattener extension needed for 2D FSDP + TP.
-
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
@@ -371,14 +371,15 @@ class DTensorExtensions(FSDPExtensions):
 # TODO: remove enable_2d_with_fsdp() once we roll out the new 2D flow.
 def enable_2d_with_fsdp() -> bool:
     """
-    Register the extension which is needed for Tensor Parallelism (TP) to work with FullyShardedDataParallel (FSDP).
-
-    We first parallelize parameters within one module or sub_modules based on a parallelize_plan and will let FSDP
+    The API registers the extension which is needed for Tensor Parallelism (TP)
+    to work with FullyShardedDataParallel (FSDP). We first parallelize parameters
+    within one module or sub_modules based on a parallelize_plan and will let FSDP
     reshard the local tensor of distributed parameter which is essentially a DTensor.
 
     Return:
         A `bool` indicated whether extension registration succeeds or not.
     """
+
     torch._C._log_api_usage_once(
         "torch.distributed.tensor.parallel.enable_2d_with_fsdp"
     )

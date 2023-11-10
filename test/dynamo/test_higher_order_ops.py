@@ -2173,8 +2173,12 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
@@ -2227,9 +2231,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3;  sin = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
@@ -2275,9 +2283,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
@@ -2319,9 +2331,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
@@ -2362,10 +2378,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
@@ -2406,10 +2426,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
@@ -2464,10 +2488,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
@@ -2492,10 +2520,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
@@ -2531,16 +2563,24 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             grad_body_0 = self.grad_body_0
             grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
             call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
             contiguous = call.contiguous();  call = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return contiguous
 
         class GraphModule(torch.nn.Module):
             def forward(self, l_x_):
+                _set_grad_enabled = torch._C._set_grad_enabled(True)
+
                 sin = l_x_.sin();  l_x_ = None
                 sum_1 = sin.sum();  sin = None
+
+                _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
                 return sum_1
 """,
         )
@@ -2643,9 +2683,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, const):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
             add = sum_1 + 3.0;  sum_1 = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return add
 """,
         )

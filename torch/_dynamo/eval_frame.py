@@ -216,7 +216,8 @@ class OptimizedModule(torch.nn.Module):
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
             # to avoid treating it as lazy on subsequent recompile.
-            self._orig_mod._infer_parameters(self._orig_mod, args, kwargs)
+            assert len(kwargs) == 0
+            self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
     def __dir__(self):

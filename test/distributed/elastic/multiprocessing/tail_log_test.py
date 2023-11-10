@@ -53,7 +53,7 @@ class TailLogTest(unittest.TestCase):
         }
 
         dst = io.StringIO()
-        tail = TailLog(name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec).start()
+        tail = TailLog("writer", log_files, dst, interval_sec).start()
         # sleep here is intentional to ensure that the log tail
         # can gracefully handle and wait for non-existent log files
         time.sleep(interval_sec * 10)
@@ -82,54 +82,6 @@ class TailLogTest(unittest.TestCase):
             {f"[writer{i}]": set(range(max)) for i in range(nprocs)}, actual
         )
         self.assertTrue(tail.stopped())
-
-    def test_tail_with_custom_prefix(self):
-        """
-        writer() writes 0 - max (on number on each line) to a log file.
-        Run nprocs such writers and tail the log files into an IOString
-        and validate that all lines are accounted for.
-        """
-        nprocs = 3
-        max = 10
-        interval_sec = 0.0001
-
-        log_files = {
-            local_rank: os.path.join(self.test_dir, f"{local_rank}_stdout.log")
-            for local_rank in range(nprocs)
-        }
-
-        dst = io.StringIO()
-        log_line_prefixes = {n: f"[worker{n}][{n}]:" for n in range(nprocs)}
-        tail = TailLog(
-            "writer",
-            log_files,
-            dst,
-            interval_sec=interval_sec,
-            log_line_prefixes=log_line_prefixes,
-        ).start()
-        # sleep here is intentional to ensure that the log tail
-        # can gracefully handle and wait for non-existent log files
-        time.sleep(interval_sec * 10)
-        futs = []
-        for local_rank, file in log_files.items():
-            f = self.threadpool.submit(
-                write, max=max, sleep=interval_sec * local_rank, file=file
-            )
-            futs.append(f)
-        wait(futs, return_when=ALL_COMPLETED)
-        self.assertFalse(tail.stopped())
-        tail.stop()
-        dst.seek(0)
-
-        headers: Set[str] = set()
-        for line in dst.readlines():
-            header, _ = line.split(":")
-            headers.add(header)
-        self.assertEqual(nprocs, len(headers))
-        for i in range(nprocs):
-            self.assertIn(f"[worker{i}][{i}]", headers)
-        self.assertTrue(tail.stopped())
-
 
     def test_tail_no_files(self):
         """

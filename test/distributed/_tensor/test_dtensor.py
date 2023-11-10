@@ -335,17 +335,6 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(replica_grad, global_tensor * self.world_size)
 
     @with_comms
-    def test_full_tensor_sync(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = (Shard(0),)
-        global_tensor = torch.ones(8, 3, requires_grad=True)
-
-        sharded_dtensor = distribute_tensor(global_tensor, device_mesh, shard_spec)
-        full_out = sharded_dtensor.full_tensor()
-        self.assertFalse(isinstance(full_out, AsyncCollectiveTensor))
-        self.assertEqual(full_out, global_tensor)
-
-    @with_comms
     def test_full_tensor_grad_hint(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = (Shard(0),)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
@@ -482,7 +483,7 @@ struct ReduceOp {
   template <int output_vec_size>
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
     if (config.vectorize_input) {
-      CUDA_KERNEL_ASSERT(output_vec_size == 1);
+      assert(output_vec_size == 1);
       // reduce at the header of input_slice where memory is not aligned,
       // so that thread_reduce will have an aligned memory to work on.
       return {input_vectorized_thread_reduce_impl(data)};
@@ -719,7 +720,7 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    CUDA_KERNEL_ASSERT(!final_output);
+    assert(!final_output);
     return (out_scalar_t)value;
   }
 
@@ -732,7 +733,7 @@ struct ReduceOp {
     at::detail::Array<arg_t, output_vec_size>,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    CUDA_KERNEL_ASSERT(false);
+    assert(false); // can't use AT_ASSERT in Cuda.
     return arg_t {};
   }
 
@@ -744,13 +745,13 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    CUDA_KERNEL_ASSERT(false);
+    assert(false);
     return *out;
   }
 
   template<class T>
   C10_DEVICE void set_results(const T x, const index_t base_offset) const {
-    CUDA_KERNEL_ASSERT(noutputs == 1);
+    assert(noutputs == 1);
     auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
     *res = x;
   }
@@ -772,7 +773,7 @@ struct ReduceOp {
 
   template <int output_vec_size>
   C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<index_t, output_vec_size> base_offset) const {
-    CUDA_KERNEL_ASSERT(final_output);
+    assert(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       set_results(ops.project(value[i]), base_offset[i]);

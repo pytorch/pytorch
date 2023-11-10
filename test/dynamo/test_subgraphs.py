@@ -493,7 +493,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self._common(fn, 2, 9)
         torch._dynamo.reset()
         with torch.no_grad():
-            self._common(fn, 2, 5)
+            self._common(fn, 2, 9)
 
     def test_resume_with_no_grad2(self):
         def fn(a, b):
@@ -522,7 +522,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 4
             return x
 
-        self._common(fn, 2, 11)
+        self._common(fn, 2, 19)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):

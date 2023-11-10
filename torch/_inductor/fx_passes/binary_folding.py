@@ -140,9 +140,6 @@ def binary_folding_init():
         ):
             return False
 
-        if not len(conv_node.args[1].users) == 1:
-            return False
-
         weight_meta_value = conv_node.args[1].meta.get("val")
         if weight_meta_value is None:
             return False

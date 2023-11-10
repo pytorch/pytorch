@@ -313,8 +313,8 @@ TEST_F(VulkanAPITest, zero_dim_tensor_1) {
 
 TEST_F(VulkanAPITest, zero_dim_tensor_2) {
   float v = 3.14f;
-  auto cpu = at::zeros({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
-  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+  auto cpu = at::empty({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
+  auto vk = at::empty({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
 
   ASSERT_TRUE(almostEqual(cpu, vk.cpu()));
 }

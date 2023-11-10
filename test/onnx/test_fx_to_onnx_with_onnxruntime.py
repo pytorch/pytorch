@@ -826,25 +826,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
-    def test_exported_program_as_input_from_file(self):
-        import tempfile
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
-            torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
-            loaded_exported_program = torch.export.load(f.name)
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
-        )
-
 
 def _parameterized_class_attrs_and_values_with_fake_options():
     input_values = []

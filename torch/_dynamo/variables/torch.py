@@ -24,7 +24,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..utils import (
@@ -132,6 +132,23 @@ tensor_dunder_fns_remap = {
 }
 
 
+try:
+    # Wed need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+    import transformers
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+except ImportError:
+    pass
+
+
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -171,7 +188,7 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, False)
+                ctx = GradModeVariable.create(tx, False, initialized=False)
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
@@ -179,13 +196,11 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, True)
+                ctx = GradModeVariable.create(tx, True, initialized=False)
                 return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(
-                tx, args[0].as_python_constant(), initialized=True
-            )
+            return GradModeVariable.create(tx, args[0].as_python_constant())
         elif self.value is torch.inference_mode:
             return InferenceModeVariable.create(tx, args[0].as_python_constant())
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
@@ -433,8 +448,7 @@ class TorchVariable(VariableTracker):
         elif any(
             self.value is method
             for method in [
-                device_interface.stream
-                for _, device_interface in get_registered_device_interfaces()
+                interface_elem.stream for interface_elem in device_interfaces.values()
             ]
         ):
             assert len(args) == 1

@@ -137,11 +137,15 @@ class DefaultSavePlanner(SavePlanner):
         return self.transform_object(write_item, object)
 
     def lookup_object(self, index: MetadataIndex) -> Any:
-        """Extension from the planner interface to make it easy to extend the default planner."""
+        """
+        This is an extension from the planner interface to make it easy to extend the default planner
+        """
         return find_state_dict_object(self.state_dict, index)
 
     def transform_object(self, write_item: WriteItem, object: Any):
-        """Extension from the planner interface to make it easy to extend the default planner."""
+        """
+        This is an extension from the planner interface to make it easy to extend the default planner
+        """
         if write_item.type == WriteItemType.BYTE_IO:
             bytes = io.BytesIO()
             torch.save(object, bytes)
@@ -217,11 +221,15 @@ class DefaultLoadPlanner(LoadPlanner):
         pass
 
     def lookup_tensor(self, index: MetadataIndex) -> torch.Tensor:
-        """Extension from the planner interface to make it easy to extend the default planner."""
+        """
+        This is an extension from the planner interface to make it easy to extend the default planner
+        """
         return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
-        """Extension from the planner interface to make it easy to extend the default planner."""
+        """
+        This is an extension from the planner interface to make it easy to extend the default planner
+        """
         return narrow_tensor_by_index(
             tensor, read_item.dest_offsets, read_item.lengths
         )
@@ -347,7 +355,9 @@ def create_default_global_save_plan(
 
 
 def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
-    """Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``."""
+    """
+    Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``.
+    """
     plan = _create_default_metadata_only_plan(state_dict)
     _, md = create_default_global_save_plan([plan])
     return md
@@ -356,7 +366,10 @@ def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
 def _check_box_overlap(
     box0: ChunkStorageMetadata, box1: ChunkStorageMetadata
 ) -> bool:
-    """Check if two boxes overlap. Tuples are (offset, lengths)."""
+    """
+    Checks if two boxes overlap. Tuples are (offset, lengths)
+    """
+
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D
     # shard, we would check if one shard is above or on the left of the

@@ -481,7 +481,6 @@ class TestConvolutionNN(NNTestCase):
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm")
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
@@ -520,7 +519,6 @@ class TestConvolutionNN(NNTestCase):
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm")
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
@@ -2056,7 +2054,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm")
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)

@@ -21,8 +21,6 @@ def fwd_bwd_compiler(fx_g, _):
 
 def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
     """
-    Obtain forward and backward graphs of a model with inductor decompositions using tracing and aot_module.
-
     Convenient util to get the fwd and bwd graphs of an arbitrary model
     with inductor decompositions. Note that this would simply do tracing
     with aot_module and don't ensure correctness. This is useful to track
@@ -47,9 +45,8 @@ def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
 
 def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=False):
     """
-    Util to print the operator coverage summary of a certain model with tabulute.
-
-    Must have tabulate module installed.
+    Util to print the operator coverage summary of a certain model with tabulute,
+    must have tabulate module installed
     """
     # python module required for summary
     import csv

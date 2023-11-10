@@ -11,7 +11,6 @@
 #include <thread>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
@@ -89,7 +88,7 @@ static std::string basename(const std::string& name) {
 
 static std::string parentdir(const std::string& name) {
   size_t end = name.find_last_of('/');
-  if (end == std::string::npos) {
+  if(end == std::string::npos) {
     end = name.find_last_of('\\');
   }
 
@@ -180,9 +179,7 @@ void PyTorchStreamReader::init() {
   }
   c10::LogAPIUsageMetadata(
       "pytorch.stream.reader.metadata",
-      {{"serialization_id", serialization_id_},
-       {"file_name", archive_name_},
-       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
+      {{"serialization_id", serialization_id_}});
 
   // version check
   at::DataPtr version_ptr;
@@ -411,10 +408,6 @@ PyTorchStreamReader::getRecordMultiReaders(const std::string& name,
 std::tuple<at::DataPtr, size_t>
 PyTorchStreamReader::getRecord(const std::string& name,
   std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
-  if(additionalReaders.empty()){
-    // No additional readers or record too small, use single threaded version
-    return getRecord(name);
-  }
 
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -425,8 +418,8 @@ PyTorchStreamReader::getRecord(const std::string& name,
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   auto n = stat.m_uncomp_size;
   valid("retrieving file meta-data for ", name.c_str());
-  if(n < additional_reader_size_threshold_){
-    // Reader size too small, use single threaded version
+  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
+    // No additional readers or record too small, use single threaded version
     return getRecord(name);
   }
 
@@ -464,11 +457,6 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
   std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
-  if(additionalReaders.empty()){
-    // No additional readers, use single threaded version
-    return getRecord(name, dst, n);
-  }
-
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
   }
@@ -483,8 +471,8 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
       n);
   valid("retrieving file meta-data for ", name.c_str());
 
-  if(n < additional_reader_size_threshold_){
-    // Reader size too small, use single threaded version
+  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
+    // No additional readers, use single threaded version
     return getRecord(name, dst, n);
   }
 
@@ -712,8 +700,8 @@ void PyTorchStreamWriter::writeEndOfFile() {
     ~Finalizer() {
       var_ = true;
     }
-   private:
-    bool& var_;
+    private:
+     bool& var_;
   } f(finalized_);
 
   auto allRecords = getAllWrittenRecords();
@@ -748,11 +736,6 @@ void PyTorchStreamWriter::writeEndOfFile() {
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());
-  c10::LogAPIUsageMetadata(
-      "pytorch.stream.writer.metadata",
-      {{"serialization_id", serialization_id_},
-       {"file_name", archive_name_},
-       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
   if (file_stream_.is_open()) {
     file_stream_.close();
   }
@@ -796,6 +779,9 @@ void PyTorchStreamWriter::writeSerializationId() {
         kSerializationIdRecordName,
         serialization_id_.c_str(),
         serialization_id_.size());
+    c10::LogAPIUsageMetadata(
+      "pytorch.stream.writer.metadata",
+      {{"serialization_id", serialization_id_}});
   }
 }
 

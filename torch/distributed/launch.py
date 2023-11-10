@@ -1,6 +1,4 @@
 r"""
-Module ``torch.distributed.launch``.
-
 ``torch.distributed.launch`` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 

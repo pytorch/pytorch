@@ -462,27 +462,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             gc.collect()
             self.assertEqual(all_live_block_count(), 0)
 
-        @torch._inductor.config.patch("freezing", True)
-        def test_constant_output(self):
-            class Mod(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.param = torch.nn.Parameter(
-                        torch.tensor([float(i) for i in range(10)], device="cuda")
-                    )
-
-                def forward(self, inp):
-                    return self.param, self.param[0:2], inp + 2
-
-            inp = torch.tensor([2], device="cuda")
-            m = Mod()
-            with torch.no_grad():
-                out_eager = m(inp)
-
-                m_comp = torch.compile(m)
-                for _ in range(3):
-                    self.assertEqual(out_eager, m_comp(inp))
-
         def test_live_outputs_multiple_graphs(self):
             def foo(x):
                 x = x + x + x

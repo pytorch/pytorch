@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Tuple, Union
+from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -314,13 +314,10 @@ def _size_of(node: fx.Node) -> int:
                 return 1
             else:
                 return 999999
-        # NB: The fallback values here are meaningless, maybe we should respect
-        # torch._inductor.config.unbacked_symint_fallback (but this is a
-        # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
@@ -919,7 +916,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Union[str, List[str]] = None,
+    prog: str = None,
     parse_stack_trace: bool = False,
 ) -> None:
     if clear_meta:

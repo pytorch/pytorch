@@ -107,7 +107,7 @@ The angle and absolute values of a complex tensor can be computed using :func:`t
 Linear Algebra
 --------------
 
-Many linear algebra operations, like :func:`torch.matmul`, :func:`torch.linalg.svd`, :func:`torch.linalg.solve` etc., support complex numbers.
+Many linear algebra operations, like :func:`torch.matmul`, :func:`torch.svd`, :func:`torch.solve` etc., support complex numbers.
 If you'd like to request an operation we don't currently support, please `search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
 if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
 
