@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/CUDAContextLight.h>
 
-// Preserved for BC, as may files depend on these includes
+// Preserved for BC, as many files depend on these includes
 #include <ATen/Context.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Logging.h>
