@@ -381,9 +381,9 @@ class _SingleLevelFunction(
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
-        r"""Define a formula for differentiating the operation with backward mode automatic differentiation (alias to the vjp function).
+        r"""Define a formula for differentiating the operation with backward mode automatic differentiation.
 
-        This function is to be overridden by all subclasses.
+        This function is to be overridden by all subclasses. (alias to the vjp function).
 
         It must accept a context :attr:`ctx` as the first argument, followed by
         as many outputs as the :func:`forward` returned (None will be passed in
