@@ -68,11 +68,7 @@ class LowPrecisionState(DefaultState):
 
 def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     """
-    Casts gradients back to full parameter precision so that further computation happens in full precision.
-
-    Args:
-        state (LowPrecisionState): The state containing information about parameter precision.
-        grad (torch.Tensor): The gradients to be cast back to full precision.
+    Cast gradients back to full parameter precision so that further computation happens in full precision.
     """
     orig_grad_data = grad.data
     grad.data = grad.data.to(state.parameter_type)
