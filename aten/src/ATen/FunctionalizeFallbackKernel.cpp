@@ -334,6 +334,5 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
   // The overloads of set_() that take in a storage should never
   // appear with torch.compile, because dynamo graph breaks
-  // appear with torch.compile, because dynamo graph breaks
   m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
 }
