@@ -8,6 +8,9 @@ from typing import Callable
 import torch
 import torch.distributed as dist
 from torch.distributed._composable import fully_shard, replicate
+from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed._tensor import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
