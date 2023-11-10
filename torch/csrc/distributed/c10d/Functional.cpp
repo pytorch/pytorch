@@ -253,6 +253,26 @@ at::Tensor reduce_scatter_tensor(
       inputs, reduce_op, group_size, group_name)[0];
 }
 
+at::Tensor all_to_all_single(
+    at::Tensor input,
+    const std::vector<int64_t>& output_split_sizes,
+    const std::vector<int64_t>& input_split_sizes,
+    const std::string& group_name) {
+  std::vector<int64_t> output_sizes = input.sizes().vec();
+  output_sizes[0] =
+      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
+  auto output = input.new_empty(output_sizes);
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->alltoall_base(
+      output,
+      input,
+      const_cast<std::vector<int64_t>&>(output_split_sizes),
+      const_cast<std::vector<int64_t>&>(input_split_sizes));
+  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  return output;
+}
+
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
   work->wait();
@@ -311,6 +331,16 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::reduce_scatter_tensor_coalesced),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "all_to_all_single("
+      "Tensor input, "
+      "SymInt[] output_split_sizes, "
+      "SymInt[] input_split_sizes, "
+      "str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
       {at::Tag::pt2_compliant_tag});
 
   m.def(

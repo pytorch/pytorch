@@ -5218,6 +5218,18 @@ try:
             ),
         )
 
+    @register_lowering(_c10d_functional.all_to_all_single)
+    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_to_all_single.default,
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
+            )
+        )
+
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)

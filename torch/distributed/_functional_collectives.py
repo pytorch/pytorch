@@ -562,7 +562,7 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 # communicate the output_split_sizes ahead of time (which is dynamic),
 # but then you pass those sizes explicitly, and the all to all itself
 # isn't dynamic, it just follows the specified output splits
-def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, rankset, group_size):
+def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, *args, **kwargs):
     if output_split_sizes is None:
         return input.new_empty(input.size())
     else:
@@ -634,6 +634,7 @@ if not torch._running_with_deploy():
     _c10_lib_impl.impl("all_gather_into_tensor_coalesced", _all_gather_into_tensor_coalesced_native_meta, "Meta")
     _c10_lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
     _c10_lib_impl.impl("reduce_scatter_tensor_coalesced", _reduce_scatter_tensor_coalesced_native_meta, "Meta")
+    _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
 
