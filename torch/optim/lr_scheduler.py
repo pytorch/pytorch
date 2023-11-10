@@ -120,10 +120,8 @@ class LRScheduler:
 
 
     def step(self, epoch=None):
-        """Raise a warning if old pattern is detected.
-
-        https://github.com/pytorch/pytorch/issues/20124
-        """
+        # Raise a warning if old pattern is detected
+        # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
             if not hasattr(self.optimizer.step, "_with_counter"):
                 warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
