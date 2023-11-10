@@ -66,7 +66,9 @@ class FSDPExtensions(ABC):
         self,
         tensor: torch.Tensor,
     ) -> Tuple[torch.Tensor, List[Shard]]:
-        """Call before loading a *sharded* model state dict and should return the tensor and list of shards from which to load data."""
+        """Call before loading a *sharded* model state dict.
+        
+        This function returns the tensor and list of shards from which to load data."""
         ...
 
     @abstractmethod
