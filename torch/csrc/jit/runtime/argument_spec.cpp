@@ -3,8 +3,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void ArgumentSpecCreator::scan(
     const TypePtr& typ,
@@ -287,5 +286,4 @@ void ArgumentSpecCreator::specializeTypes(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

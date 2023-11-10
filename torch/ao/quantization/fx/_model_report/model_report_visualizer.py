@@ -252,7 +252,7 @@ class ModelReportVisualizer:
 
         if len(channel_features) > 0:
             # now we add all channel data
-            for index, module_fqn in enumerate(filtered_data):
+            for module_fqn in filtered_data:
                 # we iterate over all channels
                 for channel in range(num_channels):
                     # we make a new row for the channel
@@ -644,7 +644,7 @@ class ModelReportVisualizer:
             # set the legend as well
             # combine all the data
             all_data = []
-            for index, channel_info in enumerate(y_data):
+            for channel_info in y_data:
                 all_data.extend(channel_info)
 
             val, bins, _ = plt.hist(

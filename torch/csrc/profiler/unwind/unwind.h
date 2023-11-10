@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/macros/Export.h>
+#include <c10/util/Optional.h>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,10 @@ struct Frame {
 // across a number of unwind states and make a single call to
 // symbolize.
 TORCH_API std::vector<Frame> symbolize(const std::vector<void*>& frames);
+
+// returns path to the library, and the offset of the addr inside the library
+TORCH_API c10::optional<std::pair<std::string, uint64_t>> libraryFor(
+    void* addr);
 
 struct Stats {
   size_t hits = 0;
