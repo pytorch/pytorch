@@ -824,15 +824,17 @@ def make_fx(f,
 
         def wrap_fake(x):
             nonlocal arg_count
+            # TODO: it would be nice to line these up with the names
+            # FX will choose for the placeholders, but we don't
+            # actually know what the names will be at this point yet
+            # NB: the Source here is actually meaningless
+            from torch._dynamo.source import ConstantSource
+            source = ConstantSource(f"input{arg_count}")
             if isinstance(x, torch.Tensor):
-                # TODO: it would be nice to line these up with the names
-                # FX will choose for the placeholders, but we don't
-                # actually know what the names will be at this point yet
-                # NB: the Source here is actually meaningless
-                from torch._dynamo.source import ConstantSource
-                source = ConstantSource(f"input{arg_count}")
                 arg_count += 1
                 return fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
+            elif isinstance(x, int) and tracing_mode == "symbolic":
+                return shape_env.create_symintnode(shape_env.create_symbol(x, source), hint=x, source=source)
 
             return x
 
