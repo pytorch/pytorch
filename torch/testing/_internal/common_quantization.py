@@ -2585,6 +2585,13 @@ class TestHelperModules:
             w = torch.cat([z, y])
             return w
 
+    class ThreeAdd(torch.nn.Module):
+        def forward(self, x1, x2, x3, x4):
+            y = x1 + x2
+            z = x3 + x4
+            w = y + z
+            return w
+
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2619,6 +2626,14 @@ class TestHelperModules:
         def forward(self, x, y):
             x = x * y
             x *= y
+            return x
+
+    class AddMulScalar(torch.nn.Module):
+        def forward(self, x):
+            x = x + 3
+            x = x * 3
+            x += 3
+            x *= 3
             return x
 
     class ConvBnReLU2dAndLinearReLU(torch.nn.Module):

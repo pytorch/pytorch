@@ -5,6 +5,7 @@ import torch
 from torch.utils._contextlib import (
     _DecoratorContextManager,
     _NoParamDecoratorContextManager,
+    F,
 )
 
 __all__ = [
@@ -181,11 +182,15 @@ class set_grad_enabled(_DecoratorContextManager):
 
     def __init__(self, mode: bool) -> None:
         self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(mode)
         self.mode = mode
+        torch._C._set_grad_enabled(mode)
+
+    def __call__(self, orig_func: F) -> F:
+        torch._C._set_grad_enabled(self.prev)
+        return super().__call__(orig_func)
 
     def __enter__(self) -> None:
-        pass
+        torch._C._set_grad_enabled(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
