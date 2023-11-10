@@ -134,10 +134,10 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Opt
     """
     Implement a simple gradient compression approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
 
-    This approach involves casting `grad` to half-precision floating-point format (`torch.float16`),
-    and then averaging gradients by `world_size` in two steps: pre-division by `state.gradient_predivide_factor`,
-    followed by post-division after a communication step (`all_reduce` or `reduce_scatter`).
-    After post-division, the compressed gradients are cast back to the parameters' precision.
+    It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
+    ``state.gradient_predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
+    gradients are averaged by a ``state.gradient_postdivide_factor``.
+    Once post-division is done, compressed gradients are casted back to parameters' precision.
 
     Args:
         state (LowPrecisionState): State information, configures pre- and post-division factors, parameters' precision.
