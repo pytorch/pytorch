@@ -1259,7 +1259,7 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import VariableBuilder, SourcelessBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         try:
             py_type = obj.python_type()
