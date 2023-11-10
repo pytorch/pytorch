@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils._pytree import tree_all, tree_all_only
 
 
 if not dist.is_available():
@@ -457,6 +458,76 @@ class TestStateDict(DTensorTestBase):
         )
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_full_state_dict(self) -> None:
+        orig_model = CompositeParamModel(device=torch.device("cuda"))
+        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+        copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        dist_model = FSDP(
+            copy.deepcopy(orig_model),
+            auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+            use_orig_params=True,
+            device_mesh=device_mesh,
+        )
+
+        dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+
+        mst, ost = get_state_dict(
+            dist_model,
+            dist_optim,
+            options=StateDictOptions(cpu_offload=True),
+        )
+
+        cpu_device = torch.device("cpu")
+
+        def is_cpu(v):
+            if isinstance(v, DTensor):
+                return v.device == cpu_device
+            elif isinstance(v, ShardedTensor):
+                shards = v.local_shards()
+                if not shards:
+                    return True
+                return shards[0].tensor.device == cpu_device
+            else:
+                return v.device == cpu_device
+
+        self.assertTrue(
+            tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, mst)
+        )
+        self.assertTrue(
+            tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, ost)
+        )
+
+        mst, ost = get_state_dict(
+            dist_model, dist_optim, options=StateDictOptions(full_state_dict=True)
+        )
+
+        self.assertTrue(
+            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), mst)
+        )
+        self.assertTrue(
+            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), ost)
+        )
+
+        mst, ost = get_state_dict(
+            dist_model,
+            dist_optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+
+        if self.rank == 0:
+            self.assertTrue(
+                tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, mst)
+            )
+            self.assertTrue(
+                tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, ost)
+            )
+        else:
+            self.assertEqual(mst, {})
+            self.assertEqual(ost, {})
 
 
 if __name__ == "__main__":
