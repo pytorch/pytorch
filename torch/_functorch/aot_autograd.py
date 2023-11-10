@@ -1426,7 +1426,7 @@ from a multi-output view call")
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            if info.mutates_data and info.requires_grad and not info.mutations_hidden_from_autograd
         ]
         f_output_tangents = [
             o
