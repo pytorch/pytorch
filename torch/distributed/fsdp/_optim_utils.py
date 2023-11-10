@@ -1353,7 +1353,7 @@ def _convert_all_state_info(
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
 ) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
-    """Given the ``gathered_state_info`` and ``input_states``, the API converted the StateInfo into the original state if the state is not a non-scalar tensor. 
+    """Given the ``gathered_state_info`` and ``input_states``, the API converted the StateInfo into the original state if the state is not a non-scalar tensor.
 
     For a multi-dimensional tensor, the local state will be stored in
     ``state_buffer`` in a correct order for later allgather purpose.
