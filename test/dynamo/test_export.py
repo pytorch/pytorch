@@ -2863,7 +2863,6 @@ def forward(self, x):
             return x.sum() + type_fn(a).func().sum()
 
         gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
-
         self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_not_functionalize(self):
