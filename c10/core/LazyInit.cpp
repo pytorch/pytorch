@@ -11,7 +11,7 @@ void SetLazyInit(DeviceType t, lazy_init_ptr func) {
 void LazyInit(const DeviceType& t) {
   lazy_init_ptr func = lazy_init_ptr_array[static_cast<int>(t)];
   if (func) {
-      func();
+    func();
   }
 }
 
