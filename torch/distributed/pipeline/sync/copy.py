@@ -4,8 +4,7 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-"""
-Autograd functions for stream-aware CUDA copy.
+"""Autograd functions for stream-aware CUDA copy.
 
 It is used to overlap copy and computation on the same GPU.
 """

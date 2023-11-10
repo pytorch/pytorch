@@ -34,9 +34,7 @@ def register_overlapped(optim_cls):
 class OverlappedOptimizer(ABC):
     def __init__(self, optim_cls: Type) -> None:
         """
-        Base class representing an overlapped optimizer.
-
-        Overlappedoptimizer is a base class that child classes can implement to
+        A base class that child classes can implement to specify how different optimizers will register themselves with DDP.
         specify how different optimizers will register themselves with DDP.
         """
         self.optim_cls = optim_cls

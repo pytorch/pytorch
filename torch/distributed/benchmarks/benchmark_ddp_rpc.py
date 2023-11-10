@@ -115,14 +115,11 @@ def _run_printable(cmd):
 
 def _run_trainer(emb_rref_list, rank):
     """
-    Perform training iterations for a model using Distributed Data Parallelism and Remote Procedure Calls.
+    Run a forward pass which involves an embedding lookup on the 8 parameter servers and running nn.Linear locally.
 
-    Args:
-        emb_rref_list (list): List of RRefs to embedding tables on parameter servers.
-        rank (int): Rank of the current trainer.
-
-    Returns:
-        tuple: A tuple containing rank, time measurements, and total batch size.
+     During the backward pass, DDP is responsible for aggregating the gradients for the dense part
+     (nn.Linear) and distributed autograd ensures gradients updates are propagated to the 
+     parameter servers.
     """
     # Setup the model.
     model = HybridModel(emb_rref_list, rank)
@@ -200,12 +197,6 @@ def _run_trainer(emb_rref_list, rank):
 def run_worker(rank, world_size):
     """
     Initialize RPC, call the function, and shut down RPC.
-
-    Args:
-        rank (int): The rank of the worker.
-        world_size (int): The total number of processes in the distributed setup.
-    Returns:
-        None
     """
     # Using different port numbers in TCP init_method for init_rpc and
     # init_process_group to avoid port conflicts.

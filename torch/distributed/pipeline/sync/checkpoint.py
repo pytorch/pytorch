@@ -68,9 +68,9 @@ class Function(Protocol):
 
 
 def checkpoint(function: Function, input):
-    """Make a checkpoint with a simple interface like.
-
-    :func:`torch.utils.checkpoint.checkpoint`. It's only used to test or debug
+    """Make a checkpoint with a simple interface, such as :func:`torch.utils.checkpoint.checkpoint`. 
+    
+    It's only used to test or debug
     :class:`Checkpoint` and :class:`Recompute` without boilerplate.
     """
     batch = Batch(input)
@@ -168,10 +168,9 @@ def is_checkpointing() -> bool:
 
 
 def is_recomputing() -> bool:
-    """
-    Whether the current forward propagation is under checkpoint recomputation.
+    """Determine whether the current forward propagation is under checkpoint recomputation.
 
-    Use this to prevent duplicated side-effects at forward
+    Use this function to prevent duplicated side-effects at forward
     propagation::
 
         class Counter(nn.Module):
@@ -211,9 +210,7 @@ class Context:
 
 
 def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None:
-    """
-    Checkpoint.forward` captures the current PyTorch's random number
-    generator states at CPU and GPU to reuse in :meth:`Recompute.backward`.
+    """:meth:`Checkpoint.forward` captures the current PyTorch's random number generator states at CPU and GPU to reuse in :meth:`Recompute.backward`.
 
     .. seealso:: :ref:`Referential Transparency`
 
@@ -231,8 +228,7 @@ def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None
 
 @contextmanager
 def restore_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> Generator[None, None, None]:
-    """:
-    Restores the random number generator states captured by :func:`save_rng_states` within its context.
+    """Restore the random number generator states captured by :func:`save_rng_states` within its context.
 
     .. seealso:: :ref:`Referential Transparency`
     """
