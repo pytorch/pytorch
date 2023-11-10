@@ -1,5 +1,6 @@
 import copy
 import logging
+import random
 import re
 from typing import cast, Dict, List, Optional, Tuple
 
@@ -460,14 +461,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         c_layout = Bias.get_layout() if Bias is not None else None
         d_layout = Y.get_layout()
         all_match = all(
-            [
-                CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
-                for buf, op_layout in zip(
-                    [X, W, Bias, Y],
-                    [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
-                )
-                if buf is not None
-            ]
+            CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
+            for buf, op_layout in zip(
+                [X, W, Bias, Y],
+                [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
+            )
+            if buf is not None
         )
         if all_match:
             return op
@@ -606,7 +605,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             num_3x_ops,
             num_2x_ops,
         )
-        return list(res.values())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        all_results = list(res.values())
+        random.shuffle(all_results)
+        return all_results[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         sizes = self.output_node.get_size()
