@@ -4052,4 +4052,4 @@ bool ProcessGroupNCCL::isUCCAvailable() const {
 
 } // namespace c10d
 
-#endif // USE_C10D_NC
+#endif // USE_C10D_NCCL
