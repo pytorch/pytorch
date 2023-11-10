@@ -82,7 +82,6 @@ class LocalTimerServer(TimerServer):
     def __init__(
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
     ):
-        """Inititalize the local timer server."""
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
         self._timers: Dict[Tuple[Any, str], TimerRequest] = {}
 

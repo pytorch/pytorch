@@ -152,7 +152,8 @@ def _reshard_output(
         module: torch.nn.Module,
         resharding_spec: ShardingSpec) -> torch.nn.Module:
     """
-    Reshard module output in the forward pass according to the given ``resharding_spec``.
+    Hook a module with output resharding in the forward pass according
+    to the given ``resharding_spec``.
 
     Args:
         module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
@@ -171,7 +172,7 @@ def _reshard_output(
 
 def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
-    Set a hook on a module with local shards collection in the forward pass.
+    Hook a module with local shards collection in the forward pass.
 
     This API is typically used to convert a sharded representation back to data parallel
     representation. In particular, it returns the local tensor for this Shard. If the

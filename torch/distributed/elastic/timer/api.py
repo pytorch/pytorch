@@ -213,7 +213,6 @@ class TimerServer(abc.ABC):
         return [r.scope_id for r in timer_requests]
 
     def start(self) -> None:
-        """Start a watchdog thread."""
         log.info(
             "Starting %s..."
             " max_interval=%s,"
@@ -227,7 +226,6 @@ class TimerServer(abc.ABC):
         self._watchdog_thread.start()
 
     def stop(self) -> None:
-        """Stop watchdog thread."""
         log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:

@@ -107,7 +107,6 @@ def _check_full_rank(store, world_size):
 
 
 def get_free_port():
-    """Return a free port."""
     sock = get_socket_with_port()
     with closing(sock):
         return sock.getsockname()[1]

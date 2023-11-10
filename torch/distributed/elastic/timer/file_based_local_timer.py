@@ -123,7 +123,6 @@ class FileTimerClient(TimerClient):
         )
 
     def release(self, scope_id: str) -> None:
-        """Request to release the timer."""
         self._send_request(
             request=FileTimerRequest(
                 worker_pid=os.getpid(),

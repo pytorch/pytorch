@@ -33,7 +33,6 @@ class ElasticDistributedSampler(DistributedSampler):
     """
 
     def __init__(self, dataset, num_replicas=None, rank=None, start_index=0):
-        """Initialize the  :class:`ElasticDistributedSampler`."""
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
         if start_index >= len(dataset):
             raise ValueError(
