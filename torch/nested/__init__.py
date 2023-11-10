@@ -178,7 +178,8 @@ Example::
 
         from torch.nested._internal.nested_tensor import jagged_from_list
 
-        nt, _ = jagged_from_list(list_of_tensors, offsets=None, device=device, dtype=dtype)
+        with torch.no_grad():
+            nt, _ = jagged_from_list(list_of_tensors, offsets=None, device=device, dtype=dtype)
 
         nt.requires_grad_(requires_grad)
         if pin_memory:

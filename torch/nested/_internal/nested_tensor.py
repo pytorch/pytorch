@@ -3,7 +3,7 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -64,7 +64,7 @@ class NestedTensor(torch.Tensor):
             torch.jagged,
             values.device,
             False,
-            False,
+            kwargs.get("requires_grad", False),
             "sizes",
             False,
             True,  # dispatch_layout
@@ -181,7 +181,7 @@ class NestedTensor(torch.Tensor):
         # propagated the meta["ragged_size"] which is still a symint and the
         # subclass is responsible for making sure that the symint doesn't leak.
         #
-        if len(free_symbols(values)) == 0 and len(free_symbols(offsets)) == 0:
+        if not has_free_symbols(values) and not has_free_symbols(offsets):
             # Note that we cannot simply check if is_fake(values) because
             # during aot autograd, FunctionalTensors are not fake but hold
             # symbolic sizes.
@@ -317,7 +317,7 @@ def jagged_from_list(
 
 def jagged_from_tensor_and_lengths(
     tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
-) -> Tuple[NestedTensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
     if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(
@@ -352,6 +352,25 @@ def jagged_from_tensor_and_lengths(
         values = tensor.view(-1, *tensor.shape[2:])
     else:
         values = tensor.view(-1)
+
+    # Check if offsets and lengths make it possibly contiguous and return a regular NT
+    is_contiguous = True
+    orig_dim = tensor.shape[1]
+    if torch.any(length_list[1:-1].ne(orig_dim)):
+        is_contiguous = False
+    if torch.any(offsets[1:-2].diff().ne(orig_dim)):
+        is_contiguous = False
+    if offsets[0] + length_list[0] != orig_dim:
+        is_contiguous = False
+
+    if is_contiguous:
+        return (
+            ViewNestedFromBuffer.apply(
+                values[offsets[0] : offsets[-1]], offsets - offsets[0]
+            ),
+            offsets,
+            None,
+        )
 
     return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
 

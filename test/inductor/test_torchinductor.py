@@ -7,6 +7,7 @@ import gc
 import importlib
 import itertools
 import math
+import operator
 import os
 import random
 import re
@@ -665,6 +666,20 @@ class CommonTemplate:
             return torch.sgn(a), torch.sgn(a + 1) - 1
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
+
+    def test_scatter_bf16(self):
+        def fn(inp, src, index):
+            return inp.scatter_add(0, index, src)
+
+        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            self.common(
+                fn,
+                [
+                    torch.zeros(3, 5, dtype=dtype),
+                    torch.ones((2, 5), dtype=dtype),
+                    torch.tensor([[0, 1, 2, 0, 0]]),
+                ],
+            )
 
     def test_randn_generator(self):
         def fn(a, generator):
@@ -2647,6 +2662,142 @@ class CommonTemplate:
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
 
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(
+                    torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
+                )
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w @ x).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -3111,6 +3262,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
+    @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -3453,6 +3605,17 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+        )
+
+    def test_cat_uint8(self):
+        def fn(x):
+            batch_shape = x.shape[:1]
+            out = torch.cat([x.new_zeros(1).expand(batch_shape + (1,)), x], dim=-1)
+            return out
+
+        self.common(
+            fn,
+            (torch.randint(0, 256, size=(3, 255), dtype=torch.uint8),),
         )
 
     def test_cat_empty(self):
@@ -6355,6 +6518,17 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_unfold_zero_dimension_tensor(self):
+        def forward(x):
+            return torch.unfold_copy(dimension=1, input=x, size=0, step=7)
+
+        x = torch.rand([1, 0], dtype=torch.float32)
+
+        y = forward(x)
+        compiled_y = torch.compile(forward, fullgraph=True)(x)
+
+        self.assertEqual(y, compiled_y)
+
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
             def __init__(self):
@@ -7461,6 +7635,40 @@ class CommonTemplate:
                 source,
             ),
         )
+
+    @config.patch(
+        "triton.autotune_pointwise", True
+    )  # needed to introduce config that exceed max shared memory usage
+    def test_large_block_sizes(self):
+        """
+        Inductor will try triton configs like x = 64 and y = 1024 which will
+        result in out of shared memory if dtype is fp32.
+
+        Currently inductor will skip such bad configs and pick the best one
+        from the remaining configs.
+        """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
+
+        @torch.compile
+        def fn(x, y):
+            return x.t() + y
+
+        # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
+        # CI while still keep the same up-rounded size-hints.
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
+        fn(a, b)
+
+    def test_adaptive_avg_pool1d_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/113013
+        def fn(x):
+            x = torch.adaptive_avg_pool1d(input=x, output_size=2)
+            x = torch.argmax(input=x)
+            return x
+
+        x = torch.rand([4, 4, 3], dtype=torch.float64)
+        self.common(fn, (x,))
 
 
 @dataclasses.dataclass

@@ -49,7 +49,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        set_guard_fail_hook,
         skip_code,
         unsupported,
     )
@@ -217,8 +216,7 @@ class OptimizedModule(torch.nn.Module):
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
             # to avoid treating it as lazy on subsequent recompile.
-            assert len(kwargs) == 0
-            self._orig_mod._infer_parameters(self._orig_mod, args)
+            self._orig_mod._infer_parameters(self._orig_mod, args, kwargs)
         return self._forward(*args, **kwargs)
 
     def __dir__(self):

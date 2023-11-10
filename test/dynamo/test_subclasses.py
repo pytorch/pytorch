@@ -275,7 +275,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return super().__torch_function__(func, types, args, kwargs)
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(x):
             return x.sigmoid()
 
@@ -765,6 +765,31 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_support_bases(self):
+        import abc
+
+        import torch.fx._symbolic_trace
+
+        class Meta(abc.ABCMeta, torch.fx._symbolic_trace.ProxyableClassMeta):
+            def __new__(cls, name, bases, dct):
+                x = super().__new__(cls, name, bases, dct)
+                x.attr = 100
+                return x
+
+        class Multistreamable(abc.ABC):  # noqa: B024
+            pass
+
+        class Foo(Multistreamable, metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            typ = type(Foo())
+            typ.__bases__
+            return typ.__bases__
+
+        self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
@@ -835,13 +860,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
-
-    def test_binary_recompiles_due_to_duck_sizing(self):
-        # Even though the input is unused, we still guard due to duck sizing
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):

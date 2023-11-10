@@ -2861,10 +2861,8 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
-        ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
         def f_correct(x):
             a = A()
@@ -3292,7 +3290,9 @@ class GraphModule(torch.nn.Module):
         cos = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        true_guard_code = [
+            "cast_symbool_to_symint_guardless(L['pred']) == 1",
+        ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
             "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",

@@ -113,7 +113,7 @@ class Match:
         ]
 
     def output_node(self) -> torch.fx.Node:
-        return [p for p in self.output_nodes() if p][0]
+        return next(p for p in self.output_nodes() if p)
 
     def replace_with_graph(self, replacement_graph, args):
         assert self.ctx
@@ -1251,6 +1251,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
             lambda g, i: make_boxed_func(g),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
+            keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
     assert gm

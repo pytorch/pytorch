@@ -599,10 +599,10 @@ def nonzero(fake_mode, func, arg):
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
-            free_symbols,
+            has_free_symbols,
         )
 
-        if not free_symbols(arg.numel()):
+        if not has_free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
@@ -635,10 +635,10 @@ def masked_select(fake_mode, func, self, mask):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import (
         _constrain_range_for_size,
-        free_symbols,
+        has_free_symbols,
     )
 
-    if not free_symbols(arg.numel()):
+    if not has_free_symbols(arg.numel()):
         if arg.numel() >= 2:
             maxval = int(arg.numel())
 
