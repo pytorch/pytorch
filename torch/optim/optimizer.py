@@ -645,13 +645,11 @@ class Optimizer:
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
-        r"""Register a load_state_dict pre-hook which will be called.
+        r"""Register a state dict pre-hook which will be called before
+        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
+        following signature::
 
-        Pre-hook will be called before :meth:`~torch.optim.Optimizer.load_state_dict` is called.
-
-        It should have the following signature::
-
-            hook(optimizer, state_dict) -> state_dict or None
+            hook(optimizer) -> None
 
         The ``optimizer`` argument is the optimizer instance being used and the
         ``state_dict`` argument is a shallow copy of the ``state_dict`` the user
@@ -685,13 +683,11 @@ class Optimizer:
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
     ) -> RemovableHandle:
-        r"""Register a load_state_dict post-hook which will be called.
+        r"""Register a state dict post-hook which will be called after
+        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
+        following signature::
 
-        Pre-hook will be called after :meth:`~torch.optim.Optimizer.load_state_dict` is called.
-
-        It should have the following signature::
-
-            hook(optimizer) -> None
+            hook(optimizer, state_dict) -> state_dict or None
 
         The ``optimizer`` argument is the optimizer instance being used.
 
