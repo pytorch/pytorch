@@ -5,10 +5,7 @@ import unittest
 import torch._dynamo as torchdynamo
 from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
-from torch._export.db.examples import (
-    filter_examples_by_support_level,
-    get_rewrite_cases,
-)
+from torch._export.db.examples import filter_examples_by_support_level
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
