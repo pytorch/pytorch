@@ -43,7 +43,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           fetch-depth: 1
           submodules: false
@@ -67,7 +67,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
 
       - name: Populate CI build options
         run: |
@@ -102,7 +102,7 @@ jobs:
             brew install libtool
 
       - name: Setup miniconda for iOS
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@release/2.1
         with:
           python-version: "3.9"
           environment-file: .github/requirements/conda-env-iOS

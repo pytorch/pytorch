@@ -47,7 +47,7 @@ jobs:
       BUILD_PLATFORMS: ${{ matrix.platform }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
       # [see note: pytorch repo ref]
@@ -109,5 +109,5 @@ jobs:
                  ghcr.io/pytorch/pytorch-nightly:latest
           docker push ghcr.io/pytorch/pytorch-nightly:latest
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
