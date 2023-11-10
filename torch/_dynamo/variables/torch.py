@@ -149,6 +149,10 @@ class BaseTorchVariable(VariableTracker):
             source=source,
         )
 
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
     def reconstruct(self, codegen):
         name = torch_get_name(value, f"allowed_fn_{id(value)}")
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -638,31 +642,30 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
             return tensor_variable
 
-    def _call_ntuple(self, tx, args, kwargs, options):
+    def _call_ntuple(self, tx, args, kwargs):
         """inline behavior of torch.nn.modules.utils._ntuple"""
         if self.value is torch.nn.modules.utils._ntuple:
             count = args[0].as_python_constant()
         else:
             count = self.value.__closure__[0].cell_contents
         assert isinstance(count, int)
+        assert not kwargs
 
         def handle_ntuple(value):
             if value.has_unpack_var_sequence(tx):
                 return variables.TupleVariable(
                     list(value.unpack_var_sequence(tx)),
-                    **VariableTracker.propagate(self, value, args, kwargs.values()),
                 )
             elif value.is_python_constant():
                 # constant prop through it
                 return variables.ConstantVariable.create(
                     torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
-                    **VariableTracker.propagate(self, value, args, kwargs.values()),
                 )
             else:
                 unimplemented(f"torch.nn.modules.utils._ntuple({value})")
 
         if self.value is torch.nn.modules.utils._ntuple:
-            return variables.LambdaVariable(handle_ntuple, **options)
+            return variables.LambdaVariable(handle_ntuple)
         else:
             return handle_ntuple(args[0])
 
@@ -709,7 +712,7 @@ class TorchVariable(BaseTorchVariable):
 
     def call_hasattr(self, tx, name):
         result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result).add_options(self)
+        return variables.ConstantVariable.create(result)
 
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
@@ -727,7 +730,6 @@ class TorchVariable(BaseTorchVariable):
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
-        options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.can_constant_fold_through() and (constant_args or unspec_python_args):
             # constant fold
@@ -736,14 +738,13 @@ class TorchVariable(BaseTorchVariable):
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
-                **options,
             )
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.CrossEntropyLoss:
-                return self._call_cross_entropy_loss(tx, args, kwargs, options)
+                return self._call_cross_entropy_loss(tx, args, kwargs)
             else:
                 return variables.UserDefinedClassVariable(
-                    self.value, source=self.source, **options
+                    self.value, source=self.source
                 ).call_function(tx, args, kwargs)
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
@@ -771,7 +772,6 @@ class TorchVariable(BaseTorchVariable):
                         torch.stack,
                         *proxy_args_kwargs(args, kwargs),
                     ),
-                    **options,
                 )
                 args = [stacked]
 
@@ -782,12 +782,11 @@ class TorchVariable(BaseTorchVariable):
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
                 ),
-                **options,
             )
 
             return tensor_variable
 
-    def _call_cross_entropy_loss(self, tx, args, kwargs, options):
+    def _call_cross_entropy_loss(self, tx, args, kwargs):
         """
         functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
         label_smoothing=0.0
@@ -849,4 +848,4 @@ class TorchVariable(BaseTorchVariable):
                 ),
             )
 
-        return variables.LambdaVariable(fake_cross_entropy_loss, **options)
+        return variables.LambdaVariable(fake_cross_entropy_loss)
