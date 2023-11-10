@@ -883,6 +883,7 @@ aten::lu_unpack.out
 aten::masked_scatter
 aten::masked_scatter.out
 aten::masked_scatter_
+aten::masked_scatter_backward
 aten::masked_select
 aten::masked_select.out
 aten::matmul_backward

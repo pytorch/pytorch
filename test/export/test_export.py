@@ -1527,6 +1527,20 @@ def forward(self, arg0_1):
         ):
             ep(*test_inp)
 
+    def test_lazy_module_kwargs(self):
+        class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def initialize_parameters(self, *args, **kwargs):
+                pass
+
+            def forward(self, x, y):
+                return x + y
+
+        m = LazyModule()
+        ep = torch.export.export(m, (), {'x': torch.randn(3, 3), 'y': torch.randn(3, 3)})
+        inputs = {'x': torch.randn(3, 3), 'y': torch.randn(3, 3)}
+        self.assertEqual(ep(**inputs), m(**inputs))
+
+
 
 if __name__ == '__main__':
     run_tests()
