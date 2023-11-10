@@ -5029,29 +5029,26 @@ def sym_constrain_range(a, min, max):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    if isinstance(val, torch.SymInt):
-        return val.node.expr
-    else:
-        assert isinstance(val, int)
-        assert a.get_size()[dim] == val
-        return sympy.sympify(val)
+    # Note [Can val be an int?]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # In principle, someone could construct an FX graph where
+    # a call to size/stride has a val that is a plain int (not
+    # SymInt).  However, we will maintain the invariant that
+    # this is not possible: if you are constructing an FX graph
+    # where there is a call to size/stride that returns an
+    # int, but you KNOW that int must always be a constant,
+    # then you do not need trace that call at all (and just
+    # constant propagate the integer as is.)
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    if isinstance(val, torch.SymInt):
-        return val.node.expr
-    else:
-        assert isinstance(val, int)
-        # NB: we don't propagate stride information on computed buffers
-        # because in general inductor is allowed to change how it decides
-        # what buffers will be, so we ALWAYS use val here.  This case
-        # should be rare but could occur if we traced sym_stride into a
-        # graph but then realized that the stride was static during
-        # inductor (it is insufficient to spec during Dynamo tracing, as
-        # the AOTAutograd retrace would then eliminate the sym_stride call
-        return sympy.sympify(val)
+    # See Note [Can val be an int?]
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_numel)
@@ -5085,9 +5082,7 @@ def accumulate_grad_(variable, new_grad):
 
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel.create(
-        kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs
-    )
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
