@@ -32,7 +32,11 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    copy_tests,
+)
 
 
 class TestCase(TorchTestCase):
