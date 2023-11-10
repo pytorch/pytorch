@@ -16,8 +16,10 @@ def clean_worker(*args, **kwargs):
 
 class Pool(multiprocessing.pool.Pool):
     """Pool implementation which uses our version of SimpleQueue.
+
     This lets us pass tensors in shared memory across processes instead of
-    serializing the underlying data."""
+    serializing the underlying data.
+    """
 
     def _setup_queues(self):
         self._inqueue = SimpleQueue()
@@ -26,8 +28,10 @@ class Pool(multiprocessing.pool.Pool):
         self._quick_get = self._outqueue._reader.recv
 
     def _repopulate_pool(self):
-        """Bring the number of pool processes up to the specified number,
-        for use after reaping workers which have exited.
+        """Increase the number of pool processes to the specified number.
+
+        Bring the number of pool processes up to the specified number, for use after
+        reaping workers which have exited.
         """
         for i in range(self._processes - len(self._pool)):
             # changed worker -> clean_worker
