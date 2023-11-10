@@ -77,6 +77,7 @@ def uninteresting_files():
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
+        torch.fx.experimental.sym_node,
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
