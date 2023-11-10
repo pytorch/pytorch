@@ -327,10 +327,10 @@ class CutlassEVTEpilogueArgumentFormatter:
     def create_pre_fused_addmm_arg_str(alpha: float, beta: float) -> str:
         return """
         {  // ADDMM Arguments: ternary op : beta * C + (alpha * acc)
-          {{%f}}, // leaf op+args : beta
+          {{static_cast<ElementAcc>(%f)}}, // leaf op+args : beta
           {},               // leaf op+args : C
           {                 // binary op : alpha * acc
-            {{%f}}, // leaf op+args : alpha
+            {{static_cast<ElementAcc>(%f)}}, // leaf op+args : alpha
             {},                // leaf op+args : acc
             {}              // binary args : multiplies
           },                // end binary op

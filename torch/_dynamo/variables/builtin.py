@@ -1199,7 +1199,13 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            name = name_var.as_python_constant()
+            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
+                unimplemented(
+                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                )
+            tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
