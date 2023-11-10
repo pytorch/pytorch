@@ -1,8 +1,8 @@
 r"""
 This module introduces CUDA Sanitizer, a tool for detecting synchronization errors between kernels ran on different streams.
 
-It stores information on accesses to tensors to determine if they are synchronized 
-or not. When enabled in a python program and a possible data race is detected, a 
+It stores information on accesses to tensors to determine if they are synchronized
+or not. When enabled in a python program and a possible data race is detected, a
 detailed warning will be printed and the program will exit.
 
 It can be enabled either by importing this module and calling
