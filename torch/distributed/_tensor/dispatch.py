@@ -23,15 +23,20 @@ from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 try:
-    from torch.utils import _cxx_pytree as pytree
+    from torch.utils._pytree.api import cxx as pytree
 except ImportError:
-    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
+    from torch.utils._pytree.api import python as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 
 _random_ops = {
     aten.native_dropout.default,
     aten.normal_.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+    aten.randint_like.low_dtype_out,
     aten.uniform_.default,
 }
 
@@ -302,9 +307,10 @@ def _operator_dispatch(
 
     if _is_inplace_op(op_call):
         # inplace op should return self instead of re-wrapping
-        self = cast(dtensor.DTensor, args[0])
-        self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self, op_info.schema, output_sharding
+        if output_sharding.output_spec is not None:
+            return args[0], op_info.schema, output_sharding
+        else:
+            return None, op_info.schema, output_sharding
     elif _is_out_variant_op(op_call):
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (

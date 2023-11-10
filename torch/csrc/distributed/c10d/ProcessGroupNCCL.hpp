@@ -47,8 +47,8 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
     "TORCH_NCCL_ENABLE_MONITORING";
 
-constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_S =
-    "TORCH_NCCL_HEARTBEAT_TIMEOUT_S";
+constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC =
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC";
 
 constexpr const char* TORCH_NCCL_COLLECTIVE_HASH_DEBUG =
     "TORCH_NCCL_COLLECTIVE_HASH_DEBUG";
@@ -76,6 +76,11 @@ enum ErrorHandlingMode {
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
+#define PRINT_COLLECTIVE_HASH_SIGNATURE(rank, opType, numel, hashValue) \
+  LOG(ERROR) << "[RANK" << rank << "] : Collective hash of " << opType  \
+             << " before calling into NCCL, "                           \
+             << "numel: " << numel << "hash: " << hashValue;
+
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
 // internal comm streams.
@@ -84,6 +89,12 @@ enum ErrorHandlingMode {
 // See stashed_for_allocator_safety_ below.
 constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
     "TORCH_NCCL_AVOID_RECORD_STREAMS";
+
+// If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
+// allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
+// can register/deregister the tensor on all available NCCL communicators.
+constexpr const char* NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
+    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -645,7 +656,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // we can dump the debugging information and abort the process.
   virtual void heartbeatMonitor();
 
+  // Function that directly trigger std::abort so that the whole process
+  // gets terminated.
   virtual void terminateProcess(std::string errMsg);
+
+  // When watchdog timeout, this function will be called and return debug info
+  // for users. For now we only get information from retrieveDesyncReport.
+  // We are working on enabling more useful debug information for watchdog
+  // timeout.
+  virtual std::string getNCCLWatchdogDebugInfo();
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -712,8 +731,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Heartbeat of watchdog thread.
   uint64_t heartbeat_;
 
+  // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
+  // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
@@ -734,7 +755,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether we are in the shutdown mode when we are trying to get debug info,
   // such as desync report.
-  std::atomic<bool> shutdownMode_;
+  std::atomic<bool> collectiveDebugInfoMode_;
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
@@ -808,6 +829,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
+  // Whether or not to hook the cache allocator to register all allocated
+  // tensors
+  bool useTensorRegisterAllocatorHook_ = false;
+
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
@@ -820,7 +845,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // is set to true.
   std::atomic<bool> enableTiming_;
 
-  // Flag to enable the print of hash value of input/output of collectives for verification.
+  // Flag to enable the print of hash value of input/output of collectives for
+  // verification.
   std::atomic<bool> enableCollecticeHashDebug_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set

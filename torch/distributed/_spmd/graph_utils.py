@@ -101,7 +101,7 @@ def clone_subgraph(
             # TODO: there are many flatten/unflatten in IterGraph that
             # can be simplified with tree_map. Will simplify this in
             # a follow-up PR.
-            original_input = pytree.tree_leaves((node.args, node.kwargs))
+            original_input = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             cloned_input, spec = tree_flatten((cloned_node.args, cloned_node.kwargs))
             mapped_cloned_input = []
             for original_input_node, cloned_input_node in zip(

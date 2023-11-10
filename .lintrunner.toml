@@ -178,32 +178,17 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
-    'torch/_dynamo/allowed_functions.py',
-    'torch/_dynamo/codegen.py',
-    'torch/_dynamo/compiled_autograd.py',
-    'torch/_dynamo/eval_frame.py',
-    'torch/_dynamo/exc.py',
-    'torch/_dynamo/funcname_cache.py',
-    'torch/_dynamo/convert_frame.py',
-    'torch/_dynamo/symbolic_convert.py',
-    'torch/_dynamo/testing.py',
-    'torch/_dynamo/types.py',
-    'torch/_dynamo/output_graph.py',
-    'torch/_dynamo/guards.py',
-    'torch/_dynamo/side_effects.py',
-    'torch/_dynamo/optimizations/__init__.py',
-    'torch/_dynamo/optimizations/backends.py',
-    'torch/_dynamo/optimizations/training.py',
-    'torch/_dynamo/debug_utils.py',
-    'torch/_dynamo/repro/**/*.py',
+    'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/_dynamo/backends/**/*.py',
+    'torch/_dynamo/variables/**/*.py',
+    'torch/_dynamo/polyfill.py',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/scheduler.py',
 ]
 command = [
     'python3',
@@ -255,6 +240,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'torch/csrc/**/*.cpp',
 ]
@@ -266,6 +252,7 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
@@ -1180,6 +1167,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
@@ -2660,7 +2648,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.1',
+    'ruff==0.1.4',
 ]
 is_formatter = true
 

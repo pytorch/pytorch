@@ -38,17 +38,25 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   for (auto& tensor : tensors) {
     size_t data_size = tensor.storage().nbytes();
     std::hash<char> hasher;
-    auto src = static_cast<const char*> (tensor.storage().data_ptr().get());
+    auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
     char* dst = (char*)std::malloc(data_size);
     std::memset(dst, 0, data_size);
     cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
     for (size_t i = 0; i < data_size; ++i) {
-        // Update the hash for each byte in the tensor
-        hash ^= hasher(((char*)dst)[i]) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+      // Update the hash for each byte in the tensor
+      hash ^= hasher(((char*)dst)[i]) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     }
     free(dst);
   }
   return hash;
+}
+
+size_t getTensorsNumel(const std::vector<at::Tensor>& tensors) {
+  size_t numel = 0;
+  for (auto& tensor : tensors) {
+    numel += tensor.numel();
+  }
+  return numel;
 }
 
 } // namespace c10d

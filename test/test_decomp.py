@@ -428,9 +428,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args = pytree.tree_leaves(args)
-    flat_kwargs = pytree.tree_leaves(kwargs)
-    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+    return any(test_unsupported(x) for x in flat_args)
 
 
 core_backward_failures = {
@@ -885,6 +884,57 @@ class DecompOneOffTests(TestCase):
         ref = torch.ops.aten.threshold_backward(grad, input_tensor, 1)
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_weight_norm_interface(self, device):
+        g = torch.randn((3, 10, 10), device=device)
+        v = torch.randn((1, 1, 10), device=device)
+
+        ref = torch.ops.aten._weight_norm_interface(g, v, 2)
+        res = torch._decomp.decompositions._weight_norm_interface(g, v, 2)
+        self.assertTrue(torch.allclose(ref[0], res[0]))
+        self.assertTrue(torch.allclose(ref[1], res[1]))
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_sdpa(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._decomp import get_decompositions
+        from torch.nn import functional as F
+
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, query_layer, key_layer, value_layer):
+                attn_output = F.scaled_dot_product_attention(
+                    query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+
+
+        query_layer = torch.randn(1, 128, 100, 64, device=device)
+        key_layer = torch.randn(1, 128, 100, 64, device=device)
+        value_layer = torch.randn(1, 128, 100, 64, device=device)
+
+        attention = ScaledDotProductAttention()
+        fx_g = make_fx(
+            attention,
+            decomposition_table=get_decompositions(
+                [
+                    torch.ops.aten._scaled_dot_product_flash_attention.default,
+                ]
+            ),
+        )(query_layer, key_layer, value_layer)
+
+        compiled_res = fx_g(query_layer, key_layer, value_layer)
+        eager_res = F.scaled_dot_product_attention(
+            query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+        )
+        self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

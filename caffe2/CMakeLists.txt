@@ -533,7 +533,7 @@ if(NOT MSVC)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
 endif()
 # Disable certain warnings for GCC-9.X
-if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+if(CMAKE_COMPILER_IS_GNUCXX)
   # See https://github.com/pytorch/pytorch/issues/38856
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
@@ -1392,12 +1392,6 @@ if(USE_CUDA)
   target_compile_definitions(torch_cuda PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
 elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE TORCH_HIP_BUILD_MAIN_LIB)
-endif()
-
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PRIVATE "-DUSE_EXPERIMENTAL_CUDNN_V8_API")
-  endif()
 endif()
 
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
