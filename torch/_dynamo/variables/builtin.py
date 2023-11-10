@@ -1220,7 +1220,16 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-                if name_var.as_python_constant() == "data":
+                name = name_var.as_python_constant()
+                if name == "requires_grad" and isinstance(
+                    obj, variables.TensorVariable
+                ):
+                    # TODO(voz): Make it work properly
+                    unimplemented(
+                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    )
+                if name == "data":
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
