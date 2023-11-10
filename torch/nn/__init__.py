@@ -11,7 +11,8 @@ from . import utils
 
 
 def factory_kwargs(kwargs):
-    r"""
+    r"""Return a canonicalized dict of factory kwargs.
+
     Given kwargs, returns a canonicalized dict of factory kwargs that can be directly passed
     to factory functions like torch.empty, or errors if unrecognized kwargs are present.
 
