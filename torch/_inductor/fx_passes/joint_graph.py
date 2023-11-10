@@ -180,9 +180,9 @@ class UniformValueConstantFolder(ConstantFolder):
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
-        return bool(
+        return (
             t.numel() != 0
-            and (t == t.flatten()[0]).all()
+            and bool((t == t.flatten()[0]).all())
             and torch._C._has_storage(t)
             and t.layout == torch.strided
         )
