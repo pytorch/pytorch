@@ -1008,7 +1008,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
-  echo "WIP: PLACE HOLDER"
+  test_executorch
   sleep 3600
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
