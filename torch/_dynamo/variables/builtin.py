@@ -1274,12 +1274,19 @@ class BuiltinVariable(VariableTracker):
     def call_type(self, tx, obj: VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
 
-        py_type = obj.python_type()
+        try:
+            py_type = obj.python_type()
+        except NotImplementedError as error:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                str(error),
+                case_name="unknown_python_type",
+            ) from None
 
-        if obj.source is not None:
+        if obj.source is None:
+            return SourcelessBuilder()(tx, py_type)
+        else:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
-
-        return SourcelessBuilder()(tx, py_type)
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
