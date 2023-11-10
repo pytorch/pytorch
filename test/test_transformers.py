@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.attention import CausalVariant, CausalBias, TensorBias
+from torch.nn.utils.attention import CausalVariant, CausalBias, TensorBias
 from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
@@ -2974,13 +2974,13 @@ class TestSDPACudaOnly(NNTestCase):
 class TestAttnMasks(NNTestCase):
 
     @parametrize("compile", [True, False])
-    def test_base_case(self, compile: bool):
+    def test_base_case(self, device, compile: bool):
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
-        shape = (16, 16, 128, 16)
+        shape = SdpaShape(16, 16, 128, 16)
         make_tensor = partial(
-            rand_sdpa_tensor, shape, "cuda", torch.float16, "dense", requires_grad=True
+            torch.rand, shape, device="cuda", dtype=torch.float16, requires_grad=True
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
@@ -3009,21 +3009,16 @@ class TestAttnMasks(NNTestCase):
 
 
     @parametrize("compile", [True, False])
-    def test_materialized_case(self, compile: bool):
+    def test_materialized_case(self, device, compile: bool):
         if compile:
             torch._dynamo.reset()
-        # Bsz, num_heads, seq_len, head_dim
-        bsz = 16
-        num_heads = 16
-        seq_len = 128
-        head_dim = 16
-        shape = (bsz, num_heads, seq_len, head_dim)
+        shape = SdpaShape(16, 16, 128, 16)
         make_tensor = partial(
-            rand_sdpa_tensor, shape, "cuda", torch.float16, "dense", requires_grad=True
+            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
-        bias = torch.rand(bsz, num_heads, seq_len, seq_len, dtype=torch.float16, device="cuda")
+        bias = torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
         attn_bias = TensorBias(bias)
 
         pytorch_output = scaled_dot_product_attention(
@@ -3062,9 +3057,10 @@ class TestAttnMasks(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     @parametrize("compile", [True, False])
-    def test_causal_variants(self, causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
-        def rand_sdpa_tensor(shape, device, dtype, type, requires_grad=False):
-            return torch.rand(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    def test_causal_variants(self, device, causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
@@ -3074,23 +3070,10 @@ class TestAttnMasks(NNTestCase):
             self.skipTest(
                 "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
             )
-        device = torch.device("cuda")
-        make_q_tensor = partial(
-            rand_sdpa_tensor,
-            (bsz, num_heads, seq_len_q, head_dim),
-            device,
-            torch.float16,
-            "dense",
-            requires_grad=True,
-        )
-        make_kv_tensor = partial(
-            rand_sdpa_tensor,
-            (bsz, num_heads, seq_len_kv, head_dim),
-            device,
-            torch.float16,
-            "dense",
-            requires_grad=True,
-        )
+
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+
         query, key, value = make_q_tensor(), make_kv_tensor(), make_kv_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
         attn_bias = CausalBias(causal_variant, seq_len_q, seq_len_kv)
@@ -3124,20 +3107,19 @@ class TestAttnMasks(NNTestCase):
         torch.testing.assert_close(value.grad, value_prototype.grad, atol=grad_atol, rtol=grad_rtol)
 
 
-    @parametrize("shape", [(16, 16, 128, 16), (16, 16, 52, 32)])
+    @parametrize("shape", [SdpaShape(16, 16, 128, 16), SdpaShape(16, 16, 52, 32)])
     @parametrize("compile", [True, False])
-    def test_tensor_bias(self, shape: List[Tuple[int]], compile: bool):
+    def test_tensor_bias(self, device, shape: SdpaShape, compile: bool):
         if compile:
             torch._dynamo.reset()
-        bsz, num_heads, seq_len, head_dim = shape
-        device = torch.device("cuda")
+
         make_tensor = partial(
-            rand_sdpa_tensor, shape, device, torch.float16, "dense", requires_grad=True
+            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
         attn_bias = TensorBias(
-            torch.rand(bsz, num_heads, seq_len, seq_len, dtype=torch.float16, device=device)
+            torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
         )
 
         pytorch_output = scaled_dot_product_attention(
