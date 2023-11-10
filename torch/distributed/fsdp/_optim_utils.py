@@ -776,7 +776,7 @@ def _flatten_zero_dim_tensor_optim_state(
     zero_dim_tensors: List[torch.Tensor],
     unflat_param_names: List[str],
 ) -> torch.Tensor:
-    """Flatten zero-dimension tensor optimizer state for a parameter.
+    """Flatten the zero-dimension tensor optimizer state for a parameter.
 
     Flattens the zero-dimension tensor optimizer state given by the values
     ``zero_dim_tensors`` for the state ``state_name`` for a single flat
