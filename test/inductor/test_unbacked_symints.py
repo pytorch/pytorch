@@ -54,6 +54,21 @@ class TestUnbackedSymints(TorchTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    def test_split_with_sizes(self):
+        def fn(x, y):
+            l = y.tolist()
+            s = torch.split(x, l)
+            d = l[0] + l[1], l[2]
+            return s[0].sum(), d
+
+        example_inputs = (torch.randn((32), device="cuda"), torch.tensor((7, 16, 9)))
+
+        with dynamo_config.patch({"capture_scalar_outputs": True}):
+            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+            expected = fn(*example_inputs)
+
+        torch.testing.assert_close(actual, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
