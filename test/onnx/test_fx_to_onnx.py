@@ -552,6 +552,21 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             x,
         )
 
+    def test_exported_program_as_input_with_model_signature(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        onnx_program = torch.onnx.dynamo_export(
+            exported_program,
+            x,
+        )
+
+        self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
