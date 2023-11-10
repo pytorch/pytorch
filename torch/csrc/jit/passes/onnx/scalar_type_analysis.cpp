@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
-#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -205,20 +204,14 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
             typesFromTensors.emplace_back(scalar_type);
           }
         } else if (auto scalar_type = get_scalar_type(input)) {
-          std::cout << "Actually got scalar type from input. "
-                    << input->debugName() << " " << scalar_type.value()
-                    << std::endl;
           auto tensor_type = input->type()->castRaw<TensorType>();
           // get_scalar_type returns non-null value already guarantees
           // that the input has a valid tensor_type.
           TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
           auto rank = tensor_type->dim();
-          std::cout << "Rank " << rank << std::endl;
           if (rank && rank.value() == 0) {
-            std::cout << "Got rank and rank 0." << std::endl;
             emplace_type_from_scalar(scalar_type.value());
           } else {
-            std::cout << "Treat as tensor." << std::endl;
             typesFromTensors.emplace_back(scalar_type.value());
           }
         }
