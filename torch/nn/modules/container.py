@@ -840,7 +840,7 @@ class ParameterDict(Module):
         return (self[k] for k in self._keys)
 
     def update(self, parameters: Union[Mapping[str, Any], 'ParameterDict']) -> None:
-        r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from parameters, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::
             If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
