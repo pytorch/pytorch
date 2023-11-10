@@ -692,7 +692,7 @@ def _flatten_tensor_optim_state(
     unflat_param_shapes: Sequence[torch.Size],
     handle: FlatParamHandle,
 ) -> torch.Tensor:
-    """Flatten positive-dimension tensor optimizer state for a parameter.
+    """Flatten the positive-dimension tensor optimizer state for a parameter.
 
     Flattens the positive-dimension tensor optimizer state given by the values
     ``tensors`` for the state ``state_name`` for a single flat parameter
