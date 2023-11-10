@@ -78,6 +78,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     }
     if cuda:
         supported_dtype.add(torch.float16)
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
