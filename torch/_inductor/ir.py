@@ -3621,8 +3621,6 @@ class ExternKernel(InputsKernel):
         return False
 
     def codegen_kwargs(self):
-        if not self.kwargs:
-            return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
@@ -3777,9 +3775,35 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
+    # Generate abi-compatible kernel names for shim kernels.
+    # Each individual shim kernel may have its own versioning rule.
+    # However, we don't expect we would end up with too many of such rules.
+    def _get_abi_compatible_kernel(self):
+        if not V.graph.cpp_wrapper:
+            return self.kernel
+
+        def sdpa_ver_fn():
+            # For sdpa, we need the v2 version only if any optional
+            # kwarg is missing.
+            if any(
+                self.get_kwargs_value(arg_name) is None
+                for arg_name in self.ordered_kwargs_for_cpp_kernel
+            ):
+                return f"{self.kernel}_v2"
+            else:
+                return self.kernel
+
+        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
+        if (ver_fn := kernel_to_ver.get(self.kernel, None)) is not None:
+            return ver_fn()
+        return self.kernel
+
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
+        # Now we setup abi_compatible_kernel after self.kernel
+        # and kwargs are adjusted appropriately.
+        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
         V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -4278,6 +4302,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.kernel = (
                     f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
                 )
+        self.abi_compatible_kernel = None
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.kernel)

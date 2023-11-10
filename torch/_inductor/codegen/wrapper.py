@@ -1728,7 +1728,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        self.generate_c_shim_extern_kernel_call(extern_kernel.kernel, args)
+        assert (
+            extern_kernel.abi_compatible_kernel is not None
+        ), f"abi_compatible_kernel is None for {extern_kernel.kernel=}"
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.abi_compatible_kernel, args
+        )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
@@ -2320,7 +2325,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             and isinstance(type_, torch.OptionalType)
         ):
             if val is None:
-                return "nullptr"
+                return "0"  # nullptr is not available in C
             if isinstance(val, (bool, int, str, float)):
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
