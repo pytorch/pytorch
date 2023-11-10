@@ -567,9 +567,9 @@ class FakificationPolicy:
     """
 
     ignore_subclass: bool = False
-    dynamic_dims: Optional["DimList[DimDynamic]"] = None
-    constraint_dims: Optional["DimList[DimConstraint]"] = None
-    source: Optional["Source"] = None
+    dynamic_dims: Optional[DimList[DimDynamic]] = None
+    constraint_dims: Optional[DimList[DimConstraint]] = None
+    source: Optional[Source] = None
 
     def __init__(self, ignore_subclass, dynamic_dims, constraint_dims, source):
         self.ignore_subclass = ignore_subclass

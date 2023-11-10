@@ -1389,7 +1389,7 @@ class FakeTensorMode(TorchDispatchMode):
         ), func
         try:
             return self.dispatch(func, types, args, kwargs)
-        except TypeError:
+        except TypeError as e:
             log.exception("fake tensor raised TypeError")
             raise
 
@@ -1820,6 +1820,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.view_as_real.default,
             aten.view_as_complex.default,
             aten.set_.source_Storage_storage_offset,
+            aten.set_.source_Tensor,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
