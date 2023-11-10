@@ -815,6 +815,10 @@ class _SplitterBase:
         for subgraph in subgraphs:
             if subgraph.is_acc:
                 if len(subgraph.nodes) >= self.settings.min_acc_module_size:
+                    print(
+                        "Keeping acc subgraph because it passes the min_acc_module_size threshold: "
+                        f"{len(subgraph.nodes)} >= {self.settings.min_acc_module_size}"
+                    )
                     result.append(subgraph)
                 else:
                     print(
