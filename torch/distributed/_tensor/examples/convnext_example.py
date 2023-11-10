@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
@@ -17,32 +16,27 @@ from torch.distributed._tensor import (
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-WORLD_SIZE = 2
+WORLD_SIZE = 4
 ITER_TIME = 20
 
 
 class LayerNorm(nn.Module):
-    def __init__(self, normalized_shape, eps=1e-6, data_format=torch.channels_last):
+    def __init__(self, normalized_shape, eps=1e-6, data_format=torch.contiguous_format):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(normalized_shape))
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
-        if self.data_format not in [torch.contiguous_format, torch.channels_last]:
+        if self.data_format not in [torch.contiguous_format]:
             raise NotImplementedError
         self.normalized_shape = (normalized_shape,)
 
     def forward(self, x):
-        if self.data_format == torch.channels_last:
-            return F.layer_norm(
-                x, self.normalized_shape, self.weight, self.bias, self.eps
-            )
-        elif self.data_format == torch.contiguous_format:
-            u = x.mean(1, keepdim=True)
-            s = (x - u).pow(2).mean(1, keepdim=True)
-            x = (x - u) / torch.sqrt(s + self.eps)
-            x = self.weight[:, None, None] * x + self.bias[:, None, None]
-            return x
+        u = x.mean(1, keepdim=True)
+        s = (x - u).pow(2).mean(1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.eps)
+        x = self.weight[:, None, None] * x + self.bias[:, None, None]
+        return x
 
 
 class Block(nn.Module):
@@ -109,7 +103,7 @@ class DownSampling(nn.Module):
 
 @torch.no_grad()
 def init_weights(m):
-    if type(m) == nn.Conv2d or type(m) == nn.Linear or type(m) == nn.LayerNorm:
+    if type(m) == nn.Conv2d or type(m) == nn.Linear:
         nn.init.ones_(m.weight)
         nn.init.zeros_(m.bias)
 
@@ -151,7 +145,6 @@ class ConvNeXt(nn.Module):
             self.stages.append(stage)
             cur += depths[i]
 
-        self.norm = nn.LayerNorm(dims[-1], eps=1e-6)
         self.head = nn.Linear(dims[-1], num_classes)
         self.apply(init_weights)
 
