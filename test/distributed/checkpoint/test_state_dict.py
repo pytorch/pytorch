@@ -459,6 +459,7 @@ class TestStateDict(DTensorTestBase):
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_cpu_offload_full_state_dict(self) -> None:
         orig_model = CompositeParamModel(device=torch.device("cuda"))
