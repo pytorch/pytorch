@@ -30,7 +30,15 @@ convnext_base,pass,8
 
 
 
+crossvit_9_240,pass,8
+
+
+
 cspdarknet53,pass,8
+
+
+
+deit_base_distilled_patch16_224,pass,8
 
 
 
@@ -102,6 +110,10 @@ lcnet_050,pass,8
 
 
 
+levit_128,pass,8
+
+
+
 mixer_b16_224,pass,8
 
 
@@ -122,7 +134,15 @@ mobilenetv3_large_100,pass,8
 
 
 
+mobilevit_s,pass,8
+
+
+
 nfnet_l0,pass,8
+
+
+
+pit_b_224,pass,8
 
 
 
@@ -166,6 +186,10 @@ rexnet_100,pass,8
 
 
 
+sebotnet33ts_256,pass,8
+
+
+
 selecsls42b,pass,8
 
 
@@ -198,4 +222,20 @@ tnt_s_patch16_224,pass,8
 
 
 
+twins_pcpvt_base,pass,8
+
+
+
+visformer_small,pass,8
+
+
+
+vit_base_patch16_224,pass,8
+
+
+
 volo_d1_224,pass,8
+
+
+
+xcit_large_24_p8_224,pass,8

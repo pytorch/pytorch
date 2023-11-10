@@ -6,6 +6,10 @@ AlbertForMaskedLM,pass,6
 
 
 
+AlbertForQuestionAnswering,pass,6
+
+
+
 AllenaiLongformerBase,pass,10
 
 
