@@ -4,6 +4,7 @@ from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
@@ -59,13 +60,24 @@ aten = torch.ops.aten
 #
 class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input: "DTensor", grad_placements: Optional[Sequence[Placement]]):  # type: ignore[override]
+    def forward(  # type: ignore[override]
+        ctx,
+        input: "DTensor",
+        grad_placements: Optional[Sequence[Placement]],
+        async_output: bool,
+    ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
+        local_tensor = input._local_tensor
+        if not async_output and isinstance(local_tensor, funcol.AsyncCollectiveTensor):
+            # synchronously wait for any pending collectives to get the result tensor
+            local_tensor = local_tensor.trigger_wait()
+            local_tensor = local_tensor.elem  # type: ignore[attr-defined]
+
         # We need to return a fresh Tensor object there as autograd metadata
-        # will be inplaced into it. So we don't want to polute the Tensor
-        # object stored in _local_tensor.
-        return input._local_tensor.view_as(input._local_tensor)
+        # will be inplaced into it. So we don't want to pollute the Tensor
+        # object stored in the _local_tensor of this DTensor.
+        return local_tensor.view_as(local_tensor)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -94,6 +106,7 @@ class _ToTorchTensor(torch.autograd.Function):
                 stride=tuple(tensor_stride),
             ),
             None,
+            None,
         )
 
 
@@ -105,16 +118,27 @@ class _FromTorchTensor(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: Tuple[Placement, ...],
         run_check: bool,
+        shape: Optional[torch.Size] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        # if it's not by default run_check, we assume user is certain that each
-        # rank has the same tensor shape, and we just use that to calculate the
-        # global shape
-        tensor_shape, tensor_stride = compute_global_tensor_info(
-            input, device_mesh, placements
-        )
+        if shape and stride:
+            tensor_shape, tensor_stride = shape, stride
+        elif not shape and not stride:
+            # if it's not by default run_check, we assume user is certain that each
+            # rank has the same tensor shape, and we just use that to calculate the
+            # global shape
+            global_shape, global_stride = compute_global_tensor_info(
+                input, device_mesh, placements
+            )
+            tensor_shape, tensor_stride = torch.Size(global_shape), tuple(global_stride)
+        else:
+            raise RuntimeError(
+                f"Found shape:{shape}, stride:{stride}.",
+                "Please pass both shape and stride at the same time.",
+            )
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
@@ -136,12 +160,12 @@ class _FromTorchTensor(torch.autograd.Function):
             input.view_as(input),
             device_mesh,
             placements,
-            shape=torch.Size(tensor_shape),
+            shape=tensor_shape,
             dtype=input.dtype,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
             requires_grad=input.requires_grad,
-            stride=tuple(tensor_stride),
+            stride=tensor_stride,
         )
         return dist_tensor
 
@@ -161,7 +185,7 @@ class _FromTorchTensor(torch.autograd.Function):
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None
+        return grad_output.to_local(), None, None, None, None, None
 
 
 class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
@@ -279,6 +303,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         placements: Optional[Sequence[Placement]] = None,
         *,
         run_check: bool = True,
+        shape: Optional[torch.Size] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -300,6 +326,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 to check meta information and data. if have :class:`Replicate` in
                 `placements`, the data on first rank of the device mesh dimension
                 will be broadcasted to other ranks.
+            shape (torch.Size, optional): A List of int which specifies the size of
+                DTensor which build on top of `local_tensor`. Note this needs to be
+                provided if the shape of `local_tensor` are different across the ranks.
+                If not provided, `shape` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks.
+            stride (tuple, optional): A List of int which specifies the stride of DTensor.
+                If not provided, `stride` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks.
 
         Returns:
             A :class:`DTensor` object
@@ -327,7 +361,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
         return _FromTorchTensor.apply(  # pyre-ignore[16]: autograd func
-            local_tensor, device_mesh, tuple(placements), run_check
+            local_tensor,
+            device_mesh,
+            tuple(placements),
+            run_check,
+            shape,
+            stride,
         )
 
     def to_local(
@@ -350,13 +389,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 as the original DTensor and use that for gradient computation.
 
         Returns:
-            A :class:`torch.Tensor` object that represents the local tensor of its current rank.
+            A :class:`torch.Tensor` or `AsyncCollectiveTensor` object. it represents the
+            local tensor on its current rank.
 
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
         return _ToTorchTensor.apply(
-            self, grad_placements
+            self, grad_placements, True
         )  # pyre-ignore[16]: autograd func
 
     def redistribute(
@@ -408,6 +448,34 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements)
+
+    def full_tensor(
+        self, *, grad_placements: Optional[Sequence[Placement]] = None
+    ) -> torch.Tensor:
+        """
+        Return the full tensor of this DTensor. It will perform necessary collectives
+        to gather the local tensors from other ranks in its DeviceMesh and concatenate
+        them together. It's a syntatic sugar of the following code:
+
+        `dtensor.redistribute(placements=[Replicate()] * mesh.ndim).to_local()`
+
+        Keyword args:
+            grad_placements (List[:class:`Placement`], optional): the placements describes
+                the future layout of any gradient layout of the full Tensor returned from this
+                function.
+                `full_tensor` converts DTensor to a full torch.Tensor and the returned torch.tensor
+                might not be used as the original replicated DTensor layout later in the code. This
+                argument is the hint that user can give to autograd in case the gradient
+                layout of the returned tensor does not match the original replicated DTensor layout.
+                If not specified, we will assume the gradient layout of the full tensor be replicated.
+
+        Returns:
+            A :class:`torch.Tensor` object that represents the full tensor of this DTensor.
+
+        .. note:: `full_tensor` is differentiable.
+        """
+        redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
+        return _ToTorchTensor.apply(redist_res, grad_placements, False)
 
     @property
     def device_mesh(self) -> DeviceMesh:

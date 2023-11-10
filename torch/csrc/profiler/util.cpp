@@ -344,6 +344,7 @@ static constexpr auto kOutMsgSize = "Out msg size";
 static constexpr auto kInSplit = "In split size";
 static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGroupSize = "Group size";
+static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
@@ -365,12 +366,34 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
   map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
-  map.emplace(
-      kInSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getInputSplitSizes(), ", ")));
-  map.emplace(
-      kOutSplit,
-      fmt::format("[{}]", fmt::join(debugInfo->getOutputSplitSizes(), ", ")));
+  auto& inSplitSizes = debugInfo->getInputSplitSizes();
+  if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
+    map.emplace(
+        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
+  } else if (inSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kInSplit,
+        fmt::format(
+            "\"[{}, ...]\"",
+            fmt::join(
+                inSplitSizes.begin(),
+                inSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
+  auto& outSplitSizes = debugInfo->getOutputSplitSizes();
+  if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
+    map.emplace(
+        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
+  } else if (outSplitSizes.size() > kTruncatLength) {
+    map.emplace(
+        kOutSplit,
+        fmt::format(
+            "\"[{}, ...]\"",
+            fmt::join(
+                outSplitSizes.begin(),
+                outSplitSizes.begin() + kTruncatLength,
+                ", ")));
+  }
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED
@@ -404,7 +427,7 @@ static constexpr auto kMatSize = "mat_size";
 static constexpr auto kMat1Size = "mat1_size";
 static constexpr auto kMat2Size = "mat2_size";
 
-static bool validateInput(
+static std::vector<c10::IntArrayRef> getInputSizes(
     const std::string& op_name,
     size_t min_size,
     c10::ArrayRef<const c10::IValue> inputs,
@@ -415,17 +438,26 @@ static bool validateInput(
        << op_name << ", min size: " << min_size
        << ", actual size: " << inputs.size();
     TORCH_WARN(ss.str());
-    return false;
+    return {};
   }
+  std::vector<c10::IntArrayRef> inputSizes = {};
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
       ss << "Failed to save extra arguments for flops computation of op "
          << op_name << ", input[" << index << "] must be a tensor.";
       TORCH_WARN(ss.str());
-      return false;
+      return {};
     }
+    at::Tensor t = inputs[index].toTensor();
+    if (t.is_nested()) {
+      ss << "Failed to save extra arguments for flops computation of op "
+         << op_name << " with input[" << index << "] as nested tensor.";
+      TORCH_WARN(ss.str());
+      return {};
+    }
+    inputSizes.emplace_back(t.sizes());
   }
-  return true;
+  return inputSizes;
 }
 
 std::unordered_map<std::string, c10::IValue> saveExtraArgs(
@@ -441,77 +473,64 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
   }
 
   if (fname == kConv2dOp) {
-    bool check = validateInput(fname, kConv2dGroups + 1, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes =
+        getInputSizes(fname, kConv2dGroups + 1, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor input = inputs[0].toTensor();
-    at::Tensor weight = inputs[1].toTensor();
-    if (weight.sizes().size() != 4) {
+    if (inputSizes[1].size() != 4) {
       TORCH_WARN(
           "Failed to compute flops for op aten::conv2d because it requires a 4D kernel tensor.");
       return map;
     }
-    map[kInputSize] = at::IValue(input.sizes());
-    map[kWeightSize] = at::IValue(weight.sizes());
+    map[kInputSize] = at::IValue(inputSizes[0]);
+    map[kWeightSize] = at::IValue(inputSizes[1]);
     map[kStride] = inputs[kConv2dStride];
     map[kPadding] = inputs[kConv2dPadding];
     map[kDilation] = inputs[kConv2dDilation];
     map[kGroups] = inputs[kConv2dGroups];
   } else if (fname == kMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kAddMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
-
     // Exact FLOP count depends on scaling factors alpha and beta but
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   } else if (fname == kMulOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kAddOp) {
-    bool check = validateInput(fname, 1, inputs, {0});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 1, inputs, {0});
+    if (inputSizes.empty()) {
       return map;
     }
-
-    at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(inputSizes[0]);
   } else if (fname == kBMMOp) {
-    bool check = validateInput(fname, 2, inputs, {0, 1});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 2, inputs, {0, 1});
+    if (inputSizes.empty()) {
       return map;
     }
 
-    at::Tensor left = inputs[0].toTensor();
-    at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[0]);
+    map[kMat2Size] = at::IValue(inputSizes[1]);
   } else if (fname == kBAddBMMOp) {
-    bool check = validateInput(fname, 3, inputs, {0, 1, 2});
-    if (!check) {
+    const auto inputSizes = getInputSizes(fname, 3, inputs, {0, 1, 2});
+    if (inputSizes.empty()) {
       return map;
     }
 
@@ -519,10 +538,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     // just assume these are +=1.
     // (similar to http://www.netlib.org/lapack/lawnspdf/lawn41.pdf,
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
-    at::Tensor left = inputs[1].toTensor();
-    at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(inputSizes[1]);
+    map[kMat2Size] = at::IValue(inputSizes[2]);
   }
 
   return map;

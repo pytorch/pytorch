@@ -1292,7 +1292,7 @@ else:
             else:
                 a = torch.empty_strided(size, stride, dtype=dtype, device=device).fill_(0)
             old_storage = a.untyped_storage().clone()
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 a.resize_(resize_size)
 
             new_storage = a.untyped_storage()
@@ -1336,7 +1336,7 @@ else:
         ]
 
         for gen_fn in gen_fns:
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 res = gen_fn()
 
             if dtype.is_floating_point or dtype.is_complex:
@@ -6783,6 +6783,33 @@ class TestTorch(TestCase):
         self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
         self.assertTrue(isinstance(bytes, torch.ByteStorage))
 
+    # Check that after `UntypedStorage.resize_` is called, the storage remains
+    # on the same CUDA device index it was initialized on, regardless of the
+    # default index
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires 2 GPUs")
+    def test_untyped_storage_resize_cuda_device(self):
+        test_cases = [
+            # start_size, storage_resize
+            ((2, 3), 0),
+            ((2, 3), 100),
+            ((2, 3), 10),
+            (0, 10),
+            (0, 0),
+        ]
+        default_indices = [0, 1]
+        devices = [
+            torch.device('cuda:0'),
+            torch.device('cuda:1')]
+
+        for default_idx, device, (start_size, storage_resize) in product(default_indices, devices, test_cases):
+            with torch.cuda.device(default_idx):
+                a = torch.zeros(start_size, device=device)
+                a.untyped_storage().resize_(storage_resize)
+
+            self.assertEqual(a.device, device)
+            self.assertEqual(a.untyped_storage().device, device)
+            self.assertEqual(a.untyped_storage().nbytes(), storage_resize)
+
     def test_storage_error(self):
         quantized_storages = [
             torch.QInt32Storage,
@@ -8688,6 +8715,38 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 TypeError,
                 r"_set_deterministic_algorithms\(\): argument 'warn_only' must be bool, not int"):
             torch.use_deterministic_algorithms(False, warn_only=1)
+
+    # Tests that torch.utils.deterministic.fill_uninitialized_memory can be set as expected
+    def test_deterministic_fill_uninitialized_memory(self):
+        with DeterministicGuard(True, fill_uninitialized_memory=False):
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
+                self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+                self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = False
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = True
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(False)
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(True)
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with self.assertRaisesRegex(RuntimeError, r"expected a bool, but got int"):
+                torch.utils.deterministic.fill_uninitialized_memory = 1
 
     def test_type_conversion_via_dtype_name(self):
         x = torch.tensor([1])

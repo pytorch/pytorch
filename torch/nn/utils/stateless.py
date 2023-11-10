@@ -173,8 +173,7 @@ def functional_call(
     tie_weights: bool = True,
     strict: bool = False,
 ):
-    r"""Performs a functional call on the module by replacing the module parameters
-    and buffers with the provided ones.
+    r"""Perform a functional call on the module by replacing the module parameters and buffers with the provided ones.
 
     .. warning::
 

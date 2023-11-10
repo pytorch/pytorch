@@ -48,9 +48,9 @@ class Schema:
 
 @dataclass
 class DSymInt:
-    """
-    DSymInt represents a value retrieved by a SymInt op from a DTensor. DSymInt
-    helps View and Factory ops to determine the placement and shape of the
+    """DSymInt represents a value retrieved by a SymInt op from a DTensor.
+
+    DSymInt helps View and Factory ops to determine the placement and shape of the
     output tensor, as those operators either do not have an input DTensor or
     the input DTensor is insufficient to determine the output tensor's placement.
     """
@@ -90,7 +90,7 @@ class DSymInt:
 
 
 def _is_partial_dtensor(obj: Any) -> bool:
-    """check if object is 1) DTensor and  2) with any placement of _Partial"""
+    """Check if object is 1) DTensor and  2) with any placement of _Partial."""
     if not isinstance(obj, DTensor):
         return False
 
@@ -284,7 +284,7 @@ def factory_with_sizes_rule(
     kwargs: Dict[str, Any],
     default_mesh: DeviceMesh,
 ) -> DTensor:
-    flat_args = pytree.tree_leaves(args)
+    flat_args = pytree.arg_tree_leaves(*args)
     assert not any(isinstance(a, DTensor) for a in flat_args), (
         f"Not expect DTensor argument for factory op, but got {node.target} "
         f"with arguments {args}."
@@ -375,7 +375,9 @@ def _get_dtensor_dispatch_graph(
         op_overload = cast(torch._ops.OpOverload, node.target)
 
         if any(
-            a.is_shard() for a in pytree.tree_leaves(args) if isinstance(a, DSymInt)
+            a.is_shard()
+            for a in pytree.arg_tree_leaves(*args)
+            if isinstance(a, DSymInt)
         ):
             if op_overload in VIEW_SYM_INT_CONSUMERS:
                 assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
@@ -473,8 +475,8 @@ def _get_dtensor_dispatch_graph(
 def _build_dummy_add_graph(
     dt: DTensor, node_to_obj: Dict[fx.Node, Any]
 ) -> Tuple[fx.GraphModule, Any]:
-    """
-    Creates a graph for a dummy add function from a partial DTensor.
+    """Create a graph for a dummy add function from a partial DTensor.
+
     This dummy add is used for triggering all_reduce on a Partial DTensor
     during the DTensor expansion of the traced graph.
     Also returns the actual DTensor after resharding.
@@ -594,7 +596,7 @@ def _rebuild_graph(
         # Map DT's dispatch graph input placeholder nodes to the ones in
         # local traced graph. It uses index-based accessing, which is
         # brittle, just for testing purpose.
-        flatten_args = pytree.tree_leaves(node.args)
+        flatten_args = pytree.arg_tree_leaves(*node.args)
         i, value_remap = 0, {}
         for dtn in traced_dispatch.graph.nodes:
             if dtn.op == OP.PLACEHOLDER:
@@ -701,10 +703,12 @@ def _convert_to_distributed(
     default_mesh: Optional[DeviceMesh] = None,
     _allow_partial: bool = False,
 ) -> Tuple[fx.GraphModule, Dict[str, Schema]]:
-    """
+    """Transform a graph module to a distributed graph module.
+
     Returns:
         - transformed graph module
         - map from output name to DTensorSpec
+
     """
     global logger
     logger = get_logger("spmd_exp")

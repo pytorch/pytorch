@@ -67,17 +67,17 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
-            (arg_only_dim0, 1),
+            (arg_only_dim0, 0),
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
             (list_replace, 1),
-            (multi_split, 17),
+            (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
             (kwarg1_cm, 1),
             (kwarg2_cm, 1),
-            (multi_split_cm, 17),
+            (multi_split_cm, 1),
             (unequal_split_cm, 1),
             (cm_with_list, 1),
         ]:
@@ -226,12 +226,12 @@ class TestSplitCatFxPasses(TestCase):
             torch.randn(2, 32),
         ]
         for fn, expected_split_merged in [
-            (multi_split, 16),
+            (multi_split, 0),
             (multi_split_2, 16),
             (multi_split_2_neg_dim, 16),
             (multi_split_with_sizes, 2),
-            (multi_split_kwarg1, 16),
-            (multi_split_kwarg2, 16),
+            (multi_split_kwarg1, 0),
+            (multi_split_kwarg2, 0),
             (unequal_multi_split, 3),
             (unequal_multi_split_neg_index, 3),
             (diff_dims, 0),
@@ -1027,6 +1027,40 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["getitem_cat_merged"],
                 expected_getitem_cat_merged,
+            )
+            counters.clear()
+
+    @patch
+    def test_stack_tahn_unbind_merge(self):
+        def stack_tahn_unbind(x):
+            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
+            cat_1 = torch.cat((item3, item4), 1)
+            cat_2 = torch.cat((item5, item6), 1)
+            tanh = torch.tanh(stack)
+            unbind = torch.unbind(tanh, 0)
+            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
+
+        args = [
+            torch.randn(50, 120),
+        ]
+        for fn, expected_stack_tahn_unbind_merged in [
+            (stack_tahn_unbind, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["stack_tahn_unbind_merged"],
+                expected_stack_tahn_unbind_merged,
             )
             counters.clear()
 

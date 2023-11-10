@@ -17,7 +17,8 @@ def _view_with_sharding_dim_change(
     tensor: Union[torch.Tensor, DT], sharding_dim: int, shape: Tuple[int, ...]
 ) -> Union[torch.Tensor, DT]:
     """
-    We change the implicit sharding dim for a distributed tensor without comms.
+    Change the implicit sharding dim for a distributed tensor without comms.
+
     Because if we don't change sharding dim, we will ended up having more comms that are not necessary.
     Note that this op will produce invalid DTensor, you will need to call this op in pair to recover
     it back to a valid DTensor.
@@ -33,9 +34,7 @@ def _view_with_sharding_dim_change(
 def _infer_dtensor_stride(
     local_tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
-    """
-    infer the dtensor stride from a local tensor
-    """
+    """Infer the dtensor stride from a local tensor."""
     tensor_stride = list(local_tensor.stride())
     for idx, placement in enumerate(placements):
         if placement.is_shard():

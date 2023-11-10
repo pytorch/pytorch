@@ -58,13 +58,8 @@ __all__ = [
 ]
 
 
-from .exported_program import (
-    ExportBackwardSignature,
-    ExportedProgram,
-    ExportGraphSignature,
-    ModuleCallEntry,
-    ModuleCallSignature,
-)
+from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
+from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -353,7 +348,8 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -411,8 +407,13 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-        dynamic_shapes: Should be a dict from argument names of ``f`` to their dynamic shape specifications,
-         as follows. The dynamic shape of a tensor argument can be specified as either
+        dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
          (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
          not required to include static dimension indices in this dict, but when they are,
          they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
@@ -437,9 +438,21 @@ def export(
     from torch._export import export, export__RC__
 
     if constraints is not None:
-        return export(f, args, kwargs, constraints)
+        return export(
+            f,
+            args,
+            kwargs,
+            constraints,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
     else:
-        return export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
+        return export__RC__(
+            f,
+            args,
+            kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
 
 def save(
@@ -557,12 +570,12 @@ def load(
     )
 
 
-def register_dataclass(typ: Any) -> None:
+def register_dataclass(cls: Any) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
-        typ: the dataclass type to register
+        cls: the dataclass type to register
 
     Example::
 
@@ -588,4 +601,4 @@ def register_dataclass(typ: Any) -> None:
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(typ)
+    return register_dataclass_as_pytree_node(cls)

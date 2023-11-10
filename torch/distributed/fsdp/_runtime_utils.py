@@ -1,7 +1,6 @@
 import functools
 import logging
 from enum import auto, Enum
-from itertools import chain
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
@@ -258,7 +257,7 @@ def _share_state_and_init_handle_attrs(
         # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
         if hasattr(root_state, "_device_mesh"):
             fsdp_state._device_mesh = root_state._device_mesh
-            fsdp_state._enable_extension = root_state._enable_extension
+            fsdp_state._fsdp_extension = root_state._fsdp_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -1456,12 +1455,9 @@ def _register_post_backward_reshard_only_hook(
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_list = pytree.tree_leaves(args)
-        kwargs_list = pytree.tree_leaves(kwargs)
+        args_flat = pytree.arg_tree_leaves(*args, **kwargs)
         inp_tensors = [
-            obj
-            for obj in chain(args_list, kwargs_list)
-            if torch.is_tensor(obj) and obj.requires_grad
+            obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
