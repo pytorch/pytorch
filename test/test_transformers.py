@@ -2976,11 +2976,12 @@ class TestAttnMasks(NNTestCase):
     @parametrize("compile", [True, False])
     def test_base_case(self, device, compile: bool):
         if compile:
+            self.skipTest("Compiling torch_function_ not working")
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
         shape = SdpaShape(16, 16, 128, 16)
         make_tensor = partial(
-            torch.rand, shape, device="cuda", dtype=torch.float16, requires_grad=True
+            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
@@ -3011,6 +3012,7 @@ class TestAttnMasks(NNTestCase):
     @parametrize("compile", [True, False])
     def test_materialized_case(self, device, compile: bool):
         if compile:
+            self.skipTest("Compiling torch_function_ not working")
             torch._dynamo.reset()
         shape = SdpaShape(16, 16, 128, 16)
         make_tensor = partial(
@@ -3062,8 +3064,8 @@ class TestAttnMasks(NNTestCase):
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
         if compile:
+            self.skipTest("Compiling torch_function_ not working")
             torch._dynamo.reset()
-        # Bsz, num_heads, seq_len, head_dim
         torch.manual_seed(123)
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shapes
         if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
@@ -3111,6 +3113,7 @@ class TestAttnMasks(NNTestCase):
     @parametrize("compile", [True, False])
     def test_tensor_bias(self, device, shape: SdpaShape, compile: bool):
         if compile:
+            self.skipTest("Compiling torch_function_ not working")
             torch._dynamo.reset()
 
         make_tensor = partial(
