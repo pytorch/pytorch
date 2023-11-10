@@ -2586,9 +2586,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
         grid_fn = default_grid(*grid)
         params = CudaKernelParamCache.get(name)
+        breakpoint()
         assert (
             params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment"
+        ), f"cuda kernel parameters for {name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
         block_cfg = {
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],
