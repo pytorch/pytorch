@@ -370,7 +370,6 @@ class TransformerEncoder(Module):
                 first_layer.linear2.weight,
                 first_layer.linear2.bias,
             )
-            print("HERE")
             _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
