@@ -1794,6 +1794,7 @@ def forward(self, x_1, output_1):
         # to be in the metadata, so there might be false negatives
         self.assertTrue("aten.copy" not in codes[0])
         self.assertTrue("aten.clone" not in codes[0])
+        print(codes[0])
 
     @requires_cuda()
     @skipIfRocm
