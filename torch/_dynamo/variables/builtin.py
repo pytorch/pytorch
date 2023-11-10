@@ -1602,8 +1602,9 @@ def dynamo_disable_grad(tx):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
+    gmv = GradModeVariable.create(tx, False)
     try:
-        GradModeVariable.create(tx, False)
+        gmv.enter(tx)
         yield
     finally:
-        GradModeVariable.create(tx, org_value)
+        gmv.exit(tx)

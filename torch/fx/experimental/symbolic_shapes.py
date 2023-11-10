@@ -2117,7 +2117,6 @@ class ShapeEnv:
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         if source_name:
             self.source_to_symint_node_cache[source_name] = out
-        print(f"{out} :: {source}")
         return out
 
     @record_shapeenv_event()

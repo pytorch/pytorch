@@ -12,13 +12,13 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import NoTest
 
-try:
-    from torchrec.datasets.random import RandomRecDataset
-    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
+# try:
+#     from torchrec.datasets.random import RandomRecDataset
+#     from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
 
-    HAS_TORCHREC = True
-except ImportError:
-    HAS_TORCHREC = False
+#     HAS_TORCHREC = True
+# except ImportError:
+HAS_TORCHREC = False
 
 
 @torch._dynamo.config.patch(force_unspec_int_unbacked_size_like_on_torchrec_kjt=True)
