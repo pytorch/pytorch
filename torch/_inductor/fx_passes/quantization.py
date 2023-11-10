@@ -19,6 +19,34 @@ quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
 """
+The quantization.py file primarily incorporates passes related to quantization fusion
+in inductor, includes:
+1. Dequant Promotion;
+2. Conv/GEMM weight prepack with oneDNN Library;
+3. Conv/GEMM quantization fusion with output quant node (if have);
+4. Other pointwise operators' quantization fusion like: qmaxpool2d, qcat and more;
+
+It also involves int8-mixed-fp32 and int8-mixed-bf16 quantization. The main difference
+of patterns for int8-mixed-bf16, comparing with int8-mixed-fp32, is
+1. There is to(dtype=torch.bfloat16) node at the inputs of activation and weight for Conv/GEMM.
+2. There is to(dtype=torch.float32) node at the outputs of Conv/GEMM before inputs to next quant node.
+Refer to: https://github.com/pytorch/pytorch/issues/111640 for detail design of int8-mixed-bf16
+quantization.
+"""
+
+
+def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+    if dtype_convert:
+        return CallFunction(
+            prims.convert_element_type.default,
+            pattern,
+            dtype,
+        )
+    else:
+        return pattern
+
+
+"""
 dequantize activation:
     x = x.to(fp32)
     x = x - zero_point
@@ -49,9 +77,22 @@ dequantize_per_channel_weight_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
+dequantize_per_channel_to_bf16_weight_pattern = (
+    _may_generate_pattern_with_dtype_convert(
+        dequantize_per_channel_weight_pattern,
+        KeywordArg("autocast_wgt_dtype"),
+    )
+)
+
 dequantize_per_channel_clone_weight_pattern = CallFunction(
     aten.clone.default,
     dequantize_per_channel_weight_pattern,
+    memory_format=KeywordArg("memory_format"),
+)
+
+dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
+    aten.clone.default,
+    dequantize_per_channel_to_bf16_weight_pattern,
     memory_format=KeywordArg("memory_format"),
 )
 
@@ -125,7 +166,7 @@ def generate_pattern_with_unary(computation_call, unary_post_op):
     return computation_call
 
 
-def generate_pattern_with_output_quant(computation_call):
+def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
     """
     quantize output:
         output = round(output * o_inv_scale)
@@ -134,6 +175,7 @@ def generate_pattern_with_output_quant(computation_call):
         output = clamp_max(output, 127)
         output = output.to(uint8)
     """
+    assert dtype in [torch.float32, torch.bfloat16]
     quantized_op_output_pattern_pt2e = CallFunction(
         prims.convert_element_type.default,
         CallFunction(
@@ -146,7 +188,11 @@ def generate_pattern_with_output_quant(computation_call):
                         aten.round.default,
                         CallFunction(
                             aten.mul.Tensor,
-                            computation_call,
+                            _may_generate_pattern_with_dtype_convert(
+                                computation_call,
+                                KeywordArg("autocast_output_quant_dtype"),
+                                dtype != torch.float32,
+                            ),
                             KeywordArg("o_inv_scale"),
                         ),
                     ),
@@ -192,6 +238,7 @@ def _register_quantized_conv_lowering(
     computation_op,
     output_dtype,
     unary_attr,
+    original_pattern_output_dtype=torch.float32,
 ):
     @register_lowering_pattern(
         pattern,
@@ -223,8 +270,8 @@ def _register_quantized_conv_lowering(
         # Output QParams
         o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
         o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
-        assert kwargs["output_dtype"] is (
-            torch.float32 if output_dtype is None else output_dtype
+        assert (
+            kwargs["output_dtype"] is original_pattern_output_dtype
         )  # Expected int8-in fp32-out qconv in weight prepack phase
         assert (
             kwargs["attr"] == "none"
@@ -404,48 +451,52 @@ def _register_quantization_unary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
-    # QConv2d
-    # Priority 1 to match: QConv2d Unary pattern with int8 output
-    # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly.
-    # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
-    conv_unary_replace_patterns = {
-        UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-            dequantize_qconv_pt2e_pattern
-        ),
-        UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-            generate_pattern_with_unary(
-                dequantize_qconv_pt2e_pattern, aten.relu.default
+    for original_pattern_output_dtype in [torch.float32, torch.bfloat16]:
+        # QConv2d
+        # Priority 1 to match: QConv2d Unary pattern with int8 output
+        # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly.
+        # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
+        conv_unary_replace_patterns = {
+            UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+                dequantize_qconv_pt2e_pattern,
+                dtype=original_pattern_output_dtype,
+            ),
+            UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+                generate_pattern_with_unary(
+                    dequantize_qconv_pt2e_pattern, aten.relu.default
+                ),
+                dtype=original_pattern_output_dtype,
+            ),
+        }
+
+        for unary_attr, patterns in conv_unary_replace_patterns.items():
+            # Register qconv2d pattern for ExternKernel Lowering
+            _register_quantized_conv_lowering(
+                patterns,
+                1,  # pass_number
+                torch.ops.onednn.qconv2d_pointwise,  # computation_op
+                None,  # output_dtype, None is the default value for int8 output
+                unary_attr,  # unary_attr
+                original_pattern_output_dtype=original_pattern_output_dtype,
             )
-        ),
-    }
 
-    for unary_attr, patterns in conv_unary_replace_patterns.items():
-        # Register qconv2d pattern for ExternKernel Lowering
-        _register_quantized_conv_lowering(
-            patterns,
-            1,  # pass_number
-            torch.ops.onednn.qconv2d_pointwise,  # computation_op
-            None,  # output_dtype, None is the default value for int8 output
-            unary_attr,  # unary_attr
-        )
+        # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
+        conv_unary_replace_float_out_patterns = {
+            UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+                dequantize_qconv_pt2e_pattern, aten.relu.default
+            ),
+        }
 
-    # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
-    conv_unary_replace_float_out_patterns = {
-        UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-            dequantize_qconv_pt2e_pattern, aten.relu.default
-        ),
-    }
-
-    for unary_attr, patterns in conv_unary_replace_float_out_patterns.items():
-        # Register qconv2d pattern for ExternKernel Lowering
-        _register_quantized_conv_lowering(
-            patterns,
-            2,  # pass_number
-            torch.ops.onednn.qconv2d_pointwise,  # computation_op
-            torch.float32,  # output_dtype
-            unary_attr,  # unary_attr
-        )
-        # TODO <Leslie>: Add BFloat16 output pattern here
+        for unary_attr, patterns in conv_unary_replace_float_out_patterns.items():
+            # Register qconv2d pattern for ExternKernel Lowering
+            _register_quantized_conv_lowering(
+                patterns,
+                2,  # pass_number
+                torch.ops.onednn.qconv2d_pointwise,  # computation_op
+                original_pattern_output_dtype,  # output_dtype
+                unary_attr,  # unary_attr
+                original_pattern_output_dtype=original_pattern_output_dtype,
+            )
 
     # QLinear
     # Priority 1 to match: QLinear Unary pattern with int8 output
@@ -756,30 +807,42 @@ def _register_quantization_lowerings():
     _register_quantization_cat()
 
 
-def _is_valid_dequant_promotion_pattern(match):
-    mul_node = match.output_node()
-    sub_node = mul_node.args[0]
-    to_fp32_node = sub_node.args[0]
-    if (
-        mul_node.target is aten.mul.Tensor
-        and sub_node.target is aten.sub.Tensor
-        and to_fp32_node.target is prims.convert_element_type.default
-        and len(list(mul_node.users)) > 1
-    ):
-        # dequant pattern has more than 1 users to be promoted
-        return True
-    return False
+def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
+    def _inner(match):
+        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype == torch.float32:
+            mul_node = match.output_node()
+        else:
+            convert_to_bf16_node = match.output_node()
+            mul_node = convert_to_bf16_node.args[0]
+        sub_node = mul_node.args[0]
+        to_fp32_node = sub_node.args[0]
+        if (
+            mul_node.target is aten.mul.Tensor
+            and sub_node.target is aten.sub.Tensor
+            and to_fp32_node.target is prims.convert_element_type.default
+            and len(list(mul_node.users)) > 1
+            if dtype == torch.float32
+            else len(list(convert_to_bf16_node.users)) > 1
+        ):
+            # dequant pattern has more than 1 users to be promoted
+            return True
+        return False
+
+    return _inner
 
 
-def _register_dequant_promotion_pass(pattern, pass_number):
+def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_promotion_pattern,
+        extra_check=_is_valid_dequant_promotion_pattern(dtype),
         pass_number=pass_number,
     )
     def dequant_promotion(match: Match, *args, **kwargs):
         # If dequant pattern used by multiply nodes,
         # we will do dequant promotion. So each user node has a separate dequant pattern connected.
+        assert dtype in [torch.float32, torch.bfloat16]
+
         def clone_to_new_node(graph, source_node, user_node):
             assert (
                 source_node.op == "call_function"
@@ -794,7 +857,11 @@ def _register_dequant_promotion_pass(pattern, pass_number):
                 user_node.replace_input_with(source_node, new_node)
             return new_node
 
-        mul_node = match.output_node()
+        if dtype == torch.float32:
+            mul_node = match.output_node()
+        else:
+            convert_to_bf16_node = match.output_node()
+            mul_node = convert_to_bf16_node.args[0]
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
         assert mul_node.target is aten.mul.Tensor
@@ -802,10 +869,22 @@ def _register_dequant_promotion_pass(pattern, pass_number):
         assert to_fp32_node.target is prims.convert_element_type.default
 
         graph = match.graph
-        user_node_list = list(mul_node.users)
+        user_node_list = (
+            list(mul_node.users)
+            if dtype == torch.float32
+            else list(convert_to_bf16_node.users)
+        )
         for user_node in user_node_list:
             # Step1: Duplicate the mul node
-            new_mul_node = clone_to_new_node(graph, mul_node, user_node)
+            if dtype == torch.float32:
+                new_mul_node = clone_to_new_node(graph, mul_node, user_node)
+            else:
+                new_convert_to_bf16_node_node = clone_to_new_node(
+                    graph, convert_to_bf16_node, user_node
+                )
+                new_mul_node = clone_to_new_node(
+                    graph, mul_node, new_convert_to_bf16_node_node
+                )
             # Step2: Duplicate the sub node
             new_sub_node = clone_to_new_node(graph, sub_node, new_mul_node)
             # Step3: Duplicate the to_fp32 node
@@ -814,47 +893,55 @@ def _register_dequant_promotion_pass(pattern, pass_number):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv2d_pattern(match):
-    # Here we do some further check to ensure:
-    # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
-    # 2. The dequant pattern has only 1 user of conv2d node.
-    # If these conditions don't meet, we will not
-    # insert weight prepack node into the matched pattern.
-    conv_node = match.output_node()
-    assert conv_node.target is aten.convolution.default
-    input_meta_value = conv_node.args[0].meta.get("val")
-    weight_meta_value = conv_node.args[1].meta.get("val")
-    for meta_value in [input_meta_value, weight_meta_value]:
+def _is_valid_dequant_conv2d_pattern(dtype):
+    def _inner(match):
+        # Here we do some further check to ensure:
+        # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
+        # 2. The dequant pattern has only 1 user of conv2d node.
+        # If these conditions don't meet, we will not
+        # insert weight prepack node into the matched pattern.
+        conv_node = match.output_node()
+        assert conv_node.target is aten.convolution.default
+        input_meta_value = conv_node.args[0].meta.get("val")
+        weight_meta_value = conv_node.args[1].meta.get("val")
+        for meta_value in [input_meta_value, weight_meta_value]:
+            if (
+                meta_value is None
+                or meta_value.device.type != "cpu"
+                or meta_value.dim() != 4
+            ):
+                # Only support conv2d now
+                return False
+
+        assert dtype in [torch.float32, torch.bfloat16]
+        if dtype == torch.float32:
+            mul_node = conv_node.args[0]
+        else:
+            convert_to_bf16 = conv_node.args[0]
+            mul_node = convert_to_bf16.args[0]
+        sub_node = mul_node.args[0]
+        to_fp32_node = sub_node.args[0]
+
+        assert to_fp32_node.target is prims.convert_element_type.default
+        assert sub_node.target is aten.sub.Tensor
+        assert mul_node.target is aten.mul.Tensor
         if (
-            meta_value is None
-            or meta_value.device.type != "cpu"
-            or meta_value.dim() != 4
+            len(list(to_fp32_node.users)) != 1
+            or len(list(sub_node.users)) != 1
+            or len(list(mul_node.users)) != 1
         ):
-            # Only support conv2d now
+            # Ensure the dequant pattern only has 1 user
+            # since we will delete the dequant pattern here
             return False
+        return True
 
-    mul_node = conv_node.args[0]
-    sub_node = mul_node.args[0]
-    to_fp32_node = sub_node.args[0]
-
-    assert to_fp32_node.target is prims.convert_element_type.default
-    assert sub_node.target is aten.sub.Tensor
-    assert mul_node.target is aten.mul.Tensor
-    if (
-        len(list(to_fp32_node.users)) != 1
-        or len(list(sub_node.users)) != 1
-        or len(list(mul_node.users)) != 1
-    ):
-        # Ensure the dequant pattern only has 1 user
-        # since we will delete the dequant pattern here
-        return False
-    return True
+    return _inner
 
 
-def _register_qconv_weight_prepack_pass(pattern, pass_number):
+def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float32):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_conv2d_pattern,
+        extra_check=_is_valid_dequant_conv2d_pattern(dtype),
         pass_number=pass_number,
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
@@ -871,9 +958,14 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
           |
         onednn.qconv2d_pointwise <- onednn.qconv_prepack <- int8_weight
         """
+        assert dtype in [torch.float32, torch.bfloat16]
         conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
-        mul_node = conv_node.args[0]
+        if dtype == torch.float32:
+            mul_node = conv_node.args[0]
+        else:
+            convert_to_bf16 = conv_node.args[0]
+            mul_node = convert_to_bf16.args[0]
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
         has_clone_to_channel_last_node_in_pattern = (
@@ -882,11 +974,21 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
         clone_node = (
             conv_node.args[1] if has_clone_to_channel_last_node_in_pattern else None
         )
-        dequant_per_channel = (
-            clone_node.args[0]
-            if has_clone_to_channel_last_node_in_pattern
-            else conv_node.args[1]
-        )
+
+        if dtype == torch.float32:
+            dequant_per_channel = (
+                clone_node.args[0]
+                if has_clone_to_channel_last_node_in_pattern
+                else conv_node.args[1]
+            )
+        else:
+            weight_to_bf16_node = (
+                clone_node.args[0]
+                if has_clone_to_channel_last_node_in_pattern
+                else conv_node.args[1]
+            )
+            dequant_per_channel = weight_to_bf16_node.args[0]
+
         assert (
             dequant_per_channel.target
             is quantized_decomposed.dequantize_per_channel.default
@@ -952,7 +1054,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
                 groups,
                 1.0,  # inv_output_scale
                 0,  # output_zero_point
-                torch.float32,  # output_dtype
+                dtype,  # output_dtype
                 "none",  # attr
                 [],  # scalars
                 "",  # algorithm
@@ -966,12 +1068,17 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
             # Erase the original conv node
             graph.erase_node(conv_node)
             # Erase the dequant pattern
+            if dtype == torch.bfloat16:
+                graph.erase_node(convert_to_bf16)
+            # Erase the dequant pattern
             graph.erase_node(mul_node)
             graph.erase_node(sub_node)
             graph.erase_node(to_fp32_node)
             # Erase the dequant per channel pattern
             if clone_node is not None:
                 graph.erase_node(clone_node)
+            if dtype == torch.bfloat16:
+                graph.erase_node(weight_to_bf16_node)
             graph.erase_node(dequant_per_channel)
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
@@ -979,10 +1086,17 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
             )
 
 
-def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
+def _generate_dequant_convolution_node_pattern(
+    _dequant_per_channel_pattern, dtype=torch.float32
+):
+    assert dtype in [torch.float32, torch.bfloat16]
     dequant_convolution_node_pattern = CallFunction(
         aten.convolution.default,
-        dequantize_per_tensor_activation_pattern,
+        _may_generate_pattern_with_dtype_convert(
+            dequantize_per_tensor_activation_pattern,
+            KeywordArg("autocast_act_dtype"),
+            dtype != torch.float32,
+        ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
         KeywordArg("stride"),
@@ -995,10 +1109,14 @@ def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
     return dequant_convolution_node_pattern
 
 
-def _generate_qconv_weight_prepack_patterns():
+def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
+    assert dtype in [torch.float32, torch.bfloat16]
     return (
         _generate_dequant_convolution_node_pattern(
             dequantize_per_channel_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_weight_pattern,
+            dtype,
         ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
@@ -1006,6 +1124,9 @@ def _generate_qconv_weight_prepack_patterns():
         # between convolution and dequant_per_channel node
         _generate_dequant_convolution_node_pattern(
             dequantize_per_channel_clone_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_clone_weight_pattern,
+            dtype,
         ),
     )
 
@@ -1162,16 +1283,49 @@ def _generate_qlinear_weight_prepack_patterns():
 
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
-    # Step 1: Dequant promotion
-    _register_dequant_promotion_pass(
-        dequantize_per_tensor_activation_pattern, pass_number=0
-    )  # pass_number=0 to run before weight prepack
+    for dtype in [torch.float32, torch.bfloat16]:
+        # Step 1: Dequant promotion for int8-mixed-fp32/bf16
+        # Transform
+        # graph 1:
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        # into:
+        # graph 2:
+        #            quant
+        #      + - - / - \ - - +
+        #      |dequant dequant|
+        #      |    |      |   |
+        #      | node1 node2   |
+        #      + - | - - - | - +
+        #        quant   quant
+        # In graph 1, the dequant node is shared by node1 and node2,
+        # as a result, neither node1 nor node2 could form an int8
+        # fusion pattern.
+        # After this transformation, the graph 2 could hit the int8
+        # fusion pattern: dequant-node-quant, respectively for
+        # node1 and node2.
+        _register_dequant_promotion_pass(
+            _may_generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("autocast_act_dtype"),
+                dtype != torch.float32,
+            ),
+            pass_number=0,
+            dtype=dtype,
+        )  # pass_number=0 to run before weight prepack
 
-    # Step 2: QConv weight prepack
-    weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
-    for weight_prepack_pattern in weight_prepack_patterns:
-        # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
-        _register_qconv_weight_prepack_pass(weight_prepack_pattern, pass_number=1)
+        # Step 2: QConv weight prepack
+        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(dtype)
+        for weight_prepack_pattern in weight_prepack_patterns:
+            # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
+            _register_qconv_weight_prepack_pass(
+                weight_prepack_pattern, pass_number=1, dtype=dtype
+            )
 
     # Step 3: QLinear weight prepack
     weight_prepack_patterns = _generate_qlinear_weight_prepack_patterns()
