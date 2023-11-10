@@ -108,6 +108,7 @@ SymbolizedTracebacks symbolize(
   }
   std::vector<std::vector<uint64_t>> python_frame_fragments =
       std::move(r.tracebacks);
+  r.tracebacks = {};
 
   for (const auto& sc : to_symbolize) {
     r.tracebacks.emplace_back();
