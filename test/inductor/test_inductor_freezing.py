@@ -24,6 +24,7 @@ from torch.testing._internal.inductor_utils import (
     copy_tests,
     HAS_CPU,
     HAS_CUDA,
+    requires_cuda,
 )
 
 aten = torch.ops.aten
