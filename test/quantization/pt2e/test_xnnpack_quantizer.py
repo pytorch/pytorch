@@ -698,6 +698,34 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_mul_float32_max(self):
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x * 3.4028235e+38
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True, ptq_act_use_minmax_observer=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (
+            torch.randn(1, 3, 5, 5),
+        )
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.mul.Tensor,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            M(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):

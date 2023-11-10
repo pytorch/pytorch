@@ -103,6 +103,7 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
     is_dynamic: bool = False,
+    ptq_act_use_minmax_observer: bool = False,
 ):
     if is_qat:
         if is_dynamic:
@@ -114,7 +115,7 @@ def get_symmetric_quantization_config(
         if is_dynamic:
             act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
         else:
-            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
+            act_observer_or_fake_quant_ctr = MinMaxObserver if ptq_act_use_minmax_observer else HistogramObserver  # type: ignore[assignment]
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
