@@ -130,7 +130,7 @@ class Upsample(Module):
                   [1.2000, 1.3600, 1.5200, 1.2800, 0.6400, 0.0000],
                   [0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]]]])
     """
-    
+
     __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
     name: str
     size: Optional[_size_any_t]

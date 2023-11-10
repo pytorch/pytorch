@@ -107,7 +107,7 @@ class Embedding(Module):
                 [-0.7895, -0.7089, -0.0364],
                 [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
-    
+
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
