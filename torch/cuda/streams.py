@@ -206,8 +206,8 @@ class Event(torch._C._CudaEventBase, _EventBase):
 
     def elapsed_time(self, end_event):
         r"""Return the time elapsed.
-        
-        Time reported in milliseconds after the event was recorded and 
+
+        Time reported in milliseconds after the event was recorded and
         before the end_event was recorded.
         """
         return super().elapsed_time(end_event)
@@ -225,7 +225,7 @@ class Event(torch._C._CudaEventBase, _EventBase):
 
     def ipc_handle(self):
         r"""Return an IPC handle of this event.
-        
+
         If not recorded yet, the event will use the current device.
         """
         return super().ipc_handle()
