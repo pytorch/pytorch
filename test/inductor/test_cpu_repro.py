@@ -35,20 +35,28 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_MACOS, slowTest
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    run_and_get_cpp_code,
-    TestCase,
-    vec_dtypes,
-)
 from torch.utils._python_dispatch import TorchDispatchMode
 
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
+
+vec_dtypes = test_torchinductor.vec_dtypes
 _lowp_fp_dtypes = (
     torch.bfloat16,
     torch.float16,
 )
+run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
+TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
+check_model = test_torchinductor.check_model
 
 
 class LstmModule(torch.nn.Module):
@@ -2571,6 +2579,32 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x, y, mode))
                 # TODO: support vectorization for int div
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint8_add(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            add = torch.add(x, y)
+            matmul = torch.matmul(add, add)
+            neg = torch.neg(add)
+            to = neg.to(torch.int32)
+            return (matmul, to)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_uint8_sub(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            add = torch.sub(x, y)
+            matmul = torch.matmul(add, add)
+            neg = torch.neg(add)
+            to = neg.to(torch.int32)
+            return (matmul, to)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
 
 
 if __name__ == "__main__":
