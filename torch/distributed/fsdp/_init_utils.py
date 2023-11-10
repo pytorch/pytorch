@@ -42,7 +42,6 @@ from torch.distributed.fsdp._flat_param import (
     FlatParamHandle,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -512,20 +511,12 @@ def _init_prefetching_state(
 def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
     # TODO: we need to add additional check once we support FSDP + PiPPy.
     # This check is currently sufficient, since we only support FSDP + TP.
-    if device_mesh:
-        state._enable_extension = (
-            _mesh_resources.get_parent_mesh(state._device_mesh) is not None
-        )
-
-        if state._enable_extension:
-            try:
-                _set_fsdp_extensions(DTensorExtensions())
-            except BaseException as e:
-                warnings.warn(
-                    "PyTorch doesn't have TensorFlattener extension point available"
-                    "2D parallelism won't work with FSDP"
-                    f"exception: {e}"
-                )
+    if device_mesh and _mesh_resources.get_parent_mesh(state._device_mesh) is not None:
+        state._fsdp_extension = DTensorExtensions()
+    else:
+        # We need to explicilty set _fsdp_extension to None.
+        # Otherwise, we will run into an infinite recursion when getting the attribute.
+        state._fsdp_extension = None
     return state
 
 
@@ -624,6 +615,7 @@ def _init_param_handle_from_params(
         state.mixed_precision.keep_low_precision_grads,
         state.process_group,
         state._use_orig_params,
+        fsdp_extension=state._fsdp_extension,
     )
     handle.shard()
     assert not state._handle
