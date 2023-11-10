@@ -356,6 +356,22 @@ def skipIfNoONEDNN(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoONEDNNBF16(fn):
+    reason = 'Quantized operations require BF16 support.'
+    if isinstance(fn, type):
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 def skipIfNoX86(fn):
     reason = 'Quantized operations require X86.'
     if isinstance(fn, type):
@@ -2585,6 +2601,13 @@ class TestHelperModules:
             w = torch.cat([z, y])
             return w
 
+    class ThreeAdd(torch.nn.Module):
+        def forward(self, x1, x2, x3, x4):
+            y = x1 + x2
+            z = x3 + x4
+            w = y + z
+            return w
+
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2619,6 +2642,14 @@ class TestHelperModules:
         def forward(self, x, y):
             x = x * y
             x *= y
+            return x
+
+    class AddMulScalar(torch.nn.Module):
+        def forward(self, x):
+            x = x + 3
+            x = x * 3
+            x += 3
+            x *= 3
             return x
 
     class ConvBnReLU2dAndLinearReLU(torch.nn.Module):

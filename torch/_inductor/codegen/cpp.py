@@ -77,6 +77,8 @@ DTYPE_TO_ATEN = {
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex64: "at::kComplexFloat",
+    torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
+    torch.float8_e5m2: "at::kFloat8_e5m2",
 }
 
 DEVICE_TO_ATEN = {
@@ -836,6 +838,14 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
+    def add(a, b):
+        return f"decltype({a})({a} + {b})"
+
+    @staticmethod
+    def sub(a, b):
+        return f"decltype({a})({a} - {b})"
+
+    @staticmethod
     def mul(a, b):
         return f"decltype({a})({a} * {b})"
 
@@ -1267,10 +1277,14 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
                     f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
             )
