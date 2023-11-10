@@ -502,16 +502,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
-            for constant_name, value in self.constants.items():
-                if (
-                    not data.is_mkldnn
-                    and data.size() == value.size()
-                    and data.stride() == value.stride()
-                    and data.dtype == value.dtype
-                    and data.device == value.device
-                    and torch.eq(data, value).all()
-                ):
-                    return constant_name
+            if not config.split_const_graph:
+                for constant_name, value in self.constants.items():
+                    if (
+                        not data.is_mkldnn
+                        and data.size() == value.size()
+                        and data.stride() == value.stride()
+                        and data.dtype == value.dtype
+                        and data.device == value.device
+                        and torch.eq(data, value).all()
+                    ):
+                        return constant_name
 
             if name is None:
                 name = f"constant{len(self.constants)}"
