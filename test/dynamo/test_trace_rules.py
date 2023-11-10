@@ -69,14 +69,6 @@ ignored_torch_name_rule_set = {
     "torch.package.package_exporter.PackageExporter",
     "torch.serialization._opener",
     "torch.sparse.check_sparse_tensor_invariants",
-    "torch.utils._config_module.ContextDecorator",
-    "torch.utils._contextlib._DecoratorContextManager",
-    "torch.utils._device.DeviceContext",
-    "torch.utils._python_dispatch.TorchDispatchMode",
-    "torch.utils.data.datapipes._decorator.guaranteed_datapipes_determinism",
-    "torch.utils.data.datapipes._decorator.runtime_validation_disabled",
-    "torch.utils.data.datapipes.dataframe.dataframes.CaptureLikeMock",
-    "torch.utils.hooks.RemovableHandle",
 }
 
 
@@ -134,6 +126,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         )
         x = generated_torch_name_rule_set - used_torch_name_rule_set
         y = used_torch_name_rule_set - generated_torch_name_rule_set
+        breakpoint()
         msg1 = (
             f"New torch objects: {x} "
             "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
