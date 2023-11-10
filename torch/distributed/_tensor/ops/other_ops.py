@@ -36,6 +36,7 @@ def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
     return OutputSharding(grad_input_spec)
 
 
+@register_prop_rule(aten.bernoulli.default)
 @register_prop_rule(aten.bernoulli_.float)
 def bernoulli_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[0]

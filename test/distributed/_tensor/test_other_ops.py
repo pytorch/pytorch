@@ -6,13 +6,13 @@ import torch
 
 import torch.distributed as dist
 
-from timm.models.layers import DropPath
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 ITER_TIME = 10
 LR = 0.001
@@ -84,18 +84,16 @@ class DistOtherOpsTest(DTensorTestBase):
         input_list = torch.rand(ITER_TIME, 1024, 10)
         grad_output_list = torch.rand(ITER_TIME, 1024, 10) * 1e-3
 
-        droppath = DropPath(0.3)
-
         for i in range(ITER_TIME):
             inp = input_list[i].to(self.device_type).requires_grad_()
             grad_output = grad_output_list[i].to(self.device_type)
 
-            # droppath  with dtensor
+            # bernoulli  with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
             grad_output_dtensor = distribute_tensor(
                 grad_output, device_mesh, shard_spec
             )
-            output = droppath(inp_dtensor)
+            output = torch.bernoulli(inp_dtensor)
             output.backward(grad_output_dtensor)
 
             send_output_tensor = output.to_local()
