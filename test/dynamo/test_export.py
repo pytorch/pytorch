@@ -3277,7 +3277,9 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         sin = l_x_.sin();  l_x_ = None
@@ -3286,7 +3288,9 @@ class GraphModule(torch.nn.Module):
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         cos = l_x_.cos();  l_x_ = None
