@@ -719,7 +719,9 @@ class _PyTreeCodeGen(CodeGen):
             # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
             # one for code: `var1, var2, = function_call()`
             without_annotation = [x.split(":")[0] for x in free_vars]
-            fn_definition += "\n    " + "".join([x + "; " for x in free_vars if ":" in x]) + "\n"
+            has_annotation = [x + "; " for x in free_vars if ":" in x]
+            if len(has_annotation) > 0:
+                fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
     {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
