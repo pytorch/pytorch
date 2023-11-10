@@ -407,22 +407,18 @@ class MetaConverter:
                         # recreate this situation.
                         def _view_from_base(base, t):
                             if t.is_nested:
-                                # Nested tensors do not support as_strided, and
-                                # hence,always have _view_func available.
-                                #
-                                # The unsafe version of _view_func omits
-                                # checking whether the base passed in has the same
-                                # metadata as the original base the view_func
-                                # was originally executed with. (1) It is OK here,
-                                # because we're calling it on the meta-ified base,
-                                # so the metadata is guaranteed to be the same.
-                                # (2) It is necessary because we don't actually
-                                # want to guard on the base's metadata here.
-
-                                # TODO: Handle type permutations of base and t
-                                #   (jagged, dense)
-                                #   (dense, jagged)
                                 if base.is_nested:
+                                    # Nested tensors do not support as_strided, and
+                                    # hence,always have _view_func available.
+                                    #
+                                    # The unsafe version of _view_func omits
+                                    # checking whether the base passed in has the same
+                                    # metadata as the original base the view_func
+                                    # was originally executed with. (1) It is OK here,
+                                    # because we're calling it on the meta-ified base,
+                                    # so the metadata is guaranteed to be the same.
+                                    # (2) It is necessary because we don't actually
+                                    # want to guard on the base's metadata here.
                                     return t._view_func_unsafe(base)
                                 else:
                                     from torch._dynamo.source import AttrSource
@@ -450,6 +446,9 @@ class MetaConverter:
                                         base, fake_offsets
                                     )
                             else:
+                                # TODO: Do we ever need to handle a dense view of an NT?
+                                # Jagged NTs are generally considered views of an underlying
+                                # values buffer, so I don't think so.
                                 (
                                     sizes,
                                     strides,

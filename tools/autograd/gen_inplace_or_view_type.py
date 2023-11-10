@@ -247,6 +247,11 @@ def unpacked_name(arg_name: str) -> str:
     return arg_name + "_"
 
 
+def undo_unpacked_name(unpacked_name: str) -> str:
+    # remove the leading underscore
+    return unpacked_name[:-1]
+
+
 @with_native_function
 def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     body: List[str] = []
@@ -367,16 +372,9 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                 arg=arg, val=arg_value, default="0"
             )
             updated_unpacked_args.append(arg_value)
-        elif (
-            arg == "nested_size_"
-            or arg == "nested_strides_"
-            or arg == "offsets_"
-            or arg == "dummy_"
-        ) and arg_type == ConstRefCType(BaseCType(tensorT)):
-            # [NOTE] [Nested Arg Types]
-            # This is temporary. Nested tensors will be migrating to use SymInts and
-            # nested_size and nested_strides will no longer be tensors.
-            updated_unpacked_args.append(arg[:-1])
+        elif arg_type == ConstRefCType(BaseCType(tensorT)):
+            # NB: Since we're not actually unpacking, just use the normal arg name.
+            updated_unpacked_args.append(undo_unpacked_name(arg))
         else:
             updated_unpacked_args.append(arg)
 
@@ -443,6 +441,7 @@ def emit_view_body(
             )
             rhs_value = f"std::move({var})"
         else:
+            # NB: unpacking logic is discarded, so we're not actually unpacking
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")

@@ -138,7 +138,6 @@ class NestedTensor(torch.Tensor):
         #
         #   (2) Facilitating the behavior around symbolic -> non-symbolic
         #       conversions and vice versa, see below.
-        #       conversions and vice versa, see below.
         #
         # [ non-symbolic -> symbolic (fakification in meta_utils) ]
         #
