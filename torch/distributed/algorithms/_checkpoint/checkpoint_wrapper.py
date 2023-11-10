@@ -72,7 +72,8 @@ class ActivationWrapper(torch.nn.Module):
         *args: Any,
     ) -> Dict[str, Any]:
         """
-        Method used after executing the state_dict() of the ~FSDP module.
+        ``_post_state_dict_hook()`` is called after the ``state_dict()`` of this
+        FSDP module is executed.
 
         For ``checkpoint_wrapper``, it will strip
         checkpoint-wrapped module prefix so that this module can be loaded into
