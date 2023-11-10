@@ -623,7 +623,7 @@ class BCELoss(_WeightedLoss):
 
 class BCEWithLogitsLoss(_Loss):
     r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
-    
+
     This version is more numerically stable than using a plain `Sigmoid`
     followed by a `BCELoss` as, by combining the operations into one layer,
     we take advantage of the log-sum-exp trick for numerical stability.
@@ -735,7 +735,7 @@ class BCEWithLogitsLoss(_Loss):
 
 class HingeEmbeddingLoss(_Loss):
     r"""Measures the loss given an input tensor :math:`x` and a labels tensor :math:`y` (containing 1 or -1).
-    
+
     This is usually used for measuring whether two inputs are similar or
     dissimilar, e.g. using the L1 pairwise distance as :math:`x`, and is typically
     used for learning nonlinear embeddings or semi-supervised learning.
@@ -796,7 +796,7 @@ class HingeEmbeddingLoss(_Loss):
 
 class MultiLabelMarginLoss(_Loss):
     r"""Multi-class hinge loss for multi-label classification.
-    
+
     Creates a criterion that optimizes a multi-class multi-classification
     hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
     and output :math:`y` (which is a 2D `Tensor` of target class indices).
@@ -863,7 +863,7 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term or L1 term based on a user-defined threshold beta.
-    
+
     The criterion uses a squared term if the absolute
     element-wise error falls below a beta and an L1 term otherwise.
     It is less sensitive to outliers than :class:`torch.nn.MSELoss` and in some cases
@@ -947,7 +947,7 @@ class SmoothL1Loss(_Loss):
 
 class HuberLoss(_Loss):
     r"""Piecewise Huber loss function.
-    
+
     Creates a criterion that uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
     This loss combines advantages of both :class:`L1Loss` and :class:`MSELoss`; the
@@ -1178,7 +1178,7 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    
+
     __constants__ = ['ignore_index', 'reduction', 'label_smoothing']
     ignore_index: int
     label_smoothing: float
@@ -1197,9 +1197,9 @@ class CrossEntropyLoss(_WeightedLoss):
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all loss based on max-entropy.
-     
+
     The criterion optimizes the loss between input :math:`x` and target :math:`y` of size :math:`(N, C)`.
-    
+
     For each sample in the minibatch:
 
     .. math::
@@ -1246,9 +1246,9 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the cosine similarity loss.
-    
-    It measures the loss given input tensors :math:`x_1`, :math:`x_2` 
-    and a `Tensor` label :math:`y` with values 1 or -1. Use (:math:`y=1`) 
+
+    It measures the loss given input tensors :math:`x_1`, :math:`x_2`
+    and a `Tensor` label :math:`y` with values 1 or -1. Use (:math:`y=1`)
     to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
     This is typically used for learning nonlinear embeddings or semi-supervised learning.
 
@@ -1310,9 +1310,9 @@ class CosineEmbeddingLoss(_Loss):
 
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that computes a margin ranking loss between inputs.
-    
-    This criterion measures the loss given inputs :math:`x1`, :math:`x2`, 
-    two 1D mini-batch or 0D `Tensors`, and a label 1D mini-batch or 
+
+    This criterion measures the loss given inputs :math:`x1`, :math:`x2`,
+    two 1D mini-batch or 0D `Tensors`, and a label 1D mini-batch or
     0D `Tensor` :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
@@ -1370,8 +1370,8 @@ class MarginRankingLoss(_Loss):
 
 class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge loss (margin-based loss).
-    
-    The loss is computed between input :math:`x` (a 2D mini-batch `Tensor`) and output :math:`y` 
+
+    The loss is computed between input :math:`x` (a 2D mini-batch `Tensor`) and output :math:`y`
     (which is a 1D tensor of target class indices, :math:`0 \leq y \leq \text{x.size}(1)-1`):
 
     For each mini-batch sample, the loss in terms of the 1D input :math:`x` and scalar
@@ -1452,8 +1452,8 @@ class MultiMarginLoss(_WeightedLoss):
 
 class TripletMarginLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss.
-     
-    The loss is computed between input tensors :math:`x1`, :math:`x2`, 
+
+    The loss is computed between input tensors :math:`x1`, :math:`x2`,
     :math:`x3` and a margin with a value greater than :math:`0`.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n` (i.e., `anchor`, `positive examples` and `negative
@@ -1521,7 +1521,7 @@ class TripletMarginLoss(_Loss):
     .. _Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
-    
+
     __constants__ = ['margin', 'p', 'eps', 'swap', 'reduction']
     margin: float
     p: float
@@ -1543,10 +1543,10 @@ class TripletMarginLoss(_Loss):
 
 class TripletMarginWithDistanceLoss(_Loss):
     r"""Creates a criterion that computes the triplet loss with a custom distance function.
-    
-    The criterion measures the triplet loss given input tensors :math:`a`, :math:`p`, 
-    and :math:`n` (representing anchor, positive, and negative examples, respectively), 
-    and a nonnegative, real-valued function ("distance function") used to compute the 
+
+    The criterion measures the triplet loss given input tensors :math:`a`, :math:`p`,
+    and :math:`n` (representing anchor, positive, and negative examples, respectively),
+    and a nonnegative, real-valued function ("distance function") used to compute the
     relationship between the anchor and positive example ("positive distance") and the
     anchor and negative example ("negative distance").
 
