@@ -319,7 +319,7 @@ class _SingleLevelFunction(
 ):
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
-        r"""Override this function in all subclasses.
+        r"""Use this function to be overridden by all subclasses.
 
         There are two ways to define forward:
 
