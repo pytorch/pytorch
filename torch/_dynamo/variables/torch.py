@@ -85,6 +85,7 @@ constant_fold_functions = [
     torch.is_autocast_cpu_enabled,
     torch.is_autocast_enabled,
     torch.is_complex,
+    torch.Tensor.is_contiguous,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
     torch.promote_types,
@@ -122,6 +123,8 @@ def remap_as_fn___rxor__(*args):
 def remap_as_fn___rand__(*args):
     return torch._C.TensorBase.__rand__(*args)
 
+def remap_as_fn_is_contiguous():
+    return torch.Tensor.is_contiguous()
 
 tensor_dunder_fns_remap = {
     torch._C.TensorBase.__radd__: remap_as_fn___radd__,
@@ -129,6 +132,7 @@ tensor_dunder_fns_remap = {
     torch._C.TensorBase.__ror__: remap_as_fn___ror__,
     torch._C.TensorBase.__rxor__: remap_as_fn___rxor__,
     torch._C.TensorBase.__rand__: remap_as_fn___rand__,
+    torch._C.TensorBase.is_contiguous: remap_as_fn_is_contiguous,
 }
 
 
