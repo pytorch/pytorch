@@ -59,11 +59,11 @@ class ExecutionStats:
 class ThroughputBenchmark:
     """
     This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark.
-    
-    This wrapper on the throughput_benchmark::ThroughputBenchmark component is responsible 
-    for executing a PyTorch module (nn.Module or ScriptModule) under an inference 
-    server like load. It can emulate multiple calling threads to a single module 
-    provided. In the future we plan to enhance this component to support inter and 
+
+    This wrapper on the throughput_benchmark::ThroughputBenchmark component is responsible
+    for executing a PyTorch module (nn.Module or ScriptModule) under an inference
+    server like load. It can emulate multiple calling threads to a single module
+    provided. In the future we plan to enhance this component to support inter and
     intra-op parallelism as well as multiple models running in a single process.
 
     Please note that even though nn.Module is supported, it might incur an overhead
@@ -110,7 +110,7 @@ class ThroughputBenchmark:
     def add_input(self, *args, **kwargs):
         """
         Store a single input to a module into the benchmark memory and keep it there.
-        
+
         During the benchmark execution every thread is going to pick up a
         random input from the all the inputs ever supplied to the benchmark via
         this function.
