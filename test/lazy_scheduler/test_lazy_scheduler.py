@@ -245,16 +245,47 @@ class LazyScheduler:
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
-    # NOTE: we usually have more complex logic here (e.g. check against the schedule, etc.),
-    # but to repro the issue, we just immediately schedule all graph modules.
-    cur_handle.schedule()
-    cur_handle.wait_for_completion()
-    # return cur_handle.outs  # works
-    # NOTE: The expectation is that when user tries to use the output,
-    # it should either be materialized already, or its materialization will be scheduled immediately.
-    # Problem: when returned value is AsyncTensor, the .grad_fn of it is not populated.
-    return cur_handle.outs_async  # fails
+    # First, schedule all graphs from all segments that are before the incoming graph in the schedule.
+    all_preceding_graph_handles = []
+    reached_current_graph = False
+    # TODO: for now, we always check the schedule from the beginning.
+    # We can optimize this by keeping track of which segments have been scheduled already.
+    _next_segment_index = 0
+    while _next_segment_index < len(self._schedule):
+      segment = self._schedule[_next_segment_index]
+      for g in self._segment_to_gms_map[segment]:
+        if str(g.graph) == str(gm.graph):  # TODO: is there a better way to check graph equivalence?
+          reached_current_graph = True
+          break
+        all_preceding_graph_handles.append(
+          self._gm_to_handle_map.get(g, None)
+        )
+      if reached_current_graph:
+        break
+      else:
+        _next_segment_index += 1
 
+    all_preceding_graph_handles_are_scheduled = True
+    for handle in all_preceding_graph_handles:
+      if handle is not None:
+        print(f"will run preceding graph: {str(self._handle_to_gm_map[handle].code)}")
+        handle.schedule()
+      else:
+        # Some preceding graph is not scheduled yet
+        print(f"some preceding graphs are not scheduled yet, skipping current graph")
+        all_preceding_graph_handles_are_scheduled = False
+        break
+
+    # Then, if all preceding graph handles are scheduled, then we schedule the incoming graph;
+    # otherwise, we don’t schedule the incoming graph.
+    if all_preceding_graph_handles_are_scheduled:
+      print(f"will run current graph: {str(self._handle_to_gm_map[cur_handle].code)}")
+      cur_handle.schedule()
+    assert isinstance(outs_async, tuple)
+    if len(outs_async) == 1:
+      return outs_async[0]
+    else:
+      return outs_async
 
 
 class TestCase(TorchTestCase):
