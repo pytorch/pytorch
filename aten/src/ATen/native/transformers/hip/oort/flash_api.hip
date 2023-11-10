@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include<iostream>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/core/Tensor.h>
@@ -434,7 +435,11 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // be used in the backward function
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     at::Tensor seed_t, offset_t;
+
+    std::cerr << "ONE" << std::endl;
+    
     if (p_dropout > 0.0)  {
+      std::cerr << "TWO" << std::endl;
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
         // We use a custom RNG that increases the offset by batch_size * nheads * 32.
@@ -442,22 +447,29 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+	std::cerr << "THREE" << std::endl;
         if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+	  std::cerr << "FOUR" << std::endl;
           auto [seed, offset] = at::cuda::philox::unpack(philox_state);
           seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
           offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
         } else {
+	  std::cerr << "FIVE" << std::endl;
           seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           params.seed = seed_t.data_ptr<int64_t>();
           params.extragraph_offset = offset_t.data_ptr<int64_t>();
         }
+	std::cerr << "SIX" << std::endl;
         params.philox_args = philox_state;
     } else {
+      std::cerr << "SEVEN" << std::endl;
         if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+	  std::cerr << "EIGHT" << std::endl;
             seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
             offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         } else {
+	  std::cerr << "NINE" << std::endl;
             seed_t = at::empty({}, at::dtype(at::kLong));
             offset_t = at::empty({}, at::dtype(at::kLong));
         }
@@ -465,8 +477,21 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     }
 
     auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-    
+
+    //reorder tensors and make contiguous
+    q.permute({0,2,1,3}).contiguous();
+    k.permute({0,2,1,3}).contiguous();
+    v.permute({0,2,1,3}).contiguous();
+    out.permute({0,2,1,3}).contiguous();
+
+    std::cerr << "Input q = " << q << std::endl;
+    std::cerr << "Input k = " << k << std::endl;
+    std::cerr << "Input v = " << v << std::endl;
+    std::cerr << "Input out = " << out << std::endl;
+
+
     //JCG TODO forward
+    std::cerr << "TEN" << std::endl;
     
     at::Tensor M = at::empty({q.sizes()[0] * q.sizes()[1], q.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
 
@@ -475,14 +500,24 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     grid.y = q.sizes()[0] * q.sizes()[1];
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
+    std::cerr << "ELEVEN" << std::endl;
 
+  std::cerr << "Input q.sizes() = " << q.sizes() << std::endl;
+  std::cerr << "Input k.sizes() = " << k.sizes() << std::endl;
+  std::cerr << "Input v.sizes() = " << v.sizes() << std::endl;
+  std::cerr << "Input out.sizes() = " << out.sizes() << std::endl;
+  
+    
      if(q_dtype == at::kHalf)
        {
+	     std::cerr << "12" << std::endl;
+
 	if (is_causal)
 	  {
-	    constexpr int				STAGE = 3;
-	    oort::attn_fwd<STAGE,128,64,64,true>	fwd_opt;
-	    auto					err   = fwd_opt(grid, block,
+	    constexpr int				        STAGE = 3;
+	    oort::attn_fwd<STAGE,128,64,64,true>	        fwd_opt;
+	    std::cerr << "13" << std::endl;
+	    auto					        err   = fwd_opt(grid, block,
 							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
 								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
@@ -494,7 +529,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 	else
 	  {
 	    constexpr int			                STAGE = 1;
-	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+	    oort::attn_fwd<STAGE,128,64,64, true>                fwd_opt;
+	    std::cerr << "14" << std::endl;
 	    auto				                err   = fwd_opt(grid, block,
 							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
@@ -507,11 +543,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
        }
      else if (q_dtype == at::kBFloat16)
        {
+	 std::cerr << "15" << std::endl;
      	if (is_causal)
      	  {
-     	    constexpr int				STAGE = 3;
-     	    oort::attn_fwd<STAGE,128,64,64,true>	fwd_opt;
-     	    auto					err   = fwd_opt(grid, block,
+     	    constexpr int				        STAGE = 3;
+     	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+	    std::cerr << "16" << std::endl;
+     	    auto					        err   = fwd_opt(grid, block,
      							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
      								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
@@ -524,6 +562,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      	  {
      	    constexpr int			                STAGE = 1;
      	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+	    std::cerr << "17" << std::endl;
      	    auto				                err   = fwd_opt(grid, block,
      							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
@@ -534,16 +573,47 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
      	  }
        }
+
+          int i = 0;
+     while(i < 1000000000000)
+       i++;
+     
+     std::cerr << "18FIRSTNAP" << std::endl;
     
+     std::cerr << "18" << std::endl;
 
+     i = 0;
+     while(i < 1000000000000)
+       i++;
+     
+     std::cerr << "18postnap" << std::endl;
+     
 
+  std::cerr << "Input q = " << q << std::endl;
+  std::cerr << "Input k = " << k << std::endl;
+  std::cerr << "Input v = " << v << std::endl;
+  std::cerr << "Input out = " << out << std::endl;
+
+  //undo reorder tensors
+  q.permute({0,2,1,3}).contiguous();
+  k.permute({0,2,1,3}).contiguous();
+  v.permute({0,2,1,3}).contiguous();
+  out.permute({0,2,1,3}).contiguous();
+  
   hipStreamSynchronize(stream);
-    
+
+  std::cerr << "19" << std::endl;
+  
     if (seqlenq_ngroups_swapped) {
+      std::cerr << "20" << std::endl;
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
+	std::cerr << "21" << std::endl;
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
+	std::cerr << "22" << std::endl;
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
+	std::cerr << "23" << std::endl;
     }
+    std::cerr << "24" << std::endl;
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 

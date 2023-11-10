@@ -9,7 +9,7 @@ namespace pytorch_flash {
 
 TORCH_API
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
+mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size // JCG MOVE TO batch_size x num_heads x seqlen_q x head_size
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
