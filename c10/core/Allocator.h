@@ -189,7 +189,6 @@ struct C10_API Allocator {
     d(ptr);
   }
 
- private:
   // Copies data from one allocation to another.
   // Pure virtual, so derived classes must define behavior.
   // Derived class implementation can simply call `default_copy_data`

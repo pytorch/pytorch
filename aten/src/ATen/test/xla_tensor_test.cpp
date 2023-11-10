@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-#include <ATen/test/allocator_copy_data_test.h>
+#include <ATen/test/allocator_clone_test.h>
 
 using namespace at;
 
@@ -24,7 +24,6 @@ struct XLAAllocator final : public at::Allocator {
   at::DeleterFnPtr raw_deleter() const override {
     return &XLAFree;
   }
-private:
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     default_copy_data(dest, src, count);
   }
@@ -40,10 +39,10 @@ TEST(XlaTensorTest, TestNoStorage) {
   ASSERT_TRUE(t.device() == at::Device(DeviceType::XLA, 0));
 }
 
-TEST(XlaTensorTest, test_allocator_copy_data) {
+TEST(XlaTensorTest, test_allocator_clone) {
   if (!at::hasXLA()) {
     return;
   }
   XLAAllocator allocator;
-  test_allocator_copy_data(&allocator);
+  test_allocator_clone(&allocator);
 }

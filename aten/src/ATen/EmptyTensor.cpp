@@ -311,9 +311,7 @@ struct MetaAllocator final : public at::Allocator {
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
-private:
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-  }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {}
 };
 
 static MetaAllocator g_meta_alloc;
