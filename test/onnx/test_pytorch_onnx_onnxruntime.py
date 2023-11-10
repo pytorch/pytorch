@@ -7101,6 +7101,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         fp32 = Tensor([1.5])
         self.run_test(CatModel(), (fp16, fp32))
 
+        class DoNotUpcastModel(torch.nn.Module):
+            def forward(self, x):
+                scale = x.size()[-1] ** -0.5
+                return x * scale
+
+        x = torch.ones(2, 3, dtype=torch.float16)
+        self.run_test(DoNotUpcastModel(), x, verbose=True)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
