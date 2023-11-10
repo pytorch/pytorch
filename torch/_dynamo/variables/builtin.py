@@ -1274,23 +1274,12 @@ class BuiltinVariable(VariableTracker):
     def call_type(self, tx, obj: VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
 
-        try:
-            py_type = obj.python_type()
-        except NotImplementedError:
-            py_type = None
+        py_type = obj.python_type()
 
-        if py_type is not None and obj.source:
+        if obj.source is not None:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
-        if py_type is not None:
-            return SourcelessBuilder()(tx, py_type)
-
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            f"Can't call type() on generated custom object {obj}. "
-            "Please use __class__ instead",
-            case_name="type_reflection_method",
-        )
+        return SourcelessBuilder()(tx, py_type)
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
