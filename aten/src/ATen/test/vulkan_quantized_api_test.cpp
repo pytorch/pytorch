@@ -86,7 +86,7 @@ void showRtol(const at::Tensor& a, const at::Tensor& b,
           std::cout << std::setw(5) << x;
           if (diff.max().item<double>() == diff_xy) {
             std::cout << " : " << diff_xy;
-            if (xpos && xpos) {
+            if (xpos && ypos) {
               *xpos = x;
               *ypos = y;
               return;
@@ -2216,6 +2216,53 @@ void quantized_binary_op_test_set(const char* op_name) {
   }
 }
 
+void test_max_pool2d(
+    const at::IntArrayRef input_shape,
+    const c10::ScalarType dtype) {
+  const auto in_cpu = produce_random_tensor(input_shape);
+
+  const auto input_quant_params = compute_quant_params(in_cpu, dtype);
+  double scale = std::get<0>(input_quant_params);
+  scale = safe_downcast<float>(scale);
+  int zero_point = std::get<1>(input_quant_params);
+
+  auto in_cpu_quantized = at::quantize_per_tensor(in_cpu,
+      scale,
+      zero_point,
+      dtype);
+
+  const auto out_cpu_quantized = at::max_pool2d(in_cpu_quantized, {3, 4}, {2, 1}, {1, 1}, {1, 1}, false);
+  auto in_vk_quantized = at::quantize_per_tensor(in_cpu.vulkan(),
+      scale,
+      zero_point,
+      dtype);
+
+  const auto out_vk_quantized = at::max_pool2d(in_vk_quantized, {3, 4}, {2, 1}, {1, 1}, {1,1}, false);
+
+  const auto out_cpu_deq = at::dequantize(out_cpu_quantized);
+  const auto out_vk_deq = at::dequantize(out_vk_quantized);
+  const auto out_vk_deq_cpu = out_vk_deq.cpu();
+
+  const auto check = almostEqual(out_vk_deq_cpu, out_cpu_deq, safe_downcast<float>(scale));
+
+  if (!check) {
+    showRtol(out_cpu_deq, out_vk_deq_cpu);
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, max_pool2d_qint8) {
+  c10::InferenceMode mode;
+  test_max_pool2d({1, 3, 72, 96}, c10::ScalarType::QInt8);
+  test_max_pool2d({5, 13, 55, 68}, c10::ScalarType::QInt8);
+}
+
+TEST_F(VulkanAPITest, max_pool2d_quint8) {
+  c10::InferenceMode mode;
+  test_max_pool2d({5, 13, 55, 68}, c10::ScalarType::QUInt8);
+  test_max_pool2d({5, 13, 55, 19}, c10::ScalarType::QUInt8);
+}
+
 TEST_F(VulkanAPITest, quantized_add_tests) {
   quantized_binary_op_test_set("quantized::add");
 }
@@ -3119,7 +3166,7 @@ bool _test_quantized_linear(
   auto out_vk_dequant = at::dequantize(out_vk_quant);
   auto out_vk_to_cpu_dequant = vulkan_to_cpu(out_vk_dequant, out_cpu_dequant);
 
-  const auto check = almostEqual(out_cpu_dequant, out_vk_to_cpu_dequant, out_scale);
+  const auto check = almostEqual(out_cpu_dequant, out_vk_to_cpu_dequant, safe_downcast<float>(out_scale));
   if (!check) {
     long xpos = -1, ypos = -1;
     if (input_cpu.sizes().size() == 2) {
