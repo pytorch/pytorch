@@ -244,7 +244,7 @@ class LazyScheduler:
       out_async.set_handle(cur_handle)
 
     # NOTE: add more complex logic here (e.g. check against the schedule, etc.)
-    cur_handle.schedule()
+    # cur_handle.schedule()
     # cur_handle.wait_for_completion()
     return cur_handle.outs_async
 
