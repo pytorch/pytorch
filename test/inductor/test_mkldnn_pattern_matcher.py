@@ -437,14 +437,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qconv2d_cpu(self):
-        r"""
-        This testcase will quantize a single Conv2d module.
-        """
-
+    def _qconv2d_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -460,39 +453,47 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
-        for int8_mixed_bf16 in (
-            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
-        ):
-
-            def matcher_check_fn():
-                # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
-                #    int8_mixed_fp32: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-                #    int8_mixed_bf16: [convert_element_type_1, sub, mul_1, optional(convert_element_type_4),
-                #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
-                self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
-                )
-                self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
-                    16 if int8_mixed_bf16 else 12,
-                )
-
-            self._test_common(
-                mod,
-                (v,),
-                check_quantization=True,
-                check_autocast=int8_mixed_bf16,
-                matcher_check_fn=matcher_check_fn,
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
+            #    int8_mixed_fp32: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            #    int8_mixed_bf16: [convert_element_type_1, sub, mul_1, optional(convert_element_type_4),
+            #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
             )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
+                16 if int8_mixed_bf16 else 12,
+            )
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            check_autocast=int8_mixed_bf16,
+            matcher_check_fn=matcher_check_fn,
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_relu_cpu(self):
+    def test_qconv2d_cpu(self):
         r"""
-        This testcase will quantize Conv2d->ReLU pattern.
+        This testcase will quantize a single Conv2d module.
         """
+        self._qconv2d_cpu_test_helper()
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
+        """
+        self._qconv2d_cpu_test_helper(int8_mixed_bf16=True)
+
+    def _qconv2d_unary_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -511,25 +512,40 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
-        for int8_mixed_bf16 in (
-            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
-        ):
-
-            def matcher_check_fn():
-                # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
-                self.assertEqual(
-                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
-                )
-                # 2. QConv2D Unary fusion in post-grad fusion pass * 2
-                self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
-
-            self._test_common(
-                mod,
-                (v,),
-                check_quantization=True,
-                check_autocast=int8_mixed_bf16,
-                matcher_check_fn=matcher_check_fn,
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
             )
+            # 2. QConv2D Unary fusion in post-grad fusion pass * 2
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            check_autocast=int8_mixed_bf16,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_relu_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper()
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_relu_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern with int8_mixed_bf16 quantization.
+        """
+        self._qconv2d_unary_cpu_test_helper(int8_mixed_bf16=True)
 
     def _qconv2d_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
         r"""
@@ -894,14 +910,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_cpu(self):
-        r"""
-        This testcase will quantize a single Linear Moduel.
-        """
-
+    def _qlinear_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -912,42 +921,51 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.linear2(self.linear(x))
 
         bias_list = [True, False]
-        for int8_mixed_bf16 in (
-            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
-        ):
-            for bias in bias_list:
-                mod = M(bias).eval()
-                v = torch.randn((2, 4))
+        for bias in bias_list:
+            mod = M(bias).eval()
+            v = torch.randn((2, 4))
 
-                def matcher_check_fn():
-                    # 1. dequant-linear pattern matched in quantization weight prepack
-                    #    int8-mixed-fp32: [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-                    #    int8-mixed-bf16: [convert_element_type_1, sub, mul_1, optional(convert_element_type_3),
-                    #                      dequantize_per_channel, optional(convert_element_type_9), t, addmm/mm]
-                    self.assertEqual(
-                        counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
-                    )
-                    self.assertEqual(
-                        counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                        16 if int8_mixed_bf16 else 12,
-                    )
-
-                self._test_common(
-                    mod,
-                    (v,),
-                    check_autocast=int8_mixed_bf16,
-                    check_quantization=True,
-                    matcher_check_fn=matcher_check_fn,
+            def matcher_check_fn():
+                # 1. dequant-linear pattern matched in quantization weight prepack
+                #    int8-mixed-fp32: [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+                #    int8-mixed-bf16: [convert_element_type_1, sub, mul_1, optional(convert_element_type_3),
+                #                      dequantize_per_channel, optional(convert_element_type_9), t, addmm/mm]
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
                 )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    16 if int8_mixed_bf16 else 12,
+                )
+
+            self._test_common(
+                mod,
+                (v,),
+                check_autocast=int8_mixed_bf16,
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_relu_cpu(self):
+    def test_qlinear_cpu(self):
         r"""
-        This testcase will quantize a Linear->ReLU pattern.
+        This testcase will quantize a single Linear Moduel.
         """
+        self._qlinear_cpu_test_helper()
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        """
+        self._qlinear_cpu_test_helper(int8_mixed_bf16=True)
+
+    def _qlinear_unary_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -961,48 +979,46 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.unary_fn2(self.linear2(tmp))
 
         bias_list = [True, False]
-        for int8_mixed_bf16 in (
-            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
-        ):
-            for bias in bias_list:
-                mod = M(bias).eval()
-                v = torch.randn((2, 4))
+        for bias in bias_list:
+            mod = M(bias).eval()
+            v = torch.randn((2, 4))
 
-                def matcher_check_fn():
-                    # 1. dequant-linear pattern matched in quantization weight prepack
-                    self.assertEqual(
-                        counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
-                    )
-                    # 2. QLinear Unary fusion in post-grad fusion pass
-                    self.assertEqual(
-                        counters["inductor"]["qlinear_unary_matcher_count"], 2
-                    )
-
-                self._test_common(
-                    mod,
-                    (v,),
-                    check_autocast=int8_mixed_bf16,
-                    check_quantization=True,
-                    matcher_check_fn=matcher_check_fn,
+            def matcher_check_fn():
+                # 1. dequant-linear pattern matched in quantization weight prepack
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
                 )
+                # 2. QLinear Unary fusion in post-grad fusion pass
+                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 2)
+
+            self._test_common(
+                mod,
+                (v,),
+                check_autocast=int8_mixed_bf16,
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_dequant_promotion_cpu(self):
+    def test_qlinear_relu_cpu(self):
         r"""
-        This testcase test if dequant node before linear is promoted correctly:
-                  X
-                  |
-               Linear1(X)
-                /   \
-        Linear2(X)   Linear3(X)
-                \   /
-                 Add
-                  |
-                  Y
+        This testcase will quantize a Linear->ReLU pattern.
         """
+        self._qlinear_unary_cpu_test_helper()
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_relu_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
+        """
+        self._qlinear_unary_cpu_test_helper(int8_mixed_bf16=True)
+
+    def _qlinear_dequant_promotion_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1021,29 +1037,61 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.rand((2, 4))
 
-        for int8_mixed_bf16 in (
-            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
-        ):
-
-            def matcher_check_fn():
-                # 1. Dequant pattern matcher for dequant promotion * 1
-                self.assertEqual(
-                    counters["inductor"]["dequant_promotion_matcher_count"], 1
-                )
-                # 2. dequant-linear pattern matched in quantization weight prepack * 3
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
-                )
-                # 3. QLinear Unary fusion in post-grad fusion pass * 1
-                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
-
-            self._test_common(
-                mod,
-                (v,),
-                check_autocast=int8_mixed_bf16,
-                check_quantization=True,
-                matcher_check_fn=matcher_check_fn,
+        def matcher_check_fn():
+            # 1. Dequant pattern matcher for dequant promotion * 1
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
+            # 2. dequant-linear pattern matched in quantization weight prepack * 3
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
             )
+            # 3. QLinear Unary fusion in post-grad fusion pass * 1
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_autocast=int8_mixed_bf16,
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_dequant_promotion_cpu(self):
+        r"""
+        This testcase test if dequant node before linear is promoted correctly:
+                  X
+                  |
+               Linear1(X)
+                /   \
+        Linear2(X)   Linear3(X)
+                \   /
+                 Add
+                  |
+                  Y
+        """
+        self._qlinear_dequant_promotion_cpu_test_helper()
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_dequant_promotion_int8_mixed_bf16(self):
+        r"""
+        Test with int8_mixed_bf16 quantization.
+        This testcase test if dequant node before linear is promoted correctly:
+                  X
+                  |
+               Linear1(X)
+                /   \
+        Linear2(X)   Linear3(X)
+                \   /
+                 Add
+                  |
+                  Y
+        """
+        self._qlinear_dequant_promotion_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfRocm
@@ -1408,7 +1456,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             match_nodes = 12
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
-    def test_qconv2d_maxpool2d_linear_dynamic(self):
+    def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
         r"""
         This testcase will quantize a single Conv2d->Maxpool2d->Linear module
         with dynamic batch size input.
@@ -1437,11 +1485,12 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
         mod = M().eval()
         v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-        include_ops = [
-            "torch.ops.onednn.qconv2d_pointwise",
-            "torch.ops.quantized.max_pool2d",
-            "torch.ops.onednn.qlinear_pointwise",
-        ]
+        if include_ops is None:
+            include_ops = [
+                "torch.ops.onednn.qconv2d_pointwise",
+                "torch.ops.quantized.max_pool2d",
+                "torch.ops.onednn.qlinear_pointwise",
+            ]
         exclude_ops = []
         self._test_code_common(
             mod,

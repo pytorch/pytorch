@@ -49,7 +49,7 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
   void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
   void apply_with_saved(
       Variable& tensor,
-      torch::dynamo::autograd::SwapSavedVariables& saved);
+      torch::dynamo::autograd::SwapSavedVariables& saved) override;
   PyObject* dict;
 };
 

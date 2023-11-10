@@ -1,7 +1,7 @@
 import inspect
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Tuple, Type
+from typing import Any, Dict, final, List, Optional, Tuple, Type
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
@@ -41,7 +41,14 @@ def _check_val(node: torch.fx.Node) -> None:
             return all(_check_correct_val(x) for x in val)
         return False
 
+    def _no_returns(op):
+        if not isinstance(op, OpOverload):
+            return False
+        return len(op._schema.returns) == 0
+
     if "val" not in node.meta:
+        if node.op == "call_function" and _no_returns(node.target):
+            return
         raise SpecViolationError(f"Node.meta {node.name} is missing val field.")
 
     val = node.meta["val"]
@@ -50,7 +57,7 @@ def _check_val(node: torch.fx.Node) -> None:
 
 
 class _VerifierMeta(type):
-    __registry: Dict[str, Type['Verifier']] = {}
+    _registry: Dict[str, Type['Verifier']] = {}
 
     def __new__(metacls, name, bases, attrs):
         if bases:
@@ -64,7 +71,7 @@ class _VerifierMeta(type):
 
         assert isinstance(attrs["dialect"], str)
         ret = type.__new__(metacls, name, bases, attrs)
-        metacls.__registry[attrs["dialect"]] = ret  # type: ignore[assignment]
+        metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
 
 
@@ -72,7 +79,24 @@ class Verifier(metaclass=_VerifierMeta):
     dialect = "ATEN"
 
     def allowed_builtin_ops(self) -> List:
-        return [operator.getitem, operator.add, operator.mul, operator.sub]
+        return [
+            operator.getitem,
+            operator.add,
+            operator.mul,
+            operator.sub,
+            operator.truediv,
+            operator.ge,
+            operator.le,
+            operator.gt,
+            operator.lt,
+            operator.eq,
+            operator.ne,
+            operator.floordiv,
+            operator.mod,
+            operator.and_,
+            operator.or_,
+            operator.not_,
+        ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
@@ -95,7 +119,14 @@ class Verifier(metaclass=_VerifierMeta):
             # TODO Enforce type checking in the constructor.
             return
         self._check_graph_module(ep.graph_module)
-        _verify_exported_program_signature(ep)
+        try:
+            _verify_exported_program_signature(ep)
+        except SpecViolationError as e:
+            # TODO Remove this branch.
+            if ep.dialect == "EDGE":  # !!! Don't change this allowlist. !!!
+                pass
+            else:
+                raise e
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
@@ -128,7 +159,7 @@ class Verifier(metaclass=_VerifierMeta):
                     raise SpecViolationError(
                         f"operator '{op}' is not functional"
                     )
-                self.check_valid_op(op)
+            self.check_valid_op(op)
 
         for mod in gm.modules():
             if not isinstance(mod, torch.fx.GraphModule):
@@ -154,6 +185,16 @@ class Verifier(metaclass=_VerifierMeta):
                         )
 
                     attr = getattr(mod, node.target)
+                    if isinstance(attr, torch.nn.Module):
+                        def _is_type(name, ty):
+                            return isinstance(getattr(attr, name, None), ty)
+                        if type(attr).__name__ == "LoweredBackendModule" \
+                                and _is_type("backend_id", str) \
+                                and _is_type("processed_bytes", bytes) \
+                                and _is_type("compile_specs", list) \
+                                and hasattr(attr, "original_module"):
+                            continue
+
                     if not isinstance(attr, _allowed_getattr_types()):
                         raise SpecViolationError(
                             f"Invalid get_attr type {type(attr)}. \n"
@@ -163,6 +204,9 @@ class Verifier(metaclass=_VerifierMeta):
 
                 elif node.op == "placeholder":
                     _check_val(node)
+                # TODO(zhxchen17)
+                # elif node.op == "output":
+                #     _check_flattened_outputs()
 
         self.check_additional(gm)
 
@@ -281,13 +325,7 @@ def _verify_exported_program_signature(exported_program) -> None:
     assert output_node.op == "output"
     output_nodes = [arg.name for arg in output_node.args[0]]
 
-    total_gs_outputs = (
-        len(gs.buffers_to_mutate) +
-        len(gs.user_outputs) +
-        len(bs_grad_to_param) +
-        len(bs_grad_to_user_inputs)
-    )
-    if len(output_nodes) != total_gs_outputs:
+    if len(output_nodes) != len(gs.output_specs):
         raise SpecViolationError(
             f"Number of output nodes {len(output_nodes)} is different "
             "Than the number of outputs specified by the graph signature: \n"
@@ -317,3 +355,9 @@ def _verify_exported_program_signature(exported_program) -> None:
                 "order or is not found in the "
                 f"exported program's user_output list: {gs.user_output}. "
             )
+
+
+def load_verifier(dialect: str) -> Optional[Type[Verifier]]:
+    if dialect == "ATEN":
+        return _VerifierMeta._registry.get(dialect)
+    return _VerifierMeta._registry[dialect]
