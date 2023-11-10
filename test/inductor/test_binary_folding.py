@@ -17,6 +17,7 @@ from torch.testing._internal.inductor_utils import (
     copy_tests,
     HAS_CPU,
     HAS_CUDA,
+    skipCUDAIf,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -37,7 +38,7 @@ aten = torch.ops.aten
 
 
 class BinaryFoldingTemplate(TestCase):
-    @unittest.skipIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
+    @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):

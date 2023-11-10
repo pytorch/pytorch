@@ -363,6 +363,8 @@ void addMetadataJson(const std::string& key, const std::string& value) {
 
 void profilerStep() {
 #ifdef USE_KINETO
+  libkineto::api().initProfilerIfRegistered();
+
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().step();
   } else {
