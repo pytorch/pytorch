@@ -2,7 +2,7 @@
 # NOTE: **Mirror any changes** to this file the [tool.ruff] config in pyproject.toml
 # before we can fully move to use ruff
 enable-extensions = G
-select = B,C,E,F,G,P,SIM1,T4,W,B9
+select = B,C,E,F,G,P,SIM1,T4,W,B9,TOR0,TOR1,TOR2
 max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
