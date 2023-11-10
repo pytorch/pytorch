@@ -1,14 +1,17 @@
 # Owner(s): ["module: inductor"]
 import functools
 import re
+import sys
 import unittest
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from unittest import mock
 
 import torch
 import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import load_test_module
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -374,7 +377,15 @@ class TestCompiledAutograd(TestCase):
             eager_check()
 
 
-test_autograd = load_test_module(__file__, "test_autograd")
+def load_test_module(name):
+    testdir = Path(__file__).absolute().parent.parent
+    with mock.patch("sys.path", [*sys.path, str(testdir)]):
+        return SourceFileLoader(
+            name, str(testdir / f"{name.replace('.', '/')}.py")
+        ).load_module()
+
+
+test_autograd = load_test_module("test_autograd")
 
 
 class EagerAutogradTests(TestCase):
