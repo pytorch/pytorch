@@ -3880,7 +3880,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, _ = self.get_kernel_and_configs()
-        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+        # If we are autotuning, not all arguments will be passed
+        self.ordered_kwargs_for_cpp_kernel = [
+            arg for arg in kernel.arg_names if arg in kernel_args
+        ]
 
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
@@ -6697,6 +6700,38 @@ class MultiOutputNoSizeAssert(MultiOutput):
     def codegen(self, wrapper):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        )
+
+
+class Broadcast(InPlaceCollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, src):
+        super().__init__(layout, inputs, constant_args)
+        self.src = src
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
+    @classmethod
+    def create(
+        cls, x: "TensorBox", src: int, tag: str, ranks: List[int], group_size: int
+    ):
+        inplace_inputs = cls.wrap_inputs_as_inplace([x])
+        packed = Broadcast(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
+            inputs=inplace_inputs,
+            constant_args=[tag, ranks, group_size],
+            src=src,
+        )
+        mark_node_as_mutating(packed, inplace_inputs[0])
+        return inplace_inputs[0]
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.broadcast("
+            f"{output_name}, async_op=True, group={output_name}_pg, src={self.src})"
         )
 
 

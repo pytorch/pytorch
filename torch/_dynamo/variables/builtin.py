@@ -54,6 +54,23 @@ from .user_defined import UserDefinedVariable
 log = logging.getLogger(__name__)
 
 
+IN_PLACE_DESUGARING_MAP = {
+    operator.iadd: operator.add,
+    operator.isub: operator.sub,
+    operator.imul: operator.mul,
+    operator.ifloordiv: operator.floordiv,
+    operator.itruediv: operator.truediv,
+    operator.imod: operator.mod,
+    operator.imatmul: operator.imatmul,
+    operator.ilshift: operator.lshift,
+    operator.irshift: operator.rshift,
+    operator.ipow: operator.pow,
+    operator.iand: operator.and_,
+    operator.ior: operator.or_,
+    operator.ixor: operator.xor,
+}
+
+
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -488,11 +505,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
-                if self.fn is operator.iadd and isinstance(
+
+                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
                 ):
-                    # Work around weird bug in hf_T5
-                    fn, args = operator.add, [args[1], args[0]]
+                    # In-place operators like += usually mustate tensor
+                    # values, but in the edge case of immutable values they
+                    # re-bind the variable.
+                    #
+                    # The easiest way to keep the graph consistent in this
+                    # scenario is to de-sugar eagerly.
+                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
 
                 if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
@@ -1080,7 +1103,9 @@ class BuiltinVariable(VariableTracker):
                             for i, b in enumerate(bases)
                         ]
                     elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C.TensorBase
+                        bases[0] is object
+                        or bases[0] is torch._C.TensorBase
+                        or bases[0] is torch.Tensor
                     ):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
@@ -1197,7 +1222,13 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            name = name_var.as_python_constant()
+            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
+                unimplemented(
+                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                )
+            tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
