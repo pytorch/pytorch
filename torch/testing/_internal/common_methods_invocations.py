@@ -18,7 +18,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, empty_types, complex_types_and, integral_types
+    all_types, empty_types, complex_types_and, integral_types, custom_types
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -13841,7 +13841,9 @@ op_db: List[OpInfo] = [
         'torch.ops.aten._efficient_attention_forward',
         sample_inputs_func=sample_inputs_efficient_attention_forward,
         dtypes=empty_types(),
-        dtypesIfCUDA=empty_types() + (torch.float16, torch.bfloat16, torch.float32),
+        dtypesIfCUDA=custom_types(torch.float16, torch.float32)
+        if not SM80OrLater
+        else custom_types(torch.float16, torch.float32, torch.bfloat16),
         supports_out=False,
         supports_autograd=True,
         supports_fwgrad_bwgrad=False,

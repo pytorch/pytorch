@@ -76,6 +76,10 @@ _all_types_and_half = _all_types + (torch.half,)
 def all_types_and_half():
     return _all_types_and_half
 
+def custom_types(*dtypes):
+    """Create a list of arbitrary dtypes"""
+    return _empty_types + _validate_dtypes(*dtypes)
+
 # The functions below are used for convenience in our test suite and thus have no corresponding C++ dispatch macro
 
 # See AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS.
