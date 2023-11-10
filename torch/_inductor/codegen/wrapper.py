@@ -1322,7 +1322,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
-        self.header.splice("#include <torch/csrc/inductor/math.h>")
+        self.header.splice("#include <c10/util/generic_math.h>")
 
         from .memory_planning import ALIGN_BYTES
 
