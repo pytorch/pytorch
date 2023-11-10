@@ -1,0 +1,4 @@
+dev,name,batch_size,_compile.<locals>.compile_inner,OutputGraph.call_user_compiler,create_aot_dispatcher_function,compile_fx.<locals>.fw_compiler_base,GraphLowering.run,GraphLowering.compile_to_module,Scheduler.__init__,Scheduler.codegen,WrapperCodeGen.generate,CachingAutotuner.benchmark_all_configs
+cuda,convit_base,64,7.342014,0.000500,10.416406,134.149810,19.874441,11.051847,2.634291,2.760418,0.092811,2.199705
+cuda,convit_base,64,5.819988,0.000293,11.434795,128.293627,19.903541,9.790758,2.607177,2.522869,0.090990,2.191267
+cuda,convit_base,64,6.554444,0.000359,10.631053,121.687261,20.292565,3.655341,2.746317,2.687504,0.098683,0.124201
