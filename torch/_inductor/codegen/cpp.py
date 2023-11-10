@@ -444,12 +444,14 @@ class CppCSEVariable(CSEVariable):
         super().__init__(name, bounds)
         # TODO: init needed variables 
         self.is_scalar = True
-        self.dtype = None
+        self.dtype = torch.float # TODO: add type propagation
         self.is_mask = False
         self.relevant_itervars = set()
 
     def update_on_args(self, name, args, kwargs):
         self.relevant_itervars.update(*[arg.relevant_itervars for arg in args if isinstance(arg, CppCSEVariable)])
+        if any(not arg.is_scalar for arg in args if isinstance(arg, CppCSEVariable)):
+            self.is_scalar = False
 
     def set_relevant_itervars(self, index):
         for s in index.free_symbols:
@@ -834,11 +836,15 @@ class CppVecOverrides(CppOverrides):
                         else:
                             has_vector = True
                 if has_scalar and has_vector:
+                    new_args = []
                     for arg in args:
                         if isinstance(arg, CppCSEVariable) and arg.is_scalar:
-                            # TODO: avoid inplace write
-                            arg.is_scalar = False
-                            arg.name = f"at::vec::Vectorized<{DTYPE_TO_CPP[arg.dtype]}>({arg.name})"
+                            new_arg = V.kernel.cse.generate(V.kernel.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[arg.dtype]}>({arg.name})")
+                            new_arg.is_scalar = False
+                            new_args.append(new_arg)
+                        else:
+                            new_args.append(arg)
+                    return func(*new_args, **kwargs)
                 elif has_scalar and not has_vector:
                     scalar_ops = super(CppVecOverrides, self)
                     return getattr(scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__))(*args, **kwargs)
@@ -1167,6 +1173,8 @@ class CppVecOverrides(CppOverrides):
             torch.float16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        if not isinstance(x, CppCSEVariable) or x.is_scalar:
+            return CppOverrides.to_dtype(x, dtype, src_dtype)
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
         opt_ctx_x = get_opt_ctx(node.args[1])
@@ -1568,11 +1576,10 @@ class CppVecKernel(CppKernel):
         non_contiguous = (
             not is_broadcast
             and stride_at(tiling_var, index) != 1
-            or free_symbol_startswith(index, "tmp")
-            # or any(
-            #     self.cse.varname_map[s.name].is_relevant(tiling_var)
-            #     for s in index.free_symbols if s.name.startswith("tmp")
-            # )
+            or any(
+                self.cse.varname_map[s.name].is_relevant(tiling_var)
+                for s in index.free_symbols if s.name.startswith("tmp")
+            )
         )
         var_expr = (
             f"{var}[{cexpr_index(index)}]"
@@ -1591,7 +1598,7 @@ class CppVecKernel(CppKernel):
             csevar = super().load(name, index)
             # csevar.is_mask = is_mask
             csevar.dtype = dtype
-            return var
+            return csevar
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = (
                 f"masked_load({loadbuf}, {load_mask})"
@@ -1634,6 +1641,7 @@ class CppVecKernel(CppKernel):
             line = f"([&]() {{ {tmpbufdeclare} {tmpbufdefine} return {line}; }})()"
 
         csevar = self.cse.generate(self.loads, line)
+        csevar.is_scalar = False
         csevar.set_relevant_itervars(index)
         return csevar
 
@@ -1910,6 +1918,7 @@ class CppTile2DKernel(CppVecKernel):
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             csevar = self.cse.generate(self.loads, line)
+            csevar.is_scalar = False
             csevar.set_relevant_itervars(index)
             return csevar
         else:
