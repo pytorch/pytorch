@@ -10,12 +10,12 @@ template<int32_t STAGE,
          bool pre_load_v>
 struct attn_fwd {
 
- hipError_t operator()(dim3 grid, dim3 block, const __bf16* Q,
-                       const __bf16* K,
-                       const __bf16* V,
+ hipError_t operator()(dim3 grid, dim3 block, const __fp16* Q,
+                       const __fp16* K,
+                       const __fp16* V,
                        float sm_scale,
                        const float* M,
-                       const __bf16* Out,
+                       const __fp16* Out,
                        uint64_t stride_qz,
                        uint64_t stride_qh,
                        uint64_t stride_qm,
@@ -37,12 +37,12 @@ struct attn_fwd {
                        uint64_t seqlen_q,
                        uint64_t seqlen_k, hipStream_t stream);
 
- hipError_t operator()(dim3 grid, dim3 block, const __fp16* Q,
-                       const __fp16* K,
-                       const __fp16* V,
+ hipError_t operator()(dim3 grid, dim3 block, const __bf16* Q,
+                       const __bf16* K,
+                       const __bf16* V,
                        float sm_scale,
                        const float* M,
-                       const __fp16* Out,
+                       const __bf16* Out,
                        uint64_t stride_qz,
                        uint64_t stride_qh,
                        uint64_t stride_qm,
@@ -74,37 +74,37 @@ template struct attn_fwd<1 /* STAGE */,
                          true /* pre_load_v */>;
 template struct attn_fwd<3 /* STAGE */,
                          128 /* BLOCK_M */,
+                         64 /* BLOCK_DMODEL */,
+                         64 /* BLOCK_N */,
+                         true /* pre_load_v */>;
+template struct attn_fwd<1 /* STAGE */,
+                         128 /* BLOCK_M */,
+                         16 /* BLOCK_DMODEL */,
+                         64 /* BLOCK_N */,
+                         true /* pre_load_v */>;
+template struct attn_fwd<1 /* STAGE */,
+                         128 /* BLOCK_M */,
+                         64 /* BLOCK_DMODEL */,
+                         64 /* BLOCK_N */,
+                         true /* pre_load_v */>;
+template struct attn_fwd<3 /* STAGE */,
+                         128 /* BLOCK_M */,
+                         16 /* BLOCK_DMODEL */,
+                         64 /* BLOCK_N */,
+                         true /* pre_load_v */>;
+template struct attn_fwd<1 /* STAGE */,
+                         128 /* BLOCK_M */,
+                         32 /* BLOCK_DMODEL */,
+                         64 /* BLOCK_N */,
+                         true /* pre_load_v */>;
+template struct attn_fwd<3 /* STAGE */,
+                         128 /* BLOCK_M */,
                          128 /* BLOCK_DMODEL */,
                          64 /* BLOCK_N */,
                          true /* pre_load_v */>;
 template struct attn_fwd<3 /* STAGE */,
                          128 /* BLOCK_M */,
                          32 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<1 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         32 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<1 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         16 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<1 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         64 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         16 /* BLOCK_DMODEL */,
-                         64 /* BLOCK_N */,
-                         true /* pre_load_v */>;
-template struct attn_fwd<3 /* STAGE */,
-                         128 /* BLOCK_M */,
-                         64 /* BLOCK_DMODEL */,
                          64 /* BLOCK_N */,
                          true /* pre_load_v */>;
 }; // namespace oort
