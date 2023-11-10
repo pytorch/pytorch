@@ -532,7 +532,7 @@ def unbind_int(func, *args, **kwargs):
         raise RuntimeError("unbind(): only supported for NestedTensor on dim=0")
 
     inp = new_kwargs.pop("input")
-    values = inp._values
+    values = inp.values()
     offsets = inp.offsets()
     lengths = inp.lengths()
 

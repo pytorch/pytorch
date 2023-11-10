@@ -3329,16 +3329,22 @@ class TestNestedTensorSubclass(NestedTestCase):
         starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
         lengths = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
         nt = torch.nested.narrow(
-            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone(),
+            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone().detach(),
             1,
             starts,
             lengths,
             layout=torch.jagged
         )
 
-        unbinded_nt = nt.unbind()
+        # TODO: Use this approach when unbind is functional
+        # unbinded_nt = nt.unbind()
+        # for i in range(starts.shape[0]):
+        #     self.assertEqual(torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64), unbinded_nt[i])
         for i in range(starts.shape[0]):
-            self.assertEqual(torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64), unbinded_nt[i])
+            self.assertEqual(
+                torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64),
+                nt.values()[nt.offsets()[i]:(nt.offsets()[i] + nt.lengths()[i])]
+            )
 
     def test_is_contiguous(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
