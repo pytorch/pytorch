@@ -502,23 +502,23 @@ class DebugFormatter:
             }
             try:
                 node_info["layout"] = str(node.get_layout())
-            except:
+            except Exception as e:
                 pass
             try:
                 node_info["dtype"] = str(node.get_dtpe())
-            except:
+            except Exception as e:
                 pass
             try:
                 node_info["device"] = str(node.get_device())
-            except:
+            except Exception as e:
                 pass
             try:
                 node_info["stride"] = str(node.get_stride())
-            except:
+            except Exception as e:
                 pass
             try:
                 node_info["numel"] = str(node.get_numel())
-            except:
+            except Exception as e:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
                 node_info["data"] = build_node_info(node.data)
@@ -538,6 +538,7 @@ class DebugFormatter:
                 info_dict.update(general_properties)
                 info_dict["benchmark_result"] = time
                 json.dump(info_dict, fd)
+                fd.write("\n")
 
 
 @dataclasses.dataclass
