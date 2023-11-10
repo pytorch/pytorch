@@ -514,7 +514,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
 #if LLVM_VERSION_MAJOR >= 15
   OpqPtrTy_ = llvm::PointerType::getUnqual(getContext());
 #else
-  Int8PtrTy_ = llvm::PointerType::getUnqual(getContext());
+  Int8PtrTy_ = llvm::Type::getInt8PtrTy((getContext());
 #endif
 
   {
@@ -612,7 +612,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
       kernel_func_name_,
       module_.get());
 #else
-  auto voidPtrTy = llvm::PointerType::getUnqual(getContext());
+  auto voidPtrTy = llvm::Type::getInt8PtrTy(getContext());
   auto voidPtrPtrTy = voidPtrTy->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
@@ -1477,7 +1477,7 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
 TypedPointer LLVMCodeGenImpl::packFuncArgs(
     const std::vector<llvm::Value*>& func_args) {
   if (func_args.empty()) {
-    llvm::PointerType* VoidPtrType = llvm::PointerType::getUnqual(getContext());
+    llvm::PointerType* VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
     return TypedPointer(
         VoidPtrType, llvm::ConstantPointerNull::get(VoidPtrType));
   }
