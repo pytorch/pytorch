@@ -851,7 +851,7 @@ def save(
         for field in dataclasses.fields(artifact):
             field_name = field.name
             serialized_field = getattr(artifact, field_name)
-            zipf.writestr(f"{field_name}.json", serialized_field)
+            zipf.writestr(f"serialized_{field_name}.json", serialized_field)
 
         zipf.writestr('version', str(SCHEMA_VERSION))
 
@@ -887,7 +887,7 @@ def load(
         # Load serialized_ep and serialized_state_dict from the zip file
         artifact: SerializedArtifact = SerializedArtifact(
             **{
-                field.name: zipf.read(f"{field.name}.json")
+                field.name: zipf.read(f"serialized_{field.name}.json")
                 for field in dataclasses.fields(SerializedArtifact)
             }
         )

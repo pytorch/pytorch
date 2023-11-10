@@ -310,10 +310,3 @@ class ExportedProgram:
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
     schema_version: int
     dialect: str
-
-
-@dataclass
-class SerializedArtifact:
-    serialized_exported_program: bytes
-    serialized_satte_dict: bytes
-    serialized_tensor_constants: bytes
