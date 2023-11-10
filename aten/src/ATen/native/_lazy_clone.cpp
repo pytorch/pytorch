@@ -7,7 +7,7 @@
 
 namespace at::native {
 
-auto _lazy_clone(Tensor const& self) -> Tensor {
+Tensor _lazy_clone(Tensor const& self) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage =
     c10::impl::cow::lazy_clone_storage(*self_storage);
