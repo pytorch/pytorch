@@ -12,12 +12,12 @@ SUPPORTED_NODES: Dict[Type[Any], FlattenFuncSpec] = {}
 SUPPORTED_NODES_EXACT_MATCH: Dict[Type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
 
 def register_pytree_flatten_spec(
-    cls: Any,
+    typ: Any,
     flatten_fn_spec: FlattenFuncSpec,
     flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None
 ) -> None:
-    SUPPORTED_NODES[cls] = flatten_fn_spec
-    SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec
+    SUPPORTED_NODES[typ] = flatten_fn_spec
+    SUPPORTED_NODES_EXACT_MATCH[typ] = flatten_fn_exact_match_spec
 
 def tree_flatten_spec(pytree: PyTree, spec: TreeSpec, exact_structural_match=False) -> List[Any]:
     if isinstance(spec, LeafSpec):
