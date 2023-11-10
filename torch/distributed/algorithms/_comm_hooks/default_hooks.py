@@ -132,7 +132,7 @@ def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch
 
 def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     """
-    Implement a simple gradient compression approach for communicating gradients in lower precision.
+    Implement a simple gradient compression approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
 
     This approach involves casting `grad` to half-precision floating-point format (`torch.float16`),
     and then averaging gradients by `world_size` in two steps: pre-division by `state.gradient_predivide_factor`,
