@@ -611,6 +611,7 @@ class ONNXProgram:
     _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
+    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
 
     @_beartype.beartype
     def __init__(
@@ -622,8 +623,10 @@ class ONNXProgram:
         *,
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
+        model_signature: Optional[torch.export.ExportGraphSignature] = None,
     ):
         self._model_proto = model_proto
+        self._model_signature = model_signature
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
@@ -637,6 +640,15 @@ class ONNXProgram:
         if self._export_exception is not None:
             raise self._export_exception
         return self._model_proto
+
+    @property
+    def model_signature(self) -> Optional[torch.export.ExportGraphSignature]:
+        """The model signature for the exported ONNX graph.
+
+        It is only available when the ONNX graph was exported from a torch.export.ExportedProgram object.
+        """
+
+        return self._model_signature
 
     @property
     def diagnostic_context(self) -> diagnostics.DiagnosticContext:
@@ -953,7 +965,7 @@ class Exporter:
     def __init__(
         self,
         options: ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
@@ -1017,6 +1029,9 @@ class Exporter:
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
+                model_signature=getattr(
+                    self.model, "graph_signature", None
+                ),  # isinstance(self.model, ExportedProgram)
             )
 
     def _assert_fake_tensor_mode(self):
