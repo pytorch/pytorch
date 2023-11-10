@@ -9,7 +9,7 @@ def partition_model(
         devices: Optional[List[int]] = None):
     """
 
-    Partitions the model across multiple GPU devices according the provided `balance` and `devices`.
+    Distribute the model across multiple GPU devices.
 
     Given an :class:`nn.Sequential` module, partitions the model across multiple
     GPU devices according the provided ``balance`` and ``devices``.

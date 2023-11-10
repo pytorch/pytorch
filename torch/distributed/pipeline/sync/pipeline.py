@@ -119,8 +119,7 @@ class Pipeline:
     def fence(
         self, batches: List[Batch], schedule: List[Tuple[int, int]], skip_trackers: List[SkipTrackerThroughPotals],
     ) -> None:
-        """
-        Copy micro-batches after computation for the previous micro-batches.
+        """Copy micro-batches after computation for the previous micro-batches.
         """
         copy_streams = self.copy_streams
         skip_layout = self.skip_layout
