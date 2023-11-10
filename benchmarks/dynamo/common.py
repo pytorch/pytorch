@@ -192,35 +192,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "xcit_large_24_p8_224",  # fp64_OOM,
 ]
 
-CI_SKIP[CI("inductor", training=False)] = [
-    # TorchBench
-    "DALLE2_pytorch",  # AttributeError: text_encodings
-    "demucs",  # OOM
-    "detectron2_fasterrcnn_r_101_c4",
-    "detectron2_fasterrcnn_r_101_dc5",
-    "detectron2_fasterrcnn_r_101_fpn",
-    "detectron2_fasterrcnn_r_50_c4",
-    "detectron2_fasterrcnn_r_50_dc5",
-    "detectron2_fasterrcnn_r_50_fpn",
-    "detectron2_fcos_r_50_fpn",
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
-    # TorchBench
-    "detectron2",
-    "densenet121",  # flaky accuracy
-    "hf_T5",  # accuracy
-    "hf_BigBird",  # accuracy
-    "hf_GPT2_large",  # OOM
-    "maml",  # accuracy
-    "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
-    "pytorch_struct",  # Test eval is not implemented
-    "pyhpc_equation_of_state",  # Accuracy
-    "pyhpc_turbulent_kinetic_energy",  # Accuracy
-    "tacotron2",
-]
-
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TorchBench
     "drq",  # Need to update torchbench
@@ -257,24 +228,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
 ]
 
-CI_SKIP[CI("inductor", training=True)] = [
-    *CI_SKIP[CI("inductor", training=False)],
-    # TorchBench
-    "Background_Matting",  # fp64_OOM
-    "hf_T5_base",  # accuracy
-    "mobilenet_v3_large",  # accuracy
-    "resnet50_quantized_qat",  # Eager model failed to run
-    "AlbertForQuestionAnswering",  # accuracy
-    "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
-    "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
-    "mobilevit_s",
-    "pit_b_224",
-    "twins_pcpvt_base",
-    "visformer_small",
-    "vit_base_patch16_224",
-    "xcit_large_24_p8_224",
-]
-
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
@@ -290,21 +243,6 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     "llama",  # AssertionError: cannot compute free_symbols of True
     "torchrec_dlrm",  # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
-]
-
-CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    *CI_SKIP[CI("inductor", training=False)],
-    "nanogpt",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
-]
-
-CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
-    # NB: Intentionally omitting for symmetry with dynamic=False
-    # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
-    *CI_SKIP[CI("inductor", training=False, dynamic=True)],
-    *CI_SKIP[CI("inductor", training=True)],
-    "levit_128",  # Accuracy fails on A10G, passes on A100
-    "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
