@@ -130,7 +130,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.shallow_copy_dict()
+    current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
 
     return list(current_config.keys())
 

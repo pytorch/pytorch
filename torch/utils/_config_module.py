@@ -9,7 +9,7 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Optional, Set, Union
+from typing import Any, Dict, Set
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -18,9 +18,7 @@ CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 def install_config_module(module):
     """
-    Converts a module-level config into a `ConfigModule()`.
-
-    See config_typing.pyi for instructions on how to get the converted module to typecheck.
+    Converts a module-level config into a `ConfigModule()`
     """
 
     class ConfigModuleInstance(ConfigModule):
@@ -29,11 +27,7 @@ def install_config_module(module):
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
         for key, value in list(source.__dict__.items()):
-            if (
-                key.startswith("__")
-                or isinstance(value, (ModuleType, FunctionType))
-                or (hasattr(value, "__module__") and value.__module__ == "typing")
-            ):
+            if key.startswith("__") or isinstance(value, (ModuleType, FunctionType)):
                 continue
 
             name = f"{prefix}{key}"
@@ -111,8 +105,6 @@ def get_assignments_with_compile_ignored_comments(module):
 
 
 class ConfigModule(ModuleType):
-    # NOTE: This should be kept in sync with config_typing.pyi.
-
     # The default values of the configuration settings.  This can be used to
     # determine if the config has been changed or not.
     _default: Dict[str, Any]
@@ -124,7 +116,7 @@ class ConfigModule(ModuleType):
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
     _is_dirty: bool
-    _hash_digest: Optional[bytes]
+    _hash_digest: bytes
 
     def __init__(self):
         raise NotImplementedError(
@@ -151,14 +143,14 @@ class ConfigModule(ModuleType):
         # then recreate things
         del self._config[name]
 
-    def save_config(self) -> bytes:
+    def save_config(self):
         """Convert config to a pickled blob"""
         config = dict(self._config)
         for key in config.get("_save_config_ignore", ()):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
 
-    def codegen_config(self) -> str:
+    def codegen_config(self):
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
         """
@@ -172,7 +164,7 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
-    def get_hash(self) -> bytes:
+    def get_hash(self):
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
             dict_to_hash = {
@@ -185,7 +177,7 @@ class ConfigModule(ModuleType):
             self._is_dirty = False
         return self._hash_digest
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self):
         warnings.warn(
             "config.to_dict() has been deprecated. It may no longer change the underlying config."
             " use config.shallow_copy_dict() or config.get_config_copy() instead",
@@ -193,26 +185,19 @@ class ConfigModule(ModuleType):
         )
         return self.shallow_copy_dict()
 
-    def shallow_copy_dict(self) -> Dict[str, Any]:
+    def shallow_copy_dict(self):
         return {**self._config}
 
-    def load_config(self, maybe_pickled_config: Union[bytes, Dict[str, Any]]) -> None:
+    def load_config(self, config):
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
-        if not isinstance(maybe_pickled_config, dict):
-            config = pickle.loads(maybe_pickled_config)
-        else:
-            config = maybe_pickled_config
+        if not isinstance(config, dict):
+            config = pickle.loads(config)
         self._config.update(config)
 
-    def get_config_copy(self) -> Dict[str, Any]:
+    def get_config_copy(self):
         return copy.deepcopy(self._config)
 
-    def patch(
-        self,
-        arg1: Optional[Union[str, Dict[str, Any]]] = None,
-        arg2: Any = None,
-        **kwargs,
-    ):
+    def patch(self, arg1=None, arg2=None, **kwargs):
         """
         Decorator and/or context manager to make temporary changes to a config.
 
@@ -229,14 +214,11 @@ class ConfigModule(ModuleType):
             with config.patch("name", val):
                 ...
         """
-        changes: Dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
-                assert isinstance(arg1, str)
                 # patch("key", True) syntax
                 changes = {arg1: arg2}
             else:
-                assert isinstance(arg1, dict)
                 # patch({"key": True}) syntax
                 changes = arg1
             assert not kwargs

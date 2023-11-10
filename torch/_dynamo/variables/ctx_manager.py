@@ -154,13 +154,14 @@ class GradModeVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
-    def create(tx, target_value, initialized=False, **kwargs):
+    def create(tx, target_value, initialized=True, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
+            initialized=initialized,
             **kwargs,
         )
-        if initialized:
+        if var.initialized:
             var._call_func(tx, var.target_values)
         return var
 
@@ -168,31 +169,25 @@ class GradModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.initialized = initialized
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        self._call_func(tx, self.target_values)
+        if not self.initialized:
+            self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ):
-        self._call_func(tx, self.initial_values)  # undo eager initialization
-        return super().call_function(tx, args, kwargs)
-
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        # Coalesce grad mode mutations
-        if torch.is_grad_enabled() != value:
-            tx.output.create_node(
-                "call_function", torch._C._set_grad_enabled, (value,), {}
-            )
-            torch._C._set_grad_enabled(value)
+        tx.output.create_node(
+            "call_function", torch._C._set_grad_enabled, (value,), {}
+        ),
+        torch._C._set_grad_enabled(value)
 
     def module_name(self):
         return "torch"

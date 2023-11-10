@@ -54,23 +54,6 @@ from .user_defined import UserDefinedVariable
 log = logging.getLogger(__name__)
 
 
-IN_PLACE_DESUGARING_MAP = {
-    operator.iadd: operator.add,
-    operator.isub: operator.sub,
-    operator.imul: operator.mul,
-    operator.ifloordiv: operator.floordiv,
-    operator.itruediv: operator.truediv,
-    operator.imod: operator.mod,
-    operator.imatmul: operator.imatmul,
-    operator.ilshift: operator.lshift,
-    operator.irshift: operator.rshift,
-    operator.ipow: operator.pow,
-    operator.iand: operator.and_,
-    operator.ior: operator.or_,
-    operator.ixor: operator.xor,
-}
-
-
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -505,17 +488,11 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
-
-                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
+                if self.fn is operator.iadd and isinstance(
                     args[0], variables.ConstantVariable
                 ):
-                    # In-place operators like += usually mustate tensor
-                    # values, but in the edge case of immutable values they
-                    # re-bind the variable.
-                    #
-                    # The easiest way to keep the graph consistent in this
-                    # scenario is to de-sugar eagerly.
-                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
+                    # Work around weird bug in hf_T5
+                    fn, args = operator.add, [args[1], args[0]]
 
                 if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
@@ -1102,8 +1079,12 @@ class BuiltinVariable(VariableTracker):
                             VariableBuilder(tx, GetItemSource(source, i))(b)
                             for i, b in enumerate(bases)
                         ]
+                    elif len(bases) == 1 and (
+                        bases[0] is object or bases[0] is torch._C.TensorBase
+                    ):
+                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
+                        unimplemented(f"unexpected sourceless type bases: {bases}")
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
@@ -1119,40 +1100,8 @@ class BuiltinVariable(VariableTracker):
                 # have the original tensor stored in the graphargs.
                 for grapharg in tx.output.graphargs:
                     if grapharg.source == source.base:
-                        old_grad = grapharg.example.grad
-                        new_grad = obj.as_proxy().node.meta["example_value"].grad
-
-                        def _grad_changed(old, new):
-                            if old is None or new is None:
-                                return new is not old
-                            try:
-                                if old.shape != new.shape:
-                                    return True
-                                if old.stride() != new.stride():
-                                    return True
-                                return False
-                            except TypeError as te:
-                                # There is a rare edge case in which
-                                # we seem to get symbol mismatches
-                                # for jagged tensor comparison.
-                                # See PYTORCH_TEST_WITH_DYNAMO=1 python test/test_nestedtensor.py
-                                #   -k test_dropout_backward_layout_torch_jagged_cpu
-                                unimplemented(str(te))
-
-                        if _grad_changed(old_grad, new_grad):
-                            if new_grad is not None:
-                                grad_shape_specialized = [
-                                    int(x) for x in new_grad.shape
-                                ]
-                                # We lazily update the grad on the example to its real state as tracked by fake tensor.
-                                # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
-                                # the underlying value to always be correct.
-                                grapharg.example.grad = torch.zeros(
-                                    grad_shape_specialized, device=new_grad.device
-                                )
-                            else:
-                                grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
+                        example_value = grapharg.example.grad
+                        return VariableBuilder(tx, source)(example_value)
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
@@ -1217,10 +1166,15 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
+            if name == "data" and all(
+                isinstance(t, variables.TensorVariable)
+                # and not (t.source is None or is_constant_source(t.source))
+                for t in [val, obj]
+            ):
                 unimplemented(
-                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
+                    "need to graph break to apply the aliasing (or track new aliased tensors) "
+                    "to continue to trace the graph"
                 )
             tx.output.side_effects.store_attr(obj, name, val)
             return val
@@ -1274,7 +1228,7 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import SourcelessBuilder, VariableBuilder
+        from .builder import VariableBuilder
 
         try:
             py_type = obj.python_type()
@@ -1288,7 +1242,7 @@ class BuiltinVariable(VariableTracker):
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
         if py_type is not None:
-            return SourcelessBuilder()(tx, py_type)
+            return ConstantVariable.create(py_type)
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,

@@ -1155,7 +1155,7 @@ uid = count(1)
 _ignored_ops = {
     torch.ops.prim.device.default,
     torch.ops.aten.detach.default,
-} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+}
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):

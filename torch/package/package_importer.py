@@ -101,10 +101,7 @@ class PackageImporter(Importer):
 
         torch._C._log_api_usage_metadata(
             "torch.package.PackageImporter.metadata",
-            {
-                "serialization_id": self.zip_reader.serialization_id(),
-                "file_name": self.filename,
-            },
+            {"serialization_id": self.zip_reader.serialization_id()},
         )
 
         self.root = _PackageNode(None)

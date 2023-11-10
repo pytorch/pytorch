@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
@@ -78,8 +78,6 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     }
     if cuda:
         supported_dtype.add(torch.float16)
-        supported_dtype.add(torch.float8_e4m3fn)
-        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -200,7 +198,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()

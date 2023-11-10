@@ -373,7 +373,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             ]:
                 input_act = getattr(m, n.args[0].target)
                 output_act = getattr(m, list(n.users)[0].target)
-                self.assertIs(input_act, output_act)
+                self.assertTrue(input_act is output_act)
 
         m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
@@ -659,39 +659,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         ]
         self._test_quantizer(
             TestHelperModules.MulInplaceMul(),
-            example_inputs,
-            quantizer,
-            node_occurrence,
-            node_list,
-        )
-
-    def test_add_mul_scalar(self):
-        quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        node_occurrence = {
-            # two input and one output for first add, and output for second add
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
-        }
-        node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.add.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.mul.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.add_.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.mul_.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        ]
-        self._test_quantizer(
-            TestHelperModules.AddMulScalar(),
             example_inputs,
             quantizer,
             node_occurrence,

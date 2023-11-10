@@ -41,9 +41,9 @@ def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorM
 
 
 def get_output(graph: fx.Graph) -> fx.Node:
-    """Take a graphmodule and return the graph output node.
-
-    We traverse in reverse to expedite it, with the idea that last node should be output
+    """
+    Take a graphmodule and returns the graph output node. We traverse in reverse
+    to expedite it, with the idea that last node should be output
     """
     for node in reversed(graph.nodes):
         if node.op == OP.OUTPUT:
@@ -54,7 +54,10 @@ def get_output(graph: fx.Graph) -> fx.Node:
 def find_node(
     graph: fx.Graph, predicate: Callable, reverse_order: bool = False
 ) -> List[fx.Node]:
-    """Take a predicate and return all the nodes in the `graph` where the predicate holds."""
+    """
+    Take a predicate and return all the nodes in the `graph` where the predicate
+    holds.
+    """
     nodes = cast(Iterable[fx.Node], graph.nodes)
     if reverse_order:
         nodes = cast(Iterable[fx.Node], iter(reversed(nodes)))  # type: ignore[call-overload]
@@ -62,8 +65,8 @@ def find_node(
 
 
 def is_leaf_subgraph(graph: fx.Graph, subgraph: List[fx.Node]) -> bool:
-    """Ensure nodes in ``subgraph`` satisfy one of the following rules.
-
+    """
+    This function ensures nodes in ``subgraph`` satisfy one of the rules:
     1. The user of the node is in ``subgraph``.
     2. The user of the node is output.
     3. There are no users -- the node is a side-effect node.
@@ -82,10 +85,11 @@ def is_leaf_subgraph(graph: fx.Graph, subgraph: List[fx.Node]) -> bool:
 def clone_subgraph(
     graph: fx.Graph, subgraph: List[fx.Node], target: fx.Node
 ) -> List[fx.Node]:
-    """Clone the given subgraph and insert it before ``target``.
-
+    """
+    Clone the given subgraph and insert it before ``target``.
     This API currently does not support inserting after ``target``.
     """
+
     all_nodes = set(subgraph)
     mapping: Dict[fx.Node, fx.Node] = dict()
     cloned_subgraph = []
@@ -121,11 +125,12 @@ def clone_subgraph(
 
 
 def rebuild_graph(gm: fx.GraphModule, remove_dead_code: bool = True) -> None:
-    """Run the required steps to ensure production-ready graph.
-
-    Note - per the fx docs, elimination of dead code is not very precise.
+    """
+    Runs the required steps to ensure production-ready graph.
+    note - per the fx docs, eliminate dead code is not very precise.
     Hence, the flag to make this step optional.
     """
+
     gm.graph.lint()
     if remove_dead_code:
         gm.graph.eliminate_dead_code()

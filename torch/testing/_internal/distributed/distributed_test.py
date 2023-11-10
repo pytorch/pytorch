@@ -10143,39 +10143,5 @@ class DistributedTest:
             )
             self._test_hook_pickling(hook, powersgd_state)
 
-        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_device_mesh_initialization(self):
-            """
-            Test DDP with device_mesh initialization.
-            """
-            world_size = int(os.environ["WORLD_SIZE"])
-
-            from torch.distributed._device_mesh import init_device_mesh
-            device_mesh = init_device_mesh("cuda", (world_size,))
-
-            pg = _get_default_group()
-
-            torch.cuda.set_device(self.rank)
-            model = TwoLinLayerNet().cuda()
-            ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_mesh=device_mesh)
-            self.assertEqual(ddp_model.device_mesh, device_mesh)
-            self.assertEqual(ddp_model.device_mesh.get_dim_groups(mesh_dim=0), pg)
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Cannot specify both process_group and device_mesh arguments."
-            ):
-                ddp_model = torch.nn.parallel.DistributedDataParallel(
-                    model, process_group=pg, device_mesh=device_mesh
-                )
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Only 1D device mesh is supported,"
-            ):
-                device_mesh = init_device_mesh("cuda", (2, world_size // 2))
-                ddp_model = torch.nn.parallel.DistributedDataParallel(
-                    model, device_mesh=device_mesh
-                )
-
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

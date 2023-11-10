@@ -119,7 +119,7 @@ class StorageWriter(abc.ABC):
         self, metadata: Metadata, results: List[List[WriteResult]]
     ) -> None:
         """
-        Write the metadata and marks the current checkpoint as successful.
+        Writes the metadata and marks the current checkpoint as successful.
 
         The actual format/schema used for serializing `metadata` is an
         implementation detail. The only requirement is that it's recoverable
@@ -155,7 +155,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def read_metadata(self) -> Metadata:
         """
-        Read the checkpoint metadata.
+        Reads the checkpoint metadata.
 
         Returns:
             The metadata object associated with the checkpoint being loaded.
@@ -212,7 +212,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         """
-        Read all items from ``plan`` using ``planner`` to resolve the data.
+        Reads all items from ``plan`` using ``planner`` to resolve the data.
 
         A subclass should call ``LoadPlanner::load_bytes`` to deserialize a BytesIO
         object into the right place.

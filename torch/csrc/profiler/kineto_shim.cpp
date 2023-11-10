@@ -66,11 +66,14 @@ const DeviceAndResource kineto_ids() {
 }
 
 void addMetadata(
-    activity_t* activity,
+    const activity_t* activity,
     const std::string& key,
     const std::string& value) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  // ActivityTraceInterface returns const pointers, so we have to cast away the
+  // constness to add metadata.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const_cast<activity_t*>(activity)->addMetadata(key, value);
 #endif // USE_KINETO
 }
 
@@ -101,7 +104,8 @@ activity_t* TraceWrapper::addCPUActivity(
   auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
-  act.id = static_cast<int32_t>(correlation_id);
+  // NOLINTNEXTLINE
+  act.id = correlation_id;
   act.startTime = start_time;
   if (type != libkineto::ActivityType::CPU_INSTANT_EVENT) {
     act.endTime = end_time;
@@ -199,7 +203,6 @@ class ExperimentalConfigWrapper {
   }
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const torch::profiler::impl::ExperimentalConfig& config_;
 };
 } // namespace

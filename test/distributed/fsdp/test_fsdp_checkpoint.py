@@ -100,7 +100,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 l3 = ckpt_wrapper(l3)
 
             fsdp_wrapper = partial(
-                _maybe_wrap_fsdp, *fsdp_args, wrap_fsdp=wrap_fsdp, **fsdp_kwargs
+                _maybe_wrap_fsdp, wrap_fsdp=wrap_fsdp, *fsdp_args, **fsdp_kwargs
             )
             self.ffn = nn.Sequential(
                 fsdp_wrapper(l1),

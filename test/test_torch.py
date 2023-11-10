@@ -6783,33 +6783,6 @@ class TestTorch(TestCase):
         self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
         self.assertTrue(isinstance(bytes, torch.ByteStorage))
 
-    # Check that after `UntypedStorage.resize_` is called, the storage remains
-    # on the same CUDA device index it was initialized on, regardless of the
-    # default index
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires 2 GPUs")
-    def test_untyped_storage_resize_cuda_device(self):
-        test_cases = [
-            # start_size, storage_resize
-            ((2, 3), 0),
-            ((2, 3), 100),
-            ((2, 3), 10),
-            (0, 10),
-            (0, 0),
-        ]
-        default_indices = [0, 1]
-        devices = [
-            torch.device('cuda:0'),
-            torch.device('cuda:1')]
-
-        for default_idx, device, (start_size, storage_resize) in product(default_indices, devices, test_cases):
-            with torch.cuda.device(default_idx):
-                a = torch.zeros(start_size, device=device)
-                a.untyped_storage().resize_(storage_resize)
-
-            self.assertEqual(a.device, device)
-            self.assertEqual(a.untyped_storage().device, device)
-            self.assertEqual(a.untyped_storage().nbytes(), storage_resize)
-
     def test_storage_error(self):
         quantized_storages = [
             torch.QInt32Storage,

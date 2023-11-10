@@ -29,7 +29,6 @@ def flatten_state_dict(
 ) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
-
     Use ``unflatten_state_dict`` to revert this process.
     Returns:
         A tuple with the flatten state_dict and a mapping from original to new state_dict.
@@ -53,7 +52,9 @@ def flatten_state_dict(
 def unflatten_state_dict(
     state_dict: STATE_DICT_TYPE, mapping: FLATTEN_MAPPING
 ) -> STATE_DICT_TYPE:
-    """Restore the original nested state_dict according to ``mapping`` and the flattened ``state_dict``."""
+    """
+    Restore the original nested state_dict according to ``mapping`` and the flattened ``state_dict``
+    """
     nested: STATE_DICT_TYPE = {}
     for key, value in state_dict.items():
         set_element(nested, mapping[key], value)

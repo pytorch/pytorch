@@ -37,7 +37,6 @@ __all__ = [
 class ParallelStyle(ABC):
     """
     The parallel style user wants the module or submodule to be parallelized.
-
     Users can extend this class to build their own parallel style with customized input/output preparations.
 
     .. warning::
@@ -70,9 +69,8 @@ class ParallelStyle(ABC):
 
 class PairwiseParallel(ParallelStyle):
     """
-    PairwiseParallel concatenate colwise and rowwise styles as a fixed pair.
-
-    Similar to what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
+    PairwiseParallel concatenate colwise and rowwise styles as a fixed
+    pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
     We assume both input and output need to be replicate DTensors.
 
     .. warning::
@@ -110,9 +108,9 @@ class PairwiseParallel(ParallelStyle):
 
 class SequenceParallel(PairwiseParallel):
     """
-    SequenceParallel concatenate colwise and rowwise styles as a fixed pair together with sequence parallel.
-
-    Similar to what Megatron-LM Sequence parallel(https://arxiv.org/pdf/2205.05198.pdf) is doing.
+    SequenceParallel concatenate colwise and rowwise styles as a fixed
+    pair together with sequence parallel like what Megatron-LM Sequence parallel
+    (https://arxiv.org/pdf/2205.05198.pdf) is doing.
     We assume both input and output need to be sharded DTensors.
 
     .. warning::
@@ -147,7 +145,7 @@ def make_input_shard_1d(
     input: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
     dim: int = 0,
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``input_layouts`` instead.
@@ -169,7 +167,7 @@ def make_input_shard_1d(
 def make_input_shard_1d_last_dim(
     input: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``input_layouts`` instead.
@@ -184,7 +182,7 @@ def make_input_shard_1d_last_dim(
 def make_input_reshard_replicate(
     input: torch.Tensor,
     device_mesh: DeviceMesh,
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``input_layouts`` instead.
@@ -201,7 +199,7 @@ def make_input_reshard_replicate(
 def make_input_replicate_1d(
     input: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``input_layouts`` instead.
@@ -222,7 +220,7 @@ def make_input_replicate_1d(
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_shard_1d(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None, dim: int = 0
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``output_layouts`` instead.
@@ -234,7 +232,7 @@ def make_output_shard_1d(
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_replicate_1d(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None
-) -> DTensor:  # noqa: D205, D400
+) -> DTensor:
     """
     .. warning::
         This method was deprecated and please specify ``output_layouts`` instead.
@@ -246,7 +244,7 @@ def make_output_replicate_1d(
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_tensor(
     output: DTensor, device_mesh: Optional[DeviceMesh] = None
-) -> torch.Tensor:  # noqa: D205, D400
+) -> torch.Tensor:
     """
     .. warning::
         This method was deprecated and please specify ``output_layouts`` instead.
@@ -260,7 +258,7 @@ def make_output_tensor(
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_sharded_output_tensor(
     output: DTensor, _device_mesh: Optional[DeviceMesh] = None
-) -> torch.Tensor:  # noqa: D205, D400
+) -> torch.Tensor:
     """
     .. warning::
         This method was deprecated and please specify ``output_layouts`` instead.
@@ -273,7 +271,7 @@ def make_sharded_output_tensor(
 def make_output_reshard_tensor(
     output: DTensor,
     device_mesh: Optional[DeviceMesh] = None,
-) -> torch.Tensor:  # noqa: D205, D400
+) -> torch.Tensor:
     """
     .. warning::
         This method was deprecated and please specify ``output_layouts`` instead.
@@ -316,8 +314,7 @@ def _redistribute_per_layout(layout, use_local_output, t, device_mesh):
 
 class RowwiseParallel(ParallelStyle):
     """
-    Partition the row of a module.
-
+    Partitioning the row of a module.
     We assume the input to be a sharded :class:`DTensor` and output to be a :class:`torch.Tensor`.
 
     Args:
@@ -407,8 +404,7 @@ class RowwiseParallel(ParallelStyle):
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partition the column of a tensor or module.
-
+    Partitioning the column of a tensor or module.
     We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`torch.Tensor`.
 
     Args:
@@ -497,8 +493,6 @@ class ColwiseParallel(ParallelStyle):
 
 class PrepareModuleInput(ParallelStyle):
     """
-    Annotate Tensor inputs with layouts for conversion to DTensor, redistributing based on specified output layouts.
-
     :class:`PrepareModuleInput` enables users to annotate :class:`torch.Tensor` or :class:`DTensor`
     inputs with ``input_layouts`` and ``output_layouts`` so that each input can be converted to
     :class:`DTensor` based on the annotation. Specifically, a DTensor will be created
@@ -530,7 +524,7 @@ class PrepareModuleInput(ParallelStyle):
         input_layouts: LayoutsType = Shard(0),
         output_layouts: LayoutsType = Replicate(),
         use_local_output: bool = False,
-    ) -> None:  # noqa: D205, D400
+    ) -> None:
         """
         Args:
             input_layouts (Union[Placement, Tuple[Placement, ...]]):
@@ -568,7 +562,9 @@ class PrepareModuleInput(ParallelStyle):
         inputs: Tuple[Any, ...],
         device_mesh: Optional[DeviceMesh] = None,
     ) -> Optional[Any]:
-        """Redistribute inputs over a device mesh."""
+        """
+        Redistribute inputs over a device mesh.
+        """
         # Always assume layouts are tuples.
         results = []
         for input, input_layout, output_layout in zip(
@@ -587,8 +583,6 @@ class PrepareModuleInput(ParallelStyle):
 
 class PrepareModuleOutput(ParallelStyle):
     """
-    Enable annotation of DTensor outputs for flexible conversion to torch.Tensor based on specified layouts.
-
     :class:`PrepareModuleOutput` enables users to annotate :class:`DTensor` outputs
     with ``output_layouts`` and ``use_local_output`` so that each output can be converted to
     :class:`DTensor` or :class:`torch.Tensor` based on the annotation. Specifically, a DTensor
@@ -620,7 +614,7 @@ class PrepareModuleOutput(ParallelStyle):
         input_layouts: LayoutsType = Replicate(),
         output_layouts: LayoutsType = Shard(0),
         use_local_output: bool = True,
-    ) -> None:  # noqa: D205, D400
+    ) -> None:
         """
         Args:
             input_layouts (Union[Placement, Tuple[Placement, ...]]):

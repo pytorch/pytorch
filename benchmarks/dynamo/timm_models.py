@@ -178,10 +178,6 @@ class TimmRunner(BenchmarkRunner):
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
-    @property
-    def force_fp16_for_bf16_models(self):
-        return set()
-
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(

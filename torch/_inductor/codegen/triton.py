@@ -2202,7 +2202,7 @@ class TritonScheduling(BaseScheduling):
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
                 fusion_log.debug(
-                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
+                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2213,7 +2213,7 @@ class TritonScheduling(BaseScheduling):
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 fusion_log.debug(
-                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
+                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2870,7 +2870,7 @@ class TritonScheduling(BaseScheduling):
             n.last_usage = set()
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
             src_code = kernel.codegen_kernel()
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

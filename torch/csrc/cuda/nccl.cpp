@@ -480,14 +480,6 @@ std::uint64_t version() {
 #endif
 }
 
-const char* version_suffix() {
-#if defined(NCCL_SUFFIX)
-  return NCCL_SUFFIX;
-#else
-  return "";
-#endif
-}
-
 void get_unique_id(ncclUniqueId& id) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;

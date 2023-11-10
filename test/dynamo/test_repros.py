@@ -1535,6 +1535,85 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
 
+    def test_tensor_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
+
+        for func in [func1, func2]:
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+            b = torch.rand([6])
+            b1 = torch.clone(b)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            _ = func(a, b)
+            _ = torch.compile(func, backend=cnt)(a1, b1)
+
+            self.assertEqual(a, a1)
+            self.assertEqual(b, b1)
+            self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_untracked_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(y):
+            x = torch.tensor([0])
+            x.data = y  # Setattr for untracked tensors is unsupported
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        _ = func(a)
+        _ = torch.compile(func, backend=cnt)(a1)
+
+        self.assertEqual(a, a1)
+        self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(x):
+            y = torch.tensor([0])
+            # If we setattr to untracked tensor, it aliases a new tensor.
+            # we need to start tracking y even though it is created in graph
+            x.data = y
+            x.add_(1)
+            return x, y
+
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
+            self.assertEqual(a, a1)
+            self.assertEqual(cnt.frame_count, 2)
+
+    def test_setattr_data_tensor_raises(self):
+        def func(x):
+            x.data = None
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        with self.assertRaises(TypeError):
+            func(a)
+        with self.assertRaises(TypeError):
+            torch.compile(func, backend="eager")(a1)
+
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
         @torch._dynamo.disable(recursive=False)
@@ -3378,20 +3457,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_split_with_sizes_aot_autograd(self):
-        def fn(result, split_sizes):
-            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
-            return rs
-
-        example_inputs = (
-            torch.randn(32, requires_grad=True),
-            torch.tensor((7, 16, 9)),
-        )
-        actual = torch.compile(fn, fullgraph=True, backend="aot_eager")(*example_inputs)
-        expected = fn(*example_inputs)
-        self.assertEqual(actual, expected)
-
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
         In this case self.fn = something that should be a TorchVariable.
@@ -3496,33 +3561,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
-
-    def test_setattr_requires_grad_graph_breaks(self):
-        def fn(x):
-            z = x + 4
-            x.requires_grad = True
-            y = x * z
-            return y
-
-        for backend in ["count", "eager", "aot_eager"]:
-            if backend == "count":
-                backend = CompileCounter()
-            opt_fn = torch.compile(fn, backend=backend)
-
-            eager = torch.zeros(5)
-            compiled = eager.clone()
-
-            out_eager = fn(eager)
-            out_opt = opt_fn(compiled)
-
-            self.assertEqual(out_eager, out_opt)
-
-            out_eager.sum().backward()
-            out_opt.sum().backward()
-
-            self.assertEqual(eager, compiled)
-            if isinstance(backend, CompileCounter):
-                self.assertEqual(backend.frame_count, 2)  # graph breaks
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):

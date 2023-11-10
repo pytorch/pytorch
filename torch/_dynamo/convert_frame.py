@@ -405,9 +405,11 @@ def maybe_cprofile(func):
     return func
 
 
+from collections import OrderedDict
+
 from torch.utils.hooks import RemovableHandle
 
-_bytecode_hooks: Dict[int, BytecodeHook] = {}
+_bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
 
 
 def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:

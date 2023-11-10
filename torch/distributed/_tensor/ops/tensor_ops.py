@@ -131,7 +131,9 @@ def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
 
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
+    """
+    Just propagate input sharding, but expect replicated for boundaries input.
+    """
     input_strategy = op_schema.args_schema[0]
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
@@ -149,7 +151,9 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
 
 @register_op_strategy(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
 def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Forward all shardings except the slice dimension."""
+    """
+    forwards all shardings except the slice dimension.
+    """
     defaults = (None, 0, None, None, 1)
     input_strategy, dim, start, end, step = (
         op_schema.args_schema + defaults[len(op_schema.args_schema) :]
@@ -198,7 +202,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 def unshard_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> Tuple[Placement, ...]:
-    """Disallow the given tensor dimension to be sharded."""
+    """Disallow the given tensor dimension to be sharded"""
     return tuple(
         p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
         for p in placements
@@ -208,7 +212,7 @@ def unshard_tensor_dim(
 def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> Tuple[Placement, ...]:
-    """Force the given tensor dimension to be replicated."""
+    """Force the given tensor dimension to be replicated"""
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
     return tuple(
@@ -264,7 +268,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
 
 @register_op_strategy(aten._local_scalar_dense.default)
 def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Only allow replication on the input/ouput."""
+    """Only allow replication on the input/ouput"""
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
@@ -304,7 +308,6 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 def prop_index(op_schema: OpSchema) -> OutputSharding:
     """
     Expect replicated on the first input; _mostly_ pointwise on the second input.
-
     TODO: exception: when the dtype of second input is "bool", then a torch.nonzero needs to be triggered first.
     """
     # Current sharding constraints:

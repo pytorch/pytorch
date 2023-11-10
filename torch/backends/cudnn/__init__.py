@@ -78,7 +78,7 @@ else:
 
 
 def version():
-    """Return the version of cuDNN."""
+    """Returns the version of cuDNN"""
     if not _init():
         return None
     return __cudnn_version
@@ -92,7 +92,7 @@ CUDNN_TENSOR_DTYPES = {
 
 
 def is_available():
-    r"""Return a bool indicating if CUDNN is currently available."""
+    r"""Returns a bool indicating if CUDNN is currently available."""
     return torch._C._has_cudnn
 
 

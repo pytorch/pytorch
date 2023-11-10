@@ -2,7 +2,7 @@ import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Set, Union
+from numbers import Real
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
@@ -127,9 +127,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: Set[Any]
-    writes: Set[Any]
-    visited: Set[Any]
+    reads: set
+    writes: set
+    visited: set
 
 
 def livevars_analysis(instructions, instruction):
@@ -173,8 +173,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: Union[int, float]
-    high: Union[int, float]
+    low: Real
+    high: Real
     fixed_point: FixedPointBox
 
     def zero(self):
@@ -197,7 +197,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions) -> Union[int, float]:
+def stacksize_analysis(instructions):
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {

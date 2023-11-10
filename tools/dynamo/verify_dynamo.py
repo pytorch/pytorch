@@ -5,8 +5,10 @@ import sys
 import traceback
 import warnings
 
-MIN_CUDA_VERSION = "11.6"
-MIN_ROCM_VERSION = "5.4"
+import packaging.version
+
+MIN_CUDA_VERSION = packaging.version.parse("11.6")
+MIN_ROCM_VERSION = packaging.version.parse("5.4")
 MIN_PYTHON_VERSION = (3, 8)
 
 
@@ -26,12 +28,11 @@ def check_python():
 def check_torch():
     import torch
 
-    return torch.__version__
+    return packaging.version.parse(torch.__version__)
 
 
 # based on torch/utils/cpp_extension.py
 def get_cuda_version():
-    from torch.torch_version import TorchVersion
     from torch.utils import cpp_extension
 
     CUDA_HOME = cpp_extension._find_cuda_home()
@@ -49,11 +50,10 @@ def get_cuda_version():
         raise VerifyDynamoError("CUDA version not found in `nvcc --version` output")
 
     cuda_str_version = cuda_version.group(1)
-    return TorchVersion(cuda_str_version)
+    return packaging.version.parse(cuda_str_version)
 
 
 def get_rocm_version():
-    from torch.torch_version import TorchVersion
     from torch.utils import cpp_extension
 
     ROCM_HOME = cpp_extension._find_rocm_home()
@@ -75,17 +75,16 @@ def get_rocm_version():
 
     hip_str_version = hip_version.group(1)
 
-    return TorchVersion(hip_str_version)
+    return packaging.version.parse(hip_str_version)
 
 
 def check_cuda():
     import torch
-    from torch.torch_version import TorchVersion
 
     if not torch.cuda.is_available() or torch.version.hip is not None:
         return None
 
-    torch_cuda_ver = TorchVersion(torch.version.cuda)
+    torch_cuda_ver = packaging.version.parse(torch.version.cuda)
 
     # check if torch cuda version matches system cuda version
     cuda_ver = get_cuda_version()
@@ -113,13 +112,14 @@ def check_cuda():
 
 def check_rocm():
     import torch
-    from torch.torch_version import TorchVersion
 
     if not torch.cuda.is_available() or torch.version.hip is None:
         return None
 
     # Extracts main ROCm version from full string
-    torch_rocm_ver = TorchVersion(".".join(list(torch.version.hip.split(".")[0:2])))
+    torch_rocm_ver = packaging.version.parse(
+        ".".join(list(torch.version.hip.split(".")[0:2]))
+    )
 
     # check if torch rocm version matches system rocm version
     rocm_ver = get_rocm_version()

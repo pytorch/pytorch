@@ -166,19 +166,14 @@ AOTIRuntimeError AOTInductorModelCreate(
       auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
       auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
 
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+
       auto model = new torch::aot_inductor::AOTInductorModel(
           constant_map,
           ""
       );
-
-      if (input_map) {
-        for (auto const& kv : *input_map) {
-          constant_map->emplace(kv.first, kv.second);
-        }
-      } else {
-        model->load_constants(/*is_cpu*/true);
-      }
-
       *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
   })
 }
@@ -225,8 +220,6 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
 #define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
-  CACHE_TORCH_DTYPE(float8_e5m2);
-  CACHE_TORCH_DTYPE(float8_e4m3fn);
   CACHE_TORCH_DTYPE(bfloat16);
   CACHE_TORCH_DTYPE(float16);
   CACHE_TORCH_DTYPE(float32);

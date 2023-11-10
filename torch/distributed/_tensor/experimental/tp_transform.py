@@ -72,14 +72,14 @@ class TensorParallelTransformPass(PassBase):
         world_size: int,
         device_type: str,
         state_dict: Dict[str, torch.Tensor],
-        graph_signature: ExportGraphSignature,
+        graph_signiture: ExportGraphSignature,
         parallel_strategies: Dict[str, ParallelStyle],
     ) -> None:
         super().__init__()
         self.rank = rank
         self.mesh = DeviceMesh(device_type, torch.arange(world_size))
         self.state_dict: Dict[str, torch.Tensor] = state_dict
-        self.graph_signature = graph_signature
+        self.graph_signiture = graph_signiture
         self.parallel_strategies = parallel_strategies
 
     def call(self, graph_module) -> PassResult:
@@ -89,11 +89,11 @@ class TensorParallelTransformPass(PassBase):
             list(self.state_dict.keys()), self.parallel_strategies
         )
         placement_strategies = _mark_sharding(
-            gm, self.graph_signature, self.mesh, parameter_placements
+            gm, self.graph_signiture, self.mesh, parameter_placements
         )
         _partitioner(gm)
         _shard_state_dict(
-            self.state_dict, placement_strategies, self.graph_signature, self.mesh
+            self.state_dict, placement_strategies, self.graph_signiture, self.mesh
         )
         return PassResult(gm, True)
 
@@ -122,7 +122,7 @@ def _generate_parameter_and_buffer_placements(
 
 def _mark_tensor_parallel_shardings(
     gm: GraphModule,
-    graph_signature: ExportGraphSignature,
+    graph_signiture: ExportGraphSignature,
     mesh: DeviceMesh,
     parameter_placements: Dict[str, Placement],
 ) -> Dict[Node, PlacementStrategy]:
@@ -130,14 +130,14 @@ def _mark_tensor_parallel_shardings(
     Mark the placement strategies of the parameter and buffer placeholder nodes.
     """
     placement_strategies: Dict[Node, PlacementStrategy] = {}
-    num_params_and_buffers = len(graph_signature.inputs_to_parameters) + len(
-        graph_signature.inputs_to_buffers
+    num_params_and_buffers = len(graph_signiture.inputs_to_parameters) + len(
+        graph_signiture.inputs_to_buffers
     )
     placeholder_idx: int = 0
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if placeholder_idx < num_params_and_buffers:
-                fqn: str = _get_input_node_fqn(node.name, graph_signature)
+                fqn: str = _get_input_node_fqn(node.name, graph_signiture)
                 placement: Placement = (
                     parameter_placements[fqn]
                     if fqn in parameter_placements
@@ -158,14 +158,14 @@ def _mark_tensor_parallel_shardings(
     return placement_strategies
 
 
-def _get_input_node_fqn(input_name: str, graph_signature: ExportGraphSignature) -> str:
+def _get_input_node_fqn(input_name: str, graph_signiture: ExportGraphSignature) -> str:
     """
     Return the FQN of an input node.
     """
-    if input_name in graph_signature.inputs_to_parameters:
-        return graph_signature.inputs_to_parameters[input_name]
-    elif input_name in graph_signature.inputs_to_buffers:
-        return graph_signature.inputs_to_buffers[input_name]
+    if input_name in graph_signiture.inputs_to_parameters:
+        return graph_signiture.inputs_to_parameters[input_name]
+    elif input_name in graph_signiture.inputs_to_buffers:
+        return graph_signiture.inputs_to_buffers[input_name]
     else:
         raise ValueError(
             f"{input_name} not found in inputs_to_parameters or inputs_to_buffers"
@@ -174,7 +174,7 @@ def _get_input_node_fqn(input_name: str, graph_signature: ExportGraphSignature) 
 
 def _mark_sharding(
     gm: GraphModule,
-    graph_signature: ExportGraphSignature,
+    graph_signiture: ExportGraphSignature,
     mesh: DeviceMesh,
     parameter_placements: Dict[str, Placement],
 ) -> Dict[Node, PlacementStrategy]:
@@ -183,7 +183,7 @@ def _mark_sharding(
     """
     placement_strategies: Dict[
         Node, PlacementStrategy
-    ] = _mark_tensor_parallel_shardings(gm, graph_signature, mesh, parameter_placements)
+    ] = _mark_tensor_parallel_shardings(gm, graph_signiture, mesh, parameter_placements)
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -504,7 +504,7 @@ def _get_op_schema(
 def _shard_state_dict(
     state_dict: Dict[str, torch.Tensor],
     placement_strategies: Dict[Node, PlacementStrategy],
-    graph_signature: ExportGraphSignature,
+    graph_signiture: ExportGraphSignature,
     mesh: DeviceMesh,
 ) -> None:
     """
@@ -513,10 +513,10 @@ def _shard_state_dict(
     for node, placement_strategy in placement_strategies.items():
         if node.op != "placeholder":
             continue
-        if node.name in graph_signature.inputs_to_parameters:
-            fqn = graph_signature.inputs_to_parameters[node.name]
-        elif node.name in graph_signature.inputs_to_buffers:
-            fqn = graph_signature.inputs_to_buffers[node.name]
+        if node.name in graph_signiture.inputs_to_parameters:
+            fqn = graph_signiture.inputs_to_parameters[node.name]
+        elif node.name in graph_signiture.inputs_to_buffers:
+            fqn = graph_signiture.inputs_to_buffers[node.name]
         else:
             continue
         assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"

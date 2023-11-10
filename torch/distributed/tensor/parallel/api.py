@@ -38,9 +38,8 @@ def parallelize_module(  # type: ignore[return]
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
-    Apply Tensor Parallelism (TP) in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
-
-    We parallelize module or sub_modules based on a parallelize_plan. The parallelize_plan contains
+    The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
+    or sub_modules based on a parallelize_plan. The parallelize_plan contains
     :class:`ParallelStyle`, which indicates how user wants the module or sub_module
     to be parallelized.
 
@@ -81,6 +80,7 @@ def parallelize_module(  # type: ignore[return]
         We recommend users to try ``ColwiseParallel`` and ``RowwiseParallel`` for each parameter
         or submodule and there might be some code changes needed now.
     """
+
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     # instantiate a TP RNG state tracker if it's not there
@@ -148,9 +148,8 @@ def parallelize_module(  # type: ignore[return]
 
 def _is_mlp_for_pairwise_parallel(module: nn.Module) -> bool:
     """
-    Traverse through all the immediate children of the given module and count the number of Linear module.
-
-    If the number is more than one, we return True.
+    Traverse through all the immediate children of the given module and count the
+    number of Linear module. If the number is more than one, we return True.
 
     Args:
         module (:class:`nn.Module`):
@@ -174,7 +173,8 @@ def _rowwise_parallelize_linear_fn(
     device_mesh: DeviceMesh,
 ) -> None:
     """
-    Parallelize the input :class:`nn.Linear` module in :class:`RowwiseParallel` style.
+    This function parallelizes the input :class:`nn.Linear` module in
+    :class:`RowwiseParallel` style.
 
     Args:
         name (str):
@@ -187,6 +187,7 @@ def _rowwise_parallelize_linear_fn(
     Returns:
         None
     """
+
     for name, param in module.named_parameters():
         dist_spec = (
             [Shard(1)] if name == "weight" else [Replicate()]  # type: ignore[list-item]
@@ -212,7 +213,8 @@ def _colwise_parallelize_linear_fn(
     sharding_dim: int = 0,
 ) -> None:
     """
-    Parallelize the input :class:`nn.Linear` or :class:`nn.Embedding` module in :class:`ColwiseParallel` style.
+    This function parallelizes the input :class:`nn.Linear` or :class:`nn.Embedding`
+    module in :class:`ColwiseParallel` style.
 
     Args:
         name (str):
@@ -225,6 +227,7 @@ def _colwise_parallelize_linear_fn(
     Returns:
         None
     """
+
     for name, param in module.named_parameters():
         dist_param = torch.nn.Parameter(
             distribute_tensor(param, device_mesh, [Shard(sharding_dim)])
@@ -239,8 +242,6 @@ def _parallelize_linear_like_module(
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
-    Parallelize an nn.Linear module over a 1-d DeviceMesh based on a specified ParallelStyle for Tensor Parallelism.
-
     This function requires that the input module be an object
     of :class:`nn.Linear`.
     The module will be parallelized over a 1-d :class:`DeviceMesh`
@@ -269,6 +270,7 @@ def _parallelize_linear_like_module(
     Return:
         A :class:`nn.Module` object parallelized.
     """
+
     if not isinstance(module, (nn.Linear, nn.Embedding)):
         raise RuntimeError(
             f"Expect a torch.nn.Linear or a torch.nn.Embedding module but received {type(module)}!"
@@ -319,8 +321,6 @@ def _parallelize_mlp(
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
-    Parallelize a sequence of nn.Linear modules over a 1-d DeviceMesh based on a specified ParallelStyle.
-
     This function assumes the input module is a sequence of nn.Linear
     and we parallelize the module based on the given parallel style.
     We don't change the FQN of each sub-module and replace each parameter

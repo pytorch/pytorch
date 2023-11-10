@@ -174,7 +174,6 @@ struct C10_API PyInterpreterVTable {
   virtual c10::IntArrayRef sizes(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const = 0;
   virtual c10::Layout layout(const TensorImpl* self) const = 0;
-  virtual int64_t numel(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;

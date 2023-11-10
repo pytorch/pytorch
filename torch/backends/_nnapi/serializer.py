@@ -1333,8 +1333,8 @@ class _NnapiSerializer:
 
         self.add_operation(opcode, inputs, outputs)
 
-    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):  # noqa: D401
-        """Helper for pointwise binary broadcast ops with superfluous extra args."""
+    def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):
+        """Helper for pointwise binary broadcast ops with superfluous extra args"""
         assert node.outputsSize() == 1
 
         assert node.inputsAt(0).type().kind() == "TensorType"
@@ -2177,8 +2177,7 @@ class _NnapiSerializer:
 def serialize_model(
     module, inputs, *, config=None, return_shapes=None, use_int16_for_qint16=False
 ):
-    """Convert to NNAPI and serialize torchscript module.
-
+    """Convert to NNAPI and serialize torchscript module:
     Parameters:
         module: Torchscript module to convert
         inputs: Tensors used to specify input details for NNAPI
@@ -2188,6 +2187,7 @@ def serialize_model(
             buffer size for NNAPI
         use_int16_for_qint16 (optional): Use Pytorch int16 to represent NNAPI qint16 values
     """
+
     return _NnapiSerializer(config, use_int16_for_qint16).serialize_model(
         module, inputs, return_shapes
     )

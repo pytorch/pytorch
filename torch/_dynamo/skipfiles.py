@@ -257,7 +257,7 @@ SKIP_DIRS = [
     "<__array_function__ internals>",
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
-SKIP_DIRS_RE = re.compile(r"match nothing^")
+SKIP_DIRS_RE = None
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
@@ -279,9 +279,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    from importlib.util import find_spec
-
-    module_spec = find_spec(import_name)
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -364,7 +362,7 @@ def check_verbose(obj, allow_torch=False):
         filename = obj.co_filename
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         filename = getfile(obj)
-        obj = obj.__code__  # type: ignore[union-attr]  # FIXME Add MethodType.__code__ to typeshed
+        obj = obj.__code__
     else:
         filename = getfile(obj)
     if obj in get_func_inlinelist():

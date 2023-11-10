@@ -1,7 +1,17 @@
 import dataclasses
 import sys
 import types
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Protocol,
+    Union,
+)
 
 from typing_extensions import TypeAlias
 
@@ -31,7 +41,7 @@ class GuardFail(NamedTuple):
 
 
 class GuardFn(Protocol):
-    closure_vars: Dict[str, object]
+    closure_vars: OrderedDict[str, object]
     args: List[str]
     code_parts: List[str]
     verbose_code_parts: List[str]

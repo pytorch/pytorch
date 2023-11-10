@@ -1,8 +1,6 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import io
-
 import tempfile
 
 import onnx
@@ -553,18 +551,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             exported_program,
             x,
         )
-
-    def test_aten_linalg_vector_norm_with_reducel2(self):
-        class Net(nn.Module):
-            def forward(self, x):
-                x = F.normalize(x)
-                return x
-
-        f = io.BytesIO()
-        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
-        onnx_model = onnx.load_from_string(f.getvalue())
-        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
-        self.assertTrue("ReduceL2" in onnx_nodes)
 
 
 if __name__ == "__main__":

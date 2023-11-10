@@ -4,7 +4,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
-#include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -19,18 +18,18 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   auto allocator = storage->allocator();
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
 
-  c10::Device device = storage->device();
-
+  auto device = at::cuda::current_device();
   if (size_bytes == 0) {
-    storage->set_data_ptr_noswap(at::DataPtr(nullptr, device));
+    storage->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
     storage->set_nbytes(0);
     return;
   }
 
-  c10::cuda::CUDAGuard guard(device.index());
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
+    // Enable p2p access when the memcpy is across devices
     at::globalContext().lazyInitCUDA();
+    at::cuda::get_p2p_access(device, storage->device().index());
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(

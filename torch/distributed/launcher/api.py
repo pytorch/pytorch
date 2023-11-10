@@ -82,7 +82,6 @@ class LaunchConfig:
     monitor_interval: float = 30
     start_method: str = "spawn"
     log_dir: Optional[str] = None
-    log_line_prefix_template: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
@@ -246,10 +245,7 @@ def launch_agent(
     )
 
     agent = LocalElasticAgent(
-        spec=spec,
-        start_method=config.start_method,
-        log_dir=config.log_dir,
-        log_line_prefix_template=config.log_line_prefix_template,
+        spec=spec, start_method=config.start_method, log_dir=config.log_dir
     )
 
     shutdown_rdzv = True

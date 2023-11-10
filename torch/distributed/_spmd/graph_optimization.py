@@ -64,9 +64,10 @@ def graph_optimization_pass(
     prerequisites: Iterable[Callable],
     apply_after: Iterable[Callable],
 ) -> Callable:
-    """Define the contract of a graph optimization pass.
+    """
+    The contract of graph optimization pass. All the passes should be wrapped
+    with this decorator.
 
-    All the passes should be wrapped with this decorator.
     `prerequisites` is used to annotate the prerequisite passes of the this pass.
     `apply_after` means that this wrapped pass must be applied after the passes
     in `apply_after`. The difference between `prerequisites` and `apply_after`
@@ -157,11 +158,12 @@ class CommBlock:
 
 
 def get_comm_block(comm_node: fx.Node) -> CommBlock:
-    """Find out all the nodes belong to this communcation given a collective node (e.g., allreduce).
+    """
+    Given a collective node (e.g., allreduce), find out all the nodes belong to
+    this communcation.
 
     Args:
         comm_node(fx.Node): The target communication/collective node.
-
     Returns:
         The CommBlock that encapsulates the related nodes (e.g., wait_node) of
         the given comm_node.
@@ -304,7 +306,10 @@ def _scatter_wait_result(
     comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
 ) -> None:
-    """Scatter the result of the fused communication node to the original users -- splitting the output and reshape each subitem."""
+    """
+    Scatters the result of the fused communication node to the original users --
+    splitting the output and reshape each subitem.
+    """
     last_wait_node_idx = 0
     for node in gm.graph.nodes:
         if node == fused_comm_block.comm_node:
@@ -366,7 +371,9 @@ def _fuse_with_cat(
     comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
 ) -> CommBlock:
-    """Fuse the CommBlocks using concat given a list of CommBlock (only allreduce)."""
+    """
+    Given a list of CommBlock (only allreduce), fuse the CommBlocks using concat.
+    """
     # Find the last input node.
     last_input_node = comm_blocks[0].inputs[0]
     last_input_index = -1
@@ -467,8 +474,8 @@ def comm_fusion_with_concat(
     gm: IterGraphModule,
     bucket_size_mb: int,
 ) -> None:
-    """Run fuse communication with concat.
-
+    """
+    Run fuse communication with concat.
     This implementation uses concat to concat the bucketed gradients.
     """
     comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
@@ -501,7 +508,9 @@ def comm_fusion_with_concat(
     apply_after=[],
 )
 def schedule_comm_wait(gm: IterGraphModule) -> None:
-    """Delay the execution of wait tensors of allreduce until its first user."""
+    """
+    Delay the execution of wait tensors of allreduce until its first user.
+    """
     comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
 
     # Find all the end users.
@@ -540,8 +549,8 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
     apply_after=[],
 )
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
-    """Erase the orphant copy_ that generated when tracing optimizer.
-
+    """
+    Erase the orphant copy_ that generated when tracing optimizer.
     Two reasons why we could not simply use the DCE of fx.Graph.
     1. fx.Graph treats copy_ as a side-effect node and does not erase it.
     2. Users may want to preserve some orphan `copy_` that is not from the
@@ -733,7 +742,9 @@ class FusedOptimizerBlock:
 
 
 def get_fused_optimizer_block(optim_node: fx.Node) -> FusedOptimizerBlock:
-    """Given a fused optimizer node and return the FusedOptimizerBlock."""
+    """
+    Given a fused optimizer node and return the FusedOptimizerBlock.
+    """
     MAX_STEP_DISTANCE = 5
     # Find the step (foreach_add)
     nodes = collections.deque([optim_node, None])
@@ -772,7 +783,10 @@ def get_fused_optimizer_block(optim_node: fx.Node) -> FusedOptimizerBlock:
 def get_all_fused_optimizer_blocks(
     gm: IterGraphModule, optim_ops: Union[Tuple[str, ...], str]
 ) -> List[FusedOptimizerBlock]:
-    """Find all the FusedOptimizerBlock that the optimizer operators are in `optim_ops`."""
+    """
+    Find all the FusedOptimizerBlock that the optimizer operators are in
+    `optim_ops`.
+    """
     return [
         get_fused_optimizer_block(node)
         for node in gm.graph.nodes
@@ -785,9 +799,9 @@ def _split_fused_adam(
     orig_optim_block: FusedOptimizerBlock,
     split_gradients: Set[fx.Node],
 ) -> Tuple[FusedOptimizerBlock, FusedOptimizerBlock]:
-    """Split the `orig_optim_block` into two FusedOptimizerBlock.
-
-    The first one will be the optimizer that optimize `split_gradients`. The second one is
+    """
+    Split the `orig_optim_block` into two FusedOptimizerBlock. The first one
+    will be the optimizer that optimize `split_gradients`. The second one is
     used to optimize the remaining gradients.
     An assert will be raised if one of the optimizer optimize zero gradients.
     """
@@ -935,8 +949,7 @@ def iter_move_grads_and_optimizers(
     target_comm_node: str,
     target_dest_node: str,
 ) -> None:
-    """Extract a comm block and split out a new optimizer and step for it.
-
+    """Function to extract a comm block and split out a new optimizer and step for it.
     This subgraph is then moved to the forward graph.
     """
     for comm_block in get_all_comm_blocks(gm, "all_reduce"):
@@ -969,7 +982,8 @@ def find_all_descendants(
     gm: IterGraphModule,
     parent_nodes: List[fx.Node],
 ) -> List[fx.Node]:
-    """Identify the list of nodes to move during FX graph transformation."""
+    """identifying list of nodes to move during FX graph transformation"""
+
     assert len(parent_nodes) > 0, "No parent nodes are given."
 
     output = get_output(gm.graph)

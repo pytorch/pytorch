@@ -187,16 +187,12 @@ class BatchLinearLHSFusion(BatchFusion):
             split_sections.append(weight.meta["example_value"].shape[0])
 
         with graph.inserting_before(subset[0]):
-            cat_weights = graph.call_function(
-                torch.cat, args=(batch_weights,), kwargs={"dim": 0}
-            )
+            cat_weights = graph.call_function(torch.cat, args=((batch_weights, 0)))
             transposed_weights = graph.call_function(
                 torch.transpose, args=(cat_weights, 0, 1)
             )
             if len(batch_biases) > 0:
-                cat_biases = graph.call_function(
-                    torch.cat, args=(batch_biases,), kwargs={"dim": 0}
-                )
+                cat_biases = graph.call_function(torch.cat, args=((batch_biases, 0)))
                 fused_lhs = graph.call_function(
                     torch.addmm,
                     args=(cat_biases, batch_input, transposed_weights),
@@ -207,7 +203,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     args=(batch_input, transposed_weights),
                 )
             fused_lhs_list = graph.call_function(
-                torch.split, args=(fused_lhs, split_sections), kwargs={"dim": 1}
+                torch.split, args=((fused_lhs, split_sections, 1))
             )
 
         for i, node in enumerate(batch_nodes):
@@ -283,12 +279,8 @@ class BatchLinearFusion(BatchFusion):
             batch_biases.append(get_arg_value(node, 2, "bias"))
 
         with graph.inserting_before(subset[0]):
-            stack_inputs = graph.call_function(
-                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
-            )
-            stack_weights = graph.call_function(
-                torch.stack, args=(batch_weights,), kwargs={"dim": 0}
-            )
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
+            stack_weights = graph.call_function(torch.stack, args=(batch_weights, 0))
             transpose_weight = graph.call_function(
                 torch.transpose, args=(stack_weights, 1, 2)
             )
@@ -298,9 +290,7 @@ class BatchLinearFusion(BatchFusion):
                     args=(stack_inputs, transpose_weight),
                 )
             else:
-                stack_biases = graph.call_function(
-                    torch.stack, args=(batch_biases,), kwargs={"dim": 0}
-                )
+                stack_biases = graph.call_function(torch.stack, args=(batch_biases, 0))
                 unsqueeze_biases = graph.call_function(
                     torch.unsqueeze, args=(stack_biases, 1)
                 )
@@ -356,9 +346,7 @@ class BatchTanhFusion(BatchFusion):
             batch_inputs.append(get_arg_value(node, 0, "input"))
 
         with graph.inserting_before(subset[0]):
-            stack_inputs = graph.call_function(
-                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
-            )
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
 
             batch_tanh = graph.call_function(
                 torch.tanh,
@@ -438,18 +426,14 @@ class BatchLayernormFusion(BatchFusion):
 
         with graph.inserting_before(subset[0]):
             stack_input = graph.call_function(
-                torch.stack, args=(group_inputs,), kwargs={"dim": stack_dim}
+                torch.stack, args=(group_inputs, stack_dim)
             )
             if group_weights is not None:
-                stack_weight = graph.call_function(
-                    torch.stack, args=(group_weights,), kwargs={"dim": 0}
-                )
+                stack_weight = graph.call_function(torch.stack, args=(group_weights,))
             else:
                 stack_weight = None
             if group_biases is not None:
-                stack_bias = graph.call_function(
-                    torch.stack, args=(group_biases,), kwargs={"dim": 0}
-                )
+                stack_bias = graph.call_function(torch.stack, args=(group_biases,))
             else:
                 stack_bias = None
 
@@ -528,9 +512,7 @@ class BatchReLUFusion(BatchFusion):
         # assume all the nodes to be batched have the same inplace
         inplace = subset[0].kwargs.get("inplace", False)
         with graph.inserting_before(subset[0]):
-            stack_inputs = graph.call_function(
-                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
-            )
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
 
             batch_relu = graph.call_function(
                 torch.nn.functional.relu,

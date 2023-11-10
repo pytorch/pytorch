@@ -41,9 +41,6 @@ class FakeProcessGroup(dist.ProcessGroup):
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         return ret_work(tensor_list)
 
-    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
-        return ret_work(tensor_list)
-
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         # NOTE: in general it's not good form to try to make FakePG work with 'real data',
         # but the reasoning here is that we want FakePG to work with DeviceMesh's init

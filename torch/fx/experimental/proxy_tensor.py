@@ -833,7 +833,8 @@ def make_fx(f,
             if isinstance(x, torch.Tensor):
                 arg_count += 1
                 return fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
-            elif isinstance(x, int) and tracing_mode == "symbolic":
+            # NB: don't match on bools
+            elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source), hint=x, source=source)
 
             return x

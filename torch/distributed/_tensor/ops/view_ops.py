@@ -42,7 +42,7 @@ DimMap = Tuple[DimSpec, ...]
 
 @dataclass
 class Singleton(DimSpec):
-    """Output dimension is a singleton."""
+    """Output dimension is a singleton"""
 
     pass
 
@@ -103,7 +103,10 @@ class Repeat(DimSpec):
 
 @dataclass
 class Flatten(DimSpec):
-    """Flatten a set of input dimensions, ensuring right-most adjacent elements remain adjacent in the output."""
+    """
+    Output dimension is a set of input dimensions flattened, keeping
+    right-most adjacent elements adjacent in the output.
+    """
 
     input_dims: Sequence[DimSpec]
 
@@ -126,7 +129,6 @@ class Flatten(DimSpec):
 class Split(DimSpec):
     """
     This dimension is a member of a decomposition of the input dim.
-
     Note that input_dim itself could be a Flattened set of input dims.
     """
 
@@ -175,7 +177,7 @@ def dim_atleast_3d(ndim: int) -> DimMap:
 
 
 def expand(input_shape: Shape, shape: Shape) -> DimMap:
-    """Implement broadcast on multiple dimensions."""
+    """Implements broadcast on multiple dimensions"""
     assert len(shape) >= len(input_shape)
 
     # 1. create padded input dimensions
@@ -257,7 +259,6 @@ def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
 def infer_size(total_size: int, sizes: Shape) -> Shape:
     """
     One dimension input to view may be "-1".
-
     Infer the size of this dimension given the total_size.
     """
     infers = [i for i, s in enumerate(sizes) if s == -1]
@@ -276,8 +277,6 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
 
 def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     """
-    Decompose a reshape operation into forwarding, flattening, or splitting dimensions for each output dimension.
-
     A view or reshape operation can be decomposed into a set of 3 types of smaller operations:
     1) Forward a dimension from input to output
     2) Flatten a set of dimensions into a single dimension
@@ -409,7 +408,6 @@ def dim_reduction(
 ) -> DimMap:
     """
     General fallback for reduction ops where _Partial() does not apply.
-
     This will cause incoming tensor to be replicated on the reducing dimensions.
     """
     if dim_or_dims is None:
@@ -478,8 +476,6 @@ def propagate_shape_and_sharding(
     mesh_sizes: Shape,
 ) -> Tuple[Shape, Optional[Sequence[Placement]], torch.Tensor]:
     """
-    Determine output sharding and tensor shape based on given global tensor shape and input sharding.
-
     Takes as input the global shape of the tensor, and the input sharding,
     and produce corresponding output sharding and shape of the output tensor.
 
