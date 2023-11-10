@@ -4,7 +4,6 @@ import base64
 import copyreg
 import dataclasses
 import functools
-import getpass
 import hashlib
 import importlib
 import io
@@ -49,7 +48,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import developer_warning, is_linux
+from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
@@ -110,15 +109,6 @@ def _compile_end() -> None:
 
 
 log = logging.getLogger(__name__)
-
-
-@functools.lru_cache(None)
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
 def cpp_wrapper_cache_dir(name: str) -> str:
@@ -428,7 +418,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format = suggest_memory_format(t)
+    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     if not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
@@ -586,7 +576,7 @@ class FxGraphHashDetails:
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()  # type: ignore[attr-defined]
+        self.inductor_config = config.save_config()
         self.inductor_code_hash = get_inductor_code_hash()
 
     def debug_str(self) -> str:
@@ -2406,13 +2396,13 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str, device: str = "cuda"
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            device_interface = get_interface_for_device(device)
-            device = torch.device(device, device_interface.current_device())
+            device_interface = get_interface_for_device(device_str)
+            device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device

@@ -236,7 +236,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(  # type: ignore[attr-defined]
+            with config.patch(
                 {
                     "triton.store_cubin": True,
                 }
@@ -469,6 +469,7 @@ def compile_fx_inner(
                 stack_traces=stack_traces,
                 is_backward=is_backward,
                 is_inference=is_inference,
+                constants=tuple(compiled_graph.constants.values()),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -694,6 +695,7 @@ def cudagraphify(
     stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -707,6 +709,7 @@ def cudagraphify(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
+            constants=constants,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -1008,17 +1011,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):  # type: ignore[attr-defined]
+        with config.patch(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
+                inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(  # type: ignore[attr-defined]
+        with config.patch(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -1116,7 +1119,9 @@ def compile_fx(
             context = torch._guards.TracingContext.get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
-                original_output_start_index = context.fw_metadata.num_mutated_inputs
+                original_output_start_index = (
+                    context.fw_metadata.num_mutated_inp_runtime_indices
+                )
             else:
                 original_output_start_index = 0
 
@@ -1235,8 +1240,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):  # type: ignore[attr-defined]
-        return config.get_config_copy()  # type: ignore[attr-defined]
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):

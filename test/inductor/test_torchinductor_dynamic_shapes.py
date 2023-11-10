@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import importlib
 import math
-import os
 import sys
 import unittest
 from functools import partial
@@ -10,7 +8,7 @@ from functools import partial
 import torch
 import torch._custom_ops as custom_ops
 import torch.library
-from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import load_test_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -23,7 +21,20 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    copy_tests,
+    HAS_CPU,
+    HAS_CUDA,
+    make_dynamic_cls,
+    TestFailure,
+)
+
+
+CommonTemplate = load_test_module(
+    __file__, "inductor.test_torchinductor"
+).CommonTemplate
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -33,18 +44,6 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
-    check_model,
-    check_model_cuda,
-    CommonTemplate,
-    copy_tests,
-    TestFailure,
-)
-
-importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
@@ -63,16 +62,6 @@ if TEST_WITH_ROCM:
     )
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
-    )
-
-
-def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
-    return make_test_cls_with_patches(
-        cls,
-        "DynamicShapes",
-        "_dynamic_shapes",
-        (torch._dynamo.config, "assume_static_by_default", False),
-        xfail_prop=xfail_prop,
     )
 
 
@@ -168,6 +157,20 @@ class TestInductorDynamic(TestCase):
         b = torch.tensor([True, True, False, False, True], device=device)
         r = f(x, b)
         opt_r = opt_f(x, b)
+        self.assertEqual(r, opt_r)
+
+    def test_adaptive_max_pool3d_with_indices(self, device):
+        x = 5
+        y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
+
+        def fn(x, y):
+            return torch.nn.functional.adaptive_max_pool3d_with_indices(
+                output_size=x, input=y, return_indices=True
+            )
+
+        opt_f = self.compile_fn(fn)
+        r = fn(x, y)
+        opt_r = opt_f(x, y)
         self.assertEqual(r, opt_r)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -354,6 +357,15 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, b)
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
+
+    def test_sym_stride_lowering(self, device):
+        def fn(x):
+            s0 = (x + 1).stride(0)
+            return x * s0
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+        self.assertEqual(fn(a), cfn(a))
 
     def test_abs(self, device):
         def fn(x, y):
