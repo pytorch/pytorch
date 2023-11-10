@@ -7107,7 +7107,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x * scale
 
         x = torch.ones(2, 3, dtype=torch.float16)
-        self.run_test(DoNotUpcastModel(), x, verbose=True)
+        self.run_test(DoNotUpcastModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):
