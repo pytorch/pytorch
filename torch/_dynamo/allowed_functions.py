@@ -149,14 +149,14 @@ def _disallowed_function_ids() -> Set[int]:
 
 
 # Helper function to dump the torch name rule map generated based on
-# heuristic defined in gen_allowed_objs_and_ids.
+# the heuristic defined in gen_allowed_objs_and_ids.
 def dump_allowed_torch_name_rule_map() -> None:
     m = gen_allowed_objs_and_ids()[2]
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
 
-def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
+def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any], Dict[str, Any]]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
