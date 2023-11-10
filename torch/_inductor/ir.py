@@ -2087,7 +2087,11 @@ class SliceView(View):
         if not free_unbacked_symbols(start) and not free_unbacked_symbols(end):
             end = sizevars.evaluate_min(end, new_size[dim])
             start = sizevars.evaluate_min(start, end)
-            if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
+            if (
+                start == 0
+                and sizevars.size_hint(end - new_size[dim]) == 0
+                and step == 1
+            ):
                 sizevars.guard_equals(end, new_size[dim])
                 return x
 
