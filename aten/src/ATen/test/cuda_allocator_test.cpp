@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/test/allocator_copy_data_test.h>
+#include <ATen/test/allocator_clone_test.h>
 
-TEST(AllocatorTestCUDA, test_copy_data) {
-  test_allocator_copy_data(c10::cuda::CUDACachingAllocator::get());
+TEST(AllocatorTestCUDA, test_clone) {
+  test_allocator_clone(c10::cuda::CUDACachingAllocator::get());
 }
