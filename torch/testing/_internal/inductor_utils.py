@@ -89,6 +89,20 @@ def _check_has_dynamic_shape(
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
 
 
+def skipCUDAIf(cond, msg):
+    if cond:
+        def decorate_fn(fn):
+            def inner(self, *args, **kwargs):
+                if self.device == "cuda":
+                    raise unittest.SkipTest(msg)
+                return fn(self, *args, **kwargs)
+            return inner
+    else:
+        def decorate_fn(fn):
+            return fn
+
+    return decorate_fn
+
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")

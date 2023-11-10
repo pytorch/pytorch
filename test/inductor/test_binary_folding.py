@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
 import itertools
-import unittest
 
 import torch
 from torch import nn
@@ -15,6 +14,7 @@ from torch.testing._internal.inductor_utils import (
     copy_tests,
     HAS_CPU,
     HAS_CUDA,
+    skipCUDAIf,
 )
 
 TestCase = load_test_module(__file__, "inductor.test_inductor_freezing").TestCase
@@ -22,7 +22,7 @@ aten = torch.ops.aten
 
 
 class BinaryFoldingTemplate(TestCase):
-    @unittest.skipIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
+    @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):
