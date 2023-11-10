@@ -164,7 +164,7 @@ def get_gradient_edge(tensor):
 
 
 def increment_version(tensor):
-    """Notify autograd that the given Tensor was modified in place.
+    """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
     It is already done automatically by PyTorch functions and within custom Function
@@ -259,7 +259,7 @@ class saved_tensors_hooks:
 
 
 class save_on_cpu(saved_tensors_hooks):
-    """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieval for backward.
+    """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieved for backward.
 
     When performing operations within this context manager, intermediary
     results saved in the graph during the forward pass will be moved to CPU,
