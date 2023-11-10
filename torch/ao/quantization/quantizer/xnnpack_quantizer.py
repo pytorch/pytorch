@@ -23,6 +23,7 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
@@ -154,12 +155,7 @@ def get_symmetric_quantization_config(
         ),
     )
 
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = None
     if is_dynamic:
         quantization_config = QuantizationConfig(
             act_quantization_spec,
@@ -236,6 +232,18 @@ def _get_module_type_filter(tp: Callable):
     return module_type_filter
 
 
+def _get_not_module_type_or_name_filter(
+    tp_list: List[Callable], module_name_list: List[str]
+) -> Callable[[Node], bool]:
+    module_type_filters = [_get_module_type_filter(tp) for tp in tp_list]
+    module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
+
+    def not_module_type_or_name_filter(n: Node) -> bool:
+        return not any(f(n) for f in module_type_filters + module_name_list_filters)
+
+    return not_module_type_or_name_filter
+
+
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     STATIC_QAT_ONLY_OPS = [
@@ -246,8 +254,8 @@ class XNNPACKQuantizer(Quantizer):
     # static quantization ops (both PTQ and QAT)
     STATIC_OPS = [
         "linear",
-        "conv2d_relu",
-        "conv2d",
+        "conv_relu",
+        "conv",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
@@ -266,7 +274,9 @@ class XNNPACKQuantizer(Quantizer):
     def __init__(self):
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.operator_type_config: Dict[
+            torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
+        ] = {}
         self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
         self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
@@ -302,7 +312,9 @@ class XNNPACKQuantizer(Quantizer):
         return self
 
     def set_operator_type(
-        self, operator_type: str, quantization_config: QuantizationConfig
+        self,
+        operator_type: torch._ops.OpOverloadPacket,
+        quantization_config: QuantizationConfig,
     ) -> XNNPACKQuantizer:
         self.operator_type_config[operator_type] = quantization_config
         return self
@@ -329,6 +341,12 @@ class XNNPACKQuantizer(Quantizer):
         ), " quantization_config == None is not supported yet"
         self.module_name_config[module_name] = quantization_config
         return self
+
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Transforms scalar values to tensor attributes"""
+        return _convert_scalars_to_attrs(model)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
@@ -374,33 +392,45 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        module_name_list = list(self.module_name_config.keys())
         for module_name, config in self.module_name_config.items():
             self._annotate_all_static_patterns(
                 model, config, _get_module_name_filter(module_name)
             )
 
+        tp_list = list(self.module_type_config.keys())
         for module_type, config in self.module_type_config.items():
             self._annotate_all_static_patterns(
                 model, config, _get_module_type_filter(module_type)
             )
 
-        self._annotate_all_static_patterns(model, self.global_config)
+        self._annotate_all_static_patterns(
+            model,
+            self.global_config,
+            _get_not_module_type_or_name_filter(tp_list, module_name_list),
+        )
         return model
 
     def _annotate_for_dynamic_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        module_name_list = list(self.module_name_config.keys())
         for module_name, config in self.module_name_config.items():
             self._annotate_all_dynamic_patterns(
                 model, config, _get_module_name_filter(module_name)
             )
 
+        tp_list = list(self.module_type_config.keys())
         for module_type, config in self.module_type_config.items():
             self._annotate_all_dynamic_patterns(
                 model, config, _get_module_type_filter(module_type)
             )
 
-        self._annotate_all_dynamic_patterns(model, self.global_config)
+        self._annotate_all_dynamic_patterns(
+            model,
+            self.global_config,
+            _get_not_module_type_or_name_filter(tp_list, module_name_list),
+        )
         return model
 
     def validate(self, model: torch.fx.GraphModule) -> None:

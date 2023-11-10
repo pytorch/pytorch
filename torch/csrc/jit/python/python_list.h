@@ -10,8 +10,7 @@
 #include <cstddef>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initScriptListBindings(PyObject* module);
 
@@ -226,5 +225,4 @@ class ScriptList final {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

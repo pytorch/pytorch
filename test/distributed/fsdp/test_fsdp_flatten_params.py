@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     FlatParamHandle,
     FlatParamShardMetadata,
     HandleShardingStrategy,
@@ -47,6 +47,7 @@ class TestFlattenParams(FSDPTest):
             "keep_low_precision_grads": False,
             "process_group": self.process_group,
             "use_orig_params": False,
+            "fsdp_extension": None,
         }
 
     def _get_transformer(self, seed=0):

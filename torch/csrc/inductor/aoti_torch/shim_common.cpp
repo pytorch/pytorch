@@ -1,4 +1,5 @@
 #include <c10/core/DeviceType.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -17,6 +18,7 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/_scaled_mm.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -24,6 +26,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/mm.h>
+#include <ATen/ops/nonzero.h>
 
 #endif
 
@@ -39,6 +42,17 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
+
+template <class T>
+c10::optional<T> pointer_to_optional(T* ptr) {
+  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
+}
+
+template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
+c10::optional<T> pointer_to_optional(U* ptr) {
+  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
+}
+
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -47,6 +61,14 @@ int32_t aoti_torch_device_type_cpu() {
 
 int32_t aoti_torch_device_type_cuda() {
   return (int32_t)c10::DeviceType::CUDA;
+}
+
+int32_t aoti_torch_dtype_float8_e5m2() {
+  return (int32_t)c10::ScalarType::Float8_e5m2;
+}
+
+int32_t aoti_torch_dtype_float8_e4m3fn() {
+  return (int32_t)c10::ScalarType::Float8_e4m3fn;
 }
 
 int32_t aoti_torch_dtype_bfloat16() {
@@ -85,6 +107,18 @@ int32_t aoti_torch_dtype_int64() {
   return (int32_t)c10::ScalarType::Long;
 }
 
+int32_t aoti_torch_dtype_bool() {
+  return (int32_t)c10::ScalarType::Bool;
+}
+
+bool aoti_torch_grad_mode_is_enabled() {
+  return c10::GradMode::is_enabled();
+}
+
+void aoti_torch_grad_mode_set_enabled(bool enabled) {
+  return c10::GradMode::set_enabled(enabled);
+}
+
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
@@ -110,12 +144,41 @@ AOTITorchError aoti_torch_get_sizes(
   });
 }
 
+AOTITorchError aoti_torch_get_size(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_size = t->size(d);
+  });
+}
+
 AOTITorchError aoti_torch_get_strides(
     AtenTensorHandle tensor,
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_strides = const_cast<int64_t*>(t->strides().data());
+  });
+}
+
+AOTITorchError aoti_torch_get_stride(
+    AtenTensorHandle tensor,
+    int64_t d,
+    int64_t* ret_stride) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_stride = t->stride(d);
+  });
+}
+
+AOTITorchError aoti_torch_get_storage_offset(
+    AtenTensorHandle tensor,
+    int64_t* ret_storage_offset) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_storage_offset = t->storage_offset();
   });
 }
 
@@ -149,12 +212,18 @@ AOTITorchError aoti_torch_empty_strided(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    c10::Device device = c10_device(device_type, device_index);
-    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-        static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor =
-        new at::Tensor(at::empty_strided(sizes, strides, options));
-    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    if (c10::DeviceType(device_type) == c10::DeviceType::CPU) {
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(
+          new at::Tensor(at::detail::empty_strided_cpu(
+              sizes, strides, static_cast<c10::ScalarType>(dtype))));
+    } else {
+      c10::Device device = c10_device(device_type, device_index);
+      c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+          static_cast<c10::ScalarType>(dtype));
+      at::Tensor* new_tensor =
+          new at::Tensor(at::empty_strided(sizes, strides, options));
+      *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
+    }
   });
 }
 
@@ -228,14 +297,56 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
-    *ret4 = r4;
-    *ret5 = r5;
+    *ret4 = r4.expect_int();
+    *ret5 = r5.expect_int();
     at::Tensor* ret6_tensor = new at::Tensor(std::move(r6));
     *ret6 = tensor_pointer_to_tensor_handle(ret6_tensor);
     at::Tensor* ret7_tensor = new at::Tensor(std::move(r7));
     *ret7 = tensor_pointer_to_tensor_handle(ret7_tensor);
     at::Tensor* ret8_tensor = new at::Tensor(std::move(r8));
     *ret8 = tensor_pointer_to_tensor_handle(ret8_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = new at::Tensor();
+    *ret = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+}
+
+AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    int32_t* out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    at::Tensor* scale_a_tensor = tensor_handle_to_tensor_pointer(scale_a);
+    at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
+    at::Tensor* scale_result_tensor =
+        tensor_handle_to_tensor_pointer(scale_result);
+    auto [r0, r1] = at::_scaled_mm(
+        *self_tensor,
+        *mat2_tensor,
+        pointer_to_optional(bias_tensor),
+        pointer_to_optional<c10::ScalarType>(out_dtype),
+        pointer_to_optional(scale_a_tensor),
+        pointer_to_optional(scale_b_tensor),
+        pointer_to_optional(scale_result_tensor),
+        use_fast_accum);
+    at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
+    *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
+    at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
+    *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
   });
 }
 
@@ -247,6 +358,25 @@ AOTITorchError aoti_torch_tensor_copy_(
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
     dst_tensor->copy_(*src_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_assign_tensors(
+    AtenTensorHandle src,
+    AtenTensorHandle dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
+    *dst_tensor = *src_tensor;
+  });
+}
+
+AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = self_tensor->clone();
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *ret = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });
 }
 
@@ -294,6 +424,45 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+AOTITorchError aoti_torch_nonzero(
+    AtenTensorHandle self,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = at::nonzero(*self_tensor);
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
+AOTITorchError aoti_torch_repeat_interleave_Tensor(
+    AtenTensorHandle repeats,
+    int64_t* output_size,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
+    at::Tensor out_tensor = at::_ops::repeat_interleave_Tensor::call(
+        *repeats_tensor, pointer_to_optional<c10::SymInt>(output_size));
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
+// Function to check existence of inf and NaN
+AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
+    auto flattened = check_tensor->view({-1});
+
+    for (int64_t i = 0; i < flattened.numel(); i++) {
+      auto value = flattened[i].item<float>();
+      if (std::isinf(value) || std::isnan(value)) {
+        assert(false);
+      }
+    }
+  });
+}
+
 // ProxyExecutor
 AOTITorchError aoti_torch_proxy_executor_call_function(
     AOTIProxyExecutorHandle proxy_executor,
@@ -301,7 +470,7 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_ints,
     int64_t* flatten_int_args,
     int num_tensors,
-    void** flatten_tensor_args) {
+    AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
@@ -310,5 +479,27 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         flatten_int_args,
         num_tensors,
         flatten_tensor_args);
+  });
+}
+
+AOTITorchError aoti_torch__alloc_from_pool(
+    AtenTensorHandle self,
+    int64_t offset_bytes,
+    int32_t dtype,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor* new_tensor = new at::Tensor(torch::inductor::_alloc_from_pool(
+        *self_tensor,
+        offset_bytes,
+        static_cast<c10::ScalarType>(dtype),
+        sizes,
+        strides));
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }

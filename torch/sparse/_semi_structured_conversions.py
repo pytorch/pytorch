@@ -322,7 +322,7 @@ def _sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
 # This function converts dense matrix into sparse semi-structured
 # representation, producing "compressed" matrix, in the layout used by
 # CUTLASS backend, and corresponding metadata matrix.
-def sparse_semi_structured_from_dense_cutlass(dense, compile=True):
+def sparse_semi_structured_from_dense_cutlass(dense, compile=False):
     if compile:
         from torch._dynamo.utils import is_compile_supported
         if is_compile_supported(dense.device.type):
@@ -336,7 +336,7 @@ def sparse_semi_structured_from_dense_cutlass(dense, compile=True):
 # reconstructs dense matrix from a pair of "compressed" matrix, given
 # in the layout used by CUTLASS backend, and accompanying metadata
 # matrix.
-def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered, compile=True):
+def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered, compile=False):
     if compile:
         from torch._dynamo.utils import is_compile_supported
         if is_compile_supported(sparse.device.type):

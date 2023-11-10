@@ -1,7 +1,7 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    hint_int, magic_methods, method_to_operator, free_symbols,
-    is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+    hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
 import torch
 import torch.fx as fx
@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import Tuple
+from typing import List, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -79,7 +79,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         elif node.op == 'placeholder':
             env[node] = InvalidNode
         elif node.op == 'call_function':
-            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
             if any(all_args):
                 env[node] = InvalidNode
@@ -124,7 +124,7 @@ def _is_fwd_seed_offset(node):
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
+    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
@@ -314,10 +314,13 @@ def _size_of(node: fx.Node) -> int:
                 return 1
             else:
                 return 999999
+        # NB: The fallback values here are meaningless, maybe we should respect
+        # torch._inductor.config.unbacked_symint_fallback (but this is a
+        # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
@@ -431,7 +434,7 @@ def reordering_to_mimic_autograd_engine(gm):
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
     get_depth(output_node, depths)
 
     def insert_node_in_graph(node):
@@ -588,7 +591,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
     # rng states accordingly.
-    fw_output_node = [node for node in fw_module.graph.nodes if node.op == "output"][0]
+    fw_output_node = next(node for node in fw_module.graph.nodes if node.op == "output")
     fw_outputs = fw_output_node.args[0]
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]
@@ -624,7 +627,7 @@ def min_cut_rematerialization_partition(
 
     To create the fwd and bwd graph, we copy the joint graph, manually set the
     outputs to just original forward or backward outputs. And then we run the
-    resulting graphs through dead code elimintation.
+    resulting graphs through dead code elimination.
 
     .. warning::
         This API is experimental and likely to change.
@@ -802,6 +805,10 @@ def min_cut_rematerialization_partition(
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
@@ -841,7 +848,7 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
 
@@ -912,7 +919,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: str = None,
+    prog: Union[str, List[str]] = None,
     parse_stack_trace: bool = False,
 ) -> None:
     if clear_meta:

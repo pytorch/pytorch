@@ -37,7 +37,7 @@ SUPPORTED_QSCHEMES = [
 ]
 
 
-class QuantizationSpecBase(ABC):
+class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
@@ -114,6 +114,7 @@ class SharedQuantizationSpec(QuantizationSpecBase):
     Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
     """
 
+    # the edge or node to share observer or fake quant instances with
     edge_or_node: EdgeOrNode
 
 
@@ -138,17 +139,38 @@ class QuantizationAnnotation:
     """
 
     # a map from torch.fx.Node to a type of QuantizationSpecBase
-    input_qspec_map: Dict[Node, QuantizationSpecBase] = field(default_factory=dict)
+    input_qspec_map: Dict[Node, Optional[QuantizationSpecBase]] = field(
+        default_factory=dict
+    )
 
     # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR
     output_qspec: Optional[QuantizationSpecBase] = None
+
+    # For a Node: node1 and edge: (node1, node2), since they are observing the same
+    # Tensor, we may want to implicitly share observers, this flag allows people to
+    # turn off this behavior for the output of the node
+    allow_implicit_sharing: bool = True
 
     # whether the node is annotated or not
     _annotated: bool = False
 
 
 class Quantizer(ABC):
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Allows for user defined transforms to run before annotating the graph.
+        This allows quantizer to allow quantizing part of the model that are otherwise not quantizable.
+        For example quantizer can
+        a) decompose a compound operator like scaled dot product attention,
+        into bmm and softmax if quantizer knows how to quantize bmm/softmax but not sdpa
+        or b) transform scalars to tensor to allow quantizing scalares.
+
+        Note: this is an optional method
+        """
+        return model
+
     # annotate nodes in the graph with observer or fake quant constructors
     # to convey the desired way of quantization
     @abstractmethod

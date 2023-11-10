@@ -45,6 +45,7 @@ from torch.testing._internal.autograd_function_db import (
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils import _pytree as pytree
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -138,7 +139,7 @@ def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, req
 # TODO: consolidate with normalize_op_input_output2
 def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_grad=None):
     flat_args, args_spec = tree_flatten(args)
-    flat_sample_args, _ = tree_flatten(sample_args)
+    flat_sample_args = pytree.tree_leaves(sample_args)
     diff_argnums = tuple(i for i, (arg, sample) in enumerate(zip(flat_args, flat_sample_args))
                          if diff_arg(sample, requires_grad=True))
     assert len(diff_argnums) > 0
@@ -268,8 +269,8 @@ def get_jvp_variant(f, sample):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = pytree.tree_leaves(primals_out)
+            flat_tangents_out = pytree.tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, tangents
@@ -303,8 +304,8 @@ def _get_jvp_variant(fn, primals, tangents):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = pytree.tree_leaves(primals_out)
+            flat_tangents_out = pytree.tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, primals + tangents
@@ -318,12 +319,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
-    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
@@ -343,7 +340,7 @@ aliasing_ops = {
     'narrow',
     'permute',
     'positive',
-    # 'ravel', is composite implict autograd and may call clone
+    # 'ravel', is composite implicit autograd and may call clone
     'real',
     'reshape',
     'resolve_conj',
@@ -482,11 +479,10 @@ class TestOperators(TestCase):
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
 
         # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -857,7 +853,7 @@ class TestOperators(TestCase):
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
-            cotangents, _ = tree_flatten(cotangents)
+            cotangents = pytree.tree_leaves(cotangents)
             num_args = len(args)
 
             args_and_cotangents = tuple(args) + tuple(cotangents)
@@ -867,8 +863,8 @@ class TestOperators(TestCase):
                 cotangents = args_and_cotangents[num_args:]
                 result, vjp_fn = vjp(fn, *args)
                 result_vjps = vjp_fn(cotangents)
-                result, _ = tree_flatten(result)
-                result_vjps, _ = tree_flatten(result_vjps)
+                result = pytree.tree_leaves(result)
+                result_vjps = pytree.tree_leaves(result_vjps)
                 return (*result, *result_vjps)
 
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
@@ -893,9 +889,7 @@ class TestOperators(TestCase):
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
         skip('nn.functional.multi_head_attention_forward'),  # randomness
-        xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
-        xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('pca_lowrank', ''),  # randomness
@@ -956,6 +950,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
+        xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
     }))
     def test_vmapvjp(self, device, dtype, op):
@@ -1035,11 +1030,8 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
 
         # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -1057,7 +1049,7 @@ class TestOperators(TestCase):
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
-    # because that coresponds to "batched forward-mode AD" testing in PyTorch core
+    # because that corresponds to "batched forward-mode AD" testing in PyTorch core
     def test_vmapjvpall(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
             # TODO: test in-place
@@ -1120,7 +1112,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
-        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
         xfail("renorm"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1186,8 +1177,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.ctc_loss'),
-        xfail('as_strided'),
-        xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.fractional_max_pool2d'),
@@ -1225,7 +1214,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
-        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
@@ -1466,7 +1454,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
-        # Following operatos take too long, hence skipped
+        # Following operators take too long, hence skipped
         skip('atleast_1d'),
         skip('atleast_2d'),
         skip('atleast_3d'),
@@ -1557,8 +1545,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
-        decorate('linalg.svd', decorator=skipIfRocm),  # https://github.com/pytorch/pytorch/issues/97256
-        decorate('svd', decorator=skipIfRocm),  # Flaky tensor-likes are not close error on ROCm, adjust tolerance?
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1577,7 +1563,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapjvpvjp(self, device, dtype, op):
-        # Since we test `jvpvjp` seperately,
+        # Since we test `jvpvjp` separately,
         # in this we just check that vmap of `jvpvjp`
         # is correct.
         if not op.supports_autograd:
@@ -1609,8 +1595,8 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                flat_primals_out, _ = tree_flatten(primals_out)
-                flat_tangents_out, _ = tree_flatten(tangents_out)
+                flat_primals_out = pytree.tree_leaves(primals_out)
+                flat_tangents_out = pytree.tree_leaves(tangents_out)
                 return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
@@ -1784,12 +1770,6 @@ class TestOperators(TestCase):
         xfail('to_sparse'),  # dispatch key issue
 
         # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
         decorate('xlogy', decorator=skipIfRocm),
 
         # numerical inconsistencies, look like bugs
@@ -1822,8 +1802,8 @@ class TestOperators(TestCase):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
 
-        def get_flat_differentiable(pytree):
-            flattened = tree_flatten(pytree)[0]
+        def get_flat_differentiable(tree):
+            flattened = pytree.tree_leaves(tree)
             return tuple(i for i in flattened if is_differentiable(i))
 
         def get_differentiable_linked(list1, list2):
@@ -1832,7 +1812,7 @@ class TestOperators(TestCase):
             return zip(*paired_list)
 
         def filter_none(out):
-            flattened = tree_flatten(out)[0]
+            flattened = pytree.tree_leaves(out)
             return tuple(o for o in flattened if o is not None)
 
         if not op.supports_autograd:
@@ -1850,8 +1830,8 @@ class TestOperators(TestCase):
                 out_flattened = out
                 cotangents_flattened = cotangents
                 if not isinstance(out_flattened, torch.Tensor):
-                    out_flattened = tree_flatten(out)[0]
-                    cotangents_flattened = tree_flatten(cotangents)[0]
+                    out_flattened = pytree.tree_leaves(out)
+                    cotangents_flattened = pytree.tree_leaves(cotangents)
                     out_flattened, cotangents_flattened = get_differentiable_linked(out_flattened, cotangents_flattened)
 
                 return filter_none(

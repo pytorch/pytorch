@@ -56,6 +56,11 @@ USE_SMALL_BATCH_SIZE = {
     "hf_T5_base": 4,
     "timm_efficientdet": 1,
     "llama_v2_7b_16h": 1,
+    "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
+}
+
+INFERENCE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 32,
 }
 
 DETECTRON2_MODELS = {
@@ -83,6 +88,8 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
@@ -99,13 +106,14 @@ SKIP_DUE_TO_CONTROL_FLOW = {
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
-    "nanogpt_generate",  # timeout
+    "nanogpt",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
     "simple_gpt",
     "hf_Whisper",  # works on cuda, accuracy failure on cpu
+    "stable_diffusion_text_encoder",
 }
 
 SKIP_FOR_CUDA = {
@@ -124,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -233,6 +243,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "llama_v2_7b_16h",
     "Background_Matting",
+    "stable_diffusion_unet",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -255,6 +266,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
 }
+
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
 
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
@@ -309,6 +322,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
+
+    @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
@@ -371,6 +388,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        elif (
+            batch_size is None
+            and not is_training
+            and model_name in INFERENCE_SMALL_BATCH_SIZE
+        ):
+            batch_size = INFERENCE_SMALL_BATCH_SIZE[model_name]
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
