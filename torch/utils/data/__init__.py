@@ -1,6 +1,7 @@
 # TODO(VitalyFedyunin): Rearranging this imports leads to crash,
 # need to cleanup dependencies and fix it
 from torch.utils.data.sampler import (
+    BalancedSampler,
     BatchSampler,
     RandomSampler,
     Sampler,
@@ -41,7 +42,8 @@ from torch.utils.data.datapipes._decorator import (
     runtime_validation_disabled,
 )
 
-__all__ = ['BatchSampler',
+__all__ = ['BalancedSampler',
+           'BatchSampler',
            'ChainDataset',
            'ConcatDataset',
            'DFIterDataPipe',

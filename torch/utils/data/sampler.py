@@ -1,9 +1,11 @@
 import torch
 from torch import Tensor
 
-from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
+from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union, Literal
+from collections import Counter
 
 __all__ = [
+    "BalancedSampler",
     "BatchSampler",
     "RandomSampler",
     "Sampler",
@@ -236,6 +238,64 @@ class WeightedRandomSampler(Sampler[int]):
 
     def __len__(self) -> int:
         return self.num_samples
+
+
+class BalancedSampler(Sampler[int]):
+    r"""Samples elements balancing the dataset. If strategy is 'oversample', the elements of the minority classes are
+    returned several times until the size of the majority class is reached (every instance is taken at least one time).
+    If strategy is 'undersample', some elements of the majority classes are not returned with the aim of equalizing the
+    number of the minority classes.
+
+    Args:
+        targets: no empty list of dataset targets to sample from
+        strategy ('oversample' | 'undersample'): sampling strategy
+    """
+    def __init__(self, targets, strategy: Literal['oversample', 'undersample'], generator=None) -> None:
+        self.targets = targets
+        self.strategy = strategy
+        self.generator = generator
+        self.counts = dict(Counter(targets))
+        self.min_class_count, self.max_class_count = (min(self.counts.values()), max(self.counts.values()))
+
+    def count_classes_with_indexes(self):
+        targets = torch.tensor(self.targets)
+        class_ids = {x: (targets == x).nonzero(as_tuple=False).squeeze(1) for x in self.counts.keys()}
+        return class_ids
+
+    def __iter__(self) -> Iterator[int]:
+        if self.generator is None:
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = self.generator
+
+        class_ids = self.count_classes_with_indexes()
+
+        if self.strategy == 'oversample':
+            ids = []
+            for x in class_ids.keys():
+                ids.extend(class_ids[x])
+                ov_ids = [class_ids[x][y]
+                          for y in torch.randint(high=self.counts[x],
+                                                 size=(self.max_class_count - self.counts[x],),
+                                                 generator=generator)]
+                ids.extend(ov_ids)
+
+            yield from map(int, torch.tensor(ids)[torch.randperm(len(ids), generator=generator)])
+
+        elif self.strategy == 'undersample':
+            un_ids = [class_ids[x][torch.randint(0, self.counts[x], (self.min_class_count,), generator=generator)]
+                      for x in class_ids.keys()]
+
+            yield from map(int, torch.tensor(un_ids)[torch.randperm(len(un_ids), generator=generator)])
+
+        else:
+            raise ValueError("strategy is not in ('oversample', 'undersample')")
+
+    def __len__(self) -> int:
+        return len(self.counts) * self.min_class_count if self.strategy == 'undersample' \
+            else len(self.counts) * self.max_class_count
 
 
 class BatchSampler(Sampler[List[int]]):

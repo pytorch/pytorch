@@ -1807,6 +1807,30 @@ except RuntimeError as e:
         self.assertEqual(num_samples // batch_size + (num_samples % batch_size > 0),
                          count_num_samples_in_data_loader)
 
+    def test_balanced_sampler_oversample(self):
+        from torch.utils.data import BalancedSampler
+
+        majority_class, majority_class_count = 0, 5
+        labels = [majority_class] * majority_class_count
+        labels.extend([1, 2, 1, 4, 3, 3, 3, 2])
+
+        ov_sampler = BalancedSampler(labels, 'oversample')
+        ov_labels = [labels[i] for i in ov_sampler]
+        for label in set(labels):
+            self.assertEqual(ov_labels.count(label), majority_class_count)
+
+    def test_balanced_sampler_undersample(self):
+        from torch.utils.data import BalancedSampler
+
+        minority_class, minority_class_count = 0, 1
+        labels = [minority_class] * minority_class_count
+        labels.extend([1, 2, 1, 4, 3, 3, 3, 2])
+
+        un_sampler = BalancedSampler(labels, 'undersample')
+        un_labels = [labels[i] for i in un_sampler]
+        for label in set(labels):
+            self.assertEqual(un_labels.count(label), minority_class_count)
+
     def test_distributed_sampler_invalid_rank(self):
         from torch.utils.data.distributed import DistributedSampler
         dataset = torch.IntTensor(range(10))
@@ -1833,7 +1857,7 @@ except RuntimeError as e:
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
     def test_sampler_reproducibility(self):
-        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
+        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler, BalancedSampler
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (
@@ -1842,6 +1866,8 @@ except RuntimeError as e:
             lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
             lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
             lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
+            lambda: BalancedSampler(self.labels, 'oversample', generator=torch.Generator().manual_seed(42)),
+            lambda: BalancedSampler(self.labels, 'undersample', generator=torch.Generator().manual_seed(42)),
         ):
             self.assertEqual(list(fn()), list(fn()))
 
