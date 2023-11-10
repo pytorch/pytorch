@@ -80,7 +80,6 @@ auto_torch_name_rule_map = {
     "torch.autograd.grad_mode.set_grad_enabled": TorchCtxManagerClassVariable,
     "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
-    # In graph functions
 }
 
 

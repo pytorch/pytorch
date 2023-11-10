@@ -76,7 +76,6 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
 # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
 # allowed objects include:
 # - Torch context manager classes.
-# - Torch in graph functions.
 def generate_allowed_object_set():
     return gen_allowed_objs_and_ids()[1]
 
