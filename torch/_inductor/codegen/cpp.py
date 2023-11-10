@@ -837,15 +837,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"decltype({a})({a} + {b})"
+        return f"decltype({a})({a} + {b}); static_assert(std::is_same<decltype({a}), decltype({b})>::value)"
 
     @staticmethod
     def sub(a, b):
-        return f"decltype({a})({a} - {b})"
+        return f"decltype({a})({a} - {b}); static_assert(std::is_same<decltype({a}), decltype({b})>::value)"
 
     @staticmethod
     def mul(a, b):
-        return f"decltype({a})({a} * {b})"
+        return f"decltype({a})({a} * {b}); static_assert(std::is_same<decltype({a}), decltype({b})>::value)"
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
