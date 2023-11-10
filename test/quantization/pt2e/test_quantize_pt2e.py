@@ -1616,7 +1616,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return n
         raise ValueError("Did not find dropout node")
 
-    def test_move_exported_model_to_eval(self):
+    def test_move_exported_model_to_eval_and_train(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1633,12 +1633,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         dropout_node = self._get_dropout_node(m)
         self.assertTrue(dropout_node.args[2])
 
-        # Do the subgraph rewriting
+        # Move model to eval, assert dropout is in eval mode
         torch.ao.quantization.move_exported_model_to_eval(m)
-
-        # Assert that dropout op exists and is in eval mode
         dropout_node = self._get_dropout_node(m)
         self.assertFalse(dropout_node.args[2])
+
+        # Move model back to train, assert dropout is in train mode again
+        torch.ao.quantization.move_exported_model_to_train(m)
+        dropout_node = self._get_dropout_node(m)
+        self.assertTrue(dropout_node.args[2])
 
     def test_disallow_eval_train(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
