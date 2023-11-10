@@ -241,6 +241,8 @@ class TracerBase:
                 print('Failed!')
                 import pdb
                 pdb.set_trace()
+                ret = type(a)([(a[0],)] + [self.create_arg(elem) for elem in a[1:]])
+                return ret
         elif isinstance(a, dict):
             r = {}
             for k, v in a.items():

@@ -109,8 +109,13 @@ class CachingAutotuner(KernelInterface):
     def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: int):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.meta)
-        for k, v in cfg.kwargs.items():
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+        try:
+            for k, v in cfg.kwargs.items():
+                compile_meta["constants"][self.fn.arg_names.index(k)] = v
+        except:
+            print('Failed!')
+            import pdb
+            pdb.set_trace()
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = (

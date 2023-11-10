@@ -81,6 +81,8 @@ def check_codegen(
         return model(*ex, **kwargs)
 
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
+    #import pdb
+    #pdb.set_trace()
 
     if is_cpp_code:
         #import pdb

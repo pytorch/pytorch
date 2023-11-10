@@ -1412,7 +1412,7 @@ class TritonKernel(Kernel):
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
             
-        if hasattr(fn, 'code'):
+        if False and hasattr(fn, 'code'):
             print('Function has code')
             name = fn.code.split('(')[0].split('def ')[1]
             helper.splice(fn.code.strip())
@@ -1545,18 +1545,36 @@ class TritonKernel(Kernel):
         # #out = self.cse.generate(self.compute, f"tl.broadcast_to({out}, {})",)
         
         if return_out:
-            out = self.cse.generate(self.compute, f"tl.full({out_size}, 1, tl.float32)",)
+            #out = self.cse.generate(self.compute, f"tl.full({out_size}, 1, tl.float32)",)
+            out = self.cse.generate(self.compute, f"tl.full([32], 1, tl.float32)",)
         else:
             out = self.cse.generate(self.compute, f"tl.full({carry_size}, 1, tl.float32)",)
         
         #self.compute.splice(f"tl.store('0x{carry_out_ptr}', {carry})")
         #self.compute.splice(f"tl.store({carry_out_ptr}, {carry})")
         
-        t_loop = "t_loop"
+        # t_loop = "t_loop"
         carry_loop = "c_loop"
         out_loop = "o_loop"
         # loop_code = f"for {t_loop} in range({out_size[0]}):"
         # self.compute.splice(loop_code)
+        
+        import pdb
+        pdb.set_trace()
+        for t in range(xs_size[0]):
+            if reverse:
+                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + tl.arange({(xs_size[0] - t) * xs_size[1] * xs_size[2]}, {(xs_size[0] - t - 1) * xs_size[1] * xs_size[2]}))",)
+            else:
+                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + tl.arange({t * xs_size[1] * xs_size[2]}, {(t + 1) * xs_size[1] * xs_size[2]}))",)
+        
+            if t == 0:
+                self.compute.splice(f"{out_loop} = forward({init}, {xs_t})",)
+            else:
+                self.compute.splice(f"{out_loop} = forward({init}, {xs_t})",)
+            # if reverse:
+            #     self.compute.splice(f"tl.store({out} + tl.arange({(xs_size[0] - t) * xs_size[1] * xs_size[2]}, {(xs_size[0] - t - 1) * xs_size[1] * xs_size[2]}), {xs_t} + tl.arange(0, 2))")
+            # else:
+            #     self.compute.splice(f"tl.store({out} + tl.arange({t * xs_size[1] * xs_size[2]}, {(t+1) * xs_size[1] * xs_size[2]}), {xs_t} + tl.arange(0, 2))")
         
         # with self.compute.indent():
         #     if reverse:
@@ -1583,41 +1601,41 @@ class TritonKernel(Kernel):
         #     else:
         #         self.compute.splice(f"tl.store(out_ptr0, {xs_t})")
           
-        import pdb
-        pdb.set_trace()      
+        #import pdb
+        #pdb.set_trace()      
         #loop_code = f"for {t_loop} in range({out_size[0]}):"
         #self.compute.splice(loop_code)
         
-        for t in range(out_size[0]):
-            if reverse:
-                raise Exception('Failed!!!!!!!')
-                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + (({xs_size[0]} - {t}) * {xs_size[1]} * {xs_size[2]}))",)
-            else:
-                #xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + ({t} * {xs_size[1]} * {xs_size[2]}))",)
-                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}))",)
+        # for t in range(out_size[0]):
+        #     if reverse:
+        #         raise Exception('Failed!!!!!!!')
+        #         xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + (({xs_size[0]} - {t}) * {xs_size[1]} * {xs_size[2]}))",)
+        #     else:
+        #         #xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + ({t} * {xs_size[1]} * {xs_size[2]}))",)
+        #         xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}))",)
             
-            #x0
-            #self.compute.splice(f"if x0 < 1:")
-            #with self.compute.indent():
-            self.compute.splice(f"tl.device_print('xs_t', {xs_t})")
-            #self.compute.splice(f"tl.device_print('XBLOCK', XBLOCK)")
-            #self.compute.splice(f"tl.device_print('progID', tl.program_id(0))")
-            #self.compute.splice(f"tl.device_print('progLaunches', tl.num_programs(0))")
+        #     #x0
+        #     #self.compute.splice(f"if x0 < 1:")
+        #     #with self.compute.indent():
+        #     self.compute.splice(f"tl.device_print('xs_t', {xs_t})")
+        #     #self.compute.splice(f"tl.device_print('XBLOCK', XBLOCK)")
+        #     #self.compute.splice(f"tl.device_print('progID', tl.program_id(0))")
+        #     #self.compute.splice(f"tl.device_print('progLaunches', tl.num_programs(0))")
         
-            if return_out:
-                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
-                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
+        #     if return_out:
+        #         #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
+        #         #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
                 
-                #self.compute.splice(f"tl.store(out_ptr0 + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
-                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
-                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
+        #         #self.compute.splice(f"tl.store(out_ptr0 + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+        #         #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
+        #         #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
             
-                self.compute.splice(f"tl.store({out} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
-            else:
-                #self.compute.splice(f"tl.store(out_ptr0, {xs_t})")
-                #self.compute.splice(f"tl.store(out_ptr0 + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+        #         self.compute.splice(f"tl.store({out} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+        #     else:
+        #         #self.compute.splice(f"tl.store(out_ptr0, {xs_t})")
+        #         #self.compute.splice(f"tl.store(out_ptr0 + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
 
-                self.compute.splice(f"tl.store({out} + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+        #         self.compute.splice(f"tl.store({out} + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
                 
         #result_carry = self.cse.generate(self.compute, f"init_val",)
         #result_out = self.cse.generate(self.compute, f"x",)
@@ -1630,11 +1648,8 @@ class TritonKernel(Kernel):
         #result_out.mask_vars = masks  # type: ignore[attr-defined]
         
         #return carry, out#[carry_out_ptr, out_ptr]
-        # if return_out:
-        #     return out
-        # else:
-        #     return carry
-        return self.cse.generate(self.compute, f"tl.load(out_ptr0)",)
+        return out
+        # return self.cse.generate(self.compute, f"tl.load(out_ptr0)",)
 
     def codegen_body(self):
         """
@@ -1864,6 +1879,16 @@ class TritonKernel(Kernel):
                 self.inside_reduction and not self.persistent_reduction
             ):
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
+                
+        self.codegen_body()
+
+        for helper in self.helper_functions:
+            code.writeline("")
+            # code.writeline("def _triton_helper_fn0(arg0, arg1):")
+            # code.writeline("    tmp0 = arg0 + arg1")
+            # code.writeline("    return tmp0, arg0")
+            
+            code.splice(helper)
 
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
@@ -1887,18 +1912,19 @@ class TritonKernel(Kernel):
             """
         code.splice(heuristics_line)
         
-        # import pdb
-        # pdb.set_trace()
+        # # import pdb
+        # # pdb.set_trace()
         # for helper in self.helper_functions:
         #     code.writeline("")
         #     #code.splice(helper)
         #     for line in helper._lines:
-        #         code.writeline(line.replace('@triton.jit', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
+        #         code.writeline(line.replace('self, ', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
+        #         #code.writeline(line.replace('@triton.jit', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
         
-        code.writeline(f"")
-        code.writeline(f"@triton.jit")
+        #code.writeline(f"")
+        #code.writeline(f"@triton.jit")
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
-        self.codegen_body()
+        #self.codegen_body()
         
         with code.indent():
             self.codegen_static_numels(code)

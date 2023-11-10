@@ -36,6 +36,8 @@ scan_impl = HigherOrderOperator("scan_impl")
 
 
 def _maybe_run_with_interpreter(fn):
+    #import pdb
+    #pdb.set_trace()
     maybe_interpreted_fn = fn
     if isinstance(fn, torch.fx.GraphModule) and fx_traceback.has_preserved_node_meta():
         # Running graph with interpreter is needed for propagating the stack_trace
@@ -373,23 +375,27 @@ class ScanAutogradOp(torch.autograd.Function):
                 import pdb
                 pdb.set_trace()
 
-            flat_carries = _unstack_pytree(flat_carries)
+            # flat_carries = _unstack_pytree(flat_carries)
 
-            # needs to flat the carries nested list
-            # second call to save_for_backward will override whatever that is saved earlier
-            # therefore, need to save everything that is needed at once
-            flat_carries = [carry_entry for carry in flat_carries for carry_entry in carry]
+            # # needs to flat the carries nested list
+            # # second call to save_for_backward will override whatever that is saved earlier
+            # # therefore, need to save everything that is needed at once
+            # flat_carries = [carry_entry for carry in flat_carries for carry_entry in carry]
 
-            flat_carries_chunk = flat_carries[:-len(flat_carries) // leading_dim]
-            flat_carries_out_chunk = flat_carries[-len(flat_carries) // leading_dim:]
+            # flat_carries_chunk = flat_carries[:-len(flat_carries) // leading_dim]
+            # flat_carries_out_chunk = flat_carries[-len(flat_carries) // leading_dim:]
 
-            # TODO: we don't need to actually store the init args, just need the xs args
-            flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
+            # flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
+            
+            flat_carries_chunk = [carry[:-1, :] for carry in flat_carries]
+            flat_carries_out_chunk = [carry[-1, :] for carry in flat_carries]
+            
             ctx.save_for_backward(*flat_args, *flat_carries_chunk)
             ctx._num_out_args = len(flat_out)
-            # import pdb
-            # pdb.set_trace()
+            #import pdb
+            #pdb.set_trace()
             return (*flat_carries_out_chunk, *flat_out)
+            #return (*flat_out, *flat_out)
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -437,6 +443,8 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
     out_pytrees = []
     direction = -1 if reverse else 1
 
+    #import pdb
+    #pdb.set_trace()
     with disable_proxy_modes_tracing():
         if not isinstance(body_graph, torch.fx.GraphModule):
             # FW Expects BxF, BxF
@@ -483,11 +491,30 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
     # import pdb
     # pdb.set_trace()
     proxy_mode.tracer.root.register_module(next_name, body_graph)
+    #proxy_mode.tracer.root.register_module(next_name, f)
     #import pdb
     #pdb.set_trace()
     #carry = torch.empty(expanded_outs_comb[0][0].shape, device=expanded_outs_comb[0][0].device)
     #out = torch.empty(expanded_outs_comb[1][0].shape, device=expanded_outs_comb[1][0].device)
     #node_args = (body_graph, flat_init, flat_xs, carry, out)
+    #node_args = (body_graph, flat_init, flat_xs)
+    # import pdb
+    # pdb.set_trace()
+    
+    # from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+    # #ret = run_and_get_triton_code(args[0], args[1][0], args[2][0])
+    # #ret = run_and_get_triton_code(f, *flat_init, *flat_xs)
+    # def fn(c, x):
+    #     return c+1, x+1
+    # ret = run_and_get_triton_code(fn, torch.rand(1, 2, device='cuda'), torch.rand(10, 1, 2, device='cuda'))
+    
+    # import inspect
+    # import dis
+    # #fn_src = inspect.getsource(('def '.join(body_graph.print_readable().split('def')[1:])).strip())
+    # code = dis.dis(f)
+    # dis.compile(source, filename, mode, flags=0, dont_inherit=False, optimize=- 1)
+    
+    #node_args = (fn_src, flat_init, flat_xs)
     node_args = (body_graph, flat_init, flat_xs)
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"reverse": reverse},
@@ -817,6 +844,7 @@ def scan_func(f, init, xs, reverse=False):
         # import pdb
         # pdb.set_trace()
         example_outs = scan_impl(functional_map_fn, unwrapped_init, unwrapped_xs, reverse=reverse)
+        #example_outs = scan_impl(f, unwrapped_init, unwrapped_xs, reverse=reverse)
         # import pdb
         # pdb.set_trace()
         # TODO: This may need adjustment for different scenarios of the carry, e.g. nested lists

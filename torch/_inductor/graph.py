@@ -529,9 +529,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def call_function(self, target, args, kwargs):
         print(target)
-        #if target == torch.ops.scan_impl or target == scan:
-        #    import pdb
-        #    pdb.set_trace()
+        # if target == torch.ops.scan_impl or target == scan:
+        #     import pdb
+        #     pdb.set_trace()
+        #     from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+        #     #ret = run_and_get_triton_code(args[0], args[1][0], args[2][0])
+        #     ret = run_and_get_triton_code(args[0], *[torch.rand(*args[1][0].get_size(), device="cuda"), torch.rand(*args[1][0].get_size(), device="cuda")])
+
         
         if target is operator.getitem and isinstance(args[0], (list, tuple)):
             #import pdb

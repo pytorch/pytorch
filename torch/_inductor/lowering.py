@@ -645,14 +645,20 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
         #pdb.set_trace()
         init = [in_lo(init_size) for in_lo in init_load]
         xs = [xs_lo(xs_size) for xs_lo in xs_load]
-        carry_out = ops.scan(dtype, f, init[0], xs[0], xs_size, [carry_size[1]], out_size, reverse, return_out)
+        
+        # if return_out:
+        #     return xs
+        # else:
+        #     return init
+        
+        #carry_out = ops.scan(dtype, f, init[0], xs[0], xs_size, [carry_size[1]], out_size, reverse, return_out)
+        carry_out = ops.scan(dtype, ops.add, init[0], xs[0], xs_size, [carry_size[1]], out_size, reverse, return_out)
+        
         #import pdb
         #pdb.set_trace()
         #ops.store(output_name, indexer(idx), result_carry)
         return carry_out
 
-    
-    
     #import pdb
     #pdb.set_trace()
 
@@ -670,11 +676,16 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     #         rand_index_expr,
     #     )
     #     return ops.to_dtype(result, dtype)
+    
+    #def fn(idx):
+    #    return empty([1, 10, 1, 2], device=device, dtype=dtype)
 
     # carry = Pointwise.create(
     #     device=device,
     #     dtype=dtype,
+    #     #inner_fn=fn,
     #     inner_fn=functools.partial(fn, return_out=False),
+    #     #ranges=[1, 10, 1, 2],
     #     ranges=list(carry_size),
     # )
     
@@ -689,7 +700,9 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     #pdb.set_trace()
     
     return [init, [out]]
-    
+    #return [init, out]
+    #return [[carry], xs]
+    #return [init, xs]
     
     
     # #TODO Create the multi-layout portion here

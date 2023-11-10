@@ -302,6 +302,8 @@ def check_model(
 
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
 
+    #import pdb
+    #pdb.set_trace()
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
@@ -4770,13 +4772,42 @@ class CommonTemplate:
         
         import pdb
         pdb.set_trace()
+        
+    def test_scan_f(self):
+        
+        w = torch.rand(2, 5, device=torch.device('cuda')).contiguous()
+        
+        @torch._dynamo.optimize("inductor")
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            return (carry+1) @ w, (x+carry) @ w
+        
+        scan (f, init, xs)
+        
+        init = torch.rand(1, 2, device=torch.device('cuda')).contiguous()
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda')).contiguous()
+        
+        try:
+            #scan_res = self.common(f, [init, xs])
+            code = run_and_get_triton_code(f, init, xs)
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
+        
+        import pdb
+        pdb.set_trace()
+        # expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        # self.assertEqual(expected_carry_out, carry_out)
+        # self.assertEqual(expected_ys, ys)
     
     def test_scan_simple(self):
         
         #@torch.compile(backend='inductor', fullgraph=True)
         def f(carry, x):
             #return torch.ops.aten.clone(carry)+1, x+carry
-            return carry+1, x+carry
+            #return carry+1, x+carry
+            return carry, x
         
         init = torch.rand(1, 2, device=torch.device('cuda')).contiguous()
         xs = torch.rand(10, 1, 2, device=torch.device('cuda')).contiguous()
