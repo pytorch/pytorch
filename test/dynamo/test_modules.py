@@ -2276,7 +2276,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_mod = torch._dynamo.optimize(cnt)(mod)
         self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
-        
+
         # The state-dict doesn't contain the `_orig_mod` prefix
         self.assertEqual(mod.state_dict(), opt_mod.state_dict())
         self.assertEqual(opt_mod.state_dict(), opt_mod._orig_mod.state_dict())
@@ -2292,13 +2292,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertNotEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
         opt_mod.load_state_dict(new_mod.state_dict())
         self.assertEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
-        self.assertEqual(list(opt_mod.parameters()), list(opt_mod._orig_mod.parameters()))
+        self.assertEqual(
+            list(opt_mod.parameters()), list(opt_mod._orig_mod.parameters())
+        )
 
         # For backward-compatibility, load a state-dict with keys prefixed with `_orig_mod`
         old_mod = MockModule()
         state_dict = old_mod.state_dict()
-        legacy_opt_state_dict = {("_orig_mod." + k):v for k, v in state_dict.items()}
-        
+        legacy_opt_state_dict = {("_orig_mod." + k): v for k, v in state_dict.items()}
+
         new_mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
         opt_mod = torch._dynamo.optimize(cnt)(new_mod)
