@@ -100,7 +100,7 @@ def allreduce_hook(state: DefaultState, grad: torch.Tensor):
 
 def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.Tensor):
     """
-    Implements ''reduce_scatter'' algorithm for sharded FSDP startegies and pre,post divison of gradients.
+    Implement ''reduce_scatter'' algorithm for sharded FSDP startegies and pre,post divison of gradients.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors.
