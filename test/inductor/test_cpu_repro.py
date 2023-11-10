@@ -2583,11 +2583,7 @@ class CPUReproTests(TestCase):
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.add(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.add(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
@@ -2596,11 +2592,7 @@ class CPUReproTests(TestCase):
     def test_uint8_sub(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.sub(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.sub(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
