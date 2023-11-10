@@ -49,9 +49,7 @@ __all__ = [
 
 @dataclass
 class _StorageInfo:
-    """
-    This is the per entry storage info
-    """
+    """This is the per entry storage info."""
 
     relative_path: str
     offset: int
@@ -330,7 +328,7 @@ class FileSystemWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
     ) -> None:
         """
-        Initialize the writer pointing to `path`
+        Initialize the writer pointing to `path`.
 
         Args:
             path: directory where the checkpoint will be written to.
