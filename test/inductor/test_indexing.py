@@ -230,11 +230,11 @@ class ExprPrinterTests(TorchTestCase):
             expr = FloorDiv(s1, s2)
             self.assertEqual(pexpr(expr), "(s1 // s2)")
             if integer:
-                self.assertEqual(cexpr(expr), "div_floor_integer(s1, s2)")
+                self.assertEqual(cexpr(expr), "torch::inductor::div_floor_int64(s1, s2)")
             else:
                 self.assertEqual(
                     cexpr(expr),
-                    "div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
+                    "torch::inductor::div_floor_double(s1, s2)",
                 )
 
     def test_print_Min_Max(self):

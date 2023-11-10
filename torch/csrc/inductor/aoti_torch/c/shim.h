@@ -74,9 +74,6 @@ using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
 
-int64_t aoti_torch_div_floor_int64(int64_t a, int64_t b);
-double aoti_torch_div_floor_double(double a, double b);
-
 // Getter functions for retrieving various constants from the runtime, that
 // can subsequently be passed to other aoti_* functions.  By hiding these
 // behind functions, the precise value of device/dtype is NOT part of the

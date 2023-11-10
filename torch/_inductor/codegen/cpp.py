@@ -314,9 +314,9 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"div_floor_integer({x}, {div})"
+                x = f"torch::inductor::div_floor_int64({x}, {div})"
             else:
-                x = f"div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+                x = f"torch::inductor::div_floor_double({x}, {div})"
         mod = self.paren(self.doprint(mod))
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
@@ -325,9 +325,9 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"div_floor_integer({x}, {div})"
+            return f"torch::inductor::div_floor_int64({x}, {div})"
         return (
-            f"div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+            f"torch::inductor::div_floor_double({x}, {div})"
         )
 
     def _print_floor(self, expr):
@@ -2890,21 +2890,6 @@ class KernelGroup:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
-        # TODO: factor this out
-        if config.aot_inductor.abi_compatible:
-            code.writeline(
-                """
-                #define div_floor_integer aoti_torch_div_floor_int64
-                #define div_floor_floating aoti_torch_div_floor_double
-                """
-            )
-        else:
-            code.writeline(
-                """
-                #define div_floor_integer at::native::div_floor_integer
-                #define div_floor_floating at::native::div_floor_floating
-                """
-            )
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
