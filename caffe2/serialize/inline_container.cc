@@ -11,6 +11,7 @@
 #include <thread>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
@@ -88,7 +89,7 @@ static std::string basename(const std::string& name) {
 
 static std::string parentdir(const std::string& name) {
   size_t end = name.find_last_of('/');
-  if(end == std::string::npos) {
+  if (end == std::string::npos) {
     end = name.find_last_of('\\');
   }
 
@@ -179,7 +180,9 @@ void PyTorchStreamReader::init() {
   }
   c10::LogAPIUsageMetadata(
       "pytorch.stream.reader.metadata",
-      {{"serialization_id", serialization_id_}});
+      {{"serialization_id", serialization_id_},
+       {"file_name", archive_name_},
+       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
 
   // version check
   at::DataPtr version_ptr;
@@ -700,8 +703,8 @@ void PyTorchStreamWriter::writeEndOfFile() {
     ~Finalizer() {
       var_ = true;
     }
-    private:
-     bool& var_;
+   private:
+    bool& var_;
   } f(finalized_);
 
   auto allRecords = getAllWrittenRecords();
@@ -736,6 +739,11 @@ void PyTorchStreamWriter::writeEndOfFile() {
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());
+  c10::LogAPIUsageMetadata(
+      "pytorch.stream.writer.metadata",
+      {{"serialization_id", serialization_id_},
+       {"file_name", archive_name_},
+       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
   if (file_stream_.is_open()) {
     file_stream_.close();
   }
@@ -779,9 +787,6 @@ void PyTorchStreamWriter::writeSerializationId() {
         kSerializationIdRecordName,
         serialization_id_.c_str(),
         serialization_id_.size());
-    c10::LogAPIUsageMetadata(
-      "pytorch.stream.writer.metadata",
-      {{"serialization_id", serialization_id_}});
   }
 }
 
