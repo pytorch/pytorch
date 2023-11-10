@@ -949,6 +949,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test.sum().backward()
         self.assertEqual(leaf.grad, leaf_test.grad)
 
+    # https://github.com/pytorch/pytorch/issues/109053
+    def test_view_dtype_overload(self):
+        def f(x):
+            return x.view(torch.int32)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x1 = torch.ones(4, requires_grad=True)
+        out_ref = f(x1)
+        out_test = f_compiled(x1)
+        self.assertEqual(out_ref, out_test)
+
+        x2 = torch.ones(4, requires_grad=False)
+        out_ref = f(x2)
+        out_test = f_compiled(x2)
+        self.assertEqual(out_ref, out_test)
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):

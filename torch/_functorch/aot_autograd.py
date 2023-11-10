@@ -834,6 +834,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         aliased_out = aliased_out.detach()
     elif not aliased_base_tensor.requires_grad and target_requires_grad:
         aliased_out.requires_grad_(True)
+    # For outputs aliasing inputs, we need to check if the dtype has changed.
+    # as_strided() is the "most generic" view, but it does not cover cross-dtype views
+    if aliased_out.dtype != target_meta_tensor.dtype:
+        aliased_out = aliased_out.view(target_meta_tensor.dtype)
     return aliased_out
 
 def to_fun(t):
