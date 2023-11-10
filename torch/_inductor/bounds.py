@@ -80,7 +80,10 @@ class BoundVars:
                     )
 
                 result[key] = make_fn(subblock)
-
+            elif "check_bounds" in key:
+                idx = int(key[len("check_bounds") :])
+                size = self.loop_body.indirect_vars[idx - 1]
+                result[key] = partial(self.check_bounds, size)
             else:
                 assert "set_indirect" in key
                 idx = int(key[len("set_indirect") :])
@@ -105,6 +108,10 @@ class BoundVars:
         # dont bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
+
+    def check_bounds(self, index, size: ValueRanges) -> ValueRanges:
+        self.replacement_vals[index] = size
+        return size
 
     def set_indirect(self, old: Expr, new: ValueRanges) -> ValueRanges:
         assert isinstance(new, ValueRanges)

@@ -97,6 +97,10 @@ class MockHandler:
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_symbol(f"({str(index_var)})")
 
+    @staticmethod
+    def check_bounds(index_var, size):
+        return f"ops.check_bounds({index_var}, {size})"
+
     @classmethod
     def _init_cls(cls):
         def make_handler(format_string):
@@ -272,6 +276,8 @@ class OpsWrapper:
     def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
+        if check:
+            _ops.check_bounds(index, size)
         return _ops.indirect_indexing(index, size, check)
 
 

@@ -30,7 +30,6 @@ from typing_extensions import TypeAlias
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
-from torch.utils._sympy.value_ranges import bound_sympy
 
 
 @dataclass
@@ -255,13 +254,8 @@ class IndexPropagation:
         # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
         #     for SymPy expressions, so we don't want to repeat idx too much
 
-        # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
-            bounds = bound_sympy(index.value.expr)
-            # Code below imposes a regression on PyTorch code as only bounded
-            # variables are allowed to skip a TORCH_CHECK for getitem
-            if bounds.is_finite():
-                # If we are turning a indirect indexing into direct, we need to wrap it.
-                index = index.value.expr
-                return index + Where(index >= 0, 0, size)
+            index = index.value.expr
+            return index + Where(index >= 0, 0, size)
+
         return self.fallback("indirect_indexing", (index, size, check), {}).value

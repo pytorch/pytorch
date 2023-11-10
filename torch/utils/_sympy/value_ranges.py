@@ -113,11 +113,6 @@ class ValueRanges:
     def is_singleton(self) -> bool:
         return self.lower == self.upper
 
-    def is_finite(self) -> bool:
-        # should also check for ranges that are between [-sys.maxsize + delta, sys.maxsize - delta]
-        # for a sufficient large delta
-        return -sympy.oo != self.lower and sympy.oo != self.upper
-
     # TODO: this doesn't work with bools but arguably it should
     @classmethod
     def unknown(cls):

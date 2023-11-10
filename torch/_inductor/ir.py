@@ -6266,6 +6266,16 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
+            def check_bounds(index_proxy, size):
+                var_size = self.body.add_indirect(size)
+
+                def check(index):
+                    V.ops.check_bounds(index, size)
+
+                name = self.body.add_submodule(check, "check_bounds")
+                return tracer.create_proxy("call_module", name, (index_proxy,), {})
+
+            @staticmethod
             def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
