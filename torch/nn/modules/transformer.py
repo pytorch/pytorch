@@ -354,7 +354,6 @@ class TransformerEncoder(Module):
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
 
-        print(why_not_sparsity_fast_path)
         if not why_not_sparsity_fast_path:
             tensor_args = (
                 src,
