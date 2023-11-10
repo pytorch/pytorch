@@ -60,13 +60,19 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-C10_API C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input);
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+C10_API inline float fp8e5m2fnuz_to_fp32_value(uint8_t) {
+  assert(false); // e5m2fnuz is not supported by CUDA or HIP.
+}
+#else
+C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
+#endif
 
 /*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
  * 8-bit floating-point number in fp8 E5M2 format, in bit representation.
  */
-inline C10_HOST_DEVICE uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
+inline uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 65536.0f, which is the first value not
    * representable (i.e. the first value which would overflow in to the sign
@@ -140,18 +146,17 @@ struct alignas(1) Float8_e5m2fnuz {
   uint8_t x;
 
   struct from_bits_t {};
-  C10_HOST_DEVICE static constexpr from_bits_t from_bits() {
+  static constexpr from_bits_t from_bits() {
     return from_bits_t();
   }
 
   Float8_e5m2fnuz() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e5m2fnuz(uint8_t bits, from_bits_t)
-      : x(bits){};
-  inline C10_HOST_DEVICE Float8_e5m2fnuz(float value);
-  inline C10_HOST_DEVICE operator float() const;
-  inline C10_HOST_DEVICE bool isnan() const;
-  inline C10_HOST_DEVICE bool isinf() const;
+  constexpr Float8_e5m2fnuz(uint8_t bits, from_bits_t) : x(bits){};
+  inline Float8_e5m2fnuz(float value);
+  inline operator float() const;
+  inline bool isnan() const;
+  inline bool isinf() const;
 };
 
 C10_API std::ostream& operator<<(

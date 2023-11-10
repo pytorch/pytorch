@@ -17,23 +17,23 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Float8_e5m2fnuz::Float8_e5m2fnuz(float value) {
+inline Float8_e5m2fnuz::Float8_e5m2fnuz(float value) {
   x = detail::fp8e5m2fnuz_from_fp32_value(value);
 }
 
 /// Implicit conversions
 
-inline C10_HOST_DEVICE Float8_e5m2fnuz::operator float() const {
+inline Float8_e5m2fnuz::operator float() const {
   return detail::fp8e5m2fnuz_to_fp32_value(x);
 }
 
 /// Special values helpers
 
-inline C10_HOST_DEVICE bool Float8_e5m2fnuz::isnan() const {
+inline bool Float8_e5m2fnuz::isnan() const {
   return x == 0b10000000;
 }
 
-inline C10_HOST_DEVICE bool Float8_e5m2fnuz::isinf() const {
+inline bool Float8_e5m2fnuz::isinf() const {
   return false;
 }
 

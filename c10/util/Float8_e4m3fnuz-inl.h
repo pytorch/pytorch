@@ -13,18 +13,18 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Float8_e4m3fnuz::Float8_e4m3fnuz(float value)
+inline Float8_e4m3fnuz::Float8_e4m3fnuz(float value)
     : x(detail::fp8e4m3fnuz_from_fp32_value(value)) {}
 
 /// Implicit conversions
 
-inline C10_HOST_DEVICE Float8_e4m3fnuz::operator float() const {
+inline Float8_e4m3fnuz::operator float() const {
   return detail::fp8e4m3fnuz_to_fp32_value(x);
 }
 
 /// Special values helper
 
-inline C10_HOST_DEVICE bool Float8_e4m3fnuz::isnan() const {
+inline bool Float8_e4m3fnuz::isnan() const {
   return x == 0b10000000;
 }
 
