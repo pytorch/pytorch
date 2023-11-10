@@ -7101,9 +7101,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         fp32 = Tensor([1.5])
         self.run_test(CatModel(), (fp16, fp32))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_does_not_trigger_upcast_type_promotion(self):
         class DoNotUpcastModel(torch.nn.Module):
             def forward(self, x):
                 scale = x.size()[-1] ** -0.5
+                # 'scale' is exported as onnx float32 rank 0 tensor.
+                # The following 'Mul' should NOT be promoted to float32.
                 return x * scale
 
         x = torch.ones(2, 3, dtype=torch.float16)
