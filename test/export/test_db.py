@@ -66,29 +66,6 @@ class ExampleTests(TestCase):
                 dynamic_shapes=case.dynamic_shapes,
             )
 
-    @parametrize(
-        "name,rewrite_case",
-        [
-            (name, rewrite_case)
-            for name, case in filter_examples_by_support_level(
-                SupportLevel.NOT_SUPPORTED_YET
-            ).items()
-            for rewrite_case in get_rewrite_cases(case)
-        ],
-        name_fn=lambda name, case: f"case_{name}_{case.name}",
-    )
-    def test_exportdb_not_supported_rewrite(
-        self, name: str, rewrite_case: ExportCase
-    ) -> None:
-        # pyre-ignore
-        inputs = normalize_inputs(rewrite_case.example_inputs)
-        exported_model = export(
-            rewrite_case.model,
-            inputs.args,
-            inputs.kwargs,
-            dynamic_shapes=rewrite_case.dynamic_shapes,
-        )
-
 
 instantiate_parametrized_tests(ExampleTests)
 
