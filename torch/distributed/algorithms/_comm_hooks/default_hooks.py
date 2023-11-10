@@ -82,7 +82,7 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     """
-    Implements the 'all_reduce' algorithm and perform pre- and post-divison of gradients.
+    Implement the 'all_reduce' algorithm and perform pre- and post-divison of gradients.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors.
