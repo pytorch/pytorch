@@ -1092,10 +1092,13 @@ Frequently Asked Questions
    We don't have official GPU support yet, but this is an area of active development, you can find more information
    `here <https://github.com/pytorch/pytorch/issues/87395>`_
 
-2. Where can I get ONNX support for my quantized model?:
+2. Where can I get ONNX support for my quantized model?
 
-   You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
-   or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
+   If you encounter an issue when exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository by prefixing the issue title with ``[ONNX]``.
+
+   If you encounter an issue with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
+
+   You may reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
 
 3. How can I use quantization with LSTM's?:
 
