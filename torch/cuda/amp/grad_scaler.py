@@ -354,7 +354,7 @@ class GradScaler:
         self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
     ) -> Optional[float]:
         """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
- 
+
         :meth:`step` carries out the following two operations:
 
         1.  Internally invokes ``unscale_(optimizer)`` (unless :meth:`unscale_` was explicitly called for ``optimizer``
