@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <c10/util/SmallBuffer.h>
+#include <c10/core/impl/cow/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -10,6 +11,7 @@
 #include <ATen/ops/_make_dual_native.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
 #include <ATen/ops/_unpack_dual_native.h>
+#include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -88,6 +90,21 @@ Tensor _new_zeros_with_same_feature_meta(
 
 bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
+}
+
+Tensor _lazy_clone(Tensor const& self) {
+  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
+  c10::intrusive_ptr<c10::StorageImpl> storage =
+    c10::impl::cow::lazy_clone_storage(*self_storage);
+  TORCH_CHECK(storage != nullptr);
+  auto tensor = c10::make_intrusive<c10::TensorImpl>(
+      c10::Storage(std::move(storage)),
+      self.key_set(),
+      self.dtype());
+  tensor->set_sizes_and_strides(self.sym_sizes(),
+                                self.sym_strides(),
+                                self.sym_storage_offset());
+  return Tensor(std::move(tensor));
 }
 
 } // namespace native

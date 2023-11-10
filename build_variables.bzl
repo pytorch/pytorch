@@ -1336,7 +1336,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/UpSampleTrilinear3d.cpp",
     "aten/src/ATen/native/VariableMethodStubs.cpp",
     "aten/src/ATen/native/WeightNorm.cpp",
-    "aten/src/ATen/native/_lazy_clone.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
