@@ -1794,6 +1794,8 @@ def forward(self, x_1, output_1):
         # to be in the metadata, so there might be false negatives
         self.assertTrue("aten.copy" not in codes[0])
         self.assertTrue("aten.clone" not in codes[0])
+        # The following checks that there are only two tensor outputs in
+        # the compiled graph
         if dynamic and grad:
             self.assertTrue("return (buf1, buf0, s0, )" in codes[0])
         else:
