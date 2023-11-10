@@ -299,7 +299,10 @@ def _unflatten_communicated_optim_state(
                 if getattr(osd_config, "_use_dtensor", False):
                     assert fsdp_state._device_mesh is not None
                     optim_state = _ext_chunk_dtensor(
-                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                        optim_state,
+                        fsdp_state.rank,
+                        fsdp_state._device_mesh,
+                        fsdp_state._fsdp_extension,
                     )
                 else:
                     assert fsdp_state.process_group is not None
@@ -309,6 +312,7 @@ def _unflatten_communicated_optim_state(
                         fsdp_state.world_size,
                         fsdp_state._device_handle.device_count(),
                         fsdp_state.process_group,
+                        fsdp_state._fsdp_extension,
                     )
             unflat_state_param[state_name] = optim_state
 
@@ -1455,7 +1459,10 @@ def _unflatten_orig_param_states(
             if getattr(osd_config, "_use_dtensor", False):
                 assert fsdp_state._device_mesh is not None
                 value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state._device_mesh,
+                    fsdp_state._fsdp_extension,
                 )
             else:
                 assert fsdp_state.process_group is not None
@@ -1465,6 +1472,7 @@ def _unflatten_orig_param_states(
                     fsdp_state.world_size,
                     fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
+                    fsdp_state._fsdp_extension,
                 )
         elif not cpu_offload:
             with SimpleProfiler.profile("clone"):
