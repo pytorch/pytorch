@@ -28,10 +28,12 @@ __all__ = [
 
 
 def is_built():
-    r"""Returns whether PyTorch is built with CUDA support.  Note that this
-    doesn't necessarily mean CUDA is available; just that if this PyTorch
-    binary were run a machine with working CUDA drivers and devices, we
-    would be able to use it."""
+    r"""
+    Return whether PyTorch is built with CUDA support.
+
+    Note that this doesn't necessarily mean CUDA is available; just that if this PyTorch
+    binary were run on a machine with working CUDA drivers and devices, we would be able to use it.
+    """
     return torch._C._has_cuda
 
 
@@ -53,8 +55,9 @@ class cuFFTPlanCacheAttrContextProp:
 
 class cuFFTPlanCache:
     r"""
-    Represents a specific plan cache for a specific `device_index`. The
-    attributes `size` and `max_size`, and method `clear`, can fetch and/ or
+    Represent a specific plan cache for a specific `device_index`.
+
+    The attributes `size` and `max_size`, and method `clear`, can fetch and/ or
     change properties of the C++ cuFFT plan cache.
     """
 
@@ -77,8 +80,7 @@ class cuFFTPlanCache:
 
 class cuFFTPlanCacheManager:
     r"""
-    Represents all cuFFT plan caches. When indexed with a device object/index,
-    this object returns the `cuFFTPlanCache` corresponding to that device.
+    Represent all cuFFT plan caches, return the cuFFTPlanCache for a given device when indexed.
 
     Finally, this object, when used directly as a `cuFFTPlanCache` object (e.g.,
     setting the `.max_size`) attribute, the current device's cuFFT plan cache is
@@ -146,6 +148,8 @@ def preferred_linalg_library(
     backend: Union[None, str, torch._C._LinalgBackend] = None
 ) -> torch._C._LinalgBackend:
     r"""
+    Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
+
     .. warning:: This flag is experimental and subject to change.
 
     When PyTorch runs a CUDA linear algebra operation it often uses the cuSOLVER or MAGMA libraries,
@@ -184,7 +188,6 @@ def preferred_linalg_library(
     * :func:`torch.linalg.svd`
     * :func:`torch.linalg.svdvals`
     """
-
     if backend is None:
         pass
     elif isinstance(backend, str):
