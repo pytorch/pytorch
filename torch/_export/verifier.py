@@ -6,8 +6,13 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export import ExportGraphSignature
-from torch.export.exported_program import ConstantArgument, ExportedProgram, InputKind
+from torch.export.graph_signature import (
+    ExportGraphSignature,
+    InputKind,
+    SymIntArgument,
+    TensorArgument,
+)
+from torch.export.exported_program import ExportedProgram
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 
@@ -220,102 +225,78 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     # Check every node in the signature exists in the graph
     input_node_names = [node.name for node in exported_program.graph.nodes if node.op == "placeholder"]
-    for node in exported_program.graph.nodes:
-        if node.op != "placeholder":
-            break
-        input_node_names.append(node.name)
-    output_node = list(exported_program.graph.nodes)[-1]
-    assert output_node.op == "output"
-    output_node_names = [node.name for node in output_node.args[0]]
 
-    def check_exists(node_list, container):
-        for node in node_list:
-            if node not in container:
-                raise SpecViolationError(
-                    f"Node {node} found in the signature's is not in the graph."
-                )
-    check_exists(gs.user_inputs, input_node_names)
-    check_exists(gs.user_outputs, output_node_names)
-    check_exists(gs.inputs_to_parameters.keys(), input_node_names)
-    check_exists(gs.inputs_to_parameters.values(), gs.parameters)
-    check_exists(gs.inputs_to_buffers.keys(), input_node_names)
-    check_exists(gs.inputs_to_buffers.values(), gs.buffers)
-    check_exists(gs.buffers_to_mutate.keys(), output_node_names)
-    check_exists(gs.buffers_to_mutate.values(), gs.buffers)
-
-    check_exists(bs_grad_to_param.keys(), output_node_names)
-    check_exists(bs_grad_to_param.values(), gs.parameters)
-    check_exists(bs_grad_to_user_inputs.keys(), output_node_names)
-    check_exists(bs_grad_to_user_inputs.values(), gs.user_inputs)
-
-    # Check parameters
-    for param in gs.parameters:
-        if param not in exported_program.state_dict:
-            raise SpecViolationError(
-                f"Parameter {param} is not in the state dict."
-            )
-
-        if not isinstance(exported_program.state_dict[param], torch.nn.Parameter):
-            raise SpecViolationError(
-                f"State dict entry for parameter {param} is not an instance of torch.nn.Parameter."
-            )
-
-    # Check buffers
-    for buffer in gs.buffers:
-        if buffer not in exported_program.state_dict:
-            raise SpecViolationError(
-                f"Buffer {buffer} is not in the state dict."
-            )
-
-    # Check inputs
-    placeholder_nodes = [n.name for n in exported_program.graph.nodes if n.op == "placeholder"]
-    if len(placeholder_nodes) != len(gs.input_specs):
+    if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
-            f"Number of placeholders nodes {len(placeholder_nodes)} doesn't match "
-            "with the number of inputs specified by the graph signature: \n"
-            f"Number of parameters: {len(gs.inputs_to_parameters)}. \n"
-            f"Number of buffers: {len(gs.inputs_to_buffers)}. \n"
-            f"Number of user inputs: {len(gs.user_inputs)}. \n"
+            f"Number of graph inputs ({len(input_node_names)}) "
+            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
         )
 
-    parameter_nodes = placeholder_nodes[:len(gs.parameters)]
-    buffer_nodes = placeholder_nodes[len(gs.parameters):len(gs.parameters) + len(gs.buffers)]
-    user_input_nodes = placeholder_nodes[len(gs.parameters) + len(gs.buffers):]
-
-    for param_node, param_name in zip(parameter_nodes, gs.parameters):
-        if (
-            param_node not in gs.inputs_to_parameters or
-            gs.inputs_to_parameters[param_node] != param_name
-        ):
-            raise SpecViolationError(
-                f"Parameter input {param_node} is not in the correct "
-                "order or is not found in the exported program's parameter list. \n"
-                f"List of parameters, in order: {gs.parameters} \n"
-                f"Parameter node to parameter name mapping: {gs.inputs_to_parameters} \n"
-            )
-
-    for buffer_node, buffer_name in zip(buffer_nodes, gs.buffers):
-        if (
-            buffer_node not in gs.inputs_to_buffers or
-            gs.inputs_to_buffers[buffer_node] != buffer_name
-        ):
-            raise SpecViolationError(
-                f"Buffer input {buffer_node} is not in the correct "
-                "order or is not found in the exported program's buffer list. \n"
-                f"List of buffers, in order: {gs.buffers} \n"
-                f"Buffer node to buffer name mapping: {gs.inputs_to_buffers} \n"
-            )
-
-    graph_inputs = [s for s in gs.input_specs if s.kind == InputKind.USER_INPUT]
-    for user_input_node, graph_input in zip(user_input_nodes, graph_inputs):
-        if not isinstance(graph_input.arg, ConstantArgument):
-            assert hasattr(graph_input.arg, "name")
-            if user_input_node != graph_input.arg.name:
+    for input_spec, node in zip(gs.input_specs, input_node_names):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument)):
+            if input_spec.arg.name != node:
                 raise SpecViolationError(
-                    f"User input {user_input_node} is not in the correct "
-                    "order or is not found in the "
-                    f"exported program's user_input list: {gs.user_inputs}. "
+                    f"Input spec name {input_spec.arg.name} does not match node name {node}"
                 )
+
+        if input_spec.kind == InputKind.USER_INPUT:
+            continue
+
+        elif input_spec.kind == InputKind.PARAMETER:
+            if not isinstance(input_spec.arg, TensorArgument):
+                raise SpecViolationError(
+                    f"Parameter {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            param = input_spec.target
+            if param not in exported_program.state_dict:
+                raise SpecViolationError(
+                    f"Parameter {param} is not in the state dict."
+                )
+
+            if not isinstance(exported_program.state_dict[param], torch.nn.Parameter):
+                raise SpecViolationError(
+                    f"State dict entry for parameter {param} is not an instance of torch.nn.Parameter."
+                )
+
+        elif input_spec.kind == InputKind.BUFFER:
+            if not isinstance(input_spec.arg, TensorArgument):
+                raise SpecViolationError(
+                    f"Buffer {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            buffer = input_spec.target
+            if buffer not in exported_program.state_dict:
+                raise SpecViolationError(
+                    f"Buffer {buffer} is not in the state dict."
+                )
+        elif input_spec.kind == InputKind.CONSTANT_TENSOR:
+            if not isinstance(input_spec.arg, TensorArgument):
+                raise SpecViolationError(
+                    f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            tensor_const = input_spec.target
+            if tensor_const not in exported_program.tensor_constants:
+                raise SpecViolationError(
+                    f"Constant tensor {tensor_const} is not in the tensor constants dictionary."
+                )
+        else:
+            raise SpecViolationError(
+                f"Unknown InputKind {input_spec.kind}."
+            )
 
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
@@ -350,7 +331,7 @@ def _verify_exported_program_signature(exported_program) -> None:
             raise SpecViolationError(
                 f"User output {user_output_node} is not in the correct "
                 "order or is not found in the "
-                f"exported program's user_output list: {gs.user_output}. "
+                f"exported program's user_output list: {gs.user_outputs}. "
             )
 
 

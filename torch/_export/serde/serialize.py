@@ -17,7 +17,6 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
-from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
@@ -164,7 +163,7 @@ _SYM_BOOL_OPS = {
 
 @dataclass
 class SerializedArtifact:
-    serialized_exported_program: bytes
+    serialized_exported_program: Union[ExportedProgram, bytes]
     serialized_state_dict: bytes
     serialized_tensor_constants: bytes
 
@@ -965,7 +964,7 @@ class ExportedProgramSerializer:
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes, bytes]:
+    def serialize(self, exported_program: ep.ExportedProgram) -> SerializedArtifact:
         serialized_graph_module = (
             GraphModuleSerializer(
                 exported_program.graph_signature,
@@ -975,7 +974,7 @@ class ExportedProgramSerializer:
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
 
-        return (
+        return SerializedArtifact(
             ExportedProgram(
                 graph_module=serialized_graph_module,
                 opset_version=self.opset_version,
@@ -1548,40 +1547,41 @@ class ExportedProgramDeserializer:
         return range_constraints
 
     def deserialize(
-        self,
-        serialized_exported_program: ExportedProgram,
-        serialized_state_dict: bytes,
-        serialized_tensor_constants: bytes
+        self, serialized_artifact: SerializedArtifact
     ) -> ep.ExportedProgram:
-        if serialized_exported_program.schema_version != SCHEMA_VERSION:
+        assert isinstance(serialized_artifact.serialized_exported_program, ExportedProgram)
+
+        if serialized_artifact.serialized_exported_program.schema_version != SCHEMA_VERSION:
             raise SerializeError(
-                f"Serialized schema version {serialized_exported_program.schema_version} "
+                f"Serialized schema version {serialized_artifact.serialized_exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
             )
 
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
-            for k, v in serialized_exported_program.range_constraints.items()
+            for k, v in serialized_artifact.serialized_exported_program.range_constraints.items()
         }
 
         res = (
             GraphModuleDeserializer()
             .deserialize(
-                serialized_exported_program.graph_module,
+                serialized_artifact.serialized_exported_program.graph_module,
                 symbol_name_to_range,
             )
         )
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range, res.names_to_symbols,
         )
-        model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
+        model_opset_version: Optional[Dict[str, int]] = serialized_artifact.serialized_exported_program.opset_version
         self._validate_model_opset_version(model_opset_version)
 
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
-        state_dict = deserialize_torch_artifact(serialized_state_dict)
-        tensor_constants = deserialize_torch_artifact(serialized_tensor_constants)
-        equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
+        state_dict = deserialize_torch_artifact(serialized_artifact.serialized_state_dict)
+        tensor_constants = deserialize_torch_artifact(serialized_artifact.serialized_tensor_constants)
+        equality_constraints = deserialize_equality_constraints(
+            serialized_artifact.serialized_exported_program.equality_constraints
+        )
 
         exported_program = ep.ExportedProgram(
             res.graph_module,
@@ -1650,17 +1650,18 @@ def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> SerializedArtifact:
-    serialized_exported_program, serialized_state_dict, serialized_tensor_constants = (
+    serialized_artifact = (
         ExportedProgramSerializer(opset_version).serialize(exported_program)
     )
+    assert isinstance(serialized_artifact.serialized_exported_program, ExportedProgram)
     json_program = json.dumps(
-        dataclasses.asdict(serialized_exported_program), cls=EnumEncoder
+        dataclasses.asdict(serialized_artifact.serialized_exported_program), cls=EnumEncoder
     )
     json_bytes = json_program.encode('utf-8')
     artifact = SerializedArtifact(
         json_bytes,
-        serialized_state_dict,
-        serialized_tensor_constants
+        serialized_artifact.serialized_state_dict,
+        serialized_artifact.serialized_tensor_constants
     )
     return artifact
 
@@ -1707,14 +1708,17 @@ def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ep.ExportedProgram:
+    assert isinstance(artifact.serialized_exported_program, bytes)
     exported_program_str = artifact.serialized_exported_program.decode('utf-8')
     exported_program_dict = json.loads(exported_program_str)
     serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
     return (
         ExportedProgramDeserializer(expected_opset_version)
         .deserialize(
-            serialized_exported_program,
-            artifact.serialized_state_dict,
-            artifact.serialized_tensor_constants
+            SerializedArtifact(
+                serialized_exported_program,
+                artifact.serialized_state_dict,
+                artifact.serialized_tensor_constants
+            )
         )
     )

@@ -117,6 +117,8 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
+        self._tensor_constants = tensor_constants or {}
+
         from torch._export.verifier import Verifier
 
         if verifier is None:
@@ -125,8 +127,6 @@ class ExportedProgram:
         self._verifier = verifier
         # Validate should be always the last step of the constructor.
         self.verifier().check(self)
-
-        self._tensor_constants = tensor_constants or {}
 
     @property
     @compatibility(is_backward_compatible=False)

@@ -730,20 +730,20 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(detail::SelectiveStr<false>) & {
     return *this;
   }
-  Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
-    return def(raw_schema.operator const char*(), tags);
+  Library& def(detail::SelectiveStr<true> raw_schema) & {
+    return def(raw_schema.operator const char*());
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
+        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f));
   }
 
   template <typename Func>

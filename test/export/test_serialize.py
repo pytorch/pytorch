@@ -81,8 +81,8 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.serialized_exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensors
         self.assertEqual(len(node.outputs), 3)
@@ -106,8 +106,8 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,)).run_decompositions()
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.serialized_exported_program.graph_module.graph.nodes[-1]
         # split.Tensor gets decomposed to split_with_sizes by the core ATen decomposition table
         self.assertEqual(node.target, "torch.ops.aten.split_with_sizes.default")
         self.assertEqual(len(node.outputs), 1)
@@ -150,8 +150,8 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         ).run_decompositions()
 
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.serialized_exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
 
@@ -174,9 +174,9 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,)).run_decompositions()
-        serialized = ExportedProgramSerializer().serialize(exported_module)[0]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
 
-        node = serialized.graph_module.graph.nodes[-1]
+        node = serialized.serialized_exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
         self.assertEqual(len(node.inputs), 4)
         self.assertEqual(node.inputs[2].name, "right")
@@ -423,9 +423,7 @@ class TestDeserialize(TestCase):
     def test_tensor_tensor_list(self):
         from torch.library import Library
         lib = Library("_export", "FRAGMENT")
-        lib.define(
-            "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
-            tags=torch.Tag.pt2_compliant_tag)
+        lib.define("_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])")
 
         def _test_tensor_tensor_list_output(x, y):
             return y, [x]
@@ -482,10 +480,10 @@ class TestSchemaVersioning(TestCase):
 
         ep = export(f, (torch.randn(1, 3),))
 
-        serialized_ep, serialized_state_dict, serialized_tensor_constants = ExportedProgramSerializer().serialize(ep)
-        serialized_ep.schema_version = -1
+        serialized_artifact = ExportedProgramSerializer().serialize(ep)
+        serialized_artifact.serialized_exported_program.schema_version = -1
         with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
-            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict, serialized_tensor_constants)
+            ExportedProgramDeserializer().deserialize(serialized_artifact)
 
 
 class TestOpVersioning(TestCase):
