@@ -14,7 +14,7 @@ __all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal.
 
-    Input signal composed of several input planes, where channels occupy the second dimension.
+    The input signal is composed of several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
 
     .. math::
