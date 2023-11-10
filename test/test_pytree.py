@@ -4,8 +4,8 @@ import unittest
 from collections import namedtuple, OrderedDict
 
 import torch
-import torch.utils._pytree.api.cxx as cxx_pytree
-import torch.utils._pytree.api.python as py_pytree
+import torch.utils._cxx_pytree as cxx_pytree
+import torch.utils._pytree as py_pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
