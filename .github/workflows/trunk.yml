@@ -183,14 +183,14 @@ jobs:
       docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "executorch", shard: 1, num_shards: 1 },
         ]}
 
-#  linux-jammy-py3-clang12-executorch-test:
-#    name: linux-jammy-py3-clang12-executorch
-#    uses: ./.github/workflows/_linux-test.yml
-#    needs: linux-jammy-py3-clang12-executorch-build
-#    with:
-#      build-environment: linux-jammy-py3-clang12-executorch
-#      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
-#      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
+  linux-jammy-py3-clang12-executorch-test:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3-clang12-executorch-build
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}

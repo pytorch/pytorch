@@ -34,3 +34,9 @@ class TestQuantizePT2EModels(TestCase):
             if "scaled_dot_product" in str(op):
                 non_core_aten_op_found = True
         self.assertFalse(non_core_aten_op_found)
+
+
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import run_tests
+
+    run_tests()
