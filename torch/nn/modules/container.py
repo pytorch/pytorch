@@ -508,7 +508,7 @@ class ModuleDict(Module):
         return self._modules.values()
 
     def update(self, modules: Mapping[str, Module]) -> None:
-        r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a mapping or an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ModuleDict` with key-value pairs from a mapping, overwriting existing keys.
 
         .. note::
             If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
@@ -771,7 +771,11 @@ class ParameterDict(Module):
         return key in self._keys
 
     def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
-        """If key is in the ParameterDict, return its value. If not, insert `key` with a parameter `default` and return `default`. `default` defaults to `None`.
+        """Set the default for a key in the Parameterdict.
+
+        If key is in the ParameterDict, return its value.
+        If not, insert `key` with a parameter `default` and return `default`.
+        `default` defaults to `None`.
 
         Args:
             key (str): key to set default for
@@ -836,7 +840,7 @@ class ParameterDict(Module):
         return (self[k] for k in self._keys)
 
     def update(self, parameters: Union[Mapping[str, Any], 'ParameterDict']) -> None:
-        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a mapping or an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from parameters, overwriting existing keys.
 
         .. note::
             If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or

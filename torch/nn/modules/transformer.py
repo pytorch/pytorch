@@ -20,7 +20,10 @@ def _generate_square_subsequent_mask(
         device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
         dtype: torch.dtype = torch.get_default_dtype(),
 ) -> Tensor:
-    r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0)."""
+    r"""Generate a square causal mask for the sequence.
+
+    The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
+    """
     return torch.triu(
         torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
         diagonal=1,
