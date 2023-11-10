@@ -255,10 +255,13 @@ class ExportedProgram:
         ordered_buffers = tuple(
             self.state_dict[name] for name in self.graph_signature.buffers
         )
-        ordered_tensor_constants = tuple(
-            self.tensor_constants[name]
-            for name in self.graph_signature.lifted_tensor_constants
-        )
+        if hasattr(self.graph_signature, "lifted_tensor_constants"):
+            ordered_tensor_constants = tuple(
+                self.tensor_constants[name]
+                for name in self.graph_signature.lifted_tensor_constants
+            )
+        else:
+            ordered_tensor_constants = ()
         self._check_input_constraints(
             *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
         )
