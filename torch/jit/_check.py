@@ -7,7 +7,9 @@ import torch
 
 
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
-    """Check the ``__init__`` method of a given ``nn.Module`` to ensure that all instance-level attributes can be properly initialized.
+    """Check the ``__init__`` method of a given ``nn.Module``.
+
+    It ensures that all instance-level attributes can be properly initialized.
 
     Specifically, we do type inference based on attribute values...even
     if the attribute in question has already been typed using
@@ -127,7 +129,9 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         self.visiting_class_level_ann = False
 
     def visit_AnnAssign(self, node):
-        """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method and see if it conforms to our attribute annotation rules."""
+        """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method.
+
+        It checks if it conforms to our attribute annotation rules."""
         # If we have a local variable
         try:
             if node.target.value.id != "self":
