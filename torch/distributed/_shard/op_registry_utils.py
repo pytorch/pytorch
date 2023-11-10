@@ -8,7 +8,7 @@ and PartialTensor.
 """
 
 def _register_op(op, func, op_table):
-    """Perform basic validation and registers the provided op in the op_table."""
+    """Perform basic validation and register the provided op in the op_table."""
     if len(signature(func).parameters) != 4:
         raise TypeError(
             f'Custom sharded op function expects signature: '

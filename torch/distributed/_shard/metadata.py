@@ -1,4 +1,4 @@
-"""Tensor Metadata."""
+"""ShardedTensor Metadata."""
 from dataclasses import dataclass
 from typing import List, Union, Optional
 from functools import reduce

@@ -4,7 +4,7 @@ from torch.utils import _pytree as pytree
 from typing import Optional
 
 def _basic_validation(op, args=(), kwargs=None):
-    """Validate common things across all operations go in here."""
+    """Validate common things across all operations."""
     from torch.distributed._shard.sharded_tensor import ShardedTensor
 
     if len(args) == 0 and (kwargs is None or len(kwargs) == 0):

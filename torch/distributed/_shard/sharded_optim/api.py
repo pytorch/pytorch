@@ -1,4 +1,4 @@
-"""Sharded Optimization API."""
+"""Sharded Optimizer API."""
 from typing import List, Union, Mapping, Dict, Any
 
 import torch.optim as optim
