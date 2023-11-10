@@ -514,7 +514,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
 #if LLVM_VERSION_MAJOR >= 15
   OpqPtrTy_ = llvm::PointerType::getUnqual(getContext());
 #else
-  Int8PtrTy_ = llvm::Type::getInt8PtrTy((getContext());
+  Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
 #endif
 
   {
