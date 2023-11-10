@@ -171,6 +171,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
+    EnableHermeticPyObject g2;
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),
