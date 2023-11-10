@@ -575,7 +575,7 @@ class SubprocessHandler:
         self.proc: subprocess.Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
-        kwargs = {}
+        kwargs: Dict[str, Any] = {}
         if not IS_WINDOWS:
             kwargs['start_new_session'] = True
         return subprocess.Popen(
