@@ -3880,10 +3880,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, _ = self.get_kernel_and_configs()
-        # If we are autotuning, not all arguments will be passed
-        self.ordered_kwargs_for_cpp_kernel = [
-            arg for arg in kernel.arg_names if arg in kernel_args
-        ]
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
 
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
