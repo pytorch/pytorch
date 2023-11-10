@@ -160,35 +160,12 @@ def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
-    from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+    from .variables import TorchCtxManagerClassVariable
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
     torch_objects = set()
     torch_name_rule_map = dict()
-
-    # Add obj to torch_objects set if it's a torch function or method.
-    # This is used to generate the in graph function list based on heuristic.
-    def heuristic_record_if_in_graph_function(obj, module, name):
-        try:
-            if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-                obj = obj.__wrapped__
-        except Exception:
-            pass
-        if isinstance(
-            obj,
-            (
-                types.FunctionType,
-                types.MethodType,
-                types.BuiltinFunctionType,
-                types.MethodDescriptorType,
-                types.WrapperDescriptorType,
-            ),
-        ):
-            torch_name_rule_map[
-                f"{module.__name__}.{name}"
-            ] = TorchInGraphFunctionVariable
-            torch_objects.add(obj)
 
     # Add obj to torch_objects set if it's a torch context manager class.
     # This is used to generate the ctx manager class list based on heuristic.
@@ -328,11 +305,9 @@ def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    heuristic_record_if_in_graph_function(obj, module, name)
                     heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    heuristic_record_if_in_graph_function(obj, module, name)
                     heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 

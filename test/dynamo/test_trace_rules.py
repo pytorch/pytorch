@@ -114,7 +114,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         )
         x = generated_torch_name_rule_set - used_torch_name_rule_set
         y = used_torch_name_rule_set - generated_torch_name_rule_set
-        breakpoint()
         msg1 = (
             f"New torch objects: {x} "
             "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
