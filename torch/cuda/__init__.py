@@ -1,7 +1,7 @@
 r"""
 This package adds support for CUDA tensor types.
 
-It implements the same function as CPU tensors, but they utilize 
+It implements the same function as CPU tensors, but they utilize
 GPUs for computation.
 
 It is lazily initialized, so you can always import it, and use
@@ -257,10 +257,10 @@ OutOfMemoryError = torch._C._OutOfMemoryError
 
 def init():
     r"""Initialize PyTorch's CUDA state.
-    
-    You may need to call this explicitly if you are interacting with 
-    PyTorch via its C API, as Python bindings for CUDA functionality 
-    will not be available until this initialization takes place.  
+
+    You may need to call this explicitly if you are interacting with
+    PyTorch via its C API, as Python bindings for CUDA functionality
+    will not be available until this initialization takes place.
     Ordinary users should not need this, as all of PyTorch's CUDA methods
     automatically initialize CUDA state on-demand.
 
