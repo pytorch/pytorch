@@ -167,6 +167,10 @@ struct C10_API Allocator {
   // Requires: input data was allocated by the same allocator.
   DataPtr clone(const void* data, std::size_t n) const;
 
+  // Checks if DataPtr has a simple context, not wrapped with any out of the
+  // ordinary contexts.
+  virtual bool is_simple_data_ptr(const DataPtr& data_ptr) const;
+
   // If this returns a non nullptr, it means that allocate()
   // is guaranteed to return a unique_ptr with this deleter attached;
   // it means the rawAllocate and rawDeallocate APIs are safe to use.
