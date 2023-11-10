@@ -17,6 +17,10 @@ void Allocator::default_copy_data(
   std::memcpy(dest, src, count);
 }
 
+bool Allocator::is_simple_data_ptr(const DataPtr& data_ptr) const {
+  return data_ptr.get() == data_ptr.get_context();
+}
+
 static void deleteInefficientStdFunctionContext(void* ptr) {
   delete static_cast<InefficientStdFunctionContext*>(ptr);
 }
