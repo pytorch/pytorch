@@ -622,23 +622,16 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-        @dataclass
-        class MyOtherDataClass:  # the pytree registration don't allow registering the same class twice
-            x: int
-            y: int
-            z: int = None
-
         # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyOtherDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyOtherDataClass")
+        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
 
-        dt = MyOtherDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
             TreeSpec(
-                MyOtherDataClass,
+                MyDataClass,
                 (
-                    MyOtherDataClass,
+                    MyDataClass,
                     ['x', 'y', 'z'],
                     [],
                 ),
@@ -648,7 +641,7 @@ class TestExport(TestCase):
         self.assertEqual(flat, [3, 4, None])
 
         orig_dt = tree_unflatten(flat, spec)
-        self.assertTrue(isinstance(orig_dt, MyOtherDataClass))
+        self.assertTrue(isinstance(orig_dt, MyDataClass))
         self.assertEqual(orig_dt.x, 3)
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)

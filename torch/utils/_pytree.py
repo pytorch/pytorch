@@ -150,58 +150,11 @@ def _register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
-    _private_register_pytree_node(
-        cls,
-        flatten_fn,
-        unflatten_fn,
-        to_str_fn=to_str_fn,  # deprecated
-        maybe_from_str_fn=maybe_from_str_fn,  # deprecated
-        serialized_type_name=serialized_type_name,
-        to_dumpable_context=to_dumpable_context,
-        from_dumpable_context=from_dumpable_context,
-    )
-
-    try:
-        from . import _cxx_pytree as cxx
-    except ImportError:
-        pass
-    else:
-        cxx._private_register_pytree_node(
-            cls,
-            flatten_fn,
-            unflatten_fn,
-            serialized_type_name=serialized_type_name,
-            to_dumpable_context=to_dumpable_context,
-            from_dumpable_context=from_dumpable_context,
-        )
-
-
-register_pytree_node = _register_pytree_node
-
-
-def _private_register_pytree_node(
-    cls: Any,
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
-    *,
-    serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
-) -> None:
-    """This is an internal function that is used to register a pytree node type
-    for the Python pytree only. End-users should use :func:`register_pytree_node`
-    instead.
-    """
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
             "to_str_fn and maybe_from_str_fn is deprecated. "
             "Please use to_dumpable_context and from_dumpable_context instead."
         )
-
-    if cls in SUPPORTED_NODES:
-        raise ValueError(f"{cls} is already registered as pytree node.")
 
     node_def = NodeDef(
         cls,
@@ -217,7 +170,7 @@ def _private_register_pytree_node(
         )
 
     if serialized_type_name is None:
-        serialized_type_name = f"{cls.__module__}.{cls.__qualname__}"
+        serialized_type_name = f"{cls.__module__}.{cls.__name__}"
 
     serialize_node_def = _SerializeNodeDef(
         cls,
@@ -290,25 +243,25 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_private_register_pytree_node(
+_register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
 )
-_private_register_pytree_node(
+_register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
     serialized_type_name="builtins.list",
 )
-_private_register_pytree_node(
+_register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
     serialized_type_name="builtins.tuple",
 )
-_private_register_pytree_node(
+_register_pytree_node(
     namedtuple,
     _namedtuple_flatten,
     _namedtuple_unflatten,
@@ -316,7 +269,7 @@ _private_register_pytree_node(
     from_dumpable_context=_namedtuple_deserialize,
     serialized_type_name="collections.namedtuple",
 )
-_private_register_pytree_node(
+_register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
@@ -776,7 +729,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if treespec.type not in SUPPORTED_SERIALIZED_TYPES:
         raise NotImplementedError(
-            f"Serializing {treespec.type} in pytree is not registered.",
+            f"Serializing {treespec.type} in pytree is not registered."
         )
 
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[treespec.type]
