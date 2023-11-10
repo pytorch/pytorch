@@ -129,10 +129,8 @@ struct ZeroTensorAllocator final : public at::Allocator {
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {}
   at::Device device_;
-private:
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-  }
 };
 
 using binary_fn = void (*)(TensorIterator&);

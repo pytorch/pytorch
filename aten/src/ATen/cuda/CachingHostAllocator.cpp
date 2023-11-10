@@ -501,7 +501,6 @@ struct CUDAHostAllocatorWrapper final : public at::Allocator {
         at::DeviceType::CPU};
   }
 
-private:
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     getCUDAHostAllocator().copy_data(dest, src, count);
   }
