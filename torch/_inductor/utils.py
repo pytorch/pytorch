@@ -873,10 +873,10 @@ def use_aten_gemm_kernels():
 
 class DebugDirManager:
     counter = itertools.count(0)
+    prev_debug_name: str
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root
