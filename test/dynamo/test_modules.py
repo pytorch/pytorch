@@ -21,10 +21,10 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-try:
-    from . import test_functions
-except ImportError:
-    import test_functions
+
+test_functions = torch._dynamo.testing.load_test_module(
+    __file__, "dynamo.test_functions"
+)
 
 
 class BasicModule(torch.nn.Module):
