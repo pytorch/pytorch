@@ -21,7 +21,7 @@ SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
 def register_dataclass_as_pytree_node(
-    cls: Any,
+    typ: Any,
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
@@ -31,11 +31,11 @@ def register_dataclass_as_pytree_node(
     return_none_fields: bool = False,
 ) -> None:
     assert dataclasses.is_dataclass(
-        cls
-    ), f"Only dataclasses can be registered with this function: {cls}"
+        typ
+    ), f"Only dataclasses can be registered with this function: {typ}"
 
-    serialized_type = f"{cls.__module__}.{cls.__qualname__}"
-    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = cls
+    serialized_type = f"{typ.__module__}.{typ.__name__}"
+    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = typ
 
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
         flattened = []
@@ -48,7 +48,7 @@ def register_dataclass_as_pytree_node(
                 flat_names.append(name)
             else:
                 none_names.append(name)
-        return flattened, (cls, flat_names, none_names)
+        return flattened, (typ, flat_names, none_names)
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
@@ -69,7 +69,7 @@ def register_dataclass_as_pytree_node(
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
-            f"Both to_dumpable_context and from_dumpable_context for {cls} must "
+            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
             "be None or registered."
         )
 
@@ -85,7 +85,7 @@ def register_dataclass_as_pytree_node(
     )
 
     _register_pytree_node(
-        cls,
+        typ,
         flatten_fn,
         unflatten_fn,
         serialized_type_name=serialized_type_name,
