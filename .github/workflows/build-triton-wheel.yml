@@ -43,12 +43,12 @@ jobs:
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           submodules: false
 
@@ -56,7 +56,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -111,7 +111,7 @@ jobs:
             ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
   upload-wheel:
     runs-on: linux.20_04.4x
@@ -171,12 +171,12 @@ jobs:
       ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           submodules: false
 
@@ -184,7 +184,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -224,5 +224,5 @@ jobs:
             ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
