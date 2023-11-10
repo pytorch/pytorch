@@ -2572,6 +2572,32 @@ class CPUReproTests(TestCase):
                 # TODO: support vectorization for int div
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_uint8_add(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            add = torch.add(x, y)
+            matmul = torch.matmul(add, add)
+            neg = torch.neg(add)
+            to = neg.to(torch.int32)
+            return (matmul, to)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_uint8_sub(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            add = torch.sub(x, y)
+            matmul = torch.matmul(add, add)
+            neg = torch.neg(add)
+            to = neg.to(torch.int32)
+            return (matmul, to)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
 
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import run_inductor_tests

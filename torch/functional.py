@@ -762,7 +762,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
 
-    .. note:: Currently in the CUDA implementation and the CPU implementation when dim is specified,
+    .. note:: Currently in the CUDA implementation and the CPU implementation,
         `torch.unique` always sort the tensor at the beginning regardless of the `sort` argument.
         Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
         :func:`torch.unique_consecutive` which avoids the sorting.
