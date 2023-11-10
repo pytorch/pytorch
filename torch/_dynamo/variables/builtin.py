@@ -11,7 +11,6 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
-from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
     unimplemented,
