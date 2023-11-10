@@ -31,7 +31,11 @@ from torch.utils import _pytree as pytree
 
 if HAS_CUDA:
     import triton
-    from torch.testing._internal.triton_utils import add_kernel
+    from torch.testing._internal.triton_utils import (
+        add_kernel,
+        add_kernel_2d_autotuned,
+        add_kernel_autotuned,
+    )
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -520,6 +524,50 @@ class AOTInductorTestsTemplate:
         ]
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    def test_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output, updated_amax = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        constraints = [
+            torch._export.dynamic_dim(x, 0) >= 1,
+            torch._export.dynamic_dim(x, 0) <= 2048,
+        ]
+        self.check_model(
+            Model(dtype),
+            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            constraints=constraints,
+        )
 
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -1042,7 +1090,8 @@ class AOTInductorTestsTemplate:
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_basic(self, grid_type, num_dims, dynamic):
+    @common_utils.parametrize("autotune", [False, True])
+    def test_triton_kernel(self, grid_type, num_dims, dynamic, autotune):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
@@ -1055,21 +1104,54 @@ class AOTInductorTestsTemplate:
                 x = x.clone()
                 y = y.clone()
                 output = torch.zeros_like(x)
-                n_elements = output.numel()
-
-                def grid_fn(meta):
-                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-                if grid_type == 1:
-                    grid = (n_elements,)
-                elif grid_type == 2:
-                    grid = lambda meta: (  # noqa: E731
-                        triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
-                    )
+                if autotune and num_dims == 2:
+                    x_elements = output.size()[0]
+                    y_elements = output.size()[1]
                 else:
-                    grid = grid_fn
+                    n_elements = output.numel()
 
-                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                # Select grid
+                if autotune and num_dims == 2:
+                    if grid_type == 1:
+                        grid = (x_elements, y_elements)
+                    elif grid_type == 2:
+                        grid = lambda meta: (  # noqa: E731
+                            triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                            triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                        )
+                    else:
+
+                        def grid_fn(meta):
+                            return (
+                                triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                                triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                            )
+
+                        grid = grid_fn
+                else:
+                    if grid_type == 1:
+                        grid = (n_elements,)
+                    elif grid_type == 2:
+                        grid = lambda meta: (  # noqa: E731
+                            triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                        )
+                    else:
+
+                        def grid_fn(meta):
+                            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                        grid = grid_fn
+
+                # Select kernel
+                if autotune:
+                    if num_dims == 1:
+                        add_kernel_autotuned[grid](x, y, output, n_elements)
+                    else:
+                        add_kernel_2d_autotuned[grid](
+                            x, y, output, x_elements, y_elements
+                        )
+                else:
+                    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
                 return output
 
         dims = [10] * num_dims
