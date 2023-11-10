@@ -4229,10 +4229,18 @@ def create_aot_dispatcher_function(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
+    # Note [nop saved tensor hooks during tracing]
+    # https://github.com/pytorch/pytorch/issues/113263
+    # If any saved tensor hooks are active, we **don't** want to trace them.
+    # Instead, we'll let them run at runtime, around the custom autograd.Function
+    # that we generate in torch.compile.
+    def nop_hook(x):
+        return x
+
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
-
+    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker(), \
+            torch.autograd.graph.saved_tensors_hooks(nop_hook, nop_hook):
         def process_inputs(flat_args):
             def convert(idx, x):
                 if shape_env is not None:

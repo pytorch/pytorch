@@ -966,6 +966,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test = f_compiled(x2)
         self.assertEqual(out_ref, out_test)
 
+    # https://github.com/pytorch/pytorch/issues/113263
+    def test_unpack_hooks_dont_run_during_tracing(self):
+        def f(x, y):
+            return x * y
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        pack_count = 0
+        unpack_count = 0
+
+        def pack_hook(x):
+            breakpoint()
+            nonlocal pack_count
+            pack_count += 1
+            return x
+
+        # unpack hook shouldn't run during compilation, while we trace the forward
+        def unpack_hook(x):
+            breakpoint()
+            nonlocal unpack_count
+            unpack_count += 1
+            return x
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            out_test = f_compiled(x, y)
+            breakpoint()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 0)
+            out_test.sum().backward()
+            self.assertEqual(pack_count, 1)
+            self.assertEqual(unpack_count, 1)
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):

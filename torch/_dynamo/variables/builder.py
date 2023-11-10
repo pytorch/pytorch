@@ -1358,7 +1358,13 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    with preserve_rng_state():
+    # See Note [nop saved tensor hooks during tracing]
+    def nop_hook(x):
+        return x
+
+    with preserve_rng_state(), torch.autograd.graph.saved_tensors_hooks(
+        nop_hook, nop_hook
+    ):
         if example_value is None:
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
