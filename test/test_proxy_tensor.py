@@ -959,6 +959,16 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    def test_non_symint_size_spec(self):
+        # this isn't really a proxy tensor test, but it's the most convenient
+        # way to get a fake tensor with symbolic sizes
+        def f(x):
+            torch._C._non_sym_sizes(x)
+            return x + 1
+
+        x = torch.randn(2, 3)
+        make_fx(f, tracing_mode="symbolic")(x)
+
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
         def f(y, x):
@@ -973,7 +983,6 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
-    @unittest.skip("Need to reenable")
     def test_repeat_interleave_unbacked_output_size(self):
         def f(x, y):
             s = x.sum().item()
@@ -1603,7 +1612,7 @@ L['a'].size()[0] < 20""")
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @torch.fx.experimental._config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
             assert t.shape[0] == 10
@@ -1663,20 +1672,16 @@ symbolic_tensor_failures = {
     xfail('combinations', ''),
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
@@ -1723,6 +1728,68 @@ inplace_symbolic_tensor_failures = {
     xfail('unique', ''),
 }
 
+out_symbolic_tensor_failures = {
+    xfail('_native_batch_norm_legit', ''),
+    xfail('aminmax', ''),
+    xfail('angle', ''),
+    xfail('argmax', ''),
+    xfail('argmin', ''),
+    xfail('bmm', ''),
+    xfail('cummax', ''),
+    xfail('cummin', ''),
+    xfail('fft.fft2', ''),
+    xfail('fft.fftn', ''),
+    xfail('fft.ifft2', ''),
+    xfail('fft.ifftn', ''),
+    xfail('gather', ''),
+    xfail('i0', ''),
+    xfail('linalg.cholesky', ''),
+    xfail('linalg.cholesky_ex', ''),
+    xfail('linalg.det', ''),
+    xfail('linalg.det', 'singular'),
+    xfail('linalg.eigh', ''),
+    xfail('linalg.inv', ''),
+    xfail('linalg.inv_ex', ''),
+    xfail('linalg.ldl_factor', ''),
+    xfail('linalg.ldl_factor_ex', ''),
+    xfail('linalg.lu', ''),
+    xfail('linalg.lu_factor', ''),
+    xfail('linalg.lu_factor_ex', ''),
+    xfail('linalg.pinv', ''),
+    xfail('linalg.pinv', 'hermitian'),
+    xfail('linalg.qr', ''),
+    xfail('linalg.slogdet', ''),
+    xfail('linalg.solve_ex', ''),
+    xfail('linalg.svd', ''),
+    xfail('linalg.svdvals', ''),
+    xfail('lu', ''),
+    xfail('lu_unpack', ''),
+    xfail('max', 'reduction_with_dim'),
+    xfail('min', 'reduction_with_dim'),
+    xfail('mode', ''),
+    xfail('nn.functional.avg_pool2d', ''),
+    xfail('nn.functional.linear', ''),
+    xfail('qr', ''),
+    xfail('round', ''),
+    xfail('round', 'decimals_0'),
+    xfail('round', 'decimals_3'),
+    xfail('round', 'decimals_neg_3'),
+    xfail('scatter_add', ''),
+    xfail('scatter', ''),
+    xfail('sort', ''),
+    xfail('svd', ''),
+    xfail('take_along_dim', ''),
+    xfail('topk', ''),
+    xfail('triangular_solve', ''),
+    xfail('view_copy', ''),
+}
+
+out_symbolic_tensor_segfaults = {
+    skip('nanmean', ''),
+}
+
+out_symbolic_tensor_failures.update(out_symbolic_tensor_segfaults)
+
 # Copies inputs to inplace operations to avoid inplace modifications
 #   to leaves requiring gradient
 def _get_safe_inplace(inplace_variant):
@@ -1732,22 +1799,29 @@ def _get_safe_inplace(inplace_variant):
 
     return _fn
 
-def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
+def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, out=False):
     fn = _get_safe_inplace(op.get_inplace()) if inplace else op.op
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
 
     # Limit ourselves to first 100 inputs so symbolic tracing tests don't take too long
-    for sample_input in itertools.islice(sample_inputs_itr, 100):
+    count = 100
+    if out:
+        count = 5
+    for sample_input in itertools.islice(sample_inputs_itr, count):
         if inplace and sample_input.broadcasts_input:
             continue
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
+        if out:
+            expected = fn(*args, **kwargs)
+            kwargs['out'] = expected
 
         try:
             optests.make_fx_check(fn, args, kwargs, tracing_mode, self.assertEqual,
                                   randomize_data=True)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
+
 
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
@@ -1773,6 +1847,14 @@ class TestProxyTensorOpInfo(TestCase):
         if not op.get_inplace():
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
+
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
+        if not op.supports_out:
+            self.skipTest("Op doesn't support out")
+        _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
 only_for = ("cpu")

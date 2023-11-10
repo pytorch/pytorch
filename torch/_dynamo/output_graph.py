@@ -19,6 +19,7 @@ from typing import (
     Optional,
     OrderedDict,
     Set,
+    Tuple,
     Union,
 )
 
@@ -33,6 +34,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._guards import (
     Checkpointable,
+    GlobalContextCheckpointState,
     Guard,
     GuardsCheckpointState,
     Source,
@@ -60,7 +62,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .guards import GuardBuilder
+from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
@@ -119,7 +121,6 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
     non_compliant_ops: Set[torch._ops.OpOverload]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
@@ -256,6 +257,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.cleanup_hooks: List[Callable[[], Any]] = []
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -380,6 +382,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+    def add_cleanup_hook(self, fn: Callable[[], Any]):
+        self.cleanup_hooks.append(fn)
+
+    def call_cleanup_hooks(self):
+        for hook in reversed(self.cleanup_hooks):
+            hook()
+        self.cleanup_hooks.clear()
+
     @property
     def root_tracer(self):
         return self.tracers[0]
@@ -465,8 +475,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def nn_modules(self) -> Dict[str, torch.nn.Module]:
         return self.tracing_context.module_context.nn_modules
 
-    def save_global_state(self):
-        global_state = self.tracing_context.global_context.global_state
+    def save_global_state(self, out=None):
+        """
+        Saves to out if it is provided. Else saves to the tracing context's global_state.
+        """
+        global_state = (
+            out if out is not None else self.tracing_context.global_context.global_state
+        )
 
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
@@ -520,7 +535,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides),
             set(self.non_compliant_ops),
         )
         self.timestamp += 1
@@ -538,7 +552,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
             self.non_compliant_ops,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
@@ -548,7 +561,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
-            if node.meta["creation_timestamp"] > self.timestamp:
+            if (
+                node.meta["creation_timestamp"] > self.timestamp
+                # placeholders here may have been lazily added by existing objects
+                and node.op != "placeholder"
+            ):
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
@@ -657,7 +674,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
-        options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
@@ -679,10 +695,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tracer = self.root_tracer
 
             if not is_constant_source(source):
-                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             if get_static_address_type(target) == "guarded":
-                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -698,7 +714,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
+            install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(target), module_key, **options)
@@ -964,6 +980,24 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         )
         return graph_sizes_str
 
+    @contextlib.contextmanager
+    def restore_global_state(self):
+        """
+        Momentarily restores the global state to what it was prior to tracing the current output
+        """
+        prior_global_state = self.tracing_context.global_context.copy_graphstate()
+        current_global_state: Dict[str, Tuple[Any, bool]] = {}
+        self.save_global_state(out=current_global_state)
+        try:
+            # Set to state prior to tracing the graph
+            self.tracing_context.global_context.restore_graphstate(prior_global_state)
+            yield
+        finally:
+            # Reset to state at the current time (e.g. before calling the user compiler)
+            self.tracing_context.global_context.restore_graphstate(
+                GlobalContextCheckpointState(current_global_state)
+            )
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -974,9 +1008,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
-        for output in rv:
-            self.guards.update(output.guards)
-
         self.create_node(
             "output",
             "output",
@@ -1002,7 +1033,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-        compiled_fn = self.call_user_compiler(gm)
+        self.call_cleanup_hooks()
+        with self.restore_global_state():
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
