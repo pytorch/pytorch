@@ -50,7 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
@@ -1054,20 +1054,12 @@ class CheckFunctionManager:
                 return converted
 
             dynamic_dims_sizes = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "size"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "stride"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
                 for t in tensor_check_examples
             ]
 

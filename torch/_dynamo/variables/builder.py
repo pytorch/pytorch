@@ -33,7 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
     is_allowed,
@@ -1746,7 +1746,7 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
         }
