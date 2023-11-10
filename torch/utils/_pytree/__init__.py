@@ -43,6 +43,7 @@ from .api.python import (  # used by internals and/or third-party packages
     _broadcast_to_and_flatten,
     _dict_flatten,
     _dict_unflatten,
+    _get_node_type,
     _is_leaf,
     _list_flatten,
     _list_unflatten,
