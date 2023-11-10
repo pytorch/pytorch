@@ -375,7 +375,7 @@ def unpackage_script_module(
 ) -> torch.nn.Module:
     """
     Call by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
-    
+
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
     if not isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
