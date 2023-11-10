@@ -393,12 +393,9 @@ def load_test_module(from_test_file, wanted_module):
     testdir = Path(from_test_file).absolute().parent
     # go up at most 3 directories to find the test root
     for _ in range(3):
-        if (testdir / "run_test.py").exists():
-            break
+        target = testdir / f"{wanted_module.replace('.', '/')}.py"
+        if target.exists():
+            with mock.patch("sys.path", [str(testdir), *sys.path]):
+                return SourceFileLoader(wanted_module, str(target)).load_module()
         testdir = testdir.parent
-    assert (testdir / "run_test.py").exists(), testdir
-
-    with mock.patch("sys.path", [str(testdir), *sys.path]):
-        return SourceFileLoader(
-            wanted_module, str(testdir / f"{wanted_module.replace('.', '/')}.py")
-        ).load_module()
+    raise ImportError(f"failed to find {wanted_module} from {from_test_file}")
