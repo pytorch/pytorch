@@ -48,7 +48,7 @@ struct TORCH_API RawTensorMetadataBase {
 
   StorageImplData data_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
-  c10::Layout layout_{};
+  c10::Layout layout_{c10::Layout::Strided};
   uint32_t dim_{0};
 };
 
