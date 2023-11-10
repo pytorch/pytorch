@@ -729,7 +729,7 @@ def register_replacement(
         """
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
             )
         )
         for i, grad in enumerate(requires_grad):
@@ -747,7 +747,7 @@ def register_replacement(
                     )
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(
-            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names
+            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names  # type: ignore[has-type]
         )
         specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
         if specific_pattern_match and extra_check(specific_pattern_match):
@@ -758,17 +758,23 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:
+        for name in argnames:  # type: ignore[has-type]
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             args.append(kwargs.pop(f"tangents_{i}"))
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
+    if trace_fn is training_graph:
+        # If inference mode is enabled during compilation, assume that we don't
+        # want to match on any training graph patterns
+        if torch.is_inference_mode_enabled():
+            return False
+
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
         argnames = [*inspect.signature(search_fn).parameters.keys()]
-        requires_grad = [
+        requires_grad: List[bool] = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
         search_gm = trace_fn(search_fn, example_inputs)
@@ -932,8 +938,12 @@ def _not_implemented(*args, **kwargs):
 
 
 def fx_to_pattern(
-    gm, ignore_types=(), argnames=(), scalar_workaround=(), exclusive_arg_names=()
-):
+    gm,
+    ignore_types=(),
+    argnames=(),
+    scalar_workaround=(),
+    exclusive_arg_names=(),
+) -> PatternExpr:
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
     patterns that can only match single functions and fixed length lists.

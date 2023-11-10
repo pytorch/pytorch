@@ -949,16 +949,17 @@ def forward(self, primals_1):
             # Thanks to the detach_() AOT Autograd doesn't need to do anything.
             # `out` will show up as having OutputType.non_alias,
             # and ._is_view() == False
-            return out
+            return out, a + 1
         inp = [torch.ones(2, 4, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(2, 4, requires_grad=True)]
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     t = torch.ops.aten.t.default(mul);  mul = None
-    return [t]""")
+    add = torch.ops.aten.add.Tensor(primals_1, 1);  primals_1 = None
+    return [t, add]""")
 
 
     def test_output_aliases_intermediate_inplace_view_and_view(self):
@@ -2697,6 +2698,22 @@ class TestPartitioning(AOTTestCase):
         res = aot_fn(x)
 
         assert torch.allclose(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/110666
+    def test_generate_gives_inference_graph(self):
+        # We expect this to give an inference graph
+        def generate(x):
+            with torch.no_grad():
+                return torch.mul(x, x)
+
+        inference_graph_cell = [None]
+        inference_compiler = partial(extract_graph, graph_cell=inference_graph_cell)
+        aot_fn = aot_function(generate, nop, inference_compiler=inference_compiler)
+        # Even though x requires grad, we should still get an inference graph
+        x = torch.randn(4, requires_grad=True)
+        res = aot_fn(x)
+        self.assertTrue(inference_graph_cell[0] is not None)
+
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
