@@ -358,7 +358,6 @@ coverage_ignore_functions = [
     # torch.ao.quantization.quantizer.embedding_quantizer
     "get_embedding_operators_config",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "convert_scalars_to_attrs",
     "get_bias_qspec",
     "get_input_act_qspec",
     "get_output_act_qspec",
@@ -979,6 +978,7 @@ coverage_ignore_functions = [
     "is_symbolic",
     "parallel_and",
     "parallel_or",
+    "sym_eq",
     "tensor_has_hints",
     # torch.fx.experimental.unification.core
     "reify",
