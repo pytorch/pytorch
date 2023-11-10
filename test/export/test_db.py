@@ -5,7 +5,10 @@ import unittest
 import torch._dynamo as torchdynamo
 from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
-from torch._export.db.examples import filter_examples_by_support_level, get_rewrite_cases
+from torch._export.db.examples import (
+    filter_examples_by_support_level,
+    get_rewrite_cases,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -87,6 +90,7 @@ class ExampleTests(TestCase):
                 inputs.kwargs,
                 dynamic_shapes=rewrite_case.dynamic_shapes,
             )
+
 
 instantiate_parametrized_tests(ExampleTests)
 
