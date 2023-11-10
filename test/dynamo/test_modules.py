@@ -2310,6 +2310,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_mod.state_dict(), old_mod.state_dict())
         self.assertEqual(old_mod.state_dict(), new_mod.state_dict())
 
+        # When only a submodule is an `OptimizedModule`
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        mod.linear = torch._dynamo.optimize(cnt)(mod.linear)
+        assert not any("_orig_mod" in key for key in mod.state_dict())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
