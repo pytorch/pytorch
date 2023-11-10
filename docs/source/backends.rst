@@ -129,7 +129,6 @@ torch.backends.mha
 .. autofunction::  torch.backends.mha.set_fastpath_enabled
 
 
-
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mps
