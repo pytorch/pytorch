@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Registry.h>
 
 #include <array>
@@ -135,6 +136,11 @@ struct AllocatorState {
   virtual ~AllocatorState() = default;
 };
 
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
 struct TraceEntry {
   enum Action {
     ALLOC, // API made to the caching allocator for new memory
@@ -158,19 +164,23 @@ struct TraceEntry {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
+      approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         device_(device),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {}
+        size_(size) {
+    time_.approx_t_ = time;
+  }
   Action action_;
   int device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
   int64_t size_;
+  trace_time_ time_;
 };
 
 struct SnapshotInfo {
