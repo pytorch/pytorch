@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     check_model,
     run_and_get_cpp_code,
-    skip_if_mac,
     TestCase,
     vec_dtypes,
 )
@@ -2201,7 +2200,6 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
-    @skip_if_mac()
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
@@ -2544,7 +2542,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @skip_if_mac()
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self):

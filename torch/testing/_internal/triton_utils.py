@@ -134,3 +134,9 @@ else:
     triton = None
     tl = None
     add_kernel = None
+    add_kernel_autotuned = None
+    add_kernel_2d_autotuned = None
+    mul2_kernel = None
+    mul2_inplace_kernel = None
+    zero_negs = None
+    indirection_kernel = None
