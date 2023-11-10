@@ -46,8 +46,8 @@ install_pip_dependencies() {
   TORCHVISION_VERSION=$(cat ci_commit_pins/vision.txt)
 
   pip_install --pre \
-    torchaudio=="${TORCHAUDIO_VERSION}" \
-    torchvision=="${TORCHVISION_VERSION}" \
+    torchaudio=="${TORCHAUDIO_VERSION}.${NIGHTLY}" \
+    torchvision=="${TORCHVISION_VERSION}.${NIGHTLY}" \
     --index-url https://download.pytorch.org/whl/nightly/cpu
 
   popd
