@@ -551,7 +551,7 @@ def _flatten_optim_state(
     unflat_osd_state: Dict[str, Dict[str, Any]],
     unflat_param_names: List[str],
 ) -> Dict[str, Any]:
-    """Flatten optimizer state for a single flat parameter.
+    """Flatten the optimizer state for a single flat parameter.
 
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
     flat parameter in ``fsdp_param_info`` corresponding to the unflattened
