@@ -127,13 +127,13 @@ jobs:
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
         with:
           github-secret: ${{ secrets.github-token }}
 
         # Setup the environment
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
         with:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
 
@@ -154,7 +154,6 @@ jobs:
       - name: Checkout PyTorch to pytorch dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
 
@@ -167,7 +166,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.1
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -198,12 +197,12 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.1
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
@@ -213,7 +212,7 @@ jobs:
 
       - name: Teardown Linux
         if: always()
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
 
       - name: Chown workspace
         if: always()
