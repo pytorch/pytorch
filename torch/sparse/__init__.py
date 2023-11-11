@@ -391,45 +391,45 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
-    The following options exists to manage sparsr tensor invariants
-    checking in sparse tensor construction:
+The following options exists to manage sparsr tensor invariants
+checking in sparse tensor construction:
 
-    1. Using a context manager:
+1. Using a context manager:
 
-    .. code:: python
+   .. code:: python
 
-        with torch.sparse.check_sparse_tensor_invariants():
-            run_my_model()
+       with torch.sparse.check_sparse_tensor_invariants():
+           run_my_model()
 
-    2. Using a procedural approach:
+2. Using a procedural approach:
 
-    .. code:: python
+   .. code:: python
 
-        prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
-        torch.sparse.check_sparse_tensor_invariants.enable()
+       prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+       torch.sparse.check_sparse_tensor_invariants.enable()
 
-        run_my_model()
+       run_my_model()
 
-        if not prev_checks_enabled:
-            torch.sparse.check_sparse_tensor_invariants.disable()
+       if not prev_checks_enabled:
+           torch.sparse.check_sparse_tensor_invariants.disable()
 
-    3. Using function decoration:
+3. Using function decoration:
 
-    .. code:: python
+   .. code:: python
 
-        @torch.sparse.check_sparse_tensor_invariants()
-        def run_my_model():
-            ...
+       @torch.sparse.check_sparse_tensor_invariants()
+       def run_my_model():
+           ...
 
-        run_my_model()
+       run_my_model()
 
-    4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
-    For example:
+4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
+   For example:
 
-    >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
-    Traceback (most recent call last):
-        File "<stdin>", line 1, in <module>
-    RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
+   >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
+   Traceback (most recent call last):
+     File "<stdin>", line 1, in <module>
+   RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
     """
 
     @staticmethod
