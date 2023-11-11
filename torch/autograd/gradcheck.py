@@ -307,7 +307,9 @@ def _get_numerical_jacobian(
 
 
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
-    """Deprecate the API for computing numerical Jacobians of a given function and its inputs.
+    """Compute the numerical Jacobian for a given fn and its inputs.
+
+    This is a Deprecated API.
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
