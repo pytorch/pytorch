@@ -994,14 +994,22 @@ test_executorch() {
   echo "Testing ExecuTorch op registration"
   "$BUILD_BIN_DIR"/test_edge_op_registration
 
-  echo "Run ExecuTorch regression tests for some models"
   pushd /executorch
+
+  echo "Install torchvision and torchaudio"
+  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
+  # there.  These libraries need to be built here, and not part of the Docker
+  # image because they require the target version of torch to be installed first
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+
+  echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
   export PYTHON_EXECUTABLE=python
   # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
-  popd
 
+  popd
   assert_git_not_dirty
 }
 

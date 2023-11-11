@@ -40,16 +40,10 @@ install_pip_dependencies() {
 
   # Install all Python dependencies
   pip_install -r requirements-ci.txt
-
-  # NB: This might be switched to pinned commits later
-  NIGHTLY=$(cat ci_commit_pins/nightly.txt)
-  TORCHAUDIO_VERSION=$(cat ci_commit_pins/audio.txt)
-  TORCHVISION_VERSION=$(cat ci_commit_pins/vision.txt)
-
-  pip_install --pre \
-    torchaudio=="${TORCHAUDIO_VERSION}.${NIGHTLY}" \
-    torchvision=="${TORCHVISION_VERSION}.${NIGHTLY}" \
-    --index-url https://download.pytorch.org/whl/nightly/cpu
+  # NB: Just need to install the stable version of these domain libraries here
+  # so that we can install executorch.  They will need to be recompiled later
+  # together with torch
+  pip_install torchvision torchaudio
 
   popd
 }
