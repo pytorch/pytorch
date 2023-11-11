@@ -14,11 +14,14 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.utils import _pytree as pytree
 
 
-def input_requires_grad(*tensors: torch.Tensor) -> bool:
+__all__ = ["AttnBias", "TensorBias", "CausalVariant", "CausalBias"]
+
+
+def _input_requires_grad(*tensors: torch.Tensor) -> bool:
     return any(t.requires_grad for t in tensors)
 
 
-def materialize_if_needed(
+def _materialize_if_needed(
     bias: "AttnBias", device: Optional[torch.device] = None
 ) -> Union[torch.Tensor, "AttnBias"]:
     if bias.needs_materialization():
@@ -26,7 +29,7 @@ def materialize_if_needed(
     return bias
 
 
-def postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int):
+def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int):
     """Handles the unpad of the last dimension"""
     if inpt_tensor.size(-1) != og_size:
         return inpt_tensor[..., :og_size]
@@ -94,37 +97,12 @@ class TensorBias(AttnBias):
         if func != torch.nn.functional.scaled_dot_product_attention:
             return NotImplemented
         args = pytree.tree_map_only(
-            TensorBias, lambda x: materialize_if_needed(x), args
+            TensorBias, lambda x: _materialize_if_needed(x), args
         )
         kwargs = pytree.tree_map_only(
-            TensorBias, lambda x: materialize_if_needed(x), kwargs
+            TensorBias, lambda x: _materialize_if_needed(x), kwargs
         )
         return func(*args, **kwargs)
-
-
-class LambdaBias(AttnBias):
-    """A bias that is a function"""
-
-    def __init__(self, bias_fn):
-        self.bias_fn = bias_fn
-
-    def materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
-        return self.bias_fn()
-
-    def needs_materialization(self) -> bool:
-        return False
-
-    @staticmethod
-    def dispatch(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        attn_mask: "LambdaBias",
-        dropout_p: float,
-        is_causal: bool,
-        scale: Optional[float],
-    ) -> torch.Tensor:
-        raise NotImplementedError("TODO FIGURE OUT!")
 
 
 class CausalVariant(IntEnum):
@@ -225,10 +203,10 @@ class CausalBias(AttnBias):
                     return_debug_mask=False,
                     scale=scale,
                 )[0]
-                return postprocess_flash_output(out, og_head_size)
+                return _postprocess_flash_output(out, og_head_size)
             if can_use_efficient_attention(sdpa_params):
                 compute_log_sumexp = False
-                if input_requires_grad(query, key, value):
+                if _input_requires_grad(query, key, value):
                     compute_log_sumexp = True
                 return torch.ops.aten._efficient_attention_forward(
                     query.transpose(1, 2),
