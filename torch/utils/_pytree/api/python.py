@@ -501,6 +501,11 @@ _private_register_pytree_node(
 )
 
 
+# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+def _is_namedtuple_instance(tree: Any) -> bool:
+    return is_namedtuple_class(type(tree))
+
+
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
     if node_type not in SUPPORTED_NODES:
