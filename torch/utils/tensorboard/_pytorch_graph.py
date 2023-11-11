@@ -230,7 +230,9 @@ class GraphPy:
 
 
 def parse(graph, trace, args=None, omit_useless_nodes=True):
-    """Parse an optimized PyTorch model graph and produces a list of nodes and node stats for eventual conversion to TensorBoard protobuf format.
+    """Parse an optimized PyTorch model graph and produces a list of nodes and node stats.
+
+    Useful for eventual conversion to TensorBoard protobuf format.
 
     Args:
       graph (PyTorch module): The model graph to be parsed.

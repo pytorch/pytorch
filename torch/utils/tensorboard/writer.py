@@ -260,8 +260,10 @@ class SummaryWriter:
 
     def _check_caffe2_blob(self, item):
         """
-        Caffe2 users have the option of passing a string representing the name of a blob in the workspace instead of passing the actual Tensor/array containing the numeric values.
+        Check if the input is a string representing a Caffe2 blob name.
 
+        Caffe2 users have the option of passing a string representing the name of a blob
+        in the workspace instead of passing the actual Tensor/array containing the numeric values.
         Thus, we need to check if we received a string as input
         instead of an actual Tensor/array, and if so, we need to fetch the Blob
         from the workspace corresponding to that name. Fetching can be done with the
@@ -1132,7 +1134,10 @@ class SummaryWriter:
     def add_custom_scalars_marginchart(
         self, tags, category="default", title="untitled"
     ):
-        """Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*, which should have exactly 3 elements.
+        """Shorthand for creating marginchart.
+
+        Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*,
+        which should have exactly 3 elements.
 
         Args:
             tags (list): list of tags that have been used in ``add_scalar()``
@@ -1149,7 +1154,9 @@ class SummaryWriter:
         self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_custom_scalars(self, layout):
-        """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once for each SummaryWriter() object.
+        """Create special chart by collecting charts tags in 'scalars'.
+
+        NOTE: This function can only be called once for each SummaryWriter() object.
 
         Because it only provides metadata to tensorboard, the function can be called before or after the training loop.
 
