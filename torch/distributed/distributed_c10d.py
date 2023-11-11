@@ -558,7 +558,7 @@ class _World:
                     "pg_name": self.pg_names[pg],
                     "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": list(ranks.values())
+                    "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
                     else [],  # 'ranks' is an empty list when all ranks are involved in a pg
                     "group_size": len(ranks),

@@ -142,8 +142,10 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
+        "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
+        "linalg.vector_norm",
         "scatter_add",
         "scatter_reduce",
         "square",
@@ -423,11 +425,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
-        # https://github.com/microsoft/onnxscript/issues/1140
-        "native_batch_norm",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._native_batch_norm_legit_functional"),
-    ),
-    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),
@@ -450,11 +447,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.avg_pool3d",
         dtypes=onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
-    ),
-    xfail(
-        # https://github.com/microsoft/onnxscript/issues/1140
-        "nn.functional.batch_norm",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._native_batch_norm_legit_functional"),
     ),
     xfail(
         "nn.functional.conv1d",

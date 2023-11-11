@@ -124,6 +124,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         sequence_mixed_elements: List[
             Union[
                 onnxscript_graph_building.TorchScriptTensor,
+                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
                 List[int],
             ]
         ] = []
@@ -147,9 +148,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with onnxscript.evaluator.default_as(tracer):
-            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)
-        output.dtype = torch.int64
-        output.shape = [len(sequence_mixed_elements)]
+            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)  # type: ignore[type-var]
+        output.dtype = torch.int64  # type: ignore[union-attr]
+        output.shape = [len(sequence_mixed_elements)]  # type: ignore[union-attr]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
