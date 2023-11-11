@@ -66,6 +66,13 @@ class ToyModel(nn.Module):
         else:
             return self.net(inputs)
 
+def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(bsz, in_feat).to(device)
+    outputs = m(inputs)
+    return m, inputs, outputs
+
 class ToyModelMultiOutput(nn.Module):
     def __init__(self, ctx_manager_1, ctx_manager_2, hidden_feat=1000):
         super().__init__()
