@@ -1,9 +1,4 @@
-import functools
-import unittest
-
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
     import triton
@@ -134,3 +129,14 @@ if HAS_CUDA:
             mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
         x = tl.load(in_ptr0 + offsets, mask=mask)
         tl.store(out_ptr + offsets, x, mask=mask)
+
+else:
+    triton = None
+    tl = None
+    add_kernel = None
+    add_kernel_autotuned = None
+    add_kernel_2d_autotuned = None
+    mul2_kernel = None
+    mul2_inplace_kernel = None
+    zero_negs = None
+    indirection_kernel = None

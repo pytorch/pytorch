@@ -10,15 +10,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
 from torch.testing._internal.inductor_utils import (
     check_model,
     check_model_cuda,
-    HAS_CPU,
-    HAS_CUDA,
     requires_cuda,
 )
 
@@ -590,7 +587,6 @@ class ForeachTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
-        run_tests(needs="filelock")
+    run_inductor_tests(skip_rocm=True)
