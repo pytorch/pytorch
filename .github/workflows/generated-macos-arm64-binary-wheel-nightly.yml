@@ -90,7 +90,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: alband/312_deps
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -208,7 +208,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: alband/312_deps
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -326,7 +326,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: alband/312_deps
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -444,7 +444,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: alband/312_deps
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -562,7 +562,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: alband/312_deps
           submodules: recursive
           repository: pytorch/builder
           path: builder
