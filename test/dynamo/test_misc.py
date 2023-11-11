@@ -8267,6 +8267,24 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
+    def test_torch_tensor_is_contiguous(self):
+        def fn(x):
+            if torch.Tensor.is_contiguous(x):
+                return x.cos()
+            return x.sin()
+
+        counter = CompileCounter()
+        f_comp = torch._dynamo.optimize(counter, nopython=True)(fn)
+        a = torch.arange(1, 10).view(3, 3)
+        b = a.t()  # non-contig
+        eager_res_a = fn(a)
+        eager_res_b = fn(b)
+        comp_res_a = f_comp(a)
+        comp_res_b = f_comp(b)
+        self.assertEqual(counter.frame_count, 2)  # recompiled on contig
+        self.assertEqual(eager_res_a, comp_res_a)
+        self.assertEqual(eager_res_b, comp_res_b)
+
     def test_funcname_cache(self):
         src = """\
 import torch
