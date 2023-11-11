@@ -6,7 +6,7 @@ from torch._export.db.case import export_case, SupportLevel
 @export_case(
     example_inputs=(torch.ones(3, 2),),
     tags={"torch.operator"},
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
+    support_level=SupportLevel.SUPPORTED,
 )
 class TorchSymMin(torch.nn.Module):
     """
