@@ -1286,7 +1286,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReasons"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -1972,7 +1972,9 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
+    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+        higher_order_ops.tag_activation_checkpoint
+    )
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
