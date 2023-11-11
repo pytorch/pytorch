@@ -15,9 +15,7 @@ torch.jit.trace(resnet50, torch.rand(1, 3, 224, 224)).save(
     "app/src/main/assets/resnet50.pt"
 )
 
-mobilenet2q = models.quantization.mobilenet_v2(
-    pretrained=True, quantize=True
-)
+mobilenet2q = models.quantization.mobilenet_v2(pretrained=True, quantize=True)
 mobilenet2q.eval()
 torch.jit.trace(mobilenet2q, torch.rand(1, 3, 224, 224)).save(
     "app/src/main/assets/mobilenet2q.pt"
