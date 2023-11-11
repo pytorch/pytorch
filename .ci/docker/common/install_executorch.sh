@@ -62,6 +62,8 @@ setup_executorch() {
   pip_install .
   build_executorch_runner "buck2"
 
+  # Make sure that all the newly generate files are owned by Jenkins
+  chown -R jenkins executorch
   popd
 }
 
