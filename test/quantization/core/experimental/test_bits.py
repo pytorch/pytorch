@@ -46,6 +46,11 @@ class TestBits(TestCase):
         for bits_type in bits_types:
             _ = torch.zeros(20, dtype=torch.int32).view(bits_type)
             _ = torch.empty(20, dtype=bits_type)
+            x = torch.randint(100, (20, 20), dtype=torch.int8).view(bits_type)
+            y = x.t().contiguous()
+            self.assertEqual(x.t().view(torch.int8), y.view(torch.int8))
+            y = x.t().clone()
+            self.assertEqual(x.t().view(torch.int8), y.view(torch.int8))
 
     def test_subclass(self):
         t = torch.zeros(20, dtype=torch.int16).view(torch.bits16)
