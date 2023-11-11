@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import importlib
 import itertools
+import os
 import sys
 import unittest
 import weakref
@@ -14,19 +16,16 @@ from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
-)
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    check_model_cuda,
-    copy_tests,
-    HAS_CPU,
-    HAS_CUDA,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -37,6 +36,12 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+
+importlib.import_module("functorch")
+importlib.import_module("filelock")
+
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
