@@ -4,7 +4,6 @@ import copy
 import dataclasses
 import functools
 import gc
-import importlib
 import itertools
 import math
 import operator
@@ -32,9 +31,14 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
+
+from torch._inductor import config, test_operators
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    has_torchvision_roi_align,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -51,34 +55,15 @@ from torch.testing._internal.common_cuda import (
 
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
+
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    IS_CI,
     IS_FBCODE,
-    IS_WINDOWS,
     IS_X86,
     skipIfRocm,
+    slowTest,
     TEST_WITH_ASAN,
 )
-from torch.utils import _pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.weak import WeakTensorKeyDictionary
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    sys.exit(0)
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-from torch._inductor import config, test_operators
-
-from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-from torch._inductor.utils import has_torchvision_roi_align
-
-from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     check_model,
     check_model_cuda,
@@ -89,11 +74,15 @@ from torch.testing._internal.inductor_utils import (
     requires_cuda,
     requires_multigpu,
     run_and_get_cpp_code,
+    skip_if_mac,
     skip_if_x86_mac,
     skipCUDAIf,
     TestCase,
     ToTuple,
 )
+from torch.utils import _pytree as pytree
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.weak import WeakTensorKeyDictionary
 
 aten = torch.ops.aten
 
@@ -759,6 +748,7 @@ class CommonTemplate:
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
+    @skip_if_mac()
     def test_min_max_reduction_nan(self):
         def fn(a):
             return (torch.max(a), torch.min(a))
@@ -8014,7 +8004,6 @@ if HAS_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU or HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests()

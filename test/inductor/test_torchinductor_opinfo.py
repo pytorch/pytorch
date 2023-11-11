@@ -12,7 +12,6 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -617,4 +616,6 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()

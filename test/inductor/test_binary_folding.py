@@ -1,16 +1,13 @@
 # Owner(s): ["module: inductor"]
 import functools
-import importlib
 import itertools
-import sys
-import unittest
 
 import torch
 from torch import nn
 from torch._dynamo.testing import load_test_module
 from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
     check_model,
     check_model_cuda,
@@ -20,20 +17,7 @@ from torch.testing._internal.inductor_utils import (
     skipCUDAIf,
 )
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 TestCase = load_test_module(__file__, "inductor.test_inductor_freezing").TestCase
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-
 aten = torch.ops.aten
 
 
@@ -252,7 +236,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 del BinaryFoldingTemplate
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU or HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests()
