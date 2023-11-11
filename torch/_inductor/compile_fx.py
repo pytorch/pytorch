@@ -640,16 +640,12 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
-        if aot_mode and config.split_const_graph:
-            split_const_graph = True
-        else:
-            split_const_graph = False
-            original_constants = None
-            const_output_index = None
-            const_kernels = None
-            const_code = None
+        original_constants = None
+        const_output_index = None
+        const_kernels = None
+        const_code = None
 
-        if split_const_graph:
+        if aot_mode and config.split_const_graph:
             const_gm, const_output_index = split_const_gm(gm)
 
             const_names = {
