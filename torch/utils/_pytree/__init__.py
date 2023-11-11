@@ -12,6 +12,9 @@ inside some nested collection. pytrees are helpful for implementing nested
 collection support for PyTorch APIs.
 """
 
+import warnings
+from typing import Any
+
 from .api import (
     Context,
     DumpableContext,
@@ -86,3 +89,20 @@ __all__ = [
     "treespec_loads",
     "treespec_pprint",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Fallback path to forward private members in Python pytree to the top level module."""
+    from .api import python
+
+    try:
+        member = getattr(python, name)
+    except AttributeError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    warnings.warn(
+        f"{__name__}.{name} is a private member "
+        "which might be changed or removed in future releases.",
+        stacklevel=2,
+    )
+    return member
