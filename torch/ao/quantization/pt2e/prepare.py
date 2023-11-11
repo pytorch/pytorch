@@ -207,7 +207,13 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
                     if user is n:
                         continue
                     arg_to_user_edge = (arg, user)
-                    _union_input_edge_with(input_edge, input_edge_root_qspec, arg_to_user_edge, edge_or_node_to_qspec, shared_with_map)
+                    _union_input_edge_with(
+                        input_edge,
+                        input_edge_root_qspec,
+                        arg_to_user_edge,
+                        edge_or_node_to_qspec,
+                        shared_with_map
+                    )
 
             _update_shared_with(input_edge, qspec, shared_with_map)
 
