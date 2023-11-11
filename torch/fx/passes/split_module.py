@@ -329,7 +329,7 @@ def split_module(
                     kwargs={},
                     type_expr=node.type,
                 )
-                new_node.meta = node.meta.copy()  # is it really a good idea to copy this?
+                new_node.meta = node.meta.copy()
                 partition.environment[node] = new_node
 
     # add placeholders to partition inputs
@@ -388,6 +388,7 @@ def split_module(
 
     # Exit epilogue
     for regions_mapping in [autocast_regions]:
+        # we need to unwind in reverse order to setting up
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
             assert len(regions) > 0
@@ -402,7 +403,7 @@ def split_module(
                     kwargs={},
                     type_expr=exit_node.type,
                 )
-                new_node.meta = exit_node.meta.copy()  # is it really a good idea to copy this?
+                new_node.meta = exit_node.meta.copy()
 
     # original module environment dict mapping node names to nodes
     orig_mod_env: Dict[str, Node] = {}
