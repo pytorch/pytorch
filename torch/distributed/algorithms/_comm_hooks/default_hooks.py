@@ -44,7 +44,7 @@ class DefaultState:
 class LowPrecisionState(DefaultState):
     r"""
     Stores state needed to perform gradient communication in a lower precision within a communication hook.
-     
+
     Communication hook will cast gradients back to the original
     parameter precision specified by ``parameter_type`` (default: torch.float32).
     Builds on top of the :class:`DefaultState`.
@@ -130,9 +130,9 @@ def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch
 
 def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
-    Implement FSDP communication hook for a simple gradient compression approach. 
+    Implement FSDP communication hook for a simple gradient compression approach.
     Casts ``grad`` to half-precision floating-point format (``torch.float16``).
-    
+
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.gradient_predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
     gradients are averaged by a ``state.gradient_postdivide_factor``.

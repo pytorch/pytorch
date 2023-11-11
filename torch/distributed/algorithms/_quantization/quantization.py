@@ -91,7 +91,7 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
 def auto_quantize(func, qtype, quant_loss=None):
     """
     Quantize the input tensors, choose the precision types, and pass other necessary arguments and then dequantizes the output.
-    
+
     Currently it only supports:
         . FP16 and BFP16 quantization method supported for gloo and nccl backends
         . all_gather, all_to_all collective ops

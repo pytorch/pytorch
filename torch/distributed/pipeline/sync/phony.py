@@ -19,8 +19,8 @@ _phonies: Dict[Tuple[torch.device, bool], Tensor] = {}
 
 
 def get_phony(device: torch.device, *, requires_grad: bool) -> Tensor:
-    """Get a phony. Phony is tensor without space. 
-    
+    """Get a phony. Phony is tensor without space.
+
     It is useful to make arbitrary dependency in a autograd graph because it doesn't require any
     gradient accumulation.
 

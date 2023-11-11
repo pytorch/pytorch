@@ -167,8 +167,8 @@ def is_checkpointing() -> bool:
 
 
 def is_recomputing() -> bool:
-    """Whether the current forward propagation is under checkpoint recomputation. 
-    
+    """Whether the current forward propagation is under checkpoint recomputation.
+
     Use this to prevent duplicated side-effects at forward
     propagation::
 
