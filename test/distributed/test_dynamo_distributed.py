@@ -668,14 +668,14 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 lambda: torch.autocast(torch.device(self.device).type, torch.float16),
                 lambda out: self.assertEqual(out.dtype, torch.float16),
             ),
-            # (
-            #     torch.enable_grad,
-            #     lambda out: self.assertTrue(out.requires_grad)
-            # ),
-            # (
-            #     torch.no_grad,
-            #     lambda out: self.assertTrue(not out.requires_grad)
-            # ),
+            (
+                torch.enable_grad,
+                lambda out: self.assertTrue(out.requires_grad)
+            ),
+            (
+                torch.no_grad,
+                lambda out: self.assertTrue(not out.requires_grad)
+            ),
         ]
 
         bucket_cap_mb = 7.5
