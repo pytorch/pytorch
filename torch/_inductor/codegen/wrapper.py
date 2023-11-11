@@ -2157,11 +2157,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         new_int_args.extend([str(a) for a in arg])
                 else:
                     assert isinstance(
-                        arg_type.getElementType(), static_arg_types
+                        arg_type.getElementType(), static_arg_types  # type: ignore[arg-type]
                     ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
             else:
                 assert isinstance(
-                    arg_type, static_arg_types
+                    arg_type, static_arg_types  # type: ignore[arg-type]
                 ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
 
         for arg, arg_type in zip(raw_args, arg_types):
