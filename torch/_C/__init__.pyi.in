@@ -1925,6 +1925,14 @@ class IntType(JitType):
     @staticmethod
     def get() -> IntType: ...
 
+class SymIntType(JitType):
+    @staticmethod
+    def get() -> SymIntType: ...
+
+class SymBoolType(JitType):
+    @staticmethod
+    def get() -> SymBoolType: ...
+
 class NumberType(JitType):
     @staticmethod
     def get() -> NumberType: ...

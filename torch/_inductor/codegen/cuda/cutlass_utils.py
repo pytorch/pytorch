@@ -179,7 +179,7 @@ def gen_ops() -> List[Any]:
 
 
 def dtype_match(
-    torch_dtype: torch.dtype,
+    torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]
 ) -> bool:
     # Import cutlass python scripts.
@@ -199,7 +199,9 @@ def dtype_match(
         return False
 
 
-def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
+def get_accumulator_dtype(
+    input_torch_dtypes: List[torch.dtype],
+) -> Optional[torch.dtype]:
     """
     Given a list of input torch dtypes, returns the inferred accumulator torch dtype.
     """
