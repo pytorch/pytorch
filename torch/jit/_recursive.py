@@ -969,7 +969,8 @@ def interface_script(mod_interface, nn_module):
     def infer_interface_methods_to_compile(nn_module):
         """Rule to infer the methods from the interface type.
 
-        It is used to know which methods need to act as starting points for compilation."""
+        It is used to know which methods need to act as starting points for compilation.
+        """
         stubs = []
         for method in mod_interface.getMethodNames():
             stubs.append(make_stub_from_method(nn_module, method))
