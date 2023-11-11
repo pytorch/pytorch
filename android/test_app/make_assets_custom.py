@@ -5,11 +5,11 @@ build script to create a tailored build which only contains these used ops.
 """
 
 import torch
-import torchvision
 import yaml
+from torchvision import models
 
 # Download and trace the model.
-model = torchvision.models.mobilenet_v2(pretrained=True)
+model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
 model.eval()
 example = torch.rand(1, 3, 224, 224)
 # TODO: create script model with `torch.jit.script`
