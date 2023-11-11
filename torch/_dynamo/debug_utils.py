@@ -11,7 +11,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
