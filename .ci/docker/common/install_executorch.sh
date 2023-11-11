@@ -63,7 +63,7 @@ setup_executorch() {
   build_executorch_runner "buck2"
 
   # Make sure that all the newly generate files are owned by Jenkins
-  chown -R jenkins executorch
+  chown -R jenkins .
   popd
 }
 
