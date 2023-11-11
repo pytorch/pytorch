@@ -17,6 +17,7 @@ To improve the performance we can move parts of the implementation to C++.
 
 import dataclasses
 import json
+import threading
 import warnings
 from collections import deque, namedtuple, OrderedDict
 from typing import (
@@ -100,6 +101,7 @@ class NodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
 
 
+_NODE_REGISTRY_LOCK = threading.Lock()
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
 
@@ -201,33 +203,34 @@ def _private_register_pytree_node(
             "Please use to_dumpable_context and from_dumpable_context instead."
         )
 
-    if cls in SUPPORTED_NODES:
-        raise ValueError(f"{cls} is already registered as pytree node.")
+    with _NODE_REGISTRY_LOCK:
+        if cls in SUPPORTED_NODES:
+            raise ValueError(f"{cls} is already registered as pytree node.")
 
-    node_def = NodeDef(
-        cls,
-        flatten_fn,
-        unflatten_fn,
-    )
-    SUPPORTED_NODES[cls] = node_def
-
-    if (to_dumpable_context is None) ^ (from_dumpable_context is None):
-        raise ValueError(
-            f"Both to_dumpable_context and from_dumpable_context for {cls} must "
-            "be None or registered."
+        node_def = NodeDef(
+            cls,
+            flatten_fn,
+            unflatten_fn,
         )
+        SUPPORTED_NODES[cls] = node_def
 
-    if serialized_type_name is None:
-        serialized_type_name = f"{cls.__module__}.{cls.__qualname__}"
+        if (to_dumpable_context is None) ^ (from_dumpable_context is None):
+            raise ValueError(
+                f"Both to_dumpable_context and from_dumpable_context for {cls} must "
+                "be None or registered."
+            )
 
-    serialize_node_def = _SerializeNodeDef(
-        cls,
-        serialized_type_name,
-        to_dumpable_context,
-        from_dumpable_context,
-    )
-    SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
+        if serialized_type_name is None:
+            serialized_type_name = f"{cls.__module__}.{cls.__qualname__}"
+
+        serialize_node_def = _SerializeNodeDef(
+            cls,
+            serialized_type_name,
+            to_dumpable_context,
+            from_dumpable_context,
+        )
+        SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
+        SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
 register_pytree_node = _register_pytree_node
