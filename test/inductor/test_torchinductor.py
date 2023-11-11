@@ -3276,6 +3276,13 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
+        self.common(
+            fn_2,
+            (
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
 
     @expectedFailureCodegenDynamic
     def test_cat_single_empty(self):
