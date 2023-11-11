@@ -78,8 +78,8 @@ class _FSDPDeviceHandle:
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return a device handle corresponding to the device 
-        
+        Return a device handle corresponding to the device.
+
         Through this handle, operations with the same semantics as CUDA can be performed on the device.
         Just return torch.cuda if the device is cuda to make attribute-access faster.
         Custom backend must first register a module with the same name with {device.type} on torch.
