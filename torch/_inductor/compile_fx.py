@@ -641,6 +641,15 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         if aot_mode and config.split_const_graph:
+            split_const_graph = True
+        else:
+            split_const_graph = False
+            original_constants = None
+            const_output_index = None
+            const_kernels = None
+            const_code = None
+
+        if split_const_graph:
             const_gm, const_output_index = split_const_gm(gm)
 
             const_names = {
@@ -666,7 +675,6 @@ def fx_codegen_and_compile(
                     const_code, _ = const_graph.codegen()
                 else:
                     const_graph.compile_to_fn()([])
-                    const_code = None
                 original_constants = const_graph.constants
                 const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
 
