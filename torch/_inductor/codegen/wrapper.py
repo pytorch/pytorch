@@ -1754,13 +1754,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        if len(grid) != 1:
-            raise NotImplementedError("triton.autotune not yet supported")
-        grid = grid[0]
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
         self.generate_kernel_call(
             kernel_name,
             args,
-            grid=grid,
+            grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=True,
@@ -2157,11 +2167,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         new_int_args.extend([str(a) for a in arg])
                 else:
                     assert isinstance(
-                        arg_type.getElementType(), static_arg_types
+                        arg_type.getElementType(), static_arg_types  # type: ignore[arg-type]
                     ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
             else:
                 assert isinstance(
-                    arg_type, static_arg_types
+                    arg_type, static_arg_types  # type: ignore[arg-type]
                 ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
 
         for arg, arg_type in zip(raw_args, arg_types):
@@ -2313,10 +2323,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_arg_str(self, val):
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        if (
+            config.aot_inductor.abi_compatible
+            and not is_legacy_abi
+            and isinstance(type_, torch.OptionalType)
+        ):
+            if val is None:
+                return "nullptr"
+            if isinstance(val, (bool, int, str, float)):
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
+                return f"&{var_name}"
+            if not isinstance(type_.getElementType(), torch.TensorType):
+                return f"&{self.val_to_arg_str(val)}"
+
+        return self.val_to_arg_str(val)
+
+    def val_to_arg_str(self, val) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            # TODO: add abi-compatible support
+            if config.aot_inductor.abi_compatible:
+                return "0"  # nullptr is not available in C
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
@@ -2341,7 +2369,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
+            # FIXME handle embedded optional types?
+            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"

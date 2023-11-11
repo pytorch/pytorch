@@ -47,6 +47,7 @@ class TestFlattenParams(FSDPTest):
             "keep_low_precision_grads": False,
             "process_group": self.process_group,
             "use_orig_params": False,
+            "fsdp_extension": None,
         }
 
     def _get_transformer(self, seed=0):
