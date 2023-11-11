@@ -626,19 +626,19 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     carry_size = list(dummy_carry.shape)
     out_size = list(dummy_out.shape)
     
-    carry_indexer = ir.FixedLayout(
-        device,
-        dtype,
-        carry_size,
-        ir.FlexibleLayout.contiguous_strides(carry_size),
-    ).make_indexer()
+    # carry_indexer = ir.FixedLayout(
+    #     device,
+    #     dtype,
+    #     carry_size,
+    #     ir.FlexibleLayout.contiguous_strides(carry_size),
+    # ).make_indexer()
     
-    out_indexer = ir.FixedLayout(
-        device,
-        dtype,
-        out_size,
-        ir.FlexibleLayout.contiguous_strides(out_size),
-    ).make_indexer()
+    # out_indexer = ir.FixedLayout(
+    #     device,
+    #     dtype,
+    #     out_size,
+    #     ir.FlexibleLayout.contiguous_strides(out_size),
+    # ).make_indexer()
     
     def fn(idx, return_out):
         #import pdb
