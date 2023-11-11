@@ -27,17 +27,19 @@ namespace at { namespace native {
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16 ||
+              mkldnn_tensor.scalar_type() == ScalarType::Half ||
               mkldnn_tensor.scalar_type() == ScalarType::Byte ||
               mkldnn_tensor.scalar_type() == ScalarType::Char,
-              "mkldnn_to_dense expects float, bfloat16, uint8, int8 tensor input");
+              "mkldnn_to_dense expects float, bfloat16, half, uint8, int8 tensor input");
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
   TORCH_CHECK(data_type == ScalarType::Float ||
               data_type == ScalarType::BFloat16 ||
+              data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "mkldnn tensor only can be converted to be a float, bfloat16, uint8, int8 cpu tensor")
+              "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte || mkldnn_tensor.scalar_type() == ScalarType::Char) {
     // For int8, uint8 input, we should not change the data type.
     TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
@@ -55,12 +57,16 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
       : (data_type == ScalarType::BFloat16
          ? stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
                          ideep::tensor::data_type::bf16)
-         : (data_type == ScalarType::Byte
-            ? stensor.to_public(cpu_tensor.template data_ptr<uint8_t>(),
-                            ideep::tensor::data_type::u8)
-            : stensor.to_public(cpu_tensor.template data_ptr<int8_t>(),
-                            ideep::tensor::data_type::s8)
-         )
+         : (data_type == ScalarType::Half
+            ? stensor.to_public(cpu_tensor.template data_ptr<Half>(),
+                            ideep::tensor::data_type::f16)
+          : (data_type == ScalarType::Byte
+              ? stensor.to_public(cpu_tensor.template data_ptr<uint8_t>(),
+                              ideep::tensor::data_type::u8)
+              : stensor.to_public(cpu_tensor.template data_ptr<int8_t>(),
+                              ideep::tensor::data_type::s8)
+            )
+           )
       );
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   // Make sure that NC11 strides follow formula of contiguous tensor.
@@ -74,9 +80,10 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
              "dense_to_mkldnn expects strided tensor input");
   TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Float ||
               cpu_tensor.scalar_type() == ScalarType::BFloat16 ||
+              cpu_tensor.scalar_type() == ScalarType::Half ||
               cpu_tensor.scalar_type() == ScalarType::Byte ||
               cpu_tensor.scalar_type() == ScalarType::Char,
-             "dense_to_mkldnn expects float, bfloat16, uint8, int8 tensor input");
+             "dense_to_mkldnn expects float, bfloat16, half, uint8, int8 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
   // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
@@ -89,9 +96,10 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
   }
   TORCH_CHECK(data_type == ScalarType::Float ||
               data_type == ScalarType::BFloat16 ||
+              data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "cpu tensor only can be converted to be a float, bfloat16, uint8, int8 mkldnn tensor")
+              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 mkldnn tensor")
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
@@ -104,6 +112,10 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
     dtensor.feed_from(dtensor.get_dims(),
                       ideep::tensor::data_type::bf16,
                       cpu_tensor_cont.template data_ptr<BFloat16>());
+  } else if (cpu_tensor.scalar_type() == ScalarType::Half) {
+    dtensor.feed_from(dtensor.get_dims(),
+                      ideep::tensor::data_type::f16,
+                      cpu_tensor_cont.template data_ptr<Half>());
   } else if (cpu_tensor.scalar_type() == ScalarType::Byte) {
     dtensor.feed_from(dtensor.get_dims(),
                       ideep::tensor::data_type::u8,
@@ -131,10 +143,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv2d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
@@ -190,13 +199,11 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv3d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 3);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
+
   auto w = itensor_from_mkldnn(self);
 
   auto desc =
@@ -219,10 +226,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_linear_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_linear_weight");
   auto out_features = self.size(0);
   auto in_features = self.size(1);
   auto self_ = self.contiguous();
@@ -291,10 +295,7 @@ static Tensor mkldnn_reorder_conv_transpose2d_weight(
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv_transpose2d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);

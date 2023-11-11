@@ -15,7 +15,7 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -25,13 +25,7 @@ from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
-from .utils import (
-    do_bench_using_profiling,
-    Placeholder,
-    sympy_dot,
-    sympy_product,
-    unique,
-)
+from .utils import do_bench, Placeholder, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -125,10 +119,18 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
-        return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
-            + "@triton.jit"
+
+        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        return textwrap.dedent(
+            f"""
+            @template(
+                num_stages={self.num_stages},
+                num_warps={self.num_warps},
+                triton_meta={triton_meta!r},
+                inductor_meta={inductor_meta!r},
+            )
+            @triton.jit
+            """
         )
 
     def def_kernel(self, *argnames):
@@ -343,7 +345,7 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, name: str, node: ir.TritonTemplateBuffer):
+    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
@@ -355,14 +357,25 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = texpr(call_args[i])
 
         if V.graph.cpp_wrapper:
+            # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
+            # if any dynamic dimension is involved. We rely on the Python version
+            # of the grid function to generate those grid configs, which may contain
+            # symbolic values. The wrapper will use cexpr to print out C++ code
+            # appropriately for the grid configs.
+            grid_args = [V.graph.sizevars.simplify(s) for s in self.call_sizes] + [
+                self.meta
+            ]
+            grid = self.grid_fn(*grid_args)
+
             wrapper.generate_kernel_call(
                 name,
                 call_args,
                 device_index=V.graph.scheduler.current_device.index,
+                grid=grid,
             )
         else:
             call_args = ", ".join(call_args)  # type: ignore[assignment]
-            stream_name = wrapper.write_get_cuda_stream(
+            stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
 
@@ -480,7 +493,8 @@ class TritonTemplate(KernelTemplate):
             expected_args,
         )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
+            map(sympy.expand, call_args[len(expected_args) :]),
+            fallback=config.unbacked_symint_fallback,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -500,7 +514,14 @@ class TritonTemplate(KernelTemplate):
             return kernel, render
 
         # create the BenchmarkRequest
-        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+        assert mod.__file__ is not None
+        grid = self.grid(
+            *V.graph.sizevars.size_hints(
+                layout.size,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            kwargs,
+        )
         bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
             module_cache_key=mod.key,
@@ -633,7 +654,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench_using_profiling(lambda: algo(*args))
+            return do_bench(lambda: algo(*args))
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -711,36 +732,14 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        def autotune(choice):
-            benchmark_fn = make_benchmark_fn()
-            try:
-                timing = benchmark_fn(
-                    choice,
-                )
-            except CUDACompileError as e:
-                log.warning(
-                    "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
-                )
-                return float("inf")
-            except RuntimeError as e:
-                msg = str(e)
-                if "invalid argument" in msg:
-                    msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                    log.warning(msg)
-                    return float("inf")
-                elif "illegal memory access" in msg:
-                    msg += "\n\nEither error in template or triton bug.\n"
-                raise ErrorFromChoice(msg, choice, benchmark_fn.debug_str())
-            except AssertionError as e:
-                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
-            return timing
+        def autotune(choices):
+            return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_process
+            from .autotune_process import tuning_pool
 
             # do the optional warmup
-            tuning_process.initialize()
-            assert tuning_process.valid()
+            tuning_pool.initialize()
 
         autotune_start_ts = time.time()
         timings = self.lookup(
@@ -784,9 +783,18 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs_extern = [
             torch.as_strided(
                 unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(input_node.get_size()),
-                V.graph.sizevars.size_hints(input_node.get_stride()),
-                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+                V.graph.sizevars.size_hints(
+                    input_node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    input_node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                ),
             )
             for input_node in input_nodes
         ]
@@ -801,46 +809,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
-
-        def benchmark_in_current_process(choice):
-            if DEBUG:
-                start_ts = time.time()
-            out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
-            return result
-
-        def benchmark_in_sub_process(choice):
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            if isinstance(choice, ExternKernelCaller):
-                return benchmark_in_current_process(choice)
-
-            from . import autotune_process
-
-            if DEBUG:
-                start_ts = time.time()
-
-            out = autotune_process.benchmark_in_sub_process(
-                choice,
-            )
-            if DEBUG:
-                elapse = time.time() - start_ts
-                print(f"MultiProcessTuning {choice}: {elapse}")
-            return out
-
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
-        )
 
         def debug_str():
             def tensor_repr(x):
@@ -857,7 +825,66 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        benchmark.debug_str = debug_str  # type: ignore[attr-defined]
+        def benchmark_choice_in_current_process(choice):
+            out.zero_()
+            if isinstance(choice, ExternKernelCaller):
+                # aten kernels want the offset baked in for sliced tensors
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
+            else:
+                # triton templates want the base pointer for sliced tensors
+                result = choice.benchmark(*example_inputs, out=out)
+            if VERIFY:
+                torch.testing.assert_close(out_extern, expected, **VERIFY)
+            torch.cuda.synchronize()  # shake out any CUDA errors
+            return result
+
+        def benchmark_in_current_process(choices):
+            timings = {}
+            for choice in choices:
+                try:
+                    timing = benchmark_choice_in_current_process(choice)
+                except CUDACompileError as e:
+                    log.warning(
+                        "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                    )
+                    timing = float("inf")
+                except RuntimeError as e:
+                    msg = str(e)
+                    if "invalid argument" in msg:
+                        msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
+                        log.warning(msg)
+                        timing = float("inf")
+                    else:
+                        if "illegal memory access" in msg:
+                            msg += "\n\nEither error in template or triton bug.\n"
+                        raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                except AssertionError as e:
+                    raise AssertionError(  # noqa: TRY200
+                        f"Incorrect result from choice {choice}\n\n{e}"
+                    )
+
+                timings[choice] = timing
+
+            return timings
+
+        def benchmark_in_sub_process(choices):
+            from . import autotune_process
+
+            # only benchmark triton kernel in sub process for now.
+            # ATen/Extern kernel are still benchmarked in the current process.
+            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+
+            timings = benchmark_in_current_process(extern)
+            timings.update(autotune_process.benchmark_in_sub_process(triton))
+            return timings
+
+        benchmark = (
+            benchmark_in_sub_process
+            if config.autotune_in_subproc
+            else benchmark_in_current_process
+        )
+
         return benchmark
 
     @staticmethod
@@ -866,7 +893,14 @@ class AlgorithmSelectorCache(PersistentCache):
             return
         sizes = ", ".join(
             [
-                "x".join(map(str, V.graph.sizevars.size_hints(n.get_size())))
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(), fallback=config.unbacked_symint_fallback
+                        ),
+                    )
+                )
                 for n in input_nodes
             ]
         )
@@ -877,9 +911,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(
-                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
-            )
+            if result:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+                )
+            else:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>\n"
+                )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
@@ -897,13 +936,22 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
-        return rand_strided(
-            V.graph.sizevars.size_hints(node.get_size()),
-            V.graph.sizevars.size_hints(node.get_stride()),
-            device=node.get_device(),
-            dtype=node.get_dtype(),
-            extra_size=node.layout.offset,
-        )
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            return rand_strided(
+                V.graph.sizevars.size_hints(
+                    node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                device=node.get_device(),
+                dtype=node.get_dtype(),
+                extra_size=node.layout.offset,
+            )
 
     @staticmethod
     def key_of(node):
@@ -915,9 +963,18 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(node.get_size()),
-            *sizevars.size_hints(node.get_stride()),
-            sizevars.size_hint(node.get_layout().offset),
+            *sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            *sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
 

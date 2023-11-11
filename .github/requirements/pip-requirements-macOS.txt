@@ -10,6 +10,7 @@ numba<=0.49.1; platform_machine != "arm64"
 opt-einsum>=3.3
 psutil==5.9.1
 nvidia-ml-py==11.525.84
+packaging==23.1
 pygments==2.15.0
 pytest==7.3.2
 pytest-xdist==3.3.1
@@ -25,3 +26,5 @@ sympy==1.11.1
 pytest-cpp==2.3.0
 rockset==1.0.3
 z3-solver==4.12.2.0
+tensorboard==2.13.0
+optree==0.9.1

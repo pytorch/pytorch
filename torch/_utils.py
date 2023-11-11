@@ -4,6 +4,7 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -150,7 +151,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 #     serialize the *state_dict* of a model, not the model itself
 #     (since this is more stable to code changes affecting the model
 #     serialization), and the state dict saves "data" only, thus
-#     stripping the the backward hooks.  In some cases, hooks are
+#     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
 #     but DDP already manages readding the hooks!
 #
@@ -301,6 +302,10 @@ def _rebuild_sparse_tensor(layout, data):
         return result
 
     raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
+
+
+def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
+    return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -840,6 +845,44 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import (
+        FunctionalTensor,
+        maybe_disable_functional_mode,
+    )
+
+    ctx = (
+        maybe_disable_functional_mode
+        if isinstance(t, FunctionalTensor)
+        else nullcontext
+    )
+    if isinstance(t, FunctionalTensor):
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        # Why?
+        # (1) If there are input mutations in the graph, then they will be re-applied during
+        #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
+        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
+        #     which dispatches to a bunch of view ops
+        # (3) The input to these view ops is our inner FunctionalTensorWrapper
+        #     (since the sync was called from C++), not the python FunctionalTensor
+        # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
+        #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
+        #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
+        maybe_functional_mode = torch._C._unset_dispatch_mode(
+            torch._C._TorchDispatchModeKey.FUNCTIONAL
+        )
+        try:
+            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
+        finally:
+            if maybe_functional_mode is not None:
+                torch._C._set_dispatch_mode(maybe_functional_mode)
+    else:
+        torch._functionalize_sync(t)  # type: ignore[attr-defined]
 
 
 @functools.lru_cache(2)

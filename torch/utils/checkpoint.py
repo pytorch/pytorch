@@ -1,8 +1,10 @@
 import contextlib
+import platform
 import uuid
 import warnings
 import weakref
 from collections import defaultdict
+from itertools import count
 from typing import (
     Any,
     Callable,
@@ -15,10 +17,12 @@ from typing import (
     Tuple,
 )
 from weakref import ReferenceType
-from torch.testing._internal.logging_tensor import LoggingTensorMode, capture_logs
-import platform
 
 import torch
+import torch.fx.traceback as fx_traceback
+from torch.utils._pytree import tree_map
+from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 __all__ = [
     "checkpoint",
@@ -32,9 +36,35 @@ __all__ = [
     "noop_context_fn",
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
+    "context_fn_gen",
+    "set_checkpoint_debug_enabled",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
+
+_checkpoint_debug_enabled: Optional[bool] = None
+
+
+@contextlib.contextmanager
+def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+    """
+    Context manager that sets whether checkpoint should print additional debug
+    information when running. See the ``debug`` flag for
+    :func:`~torch.utils.checkpoint.checkpoint` for more information. Note that
+    when set, this context manager overrides the value of ``debug`` passed to
+    checkpoint. To defer to the local setting, pass ``None`` to this context.
+
+    Args:
+        enabled (bool): Whether checkpoint should print debug information.
+            Default is 'None'.
+    """
+    global _checkpoint_debug_enabled
+    try:
+        prev = _checkpoint_debug_enabled
+        _checkpoint_debug_enabled = enabled
+        yield
+    finally:
+        _checkpoint_debug_enabled = prev
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -1098,6 +1128,163 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             super().__init__(pack_hook, unpack_hook)
 
 
+def _is_compiling(func, args, kwargs):
+    # Check if we are under AOTAutograd tracing
+    # There should probably be a better way to do this...
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
+                arg = torch._from_functional_tensor(arg.elem)
+            if isinstance(arg, torch._subclasses.FakeTensor):
+                return True
+    return False
+
+
+def _detach(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach()
+    return x
+
+
+uid = count(1)
+
+
+# NOTE: torch.utils.checkpoint internal logic will call these two functions unknown number of times
+# (i.e. there could be _CachedTorchDispatchMode calls that doesn't map to a _CachingTorchDispatchMode call),
+# so we ignore these ops and just always recompute them.
+_ignored_ops = {
+    torch.ops.prim.device.default,
+    torch.ops.aten.detach.default,
+}
+
+
+class _CachingTorchDispatchMode(TorchDispatchMode):
+    r"""
+    A :class:`TorchDispatchMode` to implement selective activation checkpointing
+    that's compatible with torch.compile. Used together with _CachedTorchDispatchMode.
+    """
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
+        self.storage = storage
+
+    def push_into_storage(self, out, func, args, kwargs):
+        out_detached = tree_map(_detach, out)
+        self.storage[func].append(out_detached)
+
+    def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
+        if should_not_recompute:
+            fx_traceback.current_meta["recompute"] = 0
+        # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
+        # we decide and handle recomputation in the partitioner.
+        out = func(*args, **kwargs)
+        self.push_into_storage(out, func, args, kwargs)
+        return out
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
+        if _is_compiling(func, args, kwargs):
+            return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
+        else:
+            if should_not_recompute:
+                out = func(*args, **kwargs)
+                self.push_into_storage(out, func, args, kwargs)
+            else:
+                out = func(*args, **kwargs)
+            return out
+
+
+class _CachedTorchDispatchMode(TorchDispatchMode):
+    r"""
+    A :class:`TorchDispatchMode` to implement selective activation checkpointing
+    that's compatible with torch.compile. Used together with _CachingTorchDispatchMode.
+    """
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
+        self.storage = storage
+
+    def pop_from_storage(self, func, args, kwargs):
+        assert func in self.storage
+        out = self.storage[func].pop(0)
+        return out
+
+    def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
+        out = self.pop_from_storage(func, args, kwargs)
+        return out
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
+        if _is_compiling(func, args, kwargs):
+            return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
+        else:
+            if should_not_recompute:
+                out = self.pop_from_storage(func, args, kwargs)
+            else:
+                out = func(*args, **kwargs)
+            return out
+
+
+def context_fn_gen(policy_fn):
+    """
+    A helper function to generate a pair of contexts to be later passed into
+    `torch.utils.checkpoint` API. Useful for implementing selective checkpointing + torch.compile
+    because the context functions need special logic to work with torch.compile.
+    The generated context functions also work in eager mode.
+
+    Args:
+        policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
+            to decide whether a particular op should be recomputed in backward pass or not.
+            In eager mode:
+                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If policy_fn(...) returns False, the op is guaranteed to be recomputed.
+            In torch.compile mode:
+                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If policy_fn(...) returns False, the op may or may not be recomputed
+                (it's up to the partitioner to decide).
+
+    Returns:
+        A pair of generated contexts.
+
+    Example:
+        >>> # xdoctest: +REQUIRES(LINUX)
+        >>>
+        >>> def get_custom_policy():
+        >>>     no_recompute_list = [
+        >>>         torch.ops.aten.mm.default,
+        >>>     ]
+        >>>     def custom_policy(mode, func, *args, **kwargs):
+        >>>         return func in no_recompute_list
+        >>>     return custom_policy
+        >>>
+        >>> def selective_checkpointing_context_fn():
+        >>>     return context_fn_gen(get_custom_policy())
+        >>>
+        >>> def gn(x, y):
+        >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+        >>>
+        >>> def fn(x, y):
+        >>>     return torch.utils.checkpoint.checkpoint(
+        >>>         gn, x, y,
+        >>>         use_reentrant=False,
+        >>>         context_fn=selective_checkpointing_context_fn,
+        >>>     )
+        >>>
+        >>> x = torch.randn(4, 4, requires_grad=True)
+        >>> y = torch.randn(4, 4, requires_grad=True)
+        >>>
+        >>> compiled_fn = torch.compile(fn)
+    """
+    storage: Dict[Any, List[Any]] = defaultdict(list)
+    return _CachingTorchDispatchMode(policy_fn, storage), _CachedTorchDispatchMode(policy_fn, storage)
+
+
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
 
@@ -1138,7 +1325,7 @@ def _checkpoint_without_reentrant_generator(
     """
     unpack_error_cb = None
 
-    if debug:
+    if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
         if context_fn != noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"
@@ -1156,6 +1343,13 @@ def _checkpoint_without_reentrant_generator(
     device = _infer_device_type(*args)
     device_module = _get_device_module(device)
     forward_context, recompute_context = context_fn()
+    if _is_compiling(fn, args, kwargs) and context_fn != noop_context_fn:
+        assert (
+            isinstance(forward_context, TorchDispatchMode) and
+            isinstance(recompute_context, TorchDispatchMode)
+        ), \
+            "In torch.compile mode, `context_fn` arg passed to `torch.utils.checkpoint` " + \
+            "must generate a tuple of two `TorchDispatchMode`s."
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device=device)
 

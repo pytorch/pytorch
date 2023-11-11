@@ -37,7 +37,7 @@ TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
 TorchDynamo has a list of supported backends developed by our partners,
-which can be see by running ``torch.compile.list_backends()`` each of which
+which can be see by running ``torch.compiler.list_backends()`` each of which
 with its optional dependencies.
 
 Some of the most commonly used backends include:
@@ -73,6 +73,8 @@ Some of the most commonly used backends include:
      - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
    * - ``torch.compile(m, backend="tvm")``
      - Uses Apache TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
+   * - ``torch.compile(m, backend="openvino")``
+     - Uses OpenVINO for inference optimizations. `Read more <https://docs.openvino.ai/2023.1/pytorch_2_0_torch_compile.html>`__
 
 Read More
 ~~~~~~~~~

@@ -16,6 +16,7 @@
 
 #include <ATen/core/TensorBase.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
@@ -293,7 +294,7 @@ class ValueCache {
     auto caller = load<CallType::PyCall>(callsite.caller_);
     TORCH_INTERNAL_ASSERT(!caller.module_info_.has_value());
     return ExtraFields<Config<C>::event_type>{
-        /*end_time_ns=*/std::numeric_limits<time_t>::min(),
+        /*end_time_ns=*/std::numeric_limits<c10::time_t>::min(),
         python_tid,
         caller.frame_state_,
         load<C>(callsite.value_)};
@@ -301,7 +302,7 @@ class ValueCache {
 
   c10::optional<TensorMetadata> recordIfTensor(py::handle p);
   std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
-      py::dict tensor_map);
+      const py::dict& tensor_map);
   void trimPrefixes();
 
  private:
@@ -354,7 +355,7 @@ c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
 }
 
 std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
-    py::dict tensor_map) {
+    const py::dict& tensor_map) {
   std::vector<std::pair<std::string, TensorMetadata>> out;
   for (auto& it : tensor_map) {
     auto* value = it.second.ptr();
@@ -666,8 +667,8 @@ struct ThreadLocalResults {
   ValueCache* value_cache_;
   PythonTracer* active_tracer_;
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
-  AppendOnlyList<approx_time_t, BLOCK_SIZE> exit_times_;
-  AppendOnlyList<approx_time_t, BLOCK_SIZE> c_exit_times_;
+  AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> exit_times_;
+  AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> c_exit_times_;
 };
 
 // ============================================================================
@@ -676,6 +677,7 @@ struct ThreadLocalResults {
 class PythonTracer final : public python_tracer::PythonTracerBase {
  public:
   PythonTracer(torch::profiler::impl::RecordQueue* queue);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonTracer() override;
 
   static int pyProfileFn(
@@ -686,13 +688,13 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   void stop() override;
   std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)> time_converter,
+      std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
-      time_t end_time_ns) override;
+      c10::time_t end_time_ns) override;
 
   struct StartFrame {
     TraceKey trace_key_;
-    approx_time_t start_time;
+    c10::approx_time_t start_time{};
   };
 
  private:
@@ -816,6 +818,7 @@ void PythonTracer::stop() {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonTracer::~PythonTracer() {
   if (active_) {
     TORCH_WARN("`PythonTracer::stop()` was not called.");
@@ -861,7 +864,7 @@ void PythonTracer::recordPyCall(
       return tls.intern<CallType::PyCall, E>(no_ephemeral_t(), frame, f_back);
     }
   }();
-  const auto time = getApproximateTime();
+  const auto time = c10::getApproximateTime();
   is_startup_frame ? start_frames_.push_back({key, time})
                    : queue_->getSubqueue()->emplace_py_call(key, time);
 }
@@ -870,14 +873,14 @@ void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
     PyObject* arg) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(Py_TYPE(arg) == &PyCFunction_Type);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
   //     `frame->f_back`.
   auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
       arg, (void*)(fn->m_ml), frame);
-  queue_->getSubqueue()->emplace_py_call(key, getApproximateTime());
+  queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
 }
 
 // ============================================================================
@@ -888,17 +891,17 @@ struct Exit {
     return t_ > other.t_;
   }
 
-  time_t t_;
+  c10::time_t t_;
   size_t python_tid_;
 };
 
 class PostProcess {
  public:
   PostProcess(
-      std::function<time_t(approx_time_t)> time_converter,
+      std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::deque<ThreadLocalResults>& tls,
       const ValueCache& value_cache,
-      time_t end_time_ns)
+      c10::time_t end_time_ns)
       : end_time_{end_time_ns}, time_converter_{std::move(time_converter)} {
     for (size_t python_tid : c10::irange(tls.size())) {
       CallTypeHelper<TraceKeyCacheState>::map(
@@ -934,7 +937,9 @@ class PostProcess {
   }
 
   template <EventType E, size_t N>
-  void addExits(AppendOnlyList<approx_time_t, N>& exits, size_t python_tid) {
+  void addExits(
+      AppendOnlyList<c10::approx_time_t, N>& exits,
+      size_t python_tid) {
     for (const auto i : exits) {
       get_state<E>().exits_.push({time_converter_(i), python_tid});
     }
@@ -959,9 +964,9 @@ class PostProcess {
       std::vector<std::shared_ptr<Result>>& out) {
     using stack_t = std::vector<std::shared_ptr<Result>>;
     const auto initial_size = out.size();
-    auto pop = [](stack_t& stack, time_t t) {
-      TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
-      c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
+    auto pop = [](stack_t& stack, c10::time_t t) {
+      TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
+      std::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
       stack.pop_back();
     };
 
@@ -1000,7 +1005,7 @@ class PostProcess {
     auto it = out.rbegin();
     for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
-          c10::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
+          std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
         const auto& tid_info =
             tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}})
@@ -1024,8 +1029,8 @@ class PostProcess {
     return std::get < E == EventType::PyCall ? 0 : 1 > (state_);
   }
 
-  time_t end_time_;
-  std::function<time_t(approx_time_t)> time_converter_;
+  c10::time_t end_time_;
+  std::function<c10::time_t(c10::approx_time_t)> time_converter_;
   std::tuple<State<EventType::PyCall>, State<EventType::PyCCall>> state_;
 };
 
@@ -1052,9 +1057,9 @@ struct PythonIDVisitor {
 };
 
 std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
-    std::function<time_t(approx_time_t)> time_converter,
+    std::function<c10::time_t(c10::approx_time_t)> time_converter,
     std::vector<python_tracer::CompressedEvent>& enters,
-    time_t end_time_ns) {
+    c10::time_t end_time_ns) {
   value_cache_.trimPrefixes();
   PostProcess post_process(
       std::move(time_converter),
@@ -1070,7 +1075,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {
-    c10::visit(id_visitor, i->extra_fields_);
+    std::visit(id_visitor, i->extra_fields_);
   }
 
   return out;
@@ -1097,12 +1102,12 @@ int PythonTracer::pyProfileFn(
 
     case PyTrace_EXCEPTION:
     case PyTrace_RETURN:
-      local_results.exit_times_.emplace_back(getApproximateTime());
+      local_results.exit_times_.emplace_back(c10::getApproximateTime());
       break;
 
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
-      local_results.c_exit_times_.emplace_back(getApproximateTime());
+      local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
       break;
   }
   return 0;

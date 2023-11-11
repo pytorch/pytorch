@@ -226,7 +226,6 @@ void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
   const auto& fn = self.grad_fn();
   std::shared_ptr<hooks_list>& list =
       materialize_autograd_meta(self)->cpp_hooks_list_;
-  // NOLINTNEXTLINE(modernize-make-shared)
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr{
       new CppFunctionTensorPreHook(list, self.output_nr())};

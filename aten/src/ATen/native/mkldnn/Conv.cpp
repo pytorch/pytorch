@@ -280,10 +280,7 @@ static Tensor _mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -407,7 +404,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   int64_t dim = input_t.ndimension() - 2;
@@ -578,7 +575,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -689,10 +686,7 @@ Tensor _mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 

@@ -1,13 +1,14 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -45,14 +46,14 @@ class SizeVarAllocator:
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
 
-    def make_simplify_with_ranges_cache(self):
+    def make_simplify_with_ranges_cache(self) -> Callable[[Expr, VarRanges], Expr]:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict = dict()
+        cache: Dict[Tuple[Any, ...], Expr] = dict()
         replacement_count = len(self.replacements)
 
-        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges):
+        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
             nonlocal replacement_count
             if replacement_count != len(self.replacements):
                 # new replacements invalidates cached results
@@ -71,7 +72,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict = dict()
+        cache: Dict[Tuple[Any, ...], Any] = dict()
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -89,7 +90,7 @@ class SizeVarAllocator:
 
         return simplify_loops
 
-    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
+    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges) -> Expr:
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -163,7 +164,9 @@ class SizeVarAllocator:
             return self._simplify_with_ranges(expr, var_ranges)
         return expr
 
-    def _simplify_loops_impl(self, index_vars, sizes, index_formulas):
+    def _simplify_loops_impl(
+        self, index_vars: List[sympy.Symbol], sizes, index_formulas
+    ):
         """
         Try to remove as many axis from loop iterations as possible, by:
             1) removing size==1 dimensions
@@ -229,7 +232,7 @@ class SizeVarAllocator:
     # Note - [On Statically Known]
     #
     # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
-    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
+    # operated by providing essentially a question, where the size hinted values were evaluated. If the condition was
     # true, we add a guard and return True, otherwise, False.
     #
     # def maybe_guard_foo(args):
@@ -371,16 +374,32 @@ class SizeVarAllocator:
             free_symbols = expr.free_symbols
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr) -> int:
+    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
         out = self.symbolic_hint(expr)
+        if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
+            # Use the provided heuristic fallback hint
+            sym_vrs = {
+                s: self.shape_env.var_to_range.get(s, None) for s in expr.free_symbols
+            }
+            if all(vr is not None for vr in sym_vrs.values()):
+                expr_vr = bound_sympy(expr, sym_vrs)
+                lower = self.size_hint(expr_vr.lower)
+                upper = self.size_hint(expr_vr.upper)
+                fallback = min(max(fallback, lower), upper)
+            return fallback
         try:
             return int(out)
         except Exception:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
-        return tuple(self.size_hint(x) for x in exprs)
+    def size_hints(
+        self,
+        exprs: List[Expr],
+        *,
+        fallback: Optional[int] = None,
+    ) -> Tuple[int, ...]:
+        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -475,18 +494,21 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[misc]
-        )  # lambda to placate mypy
+            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
+        )
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
-    def lookup_precomputed_size(self, expr: Expr):
+    def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
+
+    def free_symbols(self) -> Set[sympy.Symbol]:
+        return set(self.var_to_val.keys()) - set(self.replacements.keys())
 
 
 def join_dimensions(expr: Expr) -> Expr:

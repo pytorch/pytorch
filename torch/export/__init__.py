@@ -1,570 +1,68 @@
+import builtins
 import copy
 import dataclasses
+import inspect
 import io
+import math
 import pathlib
+import sys
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
-
-import sympy
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 
+from torch.utils._pytree import (
+    FlattenFunc,
+    FromDumpableContextFn,
+    ToDumpableContextFn,
+    UnflattenFunc,
+)
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
 
 __all__ = [
-    "ArgumentKind",
-    "ArgumentSpec",
     "Constraint",
+    "Dim",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "constrain_as_size",
-    "constrain_as_value",
+    "dims",
     "dynamic_dim",
     "export",
     "load",
+    "register_dataclass",
     "save",
 ]
 
 
+from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
+from .graph_signature import ExportBackwardSignature, ExportGraphSignature
+
+
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
-
-
-@dataclasses.dataclass
-class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
-
-
-@dataclasses.dataclass
-class ExportGraphSignature:
-    """
-    :class:`ExportGraphSignature` models the input/output signature of Export Graph,
-    which is a fx.Graph with stronger invariants gurantees.
-
-    Export Graph is functional and does not access "states" like parameters
-    or buffers within the graph via ``getattr`` nodes. Instead, :func:`export`
-    gurantees that parameters and buffers are lifted out of the graph as inputs.
-    Similarly, any mutations to buffers are not included in the graph either,
-    instead the updated values of mutated buffers are modeled as additional outputs
-    of Export Graph.
-
-    The ordering of all inputs and outputs are::
-
-        Inputs = [*parameters_buffers, *flattened_user_inputs]
-        Outputs = [*mutated_inputs, *flattened_user_outputs]
-
-    e.g. If following module is exported::
-
-        class CustomModule(nn.Module):
-            def __init__(self):
-                super(CustomModule, self).__init__()
-
-                # Define a parameter
-                self.my_parameter = nn.Parameter(torch.tensor(2.0))
-
-                # Define two buffers
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
-
-            def forward(self, x1, x2):
-                # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
-
-                # Mutate one of the buffers (e.g., increment it by 1)
-                self.my_buffer2.add_(1.0) # In-place addition
-
-                return output
-
-    Resulting Graph would be::
-
-        graph():
-            %arg0_1 := placeholder[target=arg0_1]
-            %arg1_1 := placeholder[target=arg1_1]
-            %arg2_1 := placeholder[target=arg2_1]
-            %arg3_1 := placeholder[target=arg3_1]
-            %arg4_1 := placeholder[target=arg4_1]
-            %add_tensor := call_function[target=torch.ops.aten.add.Tensor](args = (%arg3_1, %arg0_1), kwargs = {})
-            %mul_tensor := call_function[target=torch.ops.aten.mul.Tensor](args = (%add_tensor, %arg1_1), kwargs = {})
-            %mul_tensor_1 := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg4_1, %arg2_1), kwargs = {})
-            %add_tensor_1 := call_function[target=torch.ops.aten.add.Tensor](args = (%mul_tensor, %mul_tensor_1), kwargs = {})
-            %add_tensor_2 := call_function[target=torch.ops.aten.add.Tensor](args = (%arg2_1, 1.0), kwargs = {})
-            return (add_tensor_2, add_tensor_1)
-
-    Resulting ExportGraphSignature would be::
-
-        ExportGraphSignature(
-            # Indicates that there is one parameter named `my_parameter`
-            parameters=['L__self___my_parameter'],
-
-            # Indicates that there are two buffers, `my_buffer1` and `my_buffer2`
-            buffers=['L__self___my_buffer1', 'L__self___my_buffer2'],
-
-            # Indicates that the nodes `arg3_1` and `arg4_1` in produced graph map to
-            # original user inputs, ie. x1 and x2
-            user_inputs=['arg3_1', 'arg4_1'],
-
-            # Indicates that the node `add_tensor_1` maps to output of original program
-            user_outputs=['add_tensor_1'],
-
-            # Indicates that there is one parameter (self.my_parameter) captured,
-            # its name is now mangled to be `L__self___my_parameter`, which is now
-            # represented by node `arg0_1` in the graph.
-            inputs_to_parameters={'arg0_1': 'L__self___my_parameter'},
-
-            # Indicates that there are two buffers (self.my_buffer1, self.my_buffer2) captured,
-            # their name are now mangled to be `L__self___my_my_buffer1` and `L__self___my_buffer2`.
-            # They are now represented by nodes `arg1_1` and `arg2_1` in the graph.
-            inputs_to_buffers={'arg1_1': 'L__self___my_buffer1', 'arg2_1': 'L__self___my_buffer2'},
-
-            # Indicates that one buffer named `L__self___my_buffer2` is mutated during execution,
-            # its new value is output from the graph represented by the node named `add_tensor_2`
-            buffers_to_mutate={'add_tensor_2': 'L__self___my_buffer2'},
-
-            # Backward graph not captured
-            backward_signature=None,
-
-            # Work in progress feature, please ignore now.
-            assertion_dep_token=None
-        )
-    """
-
-    # A list of parameters uniquely identified by mangled fully qualified name
-    parameters: List[str]
-
-    # A list of buffers uniquely identified by mangled fully qualified name
-    buffers: List[str]
-
-    # Graph node names of pytree-flattened inputs of original program
-    user_inputs: List[str]
-
-    # Graph node names of pytree-flattened outputs of original program
-    user_outputs: List[str]
-
-    # A dictionary mapping graph input node names to parameters. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted parameter.
-    inputs_to_parameters: Dict[str, str]
-
-    # A dictionary mapping graph input node names to buffers. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted buffer.
-    inputs_to_buffers: Dict[str, str]
-
-    # A dictionary mapping graph output node names to buffers that are mutated in the
-    # original program. Buffers that are not mutated will not be found in this dictionary.
-    buffers_to_mutate: Dict[str, str]
-
-    backward_signature: Optional[ExportBackwardSignature]
-
-    # Map from assertion dependency token index to assertion dep token output
-    # name in output. The shape of output after aot_autograd will be like:
-    # (updated_inputs, user_outputs, dep_token).
-    assertion_dep_token: Optional[Dict[int, str]] = None
-
-    def __post_init__(self) -> None:
-        assertion_dep_token = self.assertion_dep_token
-        if assertion_dep_token is None:
-            return
-        assert len(assertion_dep_token) == 1
-        assertion_dep_token_index = list(assertion_dep_token.keys())[0]
-        assert (
-            len(self.user_outputs) + len(self.buffers_to_mutate)
-            == assertion_dep_token_index
-        )
-
-
-class ArgumentKind(Enum):
-    Tensor = auto()
-    SymInt = auto()
-    Constant = auto()
-
-
-@dataclasses.dataclass
-class ArgumentSpec:
-    kind: ArgumentKind
-    value: Any
-
-    def __post_init__(self):
-        if self.kind in (ArgumentKind.Tensor, ArgumentKind.SymInt):
-            assert isinstance(self.value, str)
-
-
-@dataclasses.dataclass
-class ModuleCallSignature:
-    inputs: List[ArgumentSpec]
-    outputs: List[ArgumentSpec]
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
-
-
-@dataclasses.dataclass
-class ModuleCallEntry:
-    fqn: str
-    signature: Optional[ModuleCallSignature] = None
-
-
-class ExportedProgram:
-    """
-    Package of a program from :func:`export`. It contains
-    an :class:`torch.fx.Graph` that represents Tensor computation, a state_dict containing
-    tensor values of all lifted parameters and buffers, and various metadata.
-
-    You can call an ExportedProgram like the original callable traced by
-    :func:`export` with the same calling convention.
-
-    To perform transformations on the graph, use ``.module`` property to access
-    an :class:`torch.fx.GraphModule`. You can then use
-    `FX transformation <https://pytorch.org/docs/stable/fx.html#writing-transformations>`_
-    to rewrite the graph. Afterwards, you can simply use :func:`export`
-    again to construct a correct ExportedProgram.
-    """
-
-    def __init__(
-        self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
-        graph: torch.fx.Graph,
-        graph_signature: ExportGraphSignature,
-        call_spec: Any,
-        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
-        range_constraints: Dict[sympy.Symbol, Any],
-        equality_constraints: List[Tuple[Any, Any]],
-        module_call_graph: List[ModuleCallEntry],
-        example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-    ):
-        from torch._export.exported_program import (
-            _create_graph_module_for_export,
-            CallSpec,
-        )
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            InputDim,
-            RangeConstraint,
-        )
-
-        # Remove codegen related things from the graph. It should just be a flat graph.
-        graph._codegen = torch.fx.graph.CodeGen()
-        self._graph_module = _create_graph_module_for_export(root, graph)
-        if isinstance(root, torch.fx.GraphModule):
-            self._graph_module.meta.update(root.meta)
-
-        self._graph_signature: ExportGraphSignature = graph_signature
-        self._call_spec: CallSpec = call_spec
-        self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self._equality_constraints: List[
-            Tuple[InputDim, InputDim]
-        ] = equality_constraints
-        self._module_call_graph: List[ModuleCallEntry] = module_call_graph
-        self._example_inputs = example_inputs
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def graph_module(self):
-        return self._graph_module
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def graph(self):
-        return self.graph_module.graph
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def graph_signature(self):
-        return self._graph_signature
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def state_dict(self):
-        return self._state_dict
-
-    @compatibility(is_backward_compatible=False)
-    def parameters(self) -> Iterator[torch.nn.Parameter]:
-        """
-        Returns an iterator over original module's parameters.
-        """
-        for _, param in self.named_parameters():
-            yield param
-
-    @compatibility(is_backward_compatible=False)
-    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
-        """
-        Returns an iterator over original module parameters, yielding
-        both the name of the parameter as well as the parameter itself.
-        """
-        for param_name in self.graph_signature.parameters:
-            yield param_name, self.state_dict[param_name]
-
-    @compatibility(is_backward_compatible=False)
-    def buffers(self) -> Iterator[torch.Tensor]:
-        """
-        Returns an iterator over original module buffers.
-        """
-        for _, buf in self.named_buffers():
-            yield buf
-
-    @compatibility(is_backward_compatible=False)
-    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
-        """
-        Returns an iterator over original module buffers, yielding
-        both the name of the buffer as well as the buffer itself.
-        """
-        for buffer_name in self.graph_signature.buffers:
-            yield buffer_name, self.state_dict[buffer_name]
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def call_spec(self):
-        return self._call_spec
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def range_constraints(self):
-        return self._range_constraints
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def equality_constraints(self):
-        return self._equality_constraints
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def module_call_graph(self):
-        return self._module_call_graph
-
-    @property
-    @compatibility(is_backward_compatible=False)
-    def example_inputs(self):
-        return self._example_inputs
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        import torch._export.error as error
-        from torch._export import combine_args_kwargs
-
-        if self.call_spec.in_spec is not None:
-            try:
-                user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
-            except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
-                    "Trying to flatten user inputs with exported input tree spec: \n"
-                    f"{self.call_spec.in_spec}\n"
-                    "but actually got inputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-
-        ordered_params = tuple(
-            self.state_dict[name] for name in self.graph_signature.parameters
-        )
-        ordered_buffers = tuple(
-            self.state_dict[name] for name in self.graph_signature.buffers
-        )
-        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
-
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params, *ordered_buffers, *args, enable_io_processing=False
-            )
-
-        if self.call_spec.out_spec is not None:
-            mutation = self.graph_signature.buffers_to_mutate
-            num_mutated = len(mutation)
-            mutated_buffers = res[:num_mutated]
-
-            # Exclude dependency token from final result.
-            assertion_dep_token = self.graph_signature.assertion_dep_token
-            if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
-                res = res[:assertion_dep_token_index]
-
-            res = res[num_mutated:]
-            try:
-                res = pytree.tree_unflatten(res, self.call_spec.out_spec)
-            except Exception:
-                _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(
-                    "Trying to flatten user outputs with exported output tree spec: \n"
-                    f"{self.call_spec.out_spec}\n"
-                    "but actually got outputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-            finally:
-                ix = 0
-                for buffer in self.graph_signature.buffers_to_mutate.values():
-                    self.state_dict[buffer] = mutated_buffers[ix]
-                    ix += 1
-        return res
-
-    def __str__(self) -> str:
-        graph_module = self.graph_module.print_readable(print_output=False).replace(
-            "\n", "\n    "
-        )
-        string = (
-            "ExportedProgram:\n"
-            f"    {graph_module}\n"
-            f"Graph signature: {self.graph_signature}\n"
-            f"Range constraints: {self.range_constraints}\n"
-            f"Equality constraints: {self.equality_constraints}\n"
-        )
-        return string
-
-    def module(self) -> torch.nn.Module:
-        """
-        Returns a self contained GraphModule with all the parameters/buffers inlined.
-        """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
-
-        return unlift_exported_program_lifted_states(self)
-
-    def _transform(self, *passes: PassType) -> "ExportedProgram":
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            RangeConstraint,
-        )
-
-        pm = PassManager(list(passes))
-        res = pm(self.graph_module)
-        transformed_gm = res.graph_module if res is not None else self.graph_module
-        assert transformed_gm is not None
-
-        def _get_updated_range_constraints(
-            gm: torch.fx.GraphModule,
-        ) -> Dict[sympy.Symbol, RangeConstraint]:
-            def get_shape_env(gm):
-                vals = [
-                    node.meta["val"]
-                    for node in gm.graph.nodes
-                    if node.meta.get("val", None) is not None
-                ]
-                from torch._guards import detect_fake_mode
-
-                fake_mode = detect_fake_mode(vals)
-                if fake_mode is not None:
-                    return fake_mode.shape_env
-                for v in vals:
-                    if isinstance(v, torch.SymInt):
-                        return v.node.shape_env
-
-            shape_env = get_shape_env(gm)
-            if shape_env is None:
-                return {}
-            range_constraints = {
-                k: RangeConstraint(v.lower, v.upper)
-                for k, v in shape_env.var_to_range.items()
-            }
-            return range_constraints
-
-        def _get_updated_graph_signature(
-            old_signature: ExportGraphSignature,
-            new_gm: torch.fx.GraphModule,
-        ) -> ExportGraphSignature:
-            """
-            Update the graph signature's user_input/user_outputs.
-            """
-            new_graph_inputs = [
-                node.name for node in new_gm.graph.nodes if node.op == "placeholder"
-            ]
-            num_inputs = (
-                len(old_signature.parameters)
-                + len(old_signature.buffers)
-                + len(old_signature.user_inputs)
-            )
-
-            assert len(new_graph_inputs) == num_inputs, (
-                f"Number of input nodes changed from {len(new_graph_inputs)} "
-                f"to {num_inputs} after transformation. This transformation "
-                "is currently not supported."
-            )
-            new_parameter_inputs = new_graph_inputs[: len(old_signature.parameters)]
-            num_param_buffers = len(old_signature.buffers) + len(
-                old_signature.parameters
-            )
-            new_buffer_inputs = new_graph_inputs[
-                len(old_signature.parameters) : num_param_buffers
-            ]
-            new_user_inputs = new_graph_inputs[num_param_buffers:]
-
-            output_node = list(new_gm.graph.nodes)[-1]
-            assert output_node.op == "output"
-            new_graph_outputs = [arg.name for arg in output_node.args[0]]
-
-            assert len(new_graph_outputs) == len(old_signature.buffers_to_mutate) + len(
-                old_signature.user_outputs
-            ), (
-                f"Number of output nodes changed from {len(new_graph_outputs)} "
-                f"to {len(old_signature.buffers_to_mutate) + len(old_signature.user_outputs)} "
-                "after transformation. This transformation is currently not supported."
-            )
-            new_user_outputs = new_graph_outputs[len(old_signature.buffers_to_mutate) :]
-
-            new_signature = ExportGraphSignature(
-                copy.deepcopy(old_signature.parameters),
-                copy.deepcopy(old_signature.buffers),
-                new_user_inputs,
-                new_user_outputs,
-                copy.deepcopy(old_signature.inputs_to_parameters),
-                copy.deepcopy(old_signature.inputs_to_buffers),
-                copy.deepcopy(old_signature.buffers_to_mutate),
-                copy.deepcopy(old_signature.backward_signature),
-                copy.deepcopy(old_signature.assertion_dep_token),
-            )
-            return new_signature
-
-        transformed_ep = ExportedProgram(
-            transformed_gm,
-            transformed_gm.graph,
-            _get_updated_graph_signature(self.graph_signature, transformed_gm),
-            copy.deepcopy(self.call_spec),
-            self.state_dict,
-            _get_updated_range_constraints(transformed_gm),
-            copy.deepcopy(self.equality_constraints),
-            copy.deepcopy(self._module_call_graph),
-            self.example_inputs,
-        )
-        transformed_ep.graph_module.meta.update(self.graph_module.meta)
-        transformed_ep.graph_module.meta.update(res.graph_module.meta)
-        return transformed_ep
-
-    def _check_input_constraints(self, *args):
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForConstraintsPass,
-        )
-
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
-
-    def _validate(self):
-        # TODO(zhxchen17) check for get_attr
-        # TODO(zhxchen17) check for funcitonal ops
-        for gm in self.graph_module.modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            for node in gm.graph.nodes:
-                if node.op == "call_function":
-                    assert node.target != torch.ops.higher_order._export_tracepoint
 
 
 @dataclasses.dataclass
@@ -591,12 +89,18 @@ class _ConstraintFactory(type):
             f"Please use torch.export.dynamic_dim() to create one"
         )
 
-    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None):
-        return super().__call__(w_tensor, t_id, dim, constraint_range, shared)
+    def _create(
+        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+    ):
+        return super().__call__(
+            w_tensor, t_id, dim, constraint_range, shared, debug_name
+        )
 
 
-def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None):
-    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared)
+def _create_constraint(
+    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+):
+    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared, debug_name)
 
 
 @dataclasses.dataclass
@@ -612,12 +116,15 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
+    constraint_range: "StrictMinMaxConstraint"
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
+    debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=2, upper=sympy.oo):
+    def _clone_with_range(self, lower=2, upper=math.inf):
+        # Import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
 
         constraint_range = StrictMinMaxConstraint(
@@ -625,7 +132,12 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             warn_only=False,
         )
         return _create_constraint(
-            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            self.shared,
+            self.debug_name,
         )
 
     def __ge__(self, lower):
@@ -681,181 +193,34 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
                 "A dynamic dim can be specified equal only to another dynamic dim. "
                 f"Equality with {type(other)} is not supported."
             )
+
+        # import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
         )
+        if self.debug_name is None:
+            debug_name = other.debug_name
+        else:
+            assert other.debug_name is None or self.debug_name == other.debug_name
+            debug_name = self.debug_name
         return _create_constraint(
             self.w_tensor,
             self.t_id,
             self.dim,
             constraint_range,
             shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+            debug_name=debug_name,
         )
-
-
-def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = None):
-    """
-    Hint :func:`export` about the constraint of an intermediate scalar value so that subsequent
-    branching behaviors that check on the range of aforementioned scalar value can be
-    soundly traced.
-
-    .. warning::
-        (Note that if the intermediate scalar value will be used like a size, including
-        being passed as size arg to a tensor factory or view, call :func:`constrain_as_size`
-        instead.)
-
-    Args:
-        symbol: Intermediate scalar value (int-only now) to apply range constraint on.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
-
-    Returns:
-        None
-
-    For example, following program can not be traced soundly::
-
-        def fn(x):
-            v = x.max().item()
-            if v > 1024:
-                return x
-            else:
-                return x * 2
-
-    ``v`` is a data-dependent value, which is assumed to have a range of (-inf, inf).
-    :func:`export()` a hint about which branch to take would not be able to determine
-    if the traced branching decision is correct or not. Thus :func:`export()`
-    would give following error::
-
-        torch._dynamo.exc.UserError: Consider annotating your code using
-        torch.export.constrain_as_size() or torch.export().constrain_as_value() APIs.
-        It appears that you're trying to get a value out of symbolic int/float whose value
-        is data-dependent (and thus we do not know the true value.)  The expression we were
-        trying to evaluate is f0 > 1024 (unhinted: f0 > 1024).
-
-    Assuming the actual range of ``v`` can be between [10, 200], you can add a call to
-    :func:`constrain_as_value` in the source code like this::
-
-        def fn(x):
-            v = x.max().item()
-
-            # Give export() a hint
-            torch.export.constrain_as_value(v, min=10, max=200)
-
-            if v > 1024:
-                return x
-            else:
-                return x * 2
-
-    With the additional hint, :func:`export` would be able to trace the program correctly by taking
-    the ``else`` branch, resulting in following graph::
-
-        graph():
-            %arg0_1 := placeholder[target=arg0_1]
-
-            # v = x.max().item()
-            %max_1 := call_function[target=torch.ops.aten.max.default](args = (%arg0_1,))
-            %_local_scalar_dense := call_function[target=torch.ops.aten._local_scalar_dense.default](args = (%max_1,))
-
-            # Asserting 10 <= v <= 200
-            %ge := call_function[target=operator.ge](args = (%_local_scalar_dense, 10))
-            %scalar_tensor := call_function[target=torch.ops.aten.scalar_tensor.default](args = (%ge,))
-            %_assert_async := call_function[target=torch.ops.aten._assert_async.msg](
-                args = (%scalar_tensor, _local_scalar_dense is outside of inline constraint [10, 200].))
-            %le := call_function[target=operator.le](args = (%_local_scalar_dense, 200))
-            %scalar_tensor_1 := call_function[target=torch.ops.aten.scalar_tensor.default](args = (%le,))
-            %_assert_async_1 := call_function[target=torch.ops.aten._assert_async.msg](
-                args = (%scalar_tensor_1, _local_scalar_dense is outside of inline constraint [10, 200].))
-            %sym_constrain_range := call_function[target=torch.ops.aten.sym_constrain_range.default](
-                args = (%_local_scalar_dense,), kwargs = {min: 10, max: 200})
-
-            # Always taking `else` branch to multiply elements `x` by 2 due to hints above
-            %mul := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg0_1, 2), kwargs = {})
-            return (mul,)
-
-    """
-    from torch._export.constraints import constrain_as_value
-
-    return constrain_as_value(symbol, min, max)
-
-
-def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = None):
-    """
-    Hint :func:`export` about the constraint of an intermediate scalar value that
-    represents shape of a tensor so that subsequent tensor constructors can be
-    traced correctly because many operators need to make assumption about range
-    of sizes.
-
-    Args:
-        symbol: Intermediate scalar value (int-only now) to apply range constraint on.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
-
-    Returns:
-        None
-
-    For example, following program can not be traced soundly wihout using
-    :func:`constrain_as_size` to give :func:`export` a hint about shape ranges::
-
-        def fn(x):
-            d = x.max().item()
-            return torch.ones(v)
-
-    :func:`export` would give following error::
-
-        torch._dynamo.exc.Unsupported: guard on data-dependent symbolic int/float
-
-    Assuming the actual range of ``d`` can be between [3, 10], you can add a call to
-    :func:`constrain_as_size` in the source code like this::
-
-        def fn(x):
-            d = x.max().item()
-            torch.export.constrain_as_size(d, min=3, max=10)
-            return torch.ones(d)
-
-    With the additional hint, :func:`export` would be able to trace the program correctly by taking
-    the ``else`` branch, resulting in following graph::
-
-        graph():
-            %arg0_1 := placeholder[target=arg0_1]
-
-            # d = x.max().item()
-            %max_1 := call_function[target=torch.ops.aten.max.default](args = (%arg0_1,))
-            %_local_scalar_dense := call_function[target=torch.ops.aten._local_scalar_dense.default](args = (%max_1,))
-
-            # Asserting 3 <= d <= 10
-            %ge := call_function[target=operator.ge](args = (%_local_scalar_dense, 3))
-            %scalar_tensor := call_function[target=torch.ops.aten.scalar_tensor.default](args = (%ge,))
-            %_assert_async := call_function[target=torch.ops.aten._assert_async.msg](
-                args = (%scalar_tensor, _local_scalar_dense is outside of inline constraint [3, 10].))
-            %le := call_function[target=operator.le](args = (%_local_scalar_dense, 10))
-            %scalar_tensor_1 := call_function[target=torch.ops.aten.scalar_tensor.default](args = (%le,))
-            %_assert_async_1 := call_function[target=torch.ops.aten._assert_async.msg](
-                args = (%scalar_tensor_1, _local_scalar_dense is outside of inline constraint [3, 10].))
-            %sym_constrain_range_for_size := call_function[target=torch.ops.aten.sym_constrain_range_for_size.default](
-                args = (%_local_scalar_dense,), kwargs = {min: 3, max: 10})
-
-            # Constructing new tensor with d
-            %full := call_function[target=torch.ops.aten.full.default](
-                args = ([%_local_scalar_dense], 1),
-                kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
-
-            ......
-
-
-    .. warning::
-        if your size is intended to be dynamic, do NOT test if sizes are equal to 0 or 1,
-        these will SILENTLY report false and be bypassed
-
-    """
-
-    from torch._export.constraints import constrain_as_size
-
-    return constrain_as_size(symbol, min, max)
 
 
 def dynamic_dim(t: torch.Tensor, index: int):
     """
+    .. warning::
+        (This feature is DEPRECATED. See :func:`Dim` instead.)
+
     :func:`dynamic_dim` constructs a :class:`Constraint` object that describes the dynamism of
     a dimension ``index`` of tensor ``t``. :class:`Constraint` objects should be passed to
     ``constraints`` argument of :func:`export`.
@@ -925,25 +290,77 @@ def dynamic_dim(t: torch.Tensor, index: int):
     return dynamic_dim(t, index)
 
 
+class _Dim(type):
+    """
+    Metaclass for :func:`Dim` types.
+    """
+
+    @staticmethod
+    def readable(name, min_, max_):
+        if min_ == 2:
+            min_ = None
+        if max_ == sys.maxsize - 1:
+            max_ = None
+        if min_ is None and max_ is None:
+            return f"Dim('{name}')"
+        if min_ is None:
+            return f"Dim('{name}', max={max_})"
+        if max_ is None:
+            return f"Dim('{name}', min={min_})"
+        return f"Dim('{name}', min={min_}, max={max_})"
+
+
+def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
+    It can be used to describe multiple possible values of a dynamic tensor dimension.
+    Note that different dynamic dimensions of the same tensor, or of different tensors,
+    can be described by the same type.
+
+    Args:
+        name (str): Human-readable name for debugging.
+        min (Optional[int]): Minimum possible value of given symbol (inclusive)
+        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+
+    Returns:
+        A type that can be used in dynamic shape specifications for tensors.
+    """
+    _min = 2 if min is None else builtins.max(min, 2)
+    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
+    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    dim = _Dim(name, (int,), {"min": _min, "max": _max})
+    dim.__module__ = getattr(
+        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
+    )
+    return dim
+
+
+def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    Util to create multiple :func:`Dim` types.
+    """
+    return tuple(Dim(name, min=min, max=max) for name in names)
+
+
 def export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
-    a method) and produces a traced graph representing only the Tensor
-    computation of the function in an Ahead-of-Time (AOT) fashion, which can
-    subsequently be executed with different outputs or serialized.  The traced
-    graph (1) produces a normalized operator set consisting only of functional
-    `Core ATen Operator Set <https://pytorch.org/docs/stable/ir.html>`_
-    and user specified custom operators, (2) has eliminated all Python control
-    flow and data structures (except for certain
-    conditions), and (3) has the set of shape constraints needed to show that
-    this normalization and control flow elimination is sound for a future
-    input.
+    a method) along with example inputs, and produces a traced graph representing
+    only the Tensor computation of the function in an Ahead-of-Time (AOT) fashion,
+    which can subsequently be executed with different inputs or serialized.  The
+    traced graph (1) produces normalized operators in the functional ATen operator set
+    (as well as any user-specified custom operators), (2) has eliminated all Python control
+    flow and data structures (with certain exceptions), and (3) records the set of
+    shape constraints needed to show that this normalization and control-flow elimination
+    is sound for future inputs.
 
     **Soundness Guarantee**
 
@@ -952,36 +369,27 @@ def export(
     The output :class:`ExportedProgram` is considered valid only when these
     assumptions hold true.
 
-    There are 2 types of assumptions made during tracing
-
-    - Shapes (not values) of input tensors.
-    - Ranges (lower and upper bound) of values extracted from intermediate tensors via ``.item()`` or direct indexing.
-
-
-    All assumptions must be validated at graph capture time for :func:`export`
+    Tracing makes assumptions on the shapes (not values) of input tensors.
+    Such assumptions must be validated at graph capture time for :func:`export`
     to succeed. Specifically:
 
     - Assumptions on static shapes of input tensors are automatically validated without additional effort.
-    - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with :func:`dynamic_dim` APIs
-    - Assumptions on range of intermediate values require explicit `Inline Constraint`,
-      constructed use :func:`constrain_as_size` and :func:`constraint_as_value` APIs.
+    - Assumptions on dynamic shape of input tensors require explicit specification
+      by using the :func:`Dim` API to construct dynamic dimensions and by associating
+      them with example inputs through the ``dynamic_shapes`` argument.
 
     If any assumption can not be validated, a fatal error will be raised. When that happens,
-    the error message will include suggested code needed to construct necessary
-    constraints to validate the assumptions, for example :func:`export` would suggest
-    following code for input constraints::
+    the error message will include suggested fixes to the specification that are needed
+    to validate the assumptions. For example :func:`export` might suggest the
+    following fix to the definition of a dynamic dimension ``dim0_x``, say appearing in the
+    shape associated with input ``x``, that was previously defined as ``Dim("dim0_x")``::
 
-        def specify_constraints(x):
-            return [
-                # x:
-                dynamic_dim(x, 0) <= 5,
-            ]
+        dim = Dim("dim0_x", max=5)
 
-    This example means the program requires the dim 0 of input ``x`` to be less
-    than or equal to 5 to be valid. You can inspect the constraints needed and
-    then copy this exact function into your code to generated needed
-    constraints to be passed into ``constraints`` argument.
+    This example means the generated code requires dimension 0 of input ``x`` to be less
+    than or equal to 5 to be valid. You can inspect the suggested fixes to dynamic dimension
+    definitions and then copy them verbatim into your code without needing to change the
+    ``dynamic_shapes`` argument to your :func:`export` call.
 
     Args:
         f: The callable to trace.
@@ -990,13 +398,28 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        constraints: An optional list of constraints on the dynamic arguments
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
          is expected to have dynamic shapes, please use :func:`dynamic_dim`
          to define :class:`Constraint` objects that specify the dynamics and the possible
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
+
+        dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -1006,14 +429,30 @@ def export(
     Acceptable types of inputs (for ``args`` and ``kwargs``) and outputs include:
 
     - Primitive types, i.e. ``torch.Tensor``, ``int``, ``float``, ``bool`` and ``str``.
+    - Dataclasses, but they must be registered by calling :func:`register_dataclass` first.
     - (Nested) Data structures comprising of ``dict``, ``list``, ``tuple``, ``namedtuple`` and
       ``OrderedDict`` containing all above types.
 
     """
 
-    from torch._export import export
+    from torch._export import export, export__RC__
 
-    return export(f, args, kwargs, constraints)
+    if constraints is not None:
+        return export(
+            f,
+            args,
+            kwargs,
+            constraints,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
+    else:
+        return export__RC__(
+            f,
+            args,
+            kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
 
 def save(
@@ -1054,7 +493,7 @@ def save(
             def forward(self, x):
                 return x + 10
 
-        ep = torch.export.export(MyModule(), torch.randn(5))
+        ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
         torch.export.save(ep, 'exported_program.pt2')
@@ -1064,7 +503,7 @@ def save(
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'}
+        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
         torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
 
     """
@@ -1122,10 +561,44 @@ def load(
         extra_files = {'foo.txt': ''}  # values will be replaced with data
         ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
         print(extra_files['foo.txt'])
-
+        print(ep(torch.randn(5)))
     """
     from torch._export import load
 
     return load(
         f, extra_files=extra_files, expected_opset_version=expected_opset_version
     )
+
+
+def register_dataclass(cls: Any) -> None:
+    """
+    Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
+
+    Args:
+        cls: the dataclass type to register
+
+    Example::
+
+        @dataclass
+        class InputDataClass:
+            feature: torch.Tensor
+            bias: int
+
+        class OutputDataClass:
+            res: torch.Tensor
+
+        torch.export.register_dataclass(InputDataClass)
+        torch.export.register_dataclass(OutputDataClass)
+
+        def fn(o: InputDataClass) -> torch.Tensor:
+            res = res=o.feature + o.bias
+            return OutputDataClass(res=res)
+
+        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1), ))
+        print(ep)
+
+    """
+
+    from torch._export.utils import register_dataclass_as_pytree_node
+
+    return register_dataclass_as_pytree_node(cls)

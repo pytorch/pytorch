@@ -44,6 +44,7 @@ file(GLOB C10_HEADERS
         util/*.h
         )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+target_compile_options_if_supported(c10 "-Wdeprecated")
 if(HAVE_SOVERSION)
   set_target_properties(c10 PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -80,14 +81,23 @@ if(WERROR)
 endif()
 
 # ---[ Dependency of c10
-if(${USE_GFLAGS})
+if(C10_USE_GFLAGS)
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if(${USE_GLOG})
+if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+
+if(C10_USE_NUMA)
+  target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
+  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+endif()
+
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+    target_link_libraries(c10 PRIVATE cpuinfo)
+endif()
 
 find_package(Backtrace)
 if(Backtrace_FOUND)
