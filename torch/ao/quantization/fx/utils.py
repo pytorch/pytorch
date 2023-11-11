@@ -1,48 +1,40 @@
 import copy
+import operator
+import warnings
+from collections import namedtuple
+from dataclasses import dataclass
+
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+
 import torch
 import torch.nn as nn
-from torch.ao.quantization import (
-    QConfigAny,
-    QuantType,
-)
-from torch.ao.quantization.backend_config import (
-    DTypeWithConstraints,
-)
+from torch.ao.quantization import QConfigAny, QuantType
+from torch.ao.quantization.backend_config import DTypeWithConstraints
 from torch.ao.quantization.fake_quantize import (
     FakeQuantizeBase,
     FixedQParamsFakeQuantize,
 )
 from torch.ao.quantization.observer import (
+    _is_activation_post_process,
     FixedQParamsObserver,
     ObserverBase,
 )
 from torch.ao.quantization.qconfig import (
-    float16_static_qconfig,
     float16_dynamic_qconfig,
+    float16_static_qconfig,
     qconfig_equals,
 )
-from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import (
-    activation_is_statically_quantized,
-)
-from torch.ao.quantization.observer import _is_activation_post_process
 from torch.ao.quantization.qconfig_mapping import QConfigMapping
+from torch.ao.quantization.stubs import DeQuantStub
+from torch.ao.quantization.utils import activation_is_statically_quantized
 
 from torch.fx import GraphModule, map_arg
 
-from torch.fx.graph import (
-    Graph,
-    Node,
-)
-from .custom_config import PrepareCustomConfig
+from torch.fx.graph import Graph, Node
+
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
-
-from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
-from dataclasses import dataclass
-from collections import namedtuple
-import operator
-import warnings
+from .custom_config import PrepareCustomConfig
 
 # TODO: revisit this list. Many helper methods shouldn't be public
 __all__ = [
@@ -70,7 +62,11 @@ __all__ = [
     "ObservedGraphModuleAttrs",
 ]
 
-NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functional.group_norm, torch.nn.functional.instance_norm}
+NON_QUANTIZABLE_WEIGHT_OPS = {
+    torch.nn.functional.layer_norm,
+    torch.nn.functional.group_norm,
+    torch.nn.functional.instance_norm,
+}
 
 @dataclass
 class ObservedGraphModuleAttrs:
@@ -229,6 +225,15 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     """
     devices = {p.device for p in module.parameters()} | \
         {p.device for p in module.buffers()}
+
+    """
+    As a temp workaround for AIMP HHC publish we added CPU check.remove it later. T163614564
+    """
+    if {torch.device("cpu"), torch.device("meta")} == devices:
+        warnings.warn("Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'.")
+        devices = {torch.device("cpu")}
+    ""
+
     assert len(devices) <= 1, (
         "prepare only works with cpu or single-device CUDA modules, "
         f"but got devices {devices}"
