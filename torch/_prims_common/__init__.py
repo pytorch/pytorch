@@ -844,22 +844,38 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
             newsize *= d
         else:
             torch._check(False, lambda: f"invalid shape dimension {d}")
-    torch._check(
-        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
-        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
-    )
-    if dim is not None:
-        # Convert to list to produce a compatible error message with core
-        # PyTorch, which prints sequences in square brackets.
-        shape = list(shape)
+    if dim is None:
+        torch._check(
+            numel == newsize,
+            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+        )
+    else:
+        from torch.fx.experimental.symbolic_shapes import definitely_true
+
         torch._check(
             newsize != 0,
             lambda: (
-                f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                f"cannot reshape tensor of 0 elements into shape {list(shape)} because the "
                 f"unspecified dimension size -1 can be any value and is ambiguous"
+                if definitely_true(numel == 0)
+                else f"shape '{list(shape)}' is invalid for input of size {numel}"
             ),
         )
+        torch._check(
+            numel % newsize == 0,
+            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+        )
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         shape[dim] = numel // newsize
+        # NB: This is pretty important when you have unbacked SymInts.
+        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
+        # range for i0 is typically [2, inf], which means if you divide
+        # by two the new range should be [1, inf].  But this is bad news
+        # if you have an unbacked SymInt: we need to reapply the unsound
+        # assumption that the size is >= 2.
+        torch._check_is_size(shape[dim])
     return tuple(shape)
 
 
