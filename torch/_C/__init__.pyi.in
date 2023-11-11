@@ -1593,7 +1593,7 @@ class TensorBase(metaclass=_TensorMeta):
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     nbytes: _int
     itemsize: _int
-    _has_symbolic_sizes_strides: bool
+    _has_symbolic_sizes_strides: _bool
     ${tensor_method_hints}
 
 _TensorBase = TensorBase
