@@ -1322,6 +1322,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
