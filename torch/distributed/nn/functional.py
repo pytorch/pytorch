@@ -175,7 +175,9 @@ def all_to_all_single(
     group=group.WORLD,
 ):
     """
-    Each process splits input tensor and then scatters the split list to all processes in a group. Then concatenate the received tensors from all the processes in the group and return single output tensor.
+    Each process splits input tensor and then scatters the split list to all processes in a group.
+
+    Then concatenate the received tensors from all the processes in the group and return single output tensor.
 
     Arguments:
         output (Tensor): Gathered concatenated output tensor.

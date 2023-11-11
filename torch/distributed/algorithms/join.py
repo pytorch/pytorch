@@ -10,7 +10,10 @@ __all__ = ['JoinHook', 'Joinable', 'Join']
 
 class JoinHook:
     r"""
-    This defines a join hook, which provides two entry points in the join context manager: a main hook, which is called repeatedly while there exists a non-joined process, and a post-hook, which is called once all processes have joined.
+    This defines a join hook, which provides two entry points in the join context manager.
+
+    Entry points : a main hook, which is called repeatedly while there exists a non-joined
+    process, and a post-hook, which is called once all processes have joined.
 
     To implement a join hook for the generic join context manager, define a
     class that inherits from :class:`JoinHook` and override ``main_hook()`` and
@@ -18,12 +21,17 @@ class JoinHook:
     """
 
     def main_hook(self) -> None:
-        r"""Call this hook called repeatedly while there exists a non-joined process to shadow collective communications in one training iteration (i.e., in one forward pass, backward pass, and optimizer step)."""
+        r"""Call this hook while there exists a non-joined process to shadow collective communications in a training iteration.
+
+        Training iteration i.e., in one forward pass, backward pass, and optimizer step.
+        """
         ...
 
     def post_hook(self, is_last_joiner: bool) -> None:
         r"""
-        Call hook after all processes have joined. It is passed an additional ``bool`` argument ``is_last_joiner``, which indicates if the rank is one of the last to join.
+        Call hook after all processes have joined.
+
+        It is passed an additional ``bool`` argument ``is_last_joiner``, which indicates if the rank is one of the last to join.
 
         Arguments:
             is_last_joiner (bool): ``True`` if the rank is one of the last to
@@ -64,7 +72,7 @@ class Joinable(ABC):
     @property
     @abstractmethod
     def join_device(self) -> torch.device:
-        r"""Return the device from which to perform collective communications needed by the join context manager implementation itself."""
+        r"""Return the device from which to perform collective communications needed by the join context manager."""
         ...
 
     @property
@@ -83,7 +91,10 @@ class _JoinConfig(NamedTuple):
 
     @staticmethod
     def construct_disabled_join_config():
-        r"""Return a :class:`_JoinConfig` instance indicating that join-related logic should be disabled, e.g. if the caller is not in a join context manager."""
+        r"""Return a :class:`_JoinConfig` instance indicating that join-related logic should be disabled.
+
+        e.g. if the caller is not in a join context manager.
+        """
         return _JoinConfig(
             enable=False,
             throw_on_early_termination=False,
@@ -272,7 +283,10 @@ class Join:
         return num_nonjoined_procs.item()
 
     def _notify_procs_to_terminate(self):
-        r"""Schedule an all-reduce to notify non-joined processes to terminate and raises a ``RuntimeError`` indicating that the current process has exhausted its inputs."""
+        r"""Schedule an all-reduce to notify non-joined processes to terminate.
+
+        Also raise a ``RuntimeError`` indicating that the current process has exhausted its inputs.
+        """
         ones = torch.ones(1, device=self._device)
         dist.all_reduce(ones, group=self._process_group)
         raise RuntimeError(f"Rank {self._rank} exhausted all inputs.")
@@ -280,7 +294,10 @@ class Join:
     @staticmethod
     def notify_join_context(joinable: Joinable):
         r"""
-        Notifies the join context manager that the calling process has not yet joined; then, if ``throw_on_early_termination=True``, checks if uneven inputs have been detected (i.e. if one process has already joined) and throws an exception if so.
+        Notifies the join context manager that the calling process has not yet joined.
+
+        Then, if ``throw_on_early_termination=True``, checks if uneven inputs have been detected
+        (i.e. if one process has already joined) and throws an exception if so.
 
         This method should be called from a :class:`Joinable` object before
         its per-iteration collective communications. For example, this should
