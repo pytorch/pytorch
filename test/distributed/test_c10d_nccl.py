@@ -12,7 +12,6 @@ import threading
 import pickle
 import time
 import warnings
-from contextlib import contextmanager
 from datetime import timedelta
 from itertools import chain, product
 from unittest import mock
@@ -45,6 +44,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
+    first_bucket_size,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -2017,17 +2017,6 @@ class DistributedDataParallelTest(
         )
         local_batch_start = self.rank * local_batch_size
         local_batch_end = (self.rank + 1) * local_batch_size
-
-        # Reducer.cpp sneakily creates one "initial bucket" that ignores the "bucket_cap_mb"
-        # argument.  The following makes sure the initial bucket also complies.
-        @contextmanager
-        def first_bucket_size(ddp_bucket_mb):
-            old_DEFAULT_FIRST_BUCKET_BYTES = dist._DEFAULT_FIRST_BUCKET_BYTES
-            dist._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.0e6)
-            try:
-                yield
-            finally:
-                dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
 
         with torch.backends.cudnn.flags(
             enabled=True, deterministic=True, benchmark=False

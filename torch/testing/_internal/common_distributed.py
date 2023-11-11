@@ -1262,3 +1262,14 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+# Reducer.cpp sneakily creates one "initial bucket" that ignores the "bucket_cap_mb"
+# argument.  The following makes sure the initial bucket also complies.
+@contextmanager
+def first_bucket_size(ddp_bucket_mb):
+    old_DEFAULT_FIRST_BUCKET_BYTES = c10d._DEFAULT_FIRST_BUCKET_BYTES
+    c10d._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.0e6)
+    try:
+        yield
+    finally:
+        c10d._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES

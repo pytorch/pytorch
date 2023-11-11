@@ -3,6 +3,7 @@ import copy
 import functools
 from io import StringIO
 from typing import List
+from itertools import product
 import random
 import unittest
 from unittest.mock import patch
@@ -29,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     requires_nccl,
     _dynamo_dist_per_rank_init,
+    first_bucket_size,
 )
 import torch._dynamo.logging
 from torch.testing._internal.common_cuda import (
@@ -64,14 +66,33 @@ class ToyModel(nn.Module):
         else:
             return self.net(inputs)
 
-def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
-    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(device)
-    m.apply(init_weights)
-    inputs = torch.rand(bsz, in_feat).to(device)
-    outputs = m(inputs)
-    return m, inputs, outputs
+class ToyModelMultiOutput(nn.Module):
+    def __init__(self, ctx_manager_1, ctx_manager_2, hidden_feat=1000):
+        super().__init__()
+        self.ctx_manager_1 = ctx_manager_1
+        self.ctx_manager_2 = ctx_manager_2
+        self.net1 = nn.Sequential(
+            * [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+        )
+        self.net2 = nn.Sequential(
+            * [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+        )
+        self.net3 = nn.Sequential(
+            * [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+        )
 
-
+    def forward(self, inputs):
+        with self.ctx_manager_1():
+            intermediates_1 = self.net1(inputs)
+            with self.ctx_manager_2():
+                intermediates_2 = self.net2(intermediates_1)
+            outputs = self.net3(inputs)
+        return intermediates_1, intermediates_2, outputs
 
 class ToyInnerModel(nn.Module):
     def __init__(self):
@@ -520,6 +541,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = m(inputs)
         return m, inputs, outputs
 
+    def get_model_multi_output(self, ctx_manager_1, ctx_manager_2, bsz=20, hidden_feat=1000):
+        m = ToyModelMultiOutput(ctx_manager_1, ctx_manager_2, hidden_feat=hidden_feat).to(self.device)
+        m.apply(init_weights)
+        inputs = torch.rand(bsz, hidden_feat).to(self.device)
+        outputs = m(inputs)
+        return m, inputs, outputs
+
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager(self):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -577,49 +605,119 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         context managers' effects are applied to the computation.
         """
 
-        for get_compiler in [
-            lambda: CheckSplitsCompiler(),
-            lambda: None,
-        ]:
-            for ctx_manager, output_test in [
-                (
-                    lambda: torch.autocast(torch.device(self.device).type, torch.float16),
-                    lambda out: self.assertEqual(out.dtype, torch.float16),
-                ),
-                (
-                    torch.enable_grad,
-                    lambda out: self.assertTrue(out.requires_grad)
-                ),
-                (
-                    torch.no_grad,
-                    lambda out: self.assertTrue(not out.requires_grad)
-                ),
-            ]:
-                m, inputs, correct_outputs = self.get_model(out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager)
-                # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
-                # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
-                bucket_cap_mb = 3.5  # 4MB
-                ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
+        bucket_cap_mb = 3.5
+        # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+        with first_bucket_size(bucket_cap_mb):
+            for ambient_grad, get_compiler in product([
+                torch.no_grad,
+                torch.enable_grad,
+            ], [
+                lambda: CheckSplitsCompiler(),
+                lambda: None,
+            ]):
+                with ambient_grad():
+                    for ctx_manager, output_test in [
+                        (
+                            lambda: torch.autocast(torch.device(self.device).type, torch.float16),
+                            lambda out: self.assertEqual(out.dtype, torch.float16),
+                        ),
+                        (
+                            torch.enable_grad,
+                            lambda out: self.assertTrue(out.requires_grad)
+                        ),
+                        (
+                            torch.no_grad,
+                            lambda out: self.assertTrue(not out.requires_grad)
+                        ),
+                    ]:
+                        m, inputs, correct_outputs = self.get_model(
+                            out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager
+                        )
+                        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
 
-                compiler = get_compiler()
+                        compiler = get_compiler()
 
-                @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
-                def opt_fn(inputs):
-                    return ddp_m(inputs)
+                        @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
+                        def opt_fn(inputs):
+                            return ddp_m(inputs)
 
-                opt_outputs = opt_fn(inputs)
-                self.assertTrue(same(correct_outputs, opt_outputs))
-                if compiler:
-                    self.assertEqual(compiler.compiler_called, 4)
+                        opt_outputs = opt_fn(inputs)
+                        self.assertTrue(same(correct_outputs, opt_outputs))
+                        if compiler:
+                            self.assertEqual(compiler.compiler_called, 4)
 
-                output_test(opt_outputs)
+                        output_test(opt_outputs)
 
-                # ensure compatibility with dynamo explain
+                        # ensure compatibility with dynamo explain
 
-                explain_out = torch._dynamo.explain(ddp_m)(inputs)
-                break_reasons = explain_out.break_reasons
-                self.assertEqual(len(break_reasons), 4)
-                self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
+                        explain_out = torch._dynamo.explain(ddp_m)(inputs)
+                        break_reasons = explain_out.break_reasons
+                        self.assertEqual(len(break_reasons), 4)
+                        self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
+
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_graph_split_ctx_manager_nested(self):
+        """
+        Ensures that we get the right number of splits and that the respective
+        context managers' effects are applied to the computation.
+        """
+
+        ctx_managers = [
+            (
+                lambda: torch.autocast(torch.device(self.device).type, torch.float16),
+                lambda out: self.assertEqual(out.dtype, torch.float16),
+            ),
+            # (
+            #     torch.enable_grad,
+            #     lambda out: self.assertTrue(out.requires_grad)
+            # ),
+            # (
+            #     torch.no_grad,
+            #     lambda out: self.assertTrue(not out.requires_grad)
+            # ),
+        ]
+
+        bucket_cap_mb = 7.5
+        # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+        with first_bucket_size(bucket_cap_mb):
+            for ambient_grad, get_compiler in product([
+                torch.no_grad,
+                torch.enable_grad,
+            ], [
+                lambda: CheckSplitsCompiler(),
+                lambda: None,
+            ]):
+                with ambient_grad():
+                    for ctx_manager_1, output_test_1 in ctx_managers:
+                        for ctx_manager_2, output_test_2 in ctx_managers:
+                            m, inputs, correct_outputs = self.get_model_multi_output(
+                                ctx_manager_1, ctx_manager_2, hidden_feat=1000
+                            )
+                            ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
+
+                            compiler = get_compiler()
+
+                            @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
+                            def opt_fn(inputs):
+                                return ddp_m(inputs)
+
+                            opt_outputs = opt_fn(inputs)
+                            self.assertTrue(same(correct_outputs, opt_outputs))
+                            if compiler:
+                                self.assertEqual(compiler.compiler_called, 4)
+
+                            opt_outputs_1, opt_outputs_2, opt_outputs_3 = opt_outputs
+                            output_test_1(opt_outputs_1)
+                            output_test_2(opt_outputs_2)
+                            output_test_1(opt_outputs_3)
+
+                            # ensure compatibility with dynamo explain
+
+                            explain_out = torch._dynamo.explain(ddp_m)(inputs)
+                            break_reasons = explain_out.break_reasons
+                            self.assertEqual(len(break_reasons), 4)
+                            self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
