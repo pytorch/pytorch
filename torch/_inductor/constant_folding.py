@@ -195,7 +195,7 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_graph_tag(gm):
+def constant_graph_tag(gm: torch.fx.GraphModule):
     cf = ConstantFolder(gm, skip_constructors=True)
     cf.run()
 
@@ -208,3 +208,32 @@ def constant_graph_tag(gm):
             node.tag = CONST_MODULE_TAG
         else:
             node.tag = MODULE_TAG
+
+
+def get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Construct a GraphModule which corresponds to the part which could be
+    constant folded in provided gm.
+    """
+    constant_graph_tag(gm)
+
+    new_graph = torch.fx.Graph()
+
+    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    output_nodes = []
+    for node in gm.graph.nodes:
+        if node.tag == MODULE_TAG:
+            continue
+
+        new_node = new_graph.node_copy(node, lambda x: node_remapping[x])
+        node_remapping[node] = new_node
+
+        for user in node.users:
+            if user.tag == MODULE_TAG:
+                output_nodes.append(new_node)
+                break
+
+    new_graph.output(tuple(output_nodes))
+    new_gm = torch.fx.GraphModule(gm, new_graph)
+
+    return new_gm

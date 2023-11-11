@@ -346,7 +346,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count = 0
         self.unbacked_symbol_decls = set()
 
-        if not V.graph.is_const_graph:
+        if not V.graph.is_const_graph or not V.graph.cpp_wrapper:
             self.write_header()
             self.write_prefix()
 

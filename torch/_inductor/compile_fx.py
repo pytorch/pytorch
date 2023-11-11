@@ -188,15 +188,12 @@ def split_const_gm(
     """
     from torch._inductor.constant_folding import (
         CONST_MODULE_TAG,
-        constant_graph_tag,
+        get_constant_graph,
         MODULE_TAG,
         replace_node_with_constant,
     )
-    from torch.fx.passes.split_utils import split_by_tags
 
-    constant_graph_tag(gm)
-    split_gm = split_by_tags(gm, [CONST_MODULE_TAG, MODULE_TAG], return_tuple=True)
-    const_gm = getattr(split_gm, CONST_MODULE_TAG)
+    const_gm = get_constant_graph(gm)
     const_result = const_gm()
 
     const_names = {
@@ -308,14 +305,9 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                 # clone_graph(gm) makes sure no graph modification from the first pass will
                 # leak to the second pass. It does increase memory pressure, but the problem
                 # can be alleviated once we have parameters as FakeTensor.
-                cloned_gm = clone_graph(gm)
-
-                if config.split_const_graph:
-                    # Do a split to make sure we do not commingle nodes for tuning.
-                    const_gm, _ = split_const_gm(cloned_gm)
-                    inner_compile(const_gm, [], **kwargs_patched)([])
-
-                compiled = inner_compile(cloned_gm, example_inputs, **kwargs_patched)
+                compiled = inner_compile(
+                    clone_graph(gm), example_inputs, **kwargs_patched
+                )
 
                 def materialize(x):
                     if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -647,17 +639,8 @@ def fx_codegen_and_compile(
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
-    if aot_mode and cpp_wrapper and config.split_const_graph:
-        split_const_graph = True
-    else:
-        split_const_graph = False
-        original_constants = None
-        const_code = None
-        const_kernels = None
-        const_output_index = None
-
     with V.set_fake_mode(fake_mode):
-        if split_const_graph:
+        if aot_mode and config.split_const_graph:
             const_gm, const_output_index = split_const_gm(gm)
 
             const_names = {
@@ -679,7 +662,11 @@ def fx_codegen_and_compile(
             )
             with V.set_graph_handler(const_graph):
                 const_graph.run()
-                const_code, _ = const_graph.codegen()
+                if cpp_wrapper:
+                    const_code, _ = const_graph.codegen()
+                else:
+                    const_graph.compile_to_fn()([])
+                    const_code = None
                 original_constants = const_graph.constants
                 const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
 
