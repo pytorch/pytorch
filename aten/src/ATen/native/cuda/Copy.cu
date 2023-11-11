@@ -106,12 +106,14 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     });
   } else if (dtype == kFloat8_e5m2 || dtype == kFloat8_e4m3fn) {
      float8_copy_kernel_cuda(iter);
+#if !defined(USE_ROCM)
   } else if (isBitsType(dtype)) {
     TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
       "bits types to different bits types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
     AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+#endif /* !defined(USE_ROCM) */
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
         kHalf, kBool, kBFloat16, kComplexHalf,dtype, "copy_", [&] {
