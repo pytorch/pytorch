@@ -4,7 +4,7 @@ import unittest
 
 import torch
 import torch._inductor
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import requires_cuda
 
@@ -15,7 +15,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 
 class MyModule(torch.nn.Module):
@@ -433,4 +432,6 @@ class TestGroupBatchFusion(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()
