@@ -347,7 +347,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
-std::string readTraceIntoLocalDisk(int rank) {
+// Function to read what we wrote to the local disk for validation.
+std::string readTraceInfoFromLocalDisk(int rank) {
   auto filename = c10::str("/tmp/test_nccl_trace_rank_", rank);
   std::ifstream file(filename, std::ios::binary);
   size_t size;
@@ -379,15 +380,20 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
       0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  // Enable nccl flight recorder.
   ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options);
+  // The lamda function here is very similar to the default callback.
+  // The only difference is that we are storing the nccl trace in a vec<char>
+  // so that we can use it for validation.
   pg.registerDebugInfoCallbackStorer(
       [&](int rank, const std::string& ncclTrace) {
         auto filename = c10::str("/tmp/test_nccl_trace_rank_", rank);
+        // We override the file everytime we write to it.
         std::ofstream file(
             filename, std::ios::out | std::ios::binary | std::ios::trunc);
         // Write the size of the string followed by the string itself.
@@ -418,7 +424,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());
-  auto traceFromStorage = readTraceIntoLocalDisk(0);
+  auto traceFromStorage = readTraceInfoFromLocalDisk(0);
   EXPECT_TRUE(traceFromStorage.size() > 0);
   // Check the traces read from storage match with the original nccl trace.
   EXPECT_TRUE(traceFromStorage == std::string(traces.begin(), traces.end()));

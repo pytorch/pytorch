@@ -505,6 +505,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
+  // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoCallbackStorer(
       std::function<void(int, const std::string&)>&& callbackStorer);
 
@@ -638,6 +639,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
   void dumpDebuggingInfo();
 
   // Desync debug helper
@@ -861,6 +865,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
+  // The callback function to store NCCL debug info.
   std::function<void(int, const std::string&)> debugInfoCallbackStorer_ =
       nullptr;
 

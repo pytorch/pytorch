@@ -1277,7 +1277,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void dumpTraceIntoLocalDisk(int rank, const std::string& ncclTrace) {
+void storeTraceInfoToLocalDisk(int rank, const std::string& ncclTrace) {
   const char* fileName = parseEnvVarString(
       "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
   auto filename = c10::str(std::string(fileName), rank);
@@ -1288,7 +1288,7 @@ void dumpTraceIntoLocalDisk(int rank, const std::string& ncclTrace) {
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing: " << filename;
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: " << filename;
     return;
   }
 
@@ -1315,7 +1315,7 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
       debugInfoCallbackStorer_(rank_, ncclTrace);
     } else {
       // Dump the trace blob into local disk as a fallback.
-      dumpTraceIntoLocalDisk(rank_, ncclTrace);
+      storeTraceInfoToLocalDisk(rank_, ncclTrace);
     }
   }
 }
@@ -1352,9 +1352,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
-  // In the timeout case and we now only dump the flight recorder
-  // to std::out. Down the road, if we have more complicated or blocking
-  // operations, we might need to use a side thread to do it.
+  // Store debug info to storage. (By default to local disk)
   dumpDebuggingInfo();
 
   // Create a error message reported from MonitorThread, so
