@@ -1000,6 +1000,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         call that generated code.
         """
         from .decorators import disable
+
         assert self.should_exit
 
         assert isinstance(rv, list)
