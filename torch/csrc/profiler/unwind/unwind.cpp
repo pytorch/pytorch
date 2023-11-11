@@ -59,6 +59,7 @@ struct UpgradeExclusive {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::shared_lock<std::shared_timed_mutex>& rdlock_;
 };
 
@@ -97,6 +98,7 @@ struct LibraryInfo {
 };
 
 static const char* process_name() {
+  // NOLINTNEXTLINE(*-c-arrays*)
   static char name[PATH_MAX + 1] = "";
   if (*name == '\0') {
     ssize_t len = readlink("/proc/self/exe", name, PATH_MAX);
@@ -145,6 +147,7 @@ struct UnwindCache {
                 library_name = process_name();
               }
               auto eh_frame_hdr =
+                  // NOLINTNEXTLINE(performance-no-int-to-ptr)
                   (void*)(segments[i].p_vaddr + info->dlpi_addr);
               self->all_libraries_.emplace_back(
                   std::move(library_name),
@@ -272,6 +275,7 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
   UnwindState state{};
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   state.rip = *(int64_t*)(rsp);
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
@@ -279,6 +283,7 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   state.rbp = rbp;
   unwind_cache.checkRefresh(lock);
   while (true) { // unwind for _start sets rip as being undefined
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     result->push_back((void*)state.rip);
     const Unwinder& uw = unwind_cache.unwinderFor(state.rip, lock);
     if (uw.terminator()) {
@@ -355,6 +360,7 @@ struct Symbolizer {
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
@@ -393,6 +399,7 @@ struct Symbolizer {
   Entry& getOrCreate(const std::string& name) {
     auto it = entries_.find(name);
     if (it == entries_.end()) {
+      // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
           "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
