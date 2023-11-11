@@ -1322,6 +1322,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
@@ -1754,13 +1756,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        if len(grid) != 1:
-            raise NotImplementedError("triton.autotune not yet supported")
-        grid = grid[0]
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
         self.generate_kernel_call(
             kernel_name,
             args,
-            grid=grid,
+            grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=True,

@@ -1477,7 +1477,7 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
 TypedPointer LLVMCodeGenImpl::packFuncArgs(
     const std::vector<llvm::Value*>& func_args) {
   if (func_args.empty()) {
-    llvm::PointerType* VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
+    llvm::PointerType* VoidPtrType = llvm::PointerType::getUnqual(getContext());
     return TypedPointer(
         VoidPtrType, llvm::ConstantPointerNull::get(VoidPtrType));
   }

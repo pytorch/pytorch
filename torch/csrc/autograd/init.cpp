@@ -35,10 +35,6 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
-#ifdef USE_KINETO
-#include <libkineto.h>
-#endif
-
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -133,30 +129,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   ParameterClass = PyObject_GetAttrString(parameter_module, "Parameter");
   if (!ParameterClass)
     return nullptr;
-
-#if defined(USE_KINETO) && defined(__linux__)
-  // Initialize the Kineto profilers, if they have not already.
-  // DO NOT REMOVE, this is needed for on-demand profiling.
-  if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(
-        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-        /*logOnError=*/true);
-    libkineto::api().suppressLogMessages();
-  }
-  libkineto::api().initProfilerIfRegistered();
-
-  // Used for unit test to check profiler was initialized.
-  m.def("_isProfilerInitialized", []() {
-    return libkineto::api().isProfilerInitialized();
-  });
-#endif
-
-  m.def("_is_use_kineto_defined", []() -> bool {
-#ifdef USE_KINETO
-    return true;
-#endif
-    return false;
-  });
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -343,19 +315,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<torch::profiler::impl::ActivityType> activities{
-        torch::profiler::impl::ActivityType::CPU};
+    std::set<ActivityType> activities{ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::getNumGPUs() > 0) {
-      activities.insert(torch::profiler::impl::ActivityType::CUDA);
+      activities.insert(ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::XPU);
+      activities.insert(ActivityType::XPU);
     }
     if (at::hasMTIA()) {
-      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+      activities.insert(ActivityType::MTIA);
     }
 #endif
     return activities;
