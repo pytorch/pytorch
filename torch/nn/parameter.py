@@ -30,6 +30,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             :class:`~no_grad` mode. See :ref:`locally-disable-grad-doc` for more
             details. Default: `True`
     """
+
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.empty(0)
@@ -103,6 +104,7 @@ class UninitializedTensorMixin:
 
     def materialize(self, shape, device=None, dtype=None):
         r"""Create a Parameter or Tensor with the same properties of the uninitialized one.
+
         Given a shape, it materializes a parameter in the same device
         and with the same `dtype` as the current one or the specified ones in the
         arguments.
