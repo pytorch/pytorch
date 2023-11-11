@@ -12,7 +12,7 @@ _privateuse1_backend_name = "privateuseone"
 
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
-    This API should be used to rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
+    Rename the privateuse1 backend device to make it more convenient to use as a device name within PyTorch APIs.
 
     The steps are:
 

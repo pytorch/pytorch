@@ -248,7 +248,9 @@ def _pytreeify_preserve_structure(f):
 
 class FlopCounterMode(TorchDispatchMode):
     """
-    ``FlopCounterMode`` is a context manager that counts the number of flops within its context. It does this using a ``TorchDispatchMode``.
+    ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
+
+    It does this using a ``TorchDispatchMode``.
 
     It also supports hierarchical output by passing a module (or list of
     modules) to FlopCounterMode on construction. If you do not need hierarchical
