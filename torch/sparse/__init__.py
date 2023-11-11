@@ -438,9 +438,9 @@ class check_sparse_tensor_invariants:
 
         .. note::
 
-        Use :func:`torch.sparse.check_sparse_tensor_invariants.enable` or
-        :func:`torch.sparse.check_sparse_tensor_invariants.disable` to
-        manage the state of the sparse tensor invariants checks.
+            Use :func:`torch.sparse.check_sparse_tensor_invariants.enable` or
+            :func:`torch.sparse.check_sparse_tensor_invariants.disable` to
+            manage the state of the sparse tensor invariants checks.
         """
         return torch._C._check_sparse_tensor_invariants()
 
@@ -450,14 +450,14 @@ class check_sparse_tensor_invariants:
 
         .. note::
 
-        By default, the sparse tensor invariants checks are disabled. Use
-        :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
-        retrieve the current state of sparse tensor invariants checking.
+            By default, the sparse tensor invariants checks are disabled. Use
+            :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
+            retrieve the current state of sparse tensor invariants checking.
 
         .. note::
 
-        The sparse tensor invariants check flag is effective to all sparse
-        tensor constructors, both in Python and ATen.
+            The sparse tensor invariants check flag is effective to all sparse
+            tensor constructors, both in Python and ATen.
 
         The flag can be locally overridden by the ``check_invariants``
         optional argument of the sparse tensor constructor functions.
