@@ -997,8 +997,8 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   pushd /executorch
   # NB: This is a sample model, more can be added here
-  # shellcheck disable=SC1091
   export PYTHON_EXECUTABLE=python
+  # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
   popd
 
