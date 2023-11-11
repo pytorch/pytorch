@@ -583,12 +583,21 @@ class TestGenericPytree(TestCase):
         self.assertFalse(pytree_impl.is_structseq({0, 1}))
         self.assertFalse(pytree_impl.is_structseq(1))
 
+        self.assertFalse(pytree_impl.is_structseq(FakeStructSeq))
         self.assertTrue(pytree_impl.is_structseq(time.struct_time))  # PyStructSequence
         self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple1))
         self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple2))
         self.assertFalse(pytree_impl.is_structseq(tuple))
         self.assertFalse(pytree_impl.is_structseq(list))
 
+        self.assertFalse(pytree_impl.is_structseq_class(FakeStructSeq))
+        self.assertTrue(pytree_impl.is_structseq_class(time.struct_time))  # PyStructSequence
+        self.assertFalse(pytree_impl.is_structseq_class(DirectNamedTuple1))
+        self.assertFalse(pytree_impl.is_structseq_class(DirectNamedTuple2))
+        self.assertFalse(pytree_impl.is_structseq_class(tuple))
+        self.assertFalse(pytree_impl.is_structseq_class(list))
+
+        # torch.return_types.* are all PyStructSequence types
         for cls in vars(torch.return_types).values():
             if isinstance(cls, type) and issubclass(cls, tuple):
                 self.assertTrue(pytree_impl.is_structseq(cls))
