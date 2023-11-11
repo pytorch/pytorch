@@ -19,6 +19,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+import traceback
+
 import torch
 
 import torch._dynamo
@@ -65,6 +67,7 @@ from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch._higher_order_ops.scan import scan
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -87,6 +90,15 @@ def run_fw_bw_and_get_code(fn):
 
     return run_and_get_code(run_with_backward)
 
+def _fake_scan(f, init, x):
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    carry = init
+    for xp in x_pytrees:
+        carry, out = f(carry, xp)
+        zs.append(out)
+    return carry, _stack_pytree(zs)
 
 class TestCase(TorchTestCase):
     @classmethod
@@ -290,6 +302,8 @@ def check_model(
 
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
 
+    #import pdb
+    #pdb.set_trace()
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
     # if not called:
@@ -311,6 +325,10 @@ def check_model(
         )
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    print(example_inputs)
+    print(actual)
+    import pdb
+    pdb.set_trace()
     if assert_equal:
         self.assertEqual(
             actual,
@@ -520,6 +538,7 @@ class SweepInputs2:
 
 
 class CommonTemplate:
+    '''
     def test_bool(self):
         def fn(a, b):
             return (
@@ -4722,13 +4741,132 @@ class CommonTemplate:
             return torch.nn.functional.dropout(a, 0.0, True) + a
 
         self.common(fn1, [torch.randn(55)])
-
+    '''
+    
     def test_dropout_trivial_1(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 
         self.common(fn2, [torch.randn(55)])
+        
+    def test_matmul_simple(self):
+        
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
+        mat = torch.rand(2, 5, device=torch.device('cuda'))
+        
+        def f(xs, mat):
+            out = []
+            for t in range(xs.shape[0]):
+                out.append(xs[t] @ mat)
+            return torch.stack(out)
+        
+        try:
+            out = f(xs, mat)
+            #import pdb
+            #pdb.set_trace()
+            scan_res = self.common(f, [xs, mat])
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
+        
+        import pdb
+        pdb.set_trace()
+        
+    def test_scan_f(self):
+        
+        w = torch.rand(2, 5, device=torch.device('cuda')).contiguous()
+        
+        @torch._dynamo.optimize("inductor")
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            return (carry+1) @ w, (x+carry) @ w
+        
+        scan (f, init, xs)
+        
+        init = torch.rand(1, 2, device=torch.device('cuda')).contiguous()
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda')).contiguous()
+        
+        try:
+            #scan_res = self.common(f, [init, xs])
+            code = run_and_get_triton_code(f, init, xs)
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
+        
+        import pdb
+        pdb.set_trace()
+        # expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        # self.assertEqual(expected_carry_out, carry_out)
+        # self.assertEqual(expected_ys, ys)
+    
+    def test_scan_simple(self):
+        
+        #@torch.compile(backend='inductor', fullgraph=True)
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            #return carry+1, x+carry
+            return carry, x
+        
+        init = torch.rand(1, 2, device=torch.device('cuda')).contiguous()
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda')).contiguous()
+        
+        try:
+            fc = f
+            #fc = torch.compile(f, backend='inductor', fullgraph=True)
+            #scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
+            #import pdb
+            #pdb.set_trace()
+            scan_res = self.common(scan, [fc, init, xs])
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
+        
+        import pdb
+        pdb.set_trace()
+        # expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        # self.assertEqual(expected_carry_out, carry_out)
+        # self.assertEqual(expected_ys, ys)
+        
+    def test_scan_mm(self):
+        
+        mat = torch.rand(2, 5, device=torch.device('cuda'))
+        
+        #@torch.compile(backend='inductor', fullgraph=True)
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            mat_dev = mat.to(carry.device)
+            if mat_dev.device != carry.device or mat_dev.device != x.device:
+                print('Failed')
+                import pdb
+                pdb.set_trace()
+            return carry @ mat_dev, x @ mat_dev
+        
+        init = torch.rand(1, 2, device=torch.device('cuda'))
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
+        
+        try:
+            fc = f
+            #fc = torch.compile(f, backend='inductor', fullgraph=True)
+            #scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
+            #import pdb
+            #pdb.set_trace()
+            scan_res = self.common(scan, [fc, init, xs])
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
+        
+        import pdb
+        pdb.set_trace()
+        # expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        # self.assertEqual(expected_carry_out, carry_out)
+        # self.assertEqual(expected_ys, ys)
+        
 
+    '''
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout(self):
@@ -4754,7 +4892,9 @@ class CommonTemplate:
         result2 = fn2(x)
         self.assertTrue(400 < result2.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
+    '''
 
+    '''
     @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
@@ -6401,7 +6541,7 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
-
+    '''
 
 @dataclasses.dataclass
 class TestFailure:

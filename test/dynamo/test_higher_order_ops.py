@@ -6,6 +6,8 @@ import functorch.experimental.control_flow as control_flow
 
 import torch
 
+torch._functorch.config.functionalize_rng_ops=True
+
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.utils.checkpoint
@@ -13,6 +15,7 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.wrap import wrap
+from torch._higher_order_ops.scan import scan
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -53,6 +56,15 @@ def op_count(gm):
             result += 1
     return result
 
+def _fake_scan(f, init, x):
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    carry = init
+    for xp in x_pytrees:
+        carry, out = f(carry, xp)
+        zs.append(out)
+    return carry, _stack_pytree(zs)
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
@@ -255,6 +267,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3, 3)
 
+        #@torch.compile(backend='inductor', fullgraph=True)
         @torch.compile(backend=cnt, fullgraph=True)
         def cond_f(pred, pred2, x, y):
             def true_fn(pred2, x, y):
@@ -288,6 +301,151 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 "cond_false_0.cond_true_0",
             },
         )
+        
+    def test_roll_simple(self):
+        
+        x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=torch.device('cuda')).view(4, 2)
+        
+        def test_f(x):
+            return torch.roll(x, 1)
+        
+        roll_comp = torch.compile(test_f, backend='inductor', fullgraph=True)
+        out = roll_comp(x)
+        
+        import pdb
+        pdb.set_trace()
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+
+        
+    def test_red_simple(self):
+        '''
+        # Disable index propagation, so the indirect indexing isn't optimized away
+        @patch.object(config, "constant_and_index_propagation", False)
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
+        '''
+        
+        @torch.compile(backend='inductor', fullgraph=True)
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            return carry+1, x+carry
+
+        #import pdb
+        #pdb.set_trace()
+        #init = torch.rand(1)[0]#1, 2)
+        init = torch.rand(1, 2, device=torch.device('cuda'))
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
+        
+        '''
+        import pdb
+        pdb.set_trace()
+        
+        def dummy(x):
+            return torch.sigmoid(x) + x
+        
+        dummy_comp = torch.compile(dummy, backend='inductor', fullgraph=True)
+        ys = dummy_comp(xs)
+        '''
+        
+        #import pdb
+        #pdb.set_trace()
+        fc = torch.compile(f, backend='inductor', fullgraph=True)
+        
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        # #scan_comp = torch.compile(scan, backend=cnt, fullgraph=True)
+        # scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
+        # #import pdb
+        # #pdb.set_trace()
+        # carry_out, ys = scan_comp(fc, init, xs)
+        # #carry_out, ys = scan_comp(torch.mul, init, xs)
+        
+        def test_f(x, y):
+            res = torch.sum(x, 0)
+            res_carry, res_out = (res[:1], res[1:])
+            return (res_carry, res_out)
+        
+        x = torch.rand(5, 3, device=torch.device('cuda'))
+        y = torch.rand(1, device=torch.device('cuda'))
+        #t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]], device=torch.device('cuda'), dtype=torch.float)
+        #index = torch.tensor([0, 4, 2, 0], device=torch.device('cuda'))
+        red_comp = torch.compile(test_f, backend='inductor', fullgraph=True)
+        out = red_comp(x, y)
+        
+        import pdb
+        pdb.set_trace()
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+        
+    def test_scan_simple(self):
+        '''
+        # Disable index propagation, so the indirect indexing isn't optimized away
+        @patch.object(config, "constant_and_index_propagation", False)
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
+        '''
+        
+        @torch.compile(backend='inductor', fullgraph=True)
+        def f(carry, x):
+            #return torch.ops.aten.clone(carry)+1, x+carry
+            return carry+1, x+carry
+
+        #import pdb
+        #pdb.set_trace()
+        #init = torch.rand(1)[0]#1, 2)
+        init = torch.rand(1, 2, device=torch.device('cuda'))
+        xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
+        
+        '''
+        import pdb
+        pdb.set_trace()
+        
+        def dummy(x):
+            return torch.sigmoid(x) + x
+        
+        dummy_comp = torch.compile(dummy, backend='inductor', fullgraph=True)
+        ys = dummy_comp(xs)
+        '''
+        
+        #import pdb
+        #pdb.set_trace()
+        fc = torch.compile(f, backend='inductor', fullgraph=True)
+        
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        #scan_comp = torch.compile(scan, backend=cnt, fullgraph=True)
+        scan_comp = torch.compile(scan, backend='inductor', fullgraph=True)
+        #import pdb
+        #pdb.set_trace()
+        carry_out, ys = scan_comp(fc, init, xs)
+        #carry_out, ys = scan_comp(torch.mul, init, xs)
+
+        import pdb
+        pdb.set_trace()
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

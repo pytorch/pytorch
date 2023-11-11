@@ -1696,6 +1696,8 @@ def requires_higher_order_op(obj):
 
 
 def get_higher_order_op(obj):
+    #import pdb
+    #pdb.set_trace()
     if (
         obj is torch.utils.checkpoint.checkpoint
         and not torch._functorch.config.functionalize_rng_ops

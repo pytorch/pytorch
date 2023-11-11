@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 __all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
-                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload]
+                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload,
+                          #Callable,
+                          #function
+                          ]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]

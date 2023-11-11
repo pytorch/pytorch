@@ -258,6 +258,8 @@ def map_fake_tensor_mode(f, num_mapped, *args):
 
 @map_impl.py_impl(DispatchKey.Functionalize)
 def map_func(f, num_mapped, *args):
+    import pdb
+    pdb.set_trace()
     reapply_views = torch._C._functionalization_reapply_views_tls()
     xs = args[:num_mapped]
     pos_args = args[num_mapped:]
@@ -290,6 +292,8 @@ def map_functionalize(interpreter, f, num_mapped, *args):
       1. We don't allow any input mutation inside the map function
       2. Our check for above condition is not exhaustive
     """
+    import pdb
+    pdb.set_trace()
     xs = args[:num_mapped]
     pos_args = args[num_mapped:]
     reapply_views = interpreter.functionalize_add_back_views()

@@ -225,7 +225,12 @@ class OptionalList(OptionalAttr):
 class OptionalScalar(OptionalAttr):
     def __init__(self):
         self.name = "optional_scalar"
-
+        
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    OUTER_TINY = 2
+    DEFAULT = 3
 
 def may_convert_to_optional(optional_value, value):
     return optional_value if not value and V.graph.cpp_wrapper else value
@@ -448,6 +453,8 @@ class Loops(IRNode):
 
     @cache_on_self
     def get_reads(self):
+        import pdb
+        pdb.set_trace()
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
@@ -461,6 +468,496 @@ class Loops(IRNode):
                     self.get_size(),
                 ).reads
 
+# @dataclasses.dataclass
+# class Scan(IRNode):
+#     f: Callable[..., Any]
+#     init: Any
+#     init_size: Any
+#     init_load: Any
+#     xs: Any
+#     xs_size: Any
+#     xs_load: Any
+#     reverse: Any
+#     len_init: Any
+#     size: Any
+#     carry_out_ptr: Any
+#     carry_out_load: Any
+#     out_ptr: Any
+#     out_load: Any
+#     reindex: Any
+#     reduction_hint: ReductionHint
+
+#     def __post_init__(self):
+#         #import pdb
+#         #pdb.set_trace()
+#         #assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
+#         super().__post_init__()
+
+#     def store_reduction(self, output_name, indexer, vars, scan_vars):
+#         #import pdb
+#         #pdb.set_trace()
+        
+#         #idx = self.reindex(vars, scan_vars)
+#         import pdb
+#         pdb.set_trace()
+        
+#         #init = [in_lo([1, 2]) for in_lo in self.init_load]
+#         #xs = [xs_lo([10, 1, 2]) for xs_lo in self.xs_load]
+#         #[*scan_index, *index[:-1]]
+#         init = [in_lo([vars[1], scan_vars[0]]) for in_lo in self.init_load]
+#         xs = [xs_lo(vars) for xs_lo in self.xs_load]
+        
+#         result_carry = ops.scan(self.dtype, self.f, init[0], xs[0], self.xs_size, self.reverse)
+        
+#         import pdb
+#         pdb.set_trace()
+#         ops.store(output_name, indexer(idx), result_carry)
+#         #ops.store()
+#         return #result_carry
+
+#     @classmethod
+#     def create(
+#         cls,
+#         device: torch.device,
+#         dtype: torch.dtype,
+#         len_init: Any,
+#         f: Any,
+#         init: Any,
+#         init_size: Any,
+#         init_load: Any,
+#         xs: Any,
+#         xs_size: Any,
+#         xs_load: Any,
+#         carry_out_ptr: Any,
+#         carry_out_load: Any,
+#         carry_out_shape: Any,
+#         out_ptr: Any,
+#         out_load: Any,
+#         out_shape: Any,
+#         reverse=False,
+        
+#     ) -> Tuple["TensorBox", ...]:
+        
+#         if device.type != "cuda":
+#             # TODO: CPU support
+#             return None
+
+#         if torch.version.hip is not None:
+#             # TODO: ROCm support
+#             return None
+        
+#         reduction_hint = ReductionHint.DEFAULT
+#         num_splits = 1
+        
+#         axis = 0
+
+#         def reindex(index, scan_index):
+#             import pdb
+#             pdb.set_trace()
+#             #assert len(scan_index) == len(scan_ranges)
+#             #assert len(index) == len(pointwise_ranges)
+#             return [*scan_index, *index[:-1]]
+
+#         #import pdb
+#         #pdb.set_trace()
+#         result = TensorBox.create(
+#             Scan(device=device,
+#                  dtype=dtype,
+#                  len_init=len_init,
+#                  size=xs_size,
+#                  f=f,
+#                  init=init,
+#                  init_size=init_size,
+#                  init_load=init_load,
+#                  xs=xs,
+#                  xs_size=xs_size,
+#                  xs_load=xs_load,
+#                  reverse=reverse,
+#                  inner_fn=None,
+#                  ranges=[10],
+#                  carry_out_ptr=carry_out_ptr,
+#                  carry_out_load=carry_out_load,
+#                  out_ptr=out_ptr,
+#                  out_load=out_load,
+#                  reindex=reindex,
+#                  reduction_hint=reduction_hint,
+#                  )
+#         )
+        
+#         #import pdb
+#         #pdb.set_trace()
+#         result.realize()
+        
+#         #import pdb
+#         #pdb.set_trace()
+#         return init[0], result#xs
+
+                
+# @dataclasses.dataclass
+# class Scan(Loops):
+#     f: Callable[..., Any]
+#     init: Any
+#     init_size: Any
+#     init_load: Any
+#     xs: Any
+#     xs_size: Any
+#     xs_load: Any
+#     reverse: Any
+#     len_init: Any
+#     size: Any
+#     carry_out_ptr: Any
+#     carry_out_load: Any
+#     out_ptr: Any
+#     out_load: Any
+#     reindex: Any
+#     reduction_hint: ReductionHint
+
+#     # HACK we mimick reduction
+
+#     def __post_init__(self):
+#         #import pdb
+#         #pdb.set_trace()
+#         #assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
+#         super().__post_init__()
+
+#     '''
+#     def store_reduction(self, output_name, indexer, vars, scan_vars):
+#         import pdb
+#         pdb.set_trace()
+#         #TODO: Hack, see if this works out
+#         #Expectation is that d0 = first dim of xs, but it could also be the first dim of init
+#         #idx = self.reindex(vars, scan_vars)
+#         value_init = self.inner_fn([0, scan_vars[0]])
+#         value_xs = self.inner_fn_xs(vars)
+#         #carry, ys = ops.scan(f, init, xs, reverse)
+#         result_carry = ops.scan(self.dtype, self.f, value_init, value_xs, self.reverse)
+#         import pdb
+#         pdb.set_trace()
+#         #TODO: This clearly is not correct!
+#         return (ops.store(output_name + '_carry', indexer([vars[0], vars[-1], scan_vars[0]]), result_carry), ops.store(output_name + '_init', indexer([vars[0], vars[-1], scan_vars[0]]), result_carry))
+#     '''
+
+#     def store_reduction(self, output_name, indexer, vars, scan_vars):
+#         #import pdb
+#         #pdb.set_trace()
+        
+#         idx = self.reindex(vars, scan_vars)
+#         import pdb
+#         pdb.set_trace()
+        
+#         #init = [in_lo([1, 2]) for in_lo in self.init_load]
+#         #xs = [xs_lo([10, 1, 2]) for xs_lo in self.xs_load]
+#         #[*scan_index, *index[:-1]]
+#         init = [in_lo([vars[1], scan_vars[0]]) for in_lo in self.init_load]
+#         xs = [xs_lo(vars) for xs_lo in self.xs_load]
+#         #init = self.init
+#         #xs = self.xs
+        
+#         #carry_out = self.carry_out_ptr_load([11, 1, 2])
+#         #out = self.out_ptr_load([10, 1, 2])
+        
+#         #carry_out = self.carry_out_ptr
+#         #out = self.out_ptr
+#         #carry_out = [carry_lo([11, 1, 2]) for carry_lo in self.carry_out_load]
+#         #out = [out_lo([10, 1, 2]) for out_lo in self.out_load]
+        
+#         #carry_out = self.carry_out_ptr
+#         #out = self.out_ptr
+        
+#         result_carry = ops.scan(self.dtype, self.f, init[0], xs[0], self.xs_size, self.reverse)
+        
+#         #import pdb
+#         #pdb.set_trace()
+#         #result_carry = ops.scan(self.dtype, self.f, self.init[0], self.xs[0])
+#         #return ops.store(output_name, indexer([10, 1, 2]), result_carry)
+#         #return ops.store(output_name, indexer(vars), result_carry)
+        
+#         import pdb
+#         pdb.set_trace()
+#         ops.store(output_name, indexer(idx), result_carry)
+#         #ops.store()
+#         return #result_carry
+
+#     def get_reduction_type(self):
+#         #import pdb
+#         #pdb.set_trace()
+#         # return self.scan_op
+#         return "custom"
+#         #return None
+
+#     def get_reduction_size(self):
+#         #import pdb
+#         #pdb.set_trace()
+#         return [10]
+
+#     def get_size(self):
+#         #import pdb
+#         #pdb.set_trace()
+#         return self.size
+
+#     def get_pointwise_size(self):
+#         import pdb
+#         pdb.set_trace()
+#         return self.ranges
+
+#     def index_length(self):
+#         import pdb
+#         pdb.set_trace()
+#         return len(self.ranges) + len(self.scan_ranges)
+
+#     def inner_fn_str(self):
+#         import pdb
+#         pdb.set_trace()
+#         index = self._index(self.ranges)
+#         rindex = self._index(self.scan_ranges, "r")
+#         return V.KernelFormatterHandler.ir_to_string(
+#             self.inner_fn,
+#             index,
+#             rindex,
+#         )
+
+#     @classmethod
+#     def create(
+#         cls,
+#         device: torch.device,
+#         dtype: torch.dtype,
+#         len_init: Any,
+#         f: Any,
+#         init: Any,
+#         init_size: Any,
+#         init_load: Any,
+#         xs: Any,
+#         xs_size: Any,
+#         xs_load: Any,
+#         carry_out_ptr: Any,
+#         carry_out_load: Any,
+#         carry_out_shape: Any,
+#         out_ptr: Any,
+#         out_load: Any,
+#         out_shape: Any,
+#         reverse=False,
+        
+#     ) -> Tuple["TensorBox", ...]:
+        
+#         # import pdb
+#         # pdb.set_trace()
+#         # context = V.graph.fake_mode
+#         # with context:
+#         #     example_output = f(init, xs)
+
+#         # device = FallbackKernel.find_device(tensor_args, example_output)
+#         # assert device, "Not sure where to find device info"
+#         # import pdb
+#         # pdb.set_trace()
+#         # packed = FallbackKernel(
+#         #     MultiOutputLayout(device),
+#         #     kernel,
+#         #     tensor_args,
+#         #     non_tensor_args,
+#         #     unflatten_args,
+#         # )
+
+#         # def generate_output(output, indices):
+#         #     if isinstance(output, (list, tuple)):
+#         #         return type(output)(
+#         #             generate_output(output[i], indices + [(type(output), i)])
+#         #             for i in range(len(output))
+#         #         )
+#         #     elif isinstance(output, torch.Tensor):
+#         #         return MultiOutput(
+#         #             FixedLayout(
+#         #                 output.device,
+#         #                 output.dtype,
+#         #                 convert_shape_to_inductor(output.size()),
+#         #                 convert_shape_to_inductor(output.stride()),
+#         #             ),
+#         #             packed,
+#         #             indices,
+#         #         )
+        
+        
+#         #import pdb
+#         #pdb.set_trace()
+        
+#         if device.type != "cuda":
+#             # TODO: CPU support
+#             return None
+
+#         if torch.version.hip is not None:
+#             # TODO: ROCm support
+#             return None
+        
+#         # sizevars = V.graph.sizevars
+#         # scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+#         # # Scan with a single element is just a copy
+#         # if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
+#         #     return Pointwise.create(
+#         #         device=device,
+#         #         dtype=dtype,
+#         #         inner_fn=inner_fn,
+#         #         ranges=size,
+#         #     )
+
+#         # reduction_hint, num_splits = cls.num_splits(
+#         #     device=device,
+#         #     dtype=dtype,
+#         #     inner_fn=inner_fn,
+#         #     axis=axis,
+#         #     pointwise_ranges=pointwise_ranges,
+#         #     scan_ranges=scan_ranges,
+#         #     combine_fn=combine_fn,
+#         #     scan_numel=scan_numel,
+#         # )
+#         # if num_splits > 1:
+#         #     # TODO: Support splitting
+#         #     return None
+    
+#         reduction_hint = ReductionHint.DEFAULT
+#         num_splits = 1
+
+#         #TODO: This does maybe work in the main branch, but not here
+#         '''
+#         output_sizes = [[11, 1, 2], [10, 1, 2]]
+#         output_strides = [
+#             make_contiguous_strides_for([11, 1, 2]),
+#             make_contiguous_strides_for([10, 1, 2]),
+#         ]
+#         output_ir = [
+#             MultiOutput(
+#                 FixedLayout(
+#                     device,
+#                     dtype,
+#                     output_size,
+#                     output_stride,
+#                 ),
+#                 Scan(device=device,
+#                  dtype=dtype,
+#                  len_init=len_init,
+#                  size=xs_size,
+#                  f=f,
+#                  init=init,
+#                  init_size=init_size,
+#                  init_load=init_load,
+#                  xs=xs,
+#                  xs_size=xs_size,
+#                  xs_load=xs_load,
+#                  reverse=reverse,
+#                  inner_fn=None,
+#                  ranges=[10]
+#                  ),
+#                 [(tuple, i)],
+#             )
+#             for i, (output_size, output_stride) in enumerate(
+#                 zip(output_sizes, output_strides)
+#             )
+#         ]
+
+#         return output_ir
+#         '''
+#         #import pdb
+#         #pdb.set_trace()
+        
+#         #init = cls.realize_input(init)
+#         #xs = cls.realize_input(xs)
+        
+#         axis = 0
+
+#         def reindex(index, scan_index):
+#             import pdb
+#             pdb.set_trace()
+#             #assert len(scan_index) == len(scan_ranges)
+#             #assert len(index) == len(pointwise_ranges)
+#             return [*scan_index, *index[:-1]]
+
+#         #import pdb
+#         #pdb.set_trace()
+#         result = TensorBox.create(
+#             Scan(device=device,
+#                  dtype=dtype,
+#                  len_init=len_init,
+#                  size=xs_size,
+#                  f=f,
+#                  init=init,
+#                  init_size=init_size,
+#                  init_load=init_load,
+#                  xs=xs,
+#                  xs_size=xs_size,
+#                  xs_load=xs_load,
+#                  reverse=reverse,
+#                  inner_fn=None,
+#                  ranges=[10],
+#                  carry_out_ptr=carry_out_ptr,
+#                  carry_out_load=carry_out_load,
+#                  out_ptr=out_ptr,
+#                  out_load=out_load,
+#                  reindex=reindex,
+#                  reduction_hint=reduction_hint,
+#                  )
+#         )
+        
+#         #import pdb
+#         #pdb.set_trace()
+#         result.realize()
+#         #return result
+        
+#         '''
+#         # Create two TensorBoxes
+#         # 1.) Shape of 'init' for the carry
+#         # 2.) Shape of 'xs' for the ys
+#         carry = [TensorBox(Pointwise.create(
+#                         device=device,
+#                         dtype=dtype,
+#                         inner_fn=init[0].make_loader(),
+#                         ranges=init[0].get_size(),
+#                         )) for i in range(len(init))]
+#         [ca.realize() for ca in carry]
+#         #carry = carry[0] if len(xs) == 1 else carry
+        
+#         ys = [TensorBox(Pointwise.create(
+#                             device=device,
+#                             dtype=dtype,
+#                             inner_fn=xs[i].make_loader(),
+#                             ranges=xs[i].get_size(),
+#                             )) for i in range(len(xs))]
+#         [y.realize() for y in ys]
+#         #ys = ys[0] if len(xs) == 1 else ys
+#         '''
+        
+#         #import pdb
+#         #pdb.set_trace()
+#         return init[0], result#xs
+
+#     '''
+#     @classmethod
+#     def num_splits(
+#         cls,
+#         device: torch.device,
+#         dtype: torch.dtype,
+#         f: Any,
+#         init: Any,
+#         xs: Any,
+#         reverse=False
+#     ):
+#         import pdb
+#         pdb.set_trace()
+        
+#         # TODO: custom splitting heuristic for scan
+#         def wrapper_fn(idx, reduction_idx):
+#             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
+
+#         return Reduction.num_splits(
+#             device=device,
+#             dst_dtype=dtype,
+#             src_dtype=dtype,
+#             inner_fn=wrapper_fn,
+#             ranges=pointwise_ranges,
+#             reduction_ranges=scan_ranges,
+#             reduction_type="sum",
+#             reduction_numel=scan_numel,
+#         )
+#         return None
+#     '''
 
 class Pointwise(Loops):
     def make_loader(self):
@@ -473,14 +970,47 @@ class Pointwise(Loops):
         return None
 
     def store_output(self, output_name, indexer, vars):
+        #import pdb
+        #pdb.set_trace()
         return ops.store(output_name, indexer(vars), self.inner_fn(vars))
+        #return self.inner_fn(vars)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Pointwise(device, self.dtype, loader, self.ranges)
+    
+class Scan(Pointwise):
+    
+    def __post_init__(self):
+        super().__post_init__()
 
+    def store_output(self, output_name, indexer, vars):
+        ops.store(output_name, indexer(vars), 0)
+        #import pdb
+        #pdb.set_trace()
+        #ops.add_index(indexer, "writes", output_name)
+        return self.inner_fn(vars)
+    
+    @classmethod
+    def create(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Any,
+        ranges: Any,
+        
+    ):
+        result = TensorBox.create(
+            Scan(device=device,
+                 dtype=dtype,
+                 inner_fn=inner_fn,
+                 ranges=ranges,
+                 )
+        )
+        result.realize()
+        return result
 
 @dataclasses.dataclass
 class Scatter(Pointwise):
@@ -589,6 +1119,8 @@ class Reduction(Loops):
         return self.reduction_type
 
     def store_reduction(self, output_name, indexer, vars, reduction_vars):
+        #import pdb
+        #pdb.set_trace()
         return ops.reduction(
             output_name,
             self.dtype,
@@ -853,6 +1385,8 @@ class Reduction(Loops):
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
+        import pdb
+        pdb.set_trace()
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1869,6 +2403,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
+            #import pdb
+            #pdb.set_trace()
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
@@ -2238,6 +2774,8 @@ class ComputedBuffer(Buffer):
         return super().make_loader()
 
     def get_store_function(self):
+        #import pdb
+        #pdb.set_trace()
         indexer = self.layout.as_fixed().make_indexer()
         if self.data.get_reduction_type():
             return partial(self.data.store_reduction, self.name, indexer)
@@ -2272,6 +2810,14 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
+                if isinstance(self.data, Scan):
+                    import pdb
+                    pdb.set_trace()
+                    indices = self.data.reindex(index_vars, reduction_vars)
+                    #indices = index_vars
+                else:
+                    indices = index_vars
+                
                 stride_lengths = [
                     V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads
                 ]
@@ -3364,6 +3910,8 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+        import pdb
+        pdb.set_trace()
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4299,7 +4847,10 @@ class StorageBox(MutableBox):
             ),
         ):
             return self.data.get_name()
-        assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
+        
+        #import pdb
+        #pdb.set_trace()
+        assert isinstance(self.data, (Pointwise, Reduction, Scan)), type(self.data)
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
         self.data = ComputedBuffer(
@@ -4311,6 +4862,8 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
+        #import pdb
+        #pdb.set_trace()
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
@@ -4572,6 +5125,21 @@ class LoopBodyBlock:
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}
                 )
+                
+            @staticmethod
+            def scan(dtype_proxy, f, init_proxy, xs_proxy, xs_size, carry_size, out_size, reverse, return_out):
+                def shim(dtype, init, xs, reverse, return_out):
+                    #return V.ops.scan(dtype, f, init, xs, dim, carry, out, reverse)
+                    return V.ops.scan(dtype, f, init, xs, xs_size, carry_size, out_size, reverse, return_out)
+
+                #TODO: The function needs to be turned into a proxy and then used as an argument
+                #import pdb
+                #pdb.set_trace()
+                name = self.body.add_submodule(shim, "scan")
+                #import pdb
+                #pdb.set_trace()
+                #tracer.create_proxy("call_module", name, (dtype_proxy, f_proxy, init_proxy, xs_proxy), {})
+                return tracer.create_proxy("call_module", name, (dtype_proxy, init_proxy, xs_proxy, reverse, return_out), {})
 
             @staticmethod
             def indirect_indexing(index_proxy, size, check=True):

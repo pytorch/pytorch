@@ -2,6 +2,8 @@ import torch
 import functools
 from torch.testing import make_tensor
 from functorch.experimental.control_flow import map
+from torch._higher_order_ops.scan import scan
+
 from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
@@ -13,6 +15,11 @@ def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     yield SampleInput([make_arg(2, 2, 2, low=0.1, high=2), make_arg(2, 2, 2, low=0.1, high=2)],
                       args=(make_arg(1, low=0.1, high=2), make_arg(1, low=0.1, high=2)))
+    
+def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput([make_arg(1, 2, low=0.1, high=2), make_arg(10, 2, low=0.1, high=2)])
 
 def inner_f(x, y0, y1):
     return [x[0].cos().add_(1.) * y0, (x[1] + y1.sin()).cos_().view(x[1].size())]
@@ -37,6 +44,11 @@ def triple_nested_map(xs, y0, y1):
             return map(f2, xx, y0, y1)
         return map(f1, xs, y0, y1)
     return map(f0, xs, y0, y1)
+
+def simple_scan(init, xs):
+    def f(carry, x):
+        return carry+1, x+carry
+    return scan(f, init, xs)
 
 control_flow_opinfo_db = [
     OpInfo(
@@ -64,8 +76,19 @@ control_flow_opinfo_db = [
     OpInfo(
         "TripleNestedMapControlflowOp",
         op=triple_nested_map,
-        sample_inputs_func=sample_inputs_map,
+        sample_inputs_func=sample_inputs_,
         dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+    ),
+    OpInfo(
+        "ScanControlflowOp",
+        op=simple_scan,
+        sample_inputs_func=sample_inputs_scan,
+        dtypes=all_types_and(torch.half),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,

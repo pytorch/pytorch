@@ -754,6 +754,8 @@ class PyCodeCache:
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key
+                #import pdb
+                #pdb.set_trace()
                 exec(code, mod.__dict__, mod.__dict__)
                 sys.modules[mod.__name__] = mod
                 # another thread might set this first
@@ -989,6 +991,8 @@ class AsyncCompile:
     def triton(self, kernel_name, source_code):
         _compile_start()
 
+        #import pdb
+        #pdb.set_trace()
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
             device = torch.cuda.current_device()

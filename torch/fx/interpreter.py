@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
+import traceback
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -125,6 +126,12 @@ class Interpreter:
                     desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
                     initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
+        print('Graph')
+        print(self.module.graph)
+        #tx.symbolic_locals[sym_args[1][0].value]
+        #import pdb
+        #pdb.set_trace()
+        #print(self.module.graph.symbolic_lo)
         for node in self.module.graph.nodes:
             pbar.update(1)
             if node in self.env:
@@ -188,6 +195,10 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        print((n, n.op, n.target, n.args))#, n.stack_trace))
+        #if n.name == 'scan' or n.name == 'body_graph_0':
+        #    import pdb
+        #    pdb.set_trace()
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
@@ -264,7 +275,12 @@ class Interpreter:
         assert not isinstance(target, str)
 
         # Execute the function and return the result
-        return target(*args, **kwargs)
+        try:
+            return target(*args, **kwargs)
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
 
     @compatibility(is_backward_compatible=True)
     def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:

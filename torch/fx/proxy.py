@@ -235,7 +235,14 @@ class TracerBase:
             args = tuple(self.create_arg(elem) for elem in a)
             return type(a)(*args)  # type: ignore[arg-type]
         elif isinstance(a, (tuple, list)):
-            return type(a)(self.create_arg(elem) for elem in a)
+            try:
+                return type(a)(self.create_arg(elem) for elem in a)
+            except:
+                print('Failed!')
+                import pdb
+                pdb.set_trace()
+                ret = type(a)([(a[0],)] + [self.create_arg(elem) for elem in a[1:]])
+                return ret
         elif isinstance(a, dict):
             r = {}
             for k, v in a.items():

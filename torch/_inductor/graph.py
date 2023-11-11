@@ -52,6 +52,8 @@ from .utils import (
 )
 from .virtualized import V
 
+from torch._higher_order_ops.scan import scan
+
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
@@ -464,6 +466,13 @@ class GraphLowering(torch.fx.Interpreter):
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
+        
+    def add_scan_fct(self, data):
+        print('Call the scan fct')
+        import pdb
+        pdb.set_trace()
+        return data
+        
 
     def constant_name(self, name: str, device_override: torch.device):
         """
@@ -519,7 +528,18 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
+        print(target)
+        # if target == torch.ops.scan_impl or target == scan:
+        #     import pdb
+        #     pdb.set_trace()
+        #     from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
+        #     #ret = run_and_get_triton_code(args[0], args[1][0], args[2][0])
+        #     ret = run_and_get_triton_code(args[0], *[torch.rand(*args[1][0].get_size(), device="cuda"), torch.rand(*args[1][0].get_size(), device="cuda")])
+
+        
         if target is operator.getitem and isinstance(args[0], (list, tuple)):
+            #import pdb
+            #pdb.set_trace()
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -527,6 +547,23 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
+            try:
+                name = target.name()
+            except:
+                print('Trying to call getitem on a TensorBox')
+                #TODO: Get the output from the StorageBox for further processing in the graph. 
+                # Make a read to the storage box
+                import pdb
+                pdb.set_trace()
+                # #read_writes = cb.get_read_writes().reads
+                # #args[0].realize_hint()
+                # #rw = args[0].data.get_read_writes()
+                # import pdb
+                # pdb.set_trace()
+                # #rw.writes
+                # #val = super().call_function(target, [[[args[0].data], [args[0].data]], args[1]], kwargs)
+                # return val
+            
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
@@ -558,9 +595,18 @@ class GraphLowering(torch.fx.Interpreter):
             ) from None
 
     def get_attr(self, target, args, kwargs):
+        #import pdb
+        #pdb.set_trace()
         # this is a constant
         value = getattr(self.module, target)
 
+        if isinstance(value, torch.fx.GraphModule):
+            print((value, target))
+            #import pdb
+            #pdb.set_trace()
+            return value
+            #return self.add_scan_fct(value)
+        
         if unsupported_output_tensor(value):
             return self.add_tensor_constant(value)
 
@@ -621,6 +667,8 @@ class GraphLowering(torch.fx.Interpreter):
                 except ValueError:
                     pass
 
+        #import pdb
+        #pdb.set_trace()
         self.finalize()
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
@@ -638,6 +686,8 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
+            #import pdb
+            #pdb.set_trace()
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
