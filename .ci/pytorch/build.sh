@@ -66,6 +66,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
   # To build test_edge_op_registration
   export BUILD_EXECUTORCH=ON
+  export USE_CUDA=0
 fi
 
 if ! which conda; then
