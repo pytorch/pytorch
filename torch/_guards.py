@@ -388,7 +388,7 @@ class ModuleContextCheckpointState:
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
     def __init__(self):
-        self.nn_modules: Dict[str, torch.nn.Module] = {}
+        self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
