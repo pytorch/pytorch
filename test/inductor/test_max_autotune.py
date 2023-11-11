@@ -1,18 +1,28 @@
 # Owner(s): ["module: inductor"]
-
 import os
 import unittest
 
-from typing import List
+from typing import Callable, List, Optional
 
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import reset_rng_state
+from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    CUDA_VISIBLE_DEVICES,
+    TuningProcessPool,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
+from torch._inductor.select_algorithm import (
+    AlgorithmSelectorCache,
+    ChoiceCaller,
+    TritonTemplateCaller,
+)
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -24,13 +34,22 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+
+
+def _get_path_without_sccache() -> str:
+    """
+    Get the PATH environment variable without sccache.
+    """
+    path_envs = os.environ.get("PATH", "").split(":")
+    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
+    return ":".join(path_envs)
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -47,7 +66,7 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @instantiate_parametrized_tests
-class TestDoBench(TestCase):
+class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -126,7 +145,8 @@ class TestDoBench(TestCase):
             self.assertNotEqual(0, child.exitcode)
 
     @parametrize("autotune_in_subproc", (True, False))
-    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
+    @parametrize("autotune_multi_device", (True, False))
+    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
@@ -142,7 +162,11 @@ class TestDoBench(TestCase):
         d = torch.randn(k, n).cuda()
 
         with config.patch(
-            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "autotune_multi_device": autotune_multi_device,
+            }
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
@@ -198,8 +222,10 @@ class TestDoBench(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -231,12 +257,162 @@ class TestDoBench(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    def _test_max_autotune_cutlass_backend_epilogue_fusion(
+        self,
+        dynamic: bool = False,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        mixed_precision=False,
+        fp16=True,
+        expected_fuse_count=1,
+        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+    ):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            mixed_precision
+        )
+
+        # Note: The ops that are available
+        # also depend on the alignment of the shapes
+        # so if these shapes don't all align to at least 8 elements
+        # it can happen that no Cutlass 3.x op is available
+        # that allows fusions
+        a = torch.randn(256, 32).cuda()
+        b = torch.randn(32, 256).cuda()
+        if fp16:
+            a = a.half()
+            b = b.half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_only_evt_capable_ops": True,
+                "cuda.version": "12.2",  # required to enable the Kernels we need
+            }
+        ):
+            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
+            assert (
+                actual_count == expected_fuse_count
+            ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16(self):
+        def mm(a, b):
+            return (a @ b) * 3.0
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self):
+        def mm(a, b):
+            return (a @ b) * 3.0
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_chained_fusion_fp16(self):
+        def mm(a, b):
+            return (a @ b) * 3.3 - 1.234
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
+        def mm(a, b):
+            return (a @ b) * 3.3 - 1.234
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_relu_fusion_fp16(self):
+        def mm(a, b):
+            return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
+        def mm(a, b):
+            return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self):
+        def mm(a, b):
+            return torch.clamp(torch.nn.functional.relu(a @ b), max=6.0)
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
+        def mm(a, b):
+            # this should not be fused, since the output dtype is different from the matmul dtype
+            return (a @ b).to(torch.float32) * 0.00001
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
+        def mm(a, b):
+            return (a @ b) / b.size(1)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -267,7 +443,7 @@ class TestDoBench(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_addmm(self, dynamic):
+    def test_max_autotune_addmm(self, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -302,8 +478,10 @@ class TestDoBench(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self, dynamic, max_autotune_gemm_backends
     ):
@@ -450,8 +628,135 @@ class TestDoBench(TestCase):
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
 
+    @config.patch(
+        benchmark_kernel=True,
+        fallback_random=True,
+        max_autotune_gemm=True,
+    )
+    @parametrize("device", ("cpu", "cuda"))
+    def test_matmul_dropout(self, device):
+        def fwd(a, b):
+            x = a @ b
+            x = torch.nn.functional.dropout(x, 0.1)
+            return x
+
+        def fn(a, b):
+            x = fwd(a, b).sum()
+            x.backward()
+            return a.grad
+
+        N = 128
+        a = torch.randn(N, N, device=device, requires_grad=True)
+        b = torch.randn(N, N, device=device)
+
+        opt_fn = torch.compile(fn)
+        reset_rng_state()
+        ref = fn(a, b)
+        reset_rng_state()
+        act = opt_fn(a, b)
+
+        if N <= 8:
+            print(f"ref\n{ref}\nact\n{act}")
+        torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
+
+
+class TestBenchmarkRequest(BenchmarkRequest):
+    def __init__(
+        self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
+    ) -> None:
+        self.value = value
+        self.multi_device = multi_device
+        self.parent_visible_devices = parent_visible_devices
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
+    ) -> float:
+        # Verify that the visible devices env var is set correctly. If multi-device
+        # auto-tuning is disabled, the visible devices should be unmanipulated from
+        # the parent process. If multi-device auto-tuning is enabled, the visible
+        # devices should be a _single_ valid device number. Note that we can't perform
+        # this validation directly from the test body because benchmarks execute in a
+        # separate process. If the check fails, however, the test will detect the
+        # failure by virtue of not receiving the expected result back.
+        visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+        if not self.multi_device:
+            assert visible_devices == self.parent_valid_devices
+        else:
+            valid_devices = self.parent_visible_devices.split(",")
+            assert visible_devices in valid_devices
+
+        return self.value
+
+
+class TestTritonTemplateCaller(TritonTemplateCaller):
+    def __init__(self, bmreq: TestBenchmarkRequest):
+        self.bmreq = bmreq
+
+    def __str__(self) -> str:
+        return "test"
+
+
+class TestTuningProcess(TestCase):
+    def test_tuning_pool_crash(self):
+        # Use only one device/subprocess so we test the process restarts
+        # and is usable after a "crash".
+        with config.patch({"autotune_multi_device": False}):
+            tuning_pool = TuningProcessPool()
+            tuning_pool.initialize()
+
+            # First force the tuning process to "crash" by setting a bogus
+            # string for the expected visible devices.
+            bmreq = TestBenchmarkRequest(3.14, False, "invalid")
+            choice = TestTritonTemplateCaller(bmreq)
+
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], float("inf"))
+
+            # Then send another request and make sure the sub-process
+            # has restarted and is operational. 'valid_devices' expected
+            # to be None because autotune_multi_device is off.
+            choice.bmreq.parent_valid_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], bmreq.value)
+
+            tuning_pool.terminate()
+
+    def test_tuning_pool_multiple_devices(self):
+        with config.patch({"autotune_multi_device": True}):
+            # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+            # is already set in the environment); use a subset of the available devices
+            # to ensure only the subset are visible to the sub-processes.
+            if CUDA_VISIBLE_DEVICES in os.environ:
+                visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+            else:
+                visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+
+            parent_visible_devices = ",".join(visible_devices[-2:])
+            os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
+
+            tuning_pool = TuningProcessPool()
+            tuning_pool.initialize()
+
+            choice1 = TestTritonTemplateCaller(
+                TestBenchmarkRequest(3.14, True, parent_visible_devices),
+            )
+            choice2 = TestTritonTemplateCaller(
+                TestBenchmarkRequest(2.718, True, parent_visible_devices),
+            )
+
+            timings = tuning_pool.benchmark([choice1, choice2])
+            self.assertEqual(timings[choice1], choice1.bmreq.value)
+            self.assertEqual(timings[choice2], choice2.bmreq.value)
+
+            tuning_pool.terminate()
+
 
 if __name__ == "__main__":
+    from torch._inductor.utils import is_big_gpu
+
     # Set env to make it work in CI.
-    if HAS_CUDA:
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()

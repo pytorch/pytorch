@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
-#include <iostream>
 #include <typeindex>
 #include <vector>
 
@@ -77,6 +76,7 @@ struct NodeCall {
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
+  std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
   bool needed = true;
 };
@@ -347,9 +347,6 @@ class CompiledNodeArgs {
     TORCH_CHECK(
         fn->retains_grad_hooks().empty(),
         "retains_grad_hooks not implemented for compiled autograd");
-    TORCH_CHECK(
-        fn->tensor_post_acc_grad_hooks() == nullptr,
-        "tensor_post_acc_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
     }
@@ -389,6 +386,12 @@ class CompiledNodeArgs {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
+  }
+
+  void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
   void collect_size(size_t s) {
@@ -470,7 +473,6 @@ struct TraceState {
   size_t sym_sizes_index;
   std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
-  std::vector<size_t> output_grad_targets;
 };
 
 class SwapSavedVariables {
@@ -621,19 +623,20 @@ class SwapSavedVariables {
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
 
-  // record the need to run `dst.mutable_grad() = src` after the graph
-  // dst is a real tensor, src is a fake tensor
-  void assign_mutable_grad(const at::Tensor& dst, const at::Tensor& src) {
-    const TensorArg& arg = compiler.tensor_args.lookup(dst);
-    TORCH_INTERNAL_ASSERT(arg.defined());
-    TORCH_INTERNAL_ASSERT(
-        state.outputs.size() == state.output_grad_targets.size());
-    state.outputs.emplace_back(src);
-    state.output_grad_targets.emplace_back(arg.index());
+  SwapSavedVariables(
+      AutogradCompilerCall& c,
+      TraceState& s,
+      PyObject* p,
+      const NodeCall& n)
+      : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
+
+  PyObject* get_py_compiler() {
+    return py_compiler;
   }
 
-  SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
-      : compiler(c), state(s) {}
+  const NodeCall& get_curr_node_call() {
+    return curr_node_call;
+  }
 
   void debug_asserts() {
     stashed_variables.debug_assert();
@@ -679,6 +682,10 @@ class SwapSavedVariables {
 
   AutogradCompilerCall& compiler;
   TraceState& state;
+  // This is a borrowed reference, we do not increment ownership, or lower it,
+  // it's lifecycle is entirely longer than this objects.
+  PyObject* py_compiler;
+  const NodeCall& curr_node_call;
 
   // These mappings are used to save the prior values when we overwrite things
   // in before(). In after(), we use these to cleanup after ourselves.

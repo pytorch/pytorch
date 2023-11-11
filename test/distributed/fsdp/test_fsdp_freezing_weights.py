@@ -165,6 +165,10 @@ class TestFreezingWeights(FSDPTest):
             msg="FullyShardedDataParallel states didn't match PyTorch DDP states",
         )
 
+        if freezing_method == FreezingMethod.RequiresGrad:
+            for ddp_param, fsdp_param in zip(ddp_state, fsdp_state):
+                self.assertEqual(ddp_param.requires_grad, fsdp_param.requires_grad)
+
 
 instantiate_parametrized_tests(TestFreezingWeights)
 

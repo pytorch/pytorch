@@ -8,8 +8,7 @@
 #include <memory>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Module;
 
@@ -43,5 +42,4 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     Module* self = nullptr,
     const std::vector<std::string>& argument_names = {});
 } // namespace tracer
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

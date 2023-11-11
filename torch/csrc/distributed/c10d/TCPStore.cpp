@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -6,6 +7,10 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <fstream>
+#include <random>
+#include <streambuf>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -299,14 +304,45 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     // server successfully started
     C10D_DEBUG("The server has started on port = {}.", server_->port());
 
+    std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
+    if (maxconnFile.good() && numWorkers_.has_value()) {
+      try {
+        std::string str(
+            (std::istreambuf_iterator<char>(maxconnFile)),
+            std::istreambuf_iterator<char>());
+        std::size_t somaxconn = std::stoll(str);
+        if (somaxconn < *numWorkers_) {
+          C10D_WARNING(
+              "Starting store with {} workers but somaxconn is {}."
+              "This might cause instability during bootstrap, consider increasing it.",
+              *numWorkers_,
+              somaxconn);
+        }
+      } catch (std::logic_error& e) {
+        C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
+      }
+    }
+
     addr_.port = server_->port();
   } else {
     addr_.port = opts.port;
   }
 
+  if (numWorkers_.has_value()) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(1, *numWorkers_);
+    // stagger connecting to the store when there are too many ranks to
+    // avoid causing a DDoS
+    std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
+  }
+
   client_ = detail::TCPClient::connect(addr_, opts);
   // TCP connection established
   C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
+
+  // client's first query for validation
+  validate();
 
   if (opts.waitWorkers) {
     waitForWorkers();
@@ -339,12 +375,25 @@ void TCPStore::waitForWorkers() {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        break;
+        C10_THROW_ERROR(
+            DistStoreError,
+            fmt::format(
+                "Timed out after {} seconds waiting for clients. {}/{} clients joined.",
+                elapsed.count(),
+                numWorkersCompleted,
+                *numWorkers_));
       }
       /* sleep override */
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
+}
+
+void TCPStore::validate(void) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
+  buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
+  buffer.flush();
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {

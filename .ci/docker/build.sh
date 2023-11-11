@@ -71,6 +71,9 @@ if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
+elif [[ "$image" == *cuda*linter* ]]; then
+  # Use a separate Dockerfile for linter to keep a small image size
+  DOCKERFILE="linter-cuda/Dockerfile"
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
@@ -129,35 +132,6 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-    pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks)
-    CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
     CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
@@ -181,13 +155,13 @@ case "$image" in
     CONDA_CMAKE=yes
     ONNX=yes
     ;;
-  pytorch-linux-focal-py3-clang9-android-ndk-r19c)
+  pytorch-linux-focal-py3-clang9-android-ndk-r21e)
     ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
-    ANDROID_NDK_VERSION=r19c
+    ANDROID_NDK_VERSION=r21e
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
@@ -228,7 +202,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.4.2
+    ROCM_VERSION=5.6
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -239,21 +213,10 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=5.7
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
-    ;;
-  pytorch-linux-focal-py3.8-gcc7)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    CONDA_CMAKE=yes
-    TRITON=yes
-    DOCS=yes
     ;;
     pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
@@ -286,6 +249,12 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3-clang15-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=15
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
   pytorch-linux-jammy-py3.8-gcc11)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=11
@@ -302,6 +271,11 @@ case "$image" in
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
     ANACONDA_PYTHON_VERSION=3.9
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
+    ANACONDA_PYTHON_VERSION=3.9
+    CUDA_VERSION=11.8
     CONDA_CMAKE=yes
     ;;
   *)
@@ -321,6 +295,9 @@ case "$image" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
+      # To ensure that any ROCm config will build using conda cmake
+      # and thus have LAPACK/MKL enabled
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
@@ -354,14 +331,11 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-# TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
-# it's no longer needed.
 docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
-       --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \

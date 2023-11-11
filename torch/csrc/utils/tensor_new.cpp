@@ -92,7 +92,9 @@ Tensor new_with_storage(
 std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
-  THPObjectPtr handle;
+  // Note that after the first iteration, obj is the only thing that keeps
+  // the seq raw pointer alive.
+  THPObjectPtr obj;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0)
@@ -106,13 +108,15 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     }
     if (length == 0)
       break;
-    handle = THPObjectPtr(PySequence_GetItem(seq, 0));
-    if (!handle) {
+    PyObject* new_obj = PySequence_GetItem(seq, 0);
+    if (!new_obj) {
+      // This line uses seq so we must NOT override obj before this line
       throw ValueError(
           "could not determine the shape of object type '%s'",
           Py_TYPE(seq)->tp_name);
     }
-    seq = handle.get();
+    obj = THPObjectPtr(new_obj);
+    seq = obj.get();
   }
 
   return sizes;
@@ -123,7 +127,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     return ScalarType::Long;
   }
   if (torch::is_symfloat(obj)) {
-    return ScalarType::Double;
+    return torch::tensors::get_default_scalar_type();
   }
 #ifdef USE_NUMPY
   if (is_numpy_available()) {
@@ -212,7 +216,15 @@ void recursive_store(
     if (is_symfloat) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloat>();
-      *(double*)data = val.guard_float(__FILE__, __LINE__);
+      const double double_val = val.guard_float(__FILE__, __LINE__);
+      switch (elementSize) {
+        case 8:
+          *reinterpret_cast<double*>(data) = double_val;
+          break;
+        case 4:
+          *reinterpret_cast<float*>(data) = static_cast<float>(double_val);
+          break;
+      }
       return;
     }
     if (is_symint) {
@@ -386,10 +398,7 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        bool is_typed_storage = false;
-        ScalarType storage_scalar_type{ScalarType::Undefined};
-        Storage storage;
-        std::tie(storage, storage_scalar_type, is_typed_storage) =
+        auto [storage, storage_scalar_type, is_typed_storage] =
             createStorageGetType(data);
 
         TORCH_CHECK(

@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import itertools
 import logging
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -16,14 +18,16 @@ from torch._inductor.fx_passes.post_grad import view_to_reshape
 from . import config
 
 aten = torch.ops.aten
-
-aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
 
 
-def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
+def replace_params_with_constants(
+    gm: torch.fx.GraphModule,
+    flat_params: list[Any],
+    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+) -> List[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -119,15 +123,15 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0
         e = erased_tensors[0]
 
         raise RuntimeError(
-            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
-            "The original parameters have been discarded for memeory efficiency. "
+            f"Trying to run Pytorch Eager Module after Dynamo Freezing. "
+            "The original parameters have been discarded for memory efficiency. "
             f"Found in op {func} for erased parameter {e.erased_name} of {e.owning_mod_ref()}"
         )
 
@@ -152,7 +156,7 @@ def invalidate_eager_modules():
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod):
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
     for attr_name, tensor in list(
         itertools.chain(
             mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -166,7 +170,7 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
-def enforce_output_layout(gm):
+def enforce_output_layout(gm: torch.fx.GraphModule):
     """
     Make sure the output node's layout does not change due to compiler optimizations
     by adding aten.as_strided nodes with the expected strides.
@@ -197,7 +201,7 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
-def enforce_as_strided_input_layout(gm):
+def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     """
     Make sure the as_strided node's input's layout does not change due to compiler
     optimizations, because the as_strided strides info depends on input tensor stride info.
@@ -223,7 +227,7 @@ def enforce_as_strided_input_layout(gm):
 
 
 @dynamo_timed
-def convert_conv_weights_to_channels_last(gm):
+def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     """
     Convert 4d convolution weight tensor to channels last format.
 

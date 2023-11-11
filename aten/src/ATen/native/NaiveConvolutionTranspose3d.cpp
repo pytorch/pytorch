@@ -291,7 +291,7 @@ void slow_conv_transpose3d_out_cpu_template(
   // Define a buffer of ones, for bias accumulation
   Tensor ones = bias.defined() ? at::ones({output_depth, output_height, output_width}, input_.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Long, at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND3(at::ScalarType::Long, at::ScalarType::BFloat16, at::ScalarType::Half,
       input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
         // Helpers
         Tensor input_n;
@@ -515,7 +515,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
   Tensor grad_columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
       input_depth * input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
       input.scalar_type(), "slow_conv_transpose3d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n;
@@ -728,7 +728,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
       input_depth * input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
       input.scalar_type(),
       "slow_conv_transpose3d_acc_grad_parameters_cpu",
       [&] {

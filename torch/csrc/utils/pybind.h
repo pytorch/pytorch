@@ -5,7 +5,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
-#include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -325,9 +324,6 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
-template <typename... Ts>
-struct C10_MPARK_VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
-    : variant_caster<c10::variant<Ts...>> {};
 } // namespace detail
 } // namespace pybind11
 

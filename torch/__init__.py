@@ -24,6 +24,7 @@ def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 
@@ -53,9 +54,9 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export', 'autocast',
+    'SymBool', 'sym_not', 'unravel_index',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
+    'export', 'autocast', 'cond',
 ]
 
 ################################################################################
@@ -174,13 +175,13 @@ def _load_global_deps() -> None:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
             'cublas': 'libcublas.so.*[0-9]',
             'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9]',
             'cufft': 'libcufft.so.*[0-9]',
             'curand': 'libcurand.so.*[0-9]',
             'cusolver': 'libcusolver.so.*[0-9]',
@@ -260,7 +261,7 @@ class SymInt:
     def __index__(self):
         return self.node.int_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -289,6 +290,14 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def __hash__(self) -> builtins.int:
+        ret = self.node.singleton_int()
+        if ret is not None:
+            return hash(ret)
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-singleton SymInt")
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -304,7 +313,7 @@ class SymFloat:
     def __bool__(self):
         return self.node.bool_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -354,7 +363,7 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
     def __and__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
@@ -381,8 +390,20 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __sym_ite__(self, then_val, else_val):
+        raise AssertionError("type stub not overridden")
+
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.bool_())
+        else:
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
@@ -438,6 +459,12 @@ def sym_min(a, b):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
+def sym_ite(b, t, f):
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    if isinstance(b, SymBool):
+        return b.__sym_ite__(t, f)
+    return t if b else f
+
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
 try:
@@ -471,6 +498,9 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
+    elif name == 'TensorBase':
+        # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -699,14 +729,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
-        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
-          quantized, sets new elements to a known value.  Floating point or
-          complex values are set to NaN. Integer values are set to the maximum
-          value.
-        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
-          and :func:`torch.empty_permuted` will fill the output tensor with a known
-          value. Floating point or complex dtype tensors are filled with NaN. Integer
-          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -750,6 +772,11 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
+
+    In addition, several operations fill uninitialized memory when this setting
+    is turned on and when
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
+    See the documentation for that attribute for more information.
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -965,11 +992,12 @@ def is_warn_always_enabled() -> builtins.bool:
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):
+def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):  # noqa: F811
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
+    from torch.fx.experimental.symbolic_shapes import expect_true
+    if expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -989,7 +1017,7 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
 
     raise error_type(message_evaluated)
 
-def _check(cond, message=None):
+def _check(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1018,9 +1046,10 @@ def _check_is_size(i, message=None):
     """
     # This is responsible for the expect_true
     _check(i >= 0, message)
-    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
+    from torch.fx.experimental.symbolic_shapes import _advise_is_size
+    _advise_is_size(i)
 
-def _check_index(cond, message=None):
+def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1037,7 +1066,7 @@ def _check_index(cond, message=None):
     """
     _check_with(IndexError, cond, message)
 
-def _check_value(cond, message=None):
+def _check_value(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1054,7 +1083,7 @@ def _check_value(cond, message=None):
     """
     _check_with(ValueError, cond, message)
 
-def _check_type(cond, message=None):
+def _check_type(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1071,7 +1100,7 @@ def _check_type(cond, message=None):
     """
     _check_with(TypeError, cond, message)
 
-def _check_not_implemented(cond, message=None):
+def _check_not_implemented(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1088,7 +1117,7 @@ def _check_not_implemented(cond, message=None):
     """
     _check_with(NotImplementedError, cond, message)
 
-def _check_tensor_all_with(error_type, cond, message=None):
+def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
     if not torch.is_tensor(cond):
         raise TypeError(f'cond must be a tensor, but got {type(cond)}')
 
@@ -1099,7 +1128,7 @@ def _check_tensor_all_with(error_type, cond, message=None):
     _check_with(error_type, cond._is_all_true().item(), message)
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
-def _check_tensor_all(cond, message=None):
+def _check_tensor_all(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1482,6 +1511,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+import torch._library
 
 # quantization depends on torch.fx
 # Import quantization
@@ -1535,9 +1565,13 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
-        # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+            # FIXME: CUDA Graph does not work well with CUPTI teardown.
+            #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
+            #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
+            # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+            os.environ["TEARDOWN_CUPTI"] = "0"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1560,7 +1594,7 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-        current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+        current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -1644,7 +1678,10 @@ def compile(model: Optional[Callable] = None, *,
 
     Args:
        model (Callable): Module/function to optimize
-       fullgraph (bool): Whether it is ok to break model into several subgraphs
+       fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
+        in the function that it will optimize. If True, then we require that the entire function be
+        capturable into a single graph. If this is not possible (that is, if there are graph breaks),
+        then this will raise an error.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
@@ -1739,6 +1776,7 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
+from torch._higher_order_ops import cond
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -1770,7 +1808,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     csan.enable_cuda_sanitizer()
 
 # Populate magic methods on SymInt and SymFloat
-import torch.fx.experimental.symbolic_shapes
+import torch.fx.experimental.sym_node
 
 from torch import func as func
 from torch.func import vmap
@@ -1823,28 +1861,83 @@ if TYPE_CHECKING:
     from torch import _inductor as _inductor
     from torch import onnx as onnx
 
-_lazy_modules = {
-    "_dynamo",
-    "_inductor",
-    "_export",
-    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-    "onnx",
-}
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        "_export",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
 
-def __getattr__(name):
-    # Deprecated attrs
-    replacement = _deprecated_attrs.get(name)
-    if replacement is not None:
-        import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
-        return replacement()
+    def __getattr__(name):
+        # Deprecated attrs
+        replacement = _deprecated_attrs.get(name)
+        if replacement is not None:
+            import warnings
+            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+            return replacement()
 
-    # Lazy modules
-    if name in _lazy_modules:
-        import importlib
-        return importlib.import_module(f".{name}", __name__)
+        # Lazy modules
+        if name in _lazy_modules:
+            import importlib
+            return importlib.import_module(f".{name}", __name__)
 
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+    """
+    Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
+    it will still check if the input value is within the specified range.
+    """
+    torch.sym_constrain_range(symbol, min=min, max=max)
+
+
+def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+    """
+    This indicates that a given int is size-like, and can be used in any context where a size is expected.
+    You will typically use this when reading out integers from Tensors, e.g., max.item() or lengths.tolist()
+    which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
+      GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
+
+    This function has unusual semantics which distinguish it from constrain_as_value.
+    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
+    As a result, max value you pass in should always be greater than 2.
+    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
+    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
+    report False to these tests. Although this is technically unsound,
+    in practice we observe that if your program works for all sizes >= 2,
+    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
+    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
+    At runtime, we only assert that the user provided min/max values are respected.
+
+    To demonstrate in a scenario, suppose you do
+    ```
+    # Case 1
+    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
+    constrain_as_size(symbol, min=0)
+
+    # Case 2
+    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
+    constrain_as_size(symbol, min=0, max=N)
+
+    # Case 3
+    # This is not valid case as max is <= 2
+    constrain_as_size(symbol, min=0, max=1)
+
+    # Case 4
+    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
+    constrain_as_size(symbol, min=2)
+
+    # Case 5
+    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
+    constrain_as_size(symbol, min=1)
+    ```
+    """
+    torch.sym_constrain_range_for_size(symbol, min=min, max=max)
+
 
 from . import _logging
 _logging._init_logs()

@@ -3,28 +3,65 @@ import copy
 import unittest
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
+
+from torch._inductor.fx_passes.serialized_patterns.central_index import (
+    get_serialized_pattern,
+)
 from torch._inductor.pattern_matcher import (
+    _TargetExpr,
     Arg,
     CallFunction,
+    gen_pattern,
     KeywordArg,
     Match,
+    PatternExpr,
     PatternMatcherPass,
+    PatternPrettyPrinter,
     register_graph_pattern,
 )
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
-class TestPaternMatcher(TestCase):
+class TestPatternMatcher(TestCase):
+    def common(
+        self,
+        fn,
+        args,
+        expected_matches,
+        expected_nodes,
+        additional_check=lambda code: None,
+    ):
+        counters.clear()
+        torch.manual_seed(42)
+        expected = fn(*args)
+        torch.manual_seed(42)
+        actual, codes = run_and_get_code(torch.compile(fn), *args)
+        if len(codes) == 1:
+            codes = codes[0]
+        torch.testing.assert_close(actual, expected)
+        if inductor_config.cpp_wrapper:
+            # CPP wrapper runs everything twice, so we'll match the pattern twice
+            expected_matches *= 2
+            expected_nodes *= 2
+
+        self.assertEqual(
+            counters["inductor"]["pattern_matcher_count"], expected_matches
+        )
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], expected_nodes)
+        additional_check(codes)
+        counters.clear()
+
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
@@ -57,12 +94,76 @@ class TestPaternMatcher(TestCase):
             ),
         ]
         for args in args_list:
-            counters.clear()
-            expected = fn(*args)
-            actual = torch.compile(fn)(*args)
-            torch.testing.assert_close(actual, expected)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
+            self.common(fn, args, 1, 3)
+
+    def _test_fused_int_mm_mul_impl(self, fn, args, fused_int_mm_mul_expected=True):
+        torch._dynamo.reset()
+        counters.clear()
+        ref = fn(*args)
+        test, (code,) = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
+        self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
+        if fused_int_mm_mul_expected:
+            indices = ~ref.isinf()
+            torch.testing.assert_close(
+                ref[indices], test[indices]
+            )  # also checks that dtype is correct
+
+    @skipIfRocm
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul(self):
+        def fn1(a, b, c):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
+
+        def fn2(a, b, c):
+            return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
+                torch.bfloat16
+            )
+
+        args_list = [
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((32, 1), dtype=torch.float16, device="cuda") * 0 + 0.5,
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((1, 8), dtype=torch.bfloat16, device="cuda"),
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+                torch.randn((1, 8), dtype=torch.float32, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_fused_int_mm_mul_impl(fn1, args, True)
+            self._test_fused_int_mm_mul_impl(fn2, args, True)
+
+    @skipIfRocm
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    def test_fused_int_mm_mul_gating(self):
+        def fn1(a, b, c):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
+
+        args1 = (
+            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+            torch.randn((8), dtype=torch.float32, device="cuda"),
+        )
+
+        args2 = (
+            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
+            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
+            torch.randn((32, 1), dtype=torch.float16, device="cuda"),
+        )
+        self._test_fused_int_mm_mul_impl(fn1, args1, False)
+        self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
+        inductor_config.force_fuse_int_mm_with_mul = False
+        self._test_fused_int_mm_mul_impl(fn1, args2, False)
 
     def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
         torch._dynamo.reset()
@@ -328,28 +429,58 @@ class TestPaternMatcher(TestCase):
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                True,
+            ),
+            (
+                torch.randn(8, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 8, device="cuda"),
+                True,
             ),
             (
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(1, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                False,
             ),
             (
                 torch.randn(1, 16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
+                False,
             ),
-            (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
+            (
+                4,
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                False,
+            ),
         ]
-        for args in args_list:
+        for a, b, c, should_fuse in args_list:
             torch._dynamo.reset()
             counters.clear()
+            args = (a, b, c)
             e1, e2 = fn(*args)
             a1, a2 = torch.compile(fn)(*args)
             torch.testing.assert_close(a1, e1)
             torch.testing.assert_close(a2, e2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+            count, nodes = (2, 4) if should_fuse else (0, 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
+
+    def test_addmm_symbolic_scalar(self):
+        def fn(m1, m2):
+            bias = m1.size(0)
+            return torch.add(bias, torch.mm(m1, m2)), torch.mm(m1, m2) + bias
+
+        m1 = torch.randn(16, 16, device="cuda")
+        m2 = torch.randn(16, 16, device="cuda")
+
+        counters.clear()
+        expect = fn(m1, m2)
+        actual = torch.compile(fn, dynamic=True)(m1, m2)
+        self.assertEqual(expect, actual)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
     def test_cat_mm(self):
         def fn(a, b, c):
@@ -367,11 +498,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
+        self.common(fn, args, 2, 5)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -389,13 +516,8 @@ class TestPaternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
+        self.common(fn, args, 2, 5)
 
-    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
@@ -414,22 +536,20 @@ class TestPaternMatcher(TestCase):
             torch.randn(2, 32, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+        self.common(fn, args, 1, 3)
 
-        counters.clear()
         args = [
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
+        counters.clear()
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+        # We don't recompile for dynamic-shape cases.
+        if dynamo_config.assume_static_by_default:
+            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
+            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -438,16 +558,11 @@ class TestPaternMatcher(TestCase):
             slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, -1)
             return torch.ops.aten.cat.default([cat_1, slice_2], 1)
 
-        counters.clear()
         args = [
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+        self.common(fn, args, 1, 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -495,7 +610,16 @@ class TestPaternMatcher(TestCase):
             x = torch.full([100], 0.1, dtype=torch.float32)
             return torch.cumsum(x, 0)
 
-        for fn in (fn1, fn2, fn3, fn4):
+        def fn5():
+            t1 = torch.full([2, 4], 1)
+            t2 = t1.to(dtype=torch.bool)
+            return torch.cumsum(t2, 1)
+
+        def fn6():
+            x = torch.full([10, 10], True, dtype=torch.int32)
+            return torch.cumsum(x, 1)
+
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -514,12 +638,7 @@ class TestPaternMatcher(TestCase):
         args = [
             torch.randn(2, 32, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
-        counters.clear()
+        self.common(fn, args, 1, 4)
 
         # Not all getitems are passed to cat
         def fn(a):
@@ -533,12 +652,7 @@ class TestPaternMatcher(TestCase):
         args = [
             torch.randn(2, 32, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
-        counters.clear()
+        self.common(fn, args, 0, 0)
 
         # Different dimensions  (TODO this case should be handled by replacing with a reshape)
         def fn(a):
@@ -551,11 +665,7 @@ class TestPaternMatcher(TestCase):
         args = [
             torch.randn(2, 32, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        self.common(fn, args, 0, 0)
 
         # https://github.com/pytorch/pytorch/issues/99686.
         def fn(a):
@@ -566,11 +676,7 @@ class TestPaternMatcher(TestCase):
         args = [
             torch.randn(1, 8, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        self.common(fn, args, 0, 0)
 
     def test_cat_splitwithsizes(self):
         # good case
@@ -586,12 +692,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(2, 3, device="cuda"),
             torch.randn(2, 5, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 2)
-        counters.clear()
+        self.common(fn, args, 1, 2)
 
         # cat node has other users
         def fn(a, b, c):
@@ -606,12 +707,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(2, 3, device="cuda"),
             torch.randn(2, 5, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
-        counters.clear()
+        self.common(fn, args, 0, 0)
 
         # cat and split dims are different
         def fn(a, b, c):
@@ -626,12 +722,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(10, 3, device="cuda"),
             torch.randn(10, 5, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
-        counters.clear()
+        self.common(fn, args, 0, 0)
 
         # cat and split lenghts are different
         def fn(a, b, c):
@@ -644,12 +735,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(2, 3, device="cuda"),
             torch.randn(2, 5, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
-        counters.clear()
+        self.common(fn, args, 0, 0)
 
         # cat input sizes and split sizes are different
         def fn(a, b, c):
@@ -664,12 +750,7 @@ class TestPaternMatcher(TestCase):
             torch.randn(2, 3, device="cuda"),
             torch.randn(2, 5, device="cuda"),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
-        counters.clear()
+        self.common(fn, args, 0, 0)
 
     def test_match_with_mutation(self):
         counter = 0
@@ -776,6 +857,66 @@ class TestPaternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_fuse_attention_roundtrip_pattern(self):
+        # are we losing anything in serialization
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        global_vals = {
+            "aten": torch.ops.aten,
+            "prims": torch.ops.prims,
+            "torch": torch,
+        }
+
+        for name in dir(torch._inductor.pattern_matcher):
+            attr = getattr(torch._inductor.pattern_matcher, name)
+            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+                global_vals[name] = attr
+
+        with torch._subclasses.FakeTensorMode():
+            for _, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+                env = global_vals.copy()
+                exec(pattern_pp, env)
+                pattern_2 = env["output"]
+                self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
+
+    def test_fuse_attention_all_patterns_serialized(self):
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        with torch._subclasses.FakeTensorMode():
+            for key, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+
+                search_fn_pattern = get_serialized_pattern(key)
+                if search_fn_pattern is None:
+                    continue
+
+                self.assertEqual(
+                    pattern_pp,
+                    PatternPrettyPrinter.run(search_fn_pattern),
+                    msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
+                )
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0

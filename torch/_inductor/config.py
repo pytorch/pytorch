@@ -1,4 +1,4 @@
-import os
+import os  # noqa: C101
 import sys
 
 import torch
@@ -6,11 +6,17 @@ import torch
 # add some debug printouts
 debug = False
 
+# add inf and NaN checkers
+debug_check_inf_and_nan = False
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
 # Whether to enable printing the source code for each future
 verbose_progress = False
+
+# use fx aot graph codegen cache
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
@@ -23,6 +29,7 @@ static_weight_shapes = True
 
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
+nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -32,6 +39,16 @@ inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
+
+# Enable pooled allocations for non-output tensors
+memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# How to organize memory under memory_planning=True:
+# - "none": do not try to pool storage, just reuse
+# - "intermediates": all non-outputs share storage, outputs each get unique storage
+# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
+# - "combined": a single pool for both intermediates and outputs
+memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -45,7 +62,7 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# register custom graph optimizatin pass hook. so far, pre/post passes are
+# register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
 # def my_custom_pre_pass(graph: torch.fx.graph.Graph):
@@ -64,14 +81,24 @@ post_grad_custom_post_pass = None
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
+efficient_conv_bn_eval_fx_passes = False
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
 # enable pattern match with batch fusion (using torch op)
 batch_fusion = True
 
-# enable reordering pass
-reordering = True
+# enable reordering pass for improving memory locality
+reorder_for_locality = True
+
+# Scale down RBLOCK for better occupancy
+dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
+
+# this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
+# but the mul gets fused with other pointwise ops instead.
+force_fuse_int_mm_with_mul = False
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -84,8 +111,28 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# TODO: capture whether the graph is from export
-from_export = False
+# enable reordering pass for increasing overlap between compute and communication
+reorder_for_compute_comm_overlap = False
+
+# passes (in execution order) for increasing overlap between compute and communication
+# for built-in passes, use string name; for user-defined passes, pass in the function handle
+reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
+]
+
+# runtime estimation function for ops
+# for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
+estimate_op_runtime = "default"
+
+# unit: GB/s, uni-directional P2P bandwidth per card
+# default value is NVLink
+intra_node_bw = 300
+
+# unit: GB/s, uni-directional P2P bandwidth per node
+# default value is InfiniBand
+inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -105,6 +152,10 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# the value used as a fallback for the unbacked SymInts
+# that can appear in the input shapes (e.g., in autotuning)
+unbacked_symint_fallback = 8192
+
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
@@ -112,6 +163,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -155,9 +209,14 @@ aggressive_fusion = False
 # For each fused kernel in the wrapper, comment with the nodes that get fused.
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
+enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -177,14 +236,20 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
+# we always add constants into graph.constants without
+# performing any constant-inlining optimization
+always_keep_tensor_constants = False
+
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
 # constant folding on the joint graph
-# Turn off constant folding due to issue #108388
-joint_graph_constant_folding = not is_fbcode()
+joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
@@ -192,6 +257,11 @@ debug_index_asserts = False
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
+
+# The multiprocessing start method to use for inductor workers in the codecache.
+# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
+# the default to spawn.
+worker_start_method = "fork"
 
 
 def decide_compile_threads():
@@ -373,9 +443,6 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
-
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
@@ -407,7 +474,7 @@ class triton:
     # the max number of spills we allow for the configs we benchmark.
     # Setting this to 0 means we skip a config if it spills even a single
     # register.
-    # Settting it to a larger value allows a config spilling a small amount
+    # Setting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.
@@ -427,8 +494,21 @@ class aot_inductor:
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
-    # If not specified, a temp directory will be created under the default caching path
+    # If not specified, a temp directory will be created under the default caching path.
+    # If the specified path contains something like "model.so", the sub-string will be used
+    # to name the generated library.
     output_path = ""
+
+    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+
+    # Wether to codegen abi compatible model.so
+    abi_compatible = is_fbcode()
+
+    # Serialized tree spec for flattening inputs
+    serialized_in_spec = ""
+
+    # Serialized tree spec for flattening outputs
+    serialized_out_spec = ""
 
 
 class cuda:
@@ -479,11 +559,20 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx = None
 
+    # If set to True, it will ensure that only GEMM ops capable of
+    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
+    # are enabled for the CUTLASS backend.
+    cutlass_only_evt_capable_ops: bool = False
+
 
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+
+    # Save debug information to a temporary directory
+    # If not specified, a temp directory will be created by system
+    debug_dir = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
@@ -509,6 +598,9 @@ class trace:
     # SVG figure showing post-fusion graph
     graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
 
+    # SVG figure showing fx with fusion
+    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+
     # Store cProfile (see snakeviz to view)
     compile_profile = False
 
@@ -523,7 +615,7 @@ _save_config_ignore = {
 }
 
 
-from .._dynamo.config_utils import install_config_module
+from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

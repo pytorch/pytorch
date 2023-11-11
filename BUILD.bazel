@@ -8,7 +8,7 @@ load("@pytorch//tools/rules:cu.bzl", "cu_library")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
 load("@pytorch//:aten.bzl", "generate_aten", "intern_build_aten_ops")
 load(":build.bzl", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON", "define_targets")
-load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "libtorch_python_cuda_sources", "libtorch_python_distributed_sources")
+load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "libtorch_python_cuda_sources", "libtorch_python_distributed_sources")
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cuda_sources")
 load("//:tools/bazel.bzl", "rules")
 
@@ -20,7 +20,6 @@ COMMON_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-D_FILE_OFFSET_BITS=64",
-    "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
     "-DAT_PER_OPERATOR_HEADERS",
@@ -268,7 +267,6 @@ header_template_rule(
         "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
-        "@AT_FFTW_ENABLED@": "0",
         "@AT_POCKETFFT_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
@@ -415,6 +413,7 @@ cc_library(
         "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
+        "@cudnn_frontend",
     ],
     alwayslink = True,
 )
@@ -1471,7 +1470,6 @@ cu_library(
 )
 
 PERF_COPTS = [
-    "-DTH_HAVE_THREAD",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
     "-DENABLE_ALIAS=1",

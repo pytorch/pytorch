@@ -64,7 +64,6 @@ class PlacementClassVariable(DistributedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and self.source
@@ -72,9 +71,10 @@ class PlacementClassVariable(DistributedVariable):
             # NOTE: we don't need to track mutations to the placement class as they
             # suppose to be immutable.
             new_obj = object.__new__(self.value)
-            var = PlacementVariable(new_obj, **options)
+            var = PlacementVariable(new_obj)
             if inspect.getattr_static(self.value, "__init__", None):
-                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
 
         return super().call_function(tx, args, kwargs)
 
@@ -106,7 +106,6 @@ class PlacementVariable(DistributedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         allowed_methods = ["__init__", "__setattr__"]
         # placement types dynamo tracking allows only __init__
         # and __setattr__ methods, the latter is for case like `Shard(dim)`
@@ -120,7 +119,7 @@ class PlacementVariable(DistributedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable(None, **options)
+                return ConstantVariable.create(None)
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
@@ -150,7 +149,7 @@ class DeviceMeshVariable(DistributedVariable):
 
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
-            return ConstantVariable(self.value.ndim)
+            return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
 
 
@@ -191,9 +190,9 @@ class ProcessGroupVariable(DistributedVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "rank":
-            return variables.ConstantVariable(self.value.rank())
+            return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
-            return variables.ConstantVariable(self.value.size())
+            return variables.ConstantVariable.create(self.value.size())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -201,7 +200,7 @@ class ProcessGroupVariable(DistributedVariable):
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
+            )
         # TODO should this just raise unimplemented?
         return super().var_getattr(tx, name)
 

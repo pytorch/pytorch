@@ -822,6 +822,14 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
+        # replace self.sym_numel() with self_sym_numel
+        (
+            r"{}.sym_numel\(\)",
+            {
+                "suffix": "_sym_numel",
+                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
+            },
+        ),
         # replace to_args_sizes(self) with self_args_sizes
         (
             r"to_args_sizes\({}\)",
