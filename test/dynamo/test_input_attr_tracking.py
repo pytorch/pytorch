@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -297,15 +298,18 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         compile_result = fn(x, y)
         self.assertEqual(compile_result, eager_result)
         self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.op_count, 6)
         # Graph for reference
-        # __compiled_fn_0 <eval_with_key>.0 opcode         name    target                   args          kwargs
-        # -------------  ------  -----------------------  ------------  --------
-        # placeholder    l_x_    L_x_                     ()            {}
-        # placeholder    l_y_    L_y_                     ()            {}
-        # call_method    detach  detach                   (l_y_,)       {}
-        # call_function  mul     <built-in function mul>  (l_x_, l_y_)  {}
-        # output         output  output                   ((mul,),)     {}
+        # -------------  ---------------------------  -----------------------------------------------------------------------------------  --------------  --------
+        # placeholder    l_y_                         L_y_                                                                                 ()              {}
+        # placeholder    l_x_                         L_x_                                                                                 ()              {}
+        # call_method    detach                       detach                                                                               (l_y_,)         {}
+        # call_function  _set_grad_enabled            <built-in function _set_grad_enabled>                                                (False,)        {}
+        # call_function  set_                         <method 'set_' of 'torch._C.TensorBase' objects>                                     (l_x_, detach)  {}
+        # call_function  _set_grad_enabled_1          <built-in function _set_grad_enabled>                                                (True,)         {}
+        # call_function  _unsafe_set_version_counter  <built-in method _unsafe_set_version_counter of PyCapsule object at 0x7fdf207668b0>  (set_, 1)       {}
+        # call_function  mul                          <built-in function mul>                                                              (l_x_, l_y_)    {}
+        # output         output                       output                                                                               ((mul,),)       {}
 
     # Note - this does not actually get captured in the graph yet.
     # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
