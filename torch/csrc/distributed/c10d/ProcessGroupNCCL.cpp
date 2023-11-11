@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
+#include <fstream>
 #include <mutex>
 #include <sstream>
 
@@ -1276,13 +1277,46 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void dump_debugging_info() {
+void dumpTraceIntoLocalDisk(int rank, const std::string& ncclTrace) {
+  const char* fileName = parseEnvVarString(
+      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
+  auto filename = c10::str(std::string(fileName), rank);
+
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing: " << filename;
+    return;
+  }
+
+  // Write the size of the string followed by the string itself.
+  // This can help in retrieving the strings back if needed.
+  size_t size = ncclTrace.size();
+  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+  file.write(ncclTrace.data(), size);
+}
+
+void ProcessGroupNCCL::registerDebugInfoCallbackStorer(
+    std::function<void(int, const std::string&)>&& callbackStorer) {
+  debugInfoCallbackStorer_ = std::move(callbackStorer);
+}
+
+void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR)
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
   if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
-    // TODO: Find the right and proper way to dump the debug info.
-    // We cannot print out debugging info directly.
-    LOG(ERROR) << "nccl_trace: " << dump_nccl_trace();
+    // We dump nccl trace into local disk by default and users can register
+    // their own storer via `registerDebugInfoCallbackStorer`.
+    auto ncclTrace = dump_nccl_trace();
+    if (debugInfoCallbackStorer_ != nullptr) {
+      debugInfoCallbackStorer_(rank_, ncclTrace);
+    } else {
+      // Dump the trace blob into local disk as a fallback.
+      dumpTraceIntoLocalDisk(rank_, ncclTrace);
+    }
   }
 }
 
@@ -1321,7 +1355,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // In the timeout case and we now only dump the flight recorder
   // to std::out. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  dump_debugging_info();
+  dumpDebuggingInfo();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.

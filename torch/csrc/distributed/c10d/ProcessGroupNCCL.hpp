@@ -505,6 +505,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
+  void registerDebugInfoCallbackStorer(
+      std::function<void(int, const std::string&)>&& callbackStorer);
+
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
@@ -634,6 +637,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void workCleanupLoop();
 
   void runHookLoop();
+
+  void dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -855,6 +860,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
+
+  std::function<void(int, const std::string&)> debugInfoCallbackStorer_ =
+      nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
