@@ -518,7 +518,8 @@ def as_sparse_gradcheck(gradcheck):
     """
 
     def gradcheck_with_sparse_support(func, inputs, **kwargs):
-        """Create gradcheck with support for sparse tensors.
+        """
+        Create gradcheck with support for sparse tensors.
 
         Same as :func:`torch.autograd.gradcheck` but with sparse tensors inputs and outputs support.
         """
