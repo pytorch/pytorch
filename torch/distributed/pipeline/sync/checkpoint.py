@@ -68,8 +68,13 @@ class Function(Protocol):
 
 
 def checkpoint(function: Function, input):
+<<<<<<< HEAD
     """Make a checkpoint with a simple interface, such as :func:`torch.utils.checkpoint.checkpoint`.
 
+=======
+    """Make a checkpoint with a simple interface, such as :func:`torch.utils.checkpoint.checkpoint`. 
+    
+>>>>>>> c2fb5adfc702dced4f2f782ec5cbe4372678f8ae
     It's only used to test or debug
     :class:`Checkpoint` and :class:`Recompute` without boilerplate.
     """

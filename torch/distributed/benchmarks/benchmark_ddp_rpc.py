@@ -118,7 +118,11 @@ def _run_trainer(emb_rref_list, rank):
     Run a forward pass which involves an embedding lookup on the 8 parameter servers and running nn.Linear locally.
 
      During the backward pass, DDP is responsible for aggregating the gradients for the dense part
+<<<<<<< HEAD
      (nn.Linear) and distributed autograd ensures gradients updates are propagated to the
+=======
+     (nn.Linear) and distributed autograd ensures gradients updates are propagated to the 
+>>>>>>> c2fb5adfc702dced4f2f782ec5cbe4372678f8ae
      parameter servers.
     """
     # Setup the model.
