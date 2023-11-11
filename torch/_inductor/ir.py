@@ -2535,19 +2535,16 @@ class MutationLayout(Layout):
         # dst, we can alias src to dst.
         src.realize_hint()
 
-        if V.graph.current_node.users or not isinstance(
-            src.data.layout, FlexibleLayout
-        ):
-            src = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            ).data
-            src.realize()
+        src = Pointwise.create(
+            device=src.get_device(),
+            dtype=src.get_dtype(),
+            inner_fn=src.make_loader(),
+            ranges=[
+                V.graph.sizevars.guard_equals(a, b)
+                for a, b in zip(src.get_size(), dst.get_size())
+            ],
+        ).data
+        src.realize()
 
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)

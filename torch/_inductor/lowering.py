@@ -433,6 +433,8 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
+        breakpoint()
+
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -450,7 +452,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 out[(device, use_foreach)].append((i, args))
             return out
 
-        realize_outputs = False
+        realize_outputs = len(V.graph.current_node.users) == 0
         for node in V.graph.current_node.users:
             for user in node.users:
                 if not (user.op == "call_function" and user.target in foreach_ops):
@@ -4960,7 +4962,7 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
+foreach_add = register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_mul.List, mul)
@@ -4987,7 +4989,25 @@ register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
 
 
+# these are only encountered as outputs of the graph
+# reinplacing epilogue copies improves compile time
+def register_foreach_inplace(aten_op, outplace_op):
+    def fn(*args, **kwargs):
+        results = outplace_op(*args, **kwargs)
+        mut_results = []
+        for arg, result in zip(args[0], results):
+            mut_results.append(mutate_to(arg, result))
+        return mut_results
+
+    _register_foreach_lowering(aten_op, fn)
+
+
+register_foreach_inplace(aten._foreach_add_.List, foreach_add)
+
+
 def register_inplace(aten_op, outplace_op):
+    foreach_ops.add(aten_op)
+
     @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):
         result = outplace_op(*args, **kwargs)

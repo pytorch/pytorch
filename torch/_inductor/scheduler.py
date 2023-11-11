@@ -1203,6 +1203,7 @@ class Scheduler:
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
+        breakpoint()
         self.topological_sort_schedule()
         self.logged_slow_fusion = set()
         self.fuse_nodes()

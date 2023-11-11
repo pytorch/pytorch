@@ -652,12 +652,15 @@ def reinplace_inplaceable_ops(graph):
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
             # then skip over it
-            if (
-                src.target == operator.getitem
-                and src.args[0].target == triton_kernel_wrapper_functional
-                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+            if src.target == operator.getitem and (
+                (
+                    src.args[0].target == triton_kernel_wrapper_functional
+                    and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+                )
+                or (src.args[0].target == aten._foreach_add.List)
             ):
                 src = src.args[0]
+
             copy_args_to_copy_nodes[(dst, src)] = node
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
@@ -709,6 +712,7 @@ def reinplace_inplaceable_ops(graph):
         aten._unsafe_index_put.default: InplaceableOp(
             inductor_prims._unsafe_index_put_, 0
         ),
+        aten._foreach_add.List: InplaceableOp(aten._foreach_add_.List, 0),
     }
 
     try:
@@ -733,13 +737,23 @@ def reinplace_inplaceable_ops(graph):
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg):
-                # TODO(yifu): this doesn't properly remove copy epilogues for
-                # ops that mutate multiple inputs. Need to revise the copy
-                # node tracking logic to support the case.
-                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-                if copy_node is not None:
-                    graph.erase_node(copy_node)
-                node.target = inplaceable_op.inplace_op
+                if isinstance(mutated_arg, list):
+                    for arg in mutated_arg:
+                        copy_node = copy_args_to_copy_nodes.get((arg, node))
+                        if copy_node is not None:
+                            getitem = copy_node.args[1]
+                            graph.erase_node(copy_node)
+                            graph.erase_node(getitem)
+
+                    node.target = inplaceable_op.inplace_op
+                else:
+                    # TODO(yifu): this doesn't properly remove copy epilogues for
+                    # ops that mutate multiple inputs. Need to revise the copy
+                    # node tracking logic to support the case.
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                    if copy_node is not None:
+                        graph.erase_node(copy_node)
+                    node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
