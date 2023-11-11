@@ -1194,7 +1194,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
     def cleanup(self) -> None:
-        assert self.should_exit
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
