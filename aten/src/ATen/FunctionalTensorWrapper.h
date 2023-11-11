@@ -82,7 +82,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   }
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
-    return mutation_hidden_from_autograd_counter_ == mutation_counter_;
+    return mutation_counter_ > 0 &&
+        mutation_hidden_from_autograd_counter_ == mutation_counter_;
   }
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
