@@ -23,6 +23,9 @@ ignore =
     SIM105,SIM108,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
     # flake8-simplify code styles
     SIM102,SIM103,SIM106,SIM112,
+    # TorchFix codes that don't make sense for PyTorch itself:
+    # removed functions and deprecated PyTorch functions.
+    TOR001,TOR101,
 per-file-ignores =
     __init__.py: F401
     torch/utils/cpp_extension.py: B950
