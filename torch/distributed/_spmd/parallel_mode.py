@@ -16,10 +16,10 @@ from torch.fx import GraphModule
 
 
 class ParallelMode(ABC):
-    """
-    Basic Parallel Mode interface. Each parallelism pattern should implement
-    this interface to describe how to partition and compile the graph in the
-    spmd compiler.
+    """Basic Parallel Mode interface.
+
+    Each parallelism pattern should implement this interface to describe
+    how to partition and compile the graph in the spmd compiler.
     """
 
     @abstractmethod
@@ -33,8 +33,7 @@ class ParallelMode(ABC):
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> GraphModule:
-        """
-        Partition a single device graph to a distributed graph.
+        """Partition a single device graph to a distributed graph.
 
         TODO(@wanchaol): some of these arguments are not necessary for
         partitioning, remove the unnecessary ones later.
@@ -43,19 +42,34 @@ class ParallelMode(ABC):
 
     @abstractmethod
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
-        """
-        Transform and compile a distributed graph with a set of graph
-        transformation and optimization passes for each parallel mode.
+        """Transform and compile a distributed graph.
 
-        The returned result should be a compiled executable graph in
-        the distributed environment.
+        This method applies a set of graph transformation and optimization passes for each parallel mode.
+        The returned result should be a compiled executable graph in the distributed environment.
         """
         # TODO: add more necessary arguments to this interface.
         raise NotImplementedError()
 
 
 class DataParallel(ParallelMode):
-    """Data Parallelism mode."""
+    """Data Parallelism mode.
+
+    DataParallel Mode that partition the model and graph to data parallel style
+    parallelism (i.e. DDP/FSDP/ZERO-3). It currently supports three different
+    parallel styles: "replicate", "fully_shard", and "default". See
+    :class:`DataParallelStyle` for more details.
+
+    Args:
+        parallel_style (str): parallel style to use. Currently supports
+            "replicate", "fully_shard", and "default".
+
+    Keyword args:
+        input_batch_dim (int): the batch dimension of the input tensor.
+                default: 0
+        custom_passes (Callable[[GraphModule], GraphModule], optional):
+            A custom callable that overrides the default graph transformation
+            and optimization passes.
+    """
 
     def __init__(
         self,
@@ -64,23 +78,6 @@ class DataParallel(ParallelMode):
         input_batch_dim: int = 0,
         custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None,
     ):
-        """
-        DataParallel Mode that partition the model and graph to data parallel style
-        parallelism (i.e. DDP/FSDP/ZERO-3). It currently supports three different
-        parallel styles: "replicate", "fully_shard", and "default". See
-        :class:`DataParallelStyle` for more details.
-
-        Args:
-            parallel_style (str): parallel style to use. Currently supports
-                "replicate", "fully_shard", and "default".
-
-        Keyword args:
-            input_batch_dim (int): the batch dimension of the input tensor.
-                 default: 0
-            custom_passes (Callable[[GraphModule], GraphModule], optional):
-                A custom callable that overrides the default graph transformation
-                and optimization passes.
-        """
         if parallel_style == "replicate":
             self.parallel_style = DataParallelStyle.REPLICATE
         elif parallel_style == "fully_shard":
@@ -128,16 +125,16 @@ class DataParallel(ParallelMode):
         return gm
 
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
-        """optimize a distributed graph with a set of optimization passes"""
+        """Optimize a distributed graph with a set of optimization passes."""
         # TODO: add more necessary arguments to this interface.
         return self._gm_passes(gm)
 
 
 class DTensorExpandMode(ParallelMode):
-    """
-    The DTensor Expand mode. It's replicating the parameters and
-    shard the inputs to represent DDP like behavior, it's currently
-    a transitent mode before we move to the new data parallel expansion.
+    """The DTensor Expand mode.
+
+    It's replicating the parameters and shard the inputs to represent DDP like behavior,
+    it's currently a transitent mode before we move to the new data parallel expansion.
     """
 
     def __init__(
@@ -208,8 +205,9 @@ class DTensorExpandMode(ParallelMode):
         )[0]
 
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
-        """
-        Transform and compile a distributed graph with a set of graph transformation
+        """Transform and compile a distributed graph.
+
+        This method applies a set of graph transformation
         and optimization passes for the dtensor fallback parallel mode.
         """
         # TODO: move the trasnformation passed to this function

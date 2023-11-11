@@ -115,7 +115,7 @@ def replicate(
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     **kwargs,
 ) -> nn.Module:
-    r"""Replicates a module
+    r"""Replicate a module.
 
     Args:
         module (torch.nn.Module): module to replicate

@@ -196,9 +196,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         requires_grad: bool,
         stride: Tuple[int, ...],
     ) -> "DTensor":
-        """
-        Construct a DTensor from a local tensor, device mesh, and placement and
-        other tensor properties (i.e. shape, requires_grad, strides, etc).
+        """Construct a DTensor from a local tensor, device mesh, and placement and other tensor properties.
+
         Note: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using `DTensor.from_local`, if
@@ -237,10 +236,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
     def __tensor_flatten__(self):
-        """
-        protocol to inform how to flatten a DTensor to local tensor
-        for PT2 tracing
-        """
+        """Protocol to inform how to flatten a DTensor to local tensor for PT2 tracing."""
         return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
@@ -293,9 +289,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         shape: Optional[torch.Size] = None,
         stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
-        """
-        Create a :class:`DTensor` from a local torch.Tensor on each rank
-        according to the `device_mesh` and `placements` specified.
+        """Create a :class:`DTensor` from a local torch.
+
+        Tensor on each rank according to the `device_mesh` and `placements` specified.
 
         Args:
             local_tensor (torch.Tensor): local torch.Tensor on each rank.
@@ -359,10 +355,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     def to_local(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
     ) -> torch.Tensor:
-        """
-        Get the local tensor of this DTensor on its current rank. For sharding it returns
-        a local shard of the logical tensor view, for replication it returns the replica on
-        its current rank.
+        """Get the local tensor of this DTensor on its current rank.
+
+        For sharding it returns a local shard of the logical tensor view,
+        for replication it returns the replica on its current rank.
 
         Keyword args:
             grad_placements (List[:class:`Placement`], optional): the placements describes
@@ -390,7 +386,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
     ) -> "DTensor":
-        """
+        """Redistribute the current DTensor from its current placements to a new placements.
+
         `redistribute` performs necessary collective operations that redistribute the current
         DTensor from its current placements to a new placements, or from is current DeviceMesh
         to a new DeviceMesh. i.e. we can turn a Sharded DTensor to a Replicated DTensor by
@@ -438,10 +435,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
     ) -> torch.Tensor:
-        """
-        Return the full tensor of this DTensor. It will perform necessary collectives
-        to gather the local tensors from other ranks in its DeviceMesh and concatenate
-        them together. It's a syntatic sugar of the following code:
+        """Return the full tensor of this DTensor.
+
+        It will perform necessary collectives to gather the local tensors from other ranks
+        in its DeviceMesh and concatenate them together. It's a syntatic sugar of the following code:
 
         `dtensor.redistribute(placements=[Replicate()] * mesh.ndim).to_local()`
 
@@ -466,8 +463,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     @property
     def device_mesh(self) -> DeviceMesh:
-        """
-        The :class:`DeviceMesh` attribute that associates with this DTensor object.
+        """The :class:`DeviceMesh` attribute that associates with this DTensor object.
 
         .. note:: device_mesh is a read-only property, it can not be set.
         """
@@ -475,9 +471,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     @property
     def placements(self) -> Sequence[Placement]:
-        """
-        The placements attribute of this DTensor that describes the layout of this
-        DTensor on the its DeviceMesh.
+        """The placements attribute of this DTensor that describes the layout of this DTensor on the its DeviceMesh.
 
         .. note:: placements is a read-only property, it can not be set.
         """
@@ -489,9 +483,9 @@ def distribute_tensor(
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
-    """
-    Distribute a torch.Tensor to the `device_mesh` according to the `placements`
-    specified. The rank of `device_mesh` and `placements` must be the same.
+    """Distribute a torch.Tensor to the `device_mesh` according to the `placements` specified.
+
+    The rank of `device_mesh` and `placements` must be the same.
 
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
@@ -515,7 +509,6 @@ def distribute_tensor(
         return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
     """
-
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
 
     # get default device mesh if there's nothing specified
@@ -610,11 +603,12 @@ def distribute_module(
     input_fn: Optional[Callable[..., None]] = None,
     output_fn: Optional[Callable[..., None]] = None,
 ) -> nn.Module:
-    """
-    This function converts all module parameters to :class:`DTensor` parameters
-    according to the `partition_fn` specified. It could also control the input or
-    output of the module by specifying the `input_fn` and `output_fn`. (i.e. convert
-    the input to :class:`DTensor`, convert the output back to torch.Tensor)
+    """Convert all module parameters to :class:`DTensor` parameters according to the `partition_fn` specified.
+
+    It could also control the input or output of the module by specifying
+    the `input_fn` and `output_fn`. (i.e. convert the input to :class:`DTensor`,
+    convert the output back to torch.Tensor)
+
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
         device_mesh (:class:`DeviceMesh`): the device mesh to place the module.
@@ -631,7 +625,6 @@ def distribute_module(
     Returns:
         A module that contains parameters/buffers that are all `DTensor`s.
     """
-
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()

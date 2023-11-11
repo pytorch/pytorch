@@ -17,8 +17,8 @@ _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
 
 
 def _replicate_then_shard(val: _PlacementItem) -> int:
-    """
-    Replicate from inner to outer dimension.
+    """Replicate from inner to outer dimension.
+
     Shard from outer to inner dimension.
     """
     i, (current, target) = val
@@ -31,8 +31,8 @@ def _replicate_then_shard(val: _PlacementItem) -> int:
 
 
 def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
-    """
-    Decompose Si -> Sj into Si -> R -> Sj
+    """Decompose Si -> Sj into Si -> R -> Sj.
+
     There's 2 ways a shardings can differ within a mesh dimension:
       1) sharding on different tensor dimensions, e.g. Shard(0) -> Shard(1)
       2) different sub-shards of a repeated shard ("mis-aligned sharding")
@@ -77,12 +77,11 @@ def redistribute_local_tensor(
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
 ) -> torch.Tensor:
-    """
-    This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
-    the target DTensorSpec, which involves the necessary collective calls to transform
-    the local shard of the DTensor from its current spec to the target spec.
-    """
+    """Redistribute the local tensor from the current DTensorSpec to the target DTensorSpec.
 
+    This involves the necessary collective calls to transform the local shard of the DTensor
+    from its current spec to the target spec.
+    """
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")

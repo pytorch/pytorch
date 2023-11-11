@@ -13,10 +13,7 @@ from .contract import contract
 
 @contextmanager
 def _no_hook(module: nn.Module):
-    r"""
-    Disable hooks installed by checkpoint to avoid unintentional recursion
-    during backward recomputation.
-    """
+    r"""Disable hooks installed by checkpoint to avoid unintentional recursion during backward recomputation."""
     orig_enable_hook = checkpoint.state(module).enable_hook
     checkpoint.state(module).enable_hook = False
     try:
@@ -27,10 +24,11 @@ def _no_hook(module: nn.Module):
 
 @contract()
 def checkpoint(module: nn.Module) -> nn.Module:
-    r"""
-    This is a composable activation checkpointing API. Unlike functional
-    activation checkpointing APIs, this one does not require changing model
-    source code. Unlike ``nn.Module`` wrapper activation checkpointing APIs,
+    r"""Apply a composable activation checkpointing API.
+
+    Unlike functional activation checkpointing APIs,
+    this one does not require changing model source code.
+    Unlike ``nn.Module`` wrapper activation checkpointing APIs,
     this one does not modify model structure or fully-qualified names either.
     Under the hood, it registers activation checkpointing logic as pre- and
     post-forward hooks. Hence, this API can be easily applied to any model or

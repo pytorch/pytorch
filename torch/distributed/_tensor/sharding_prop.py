@@ -48,9 +48,7 @@ class ShardingPropagator:
         rule_func: Callable[[OpSchema], OutputSharding],
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
-        """
-        Register a sharding propagation rule for an operator.
-        """
+        """Register a sharding propagation rule for an operator."""
         self.op_to_rules[op_overload] = rule_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
@@ -61,9 +59,7 @@ class ShardingPropagator:
         strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
-        """
-        Register a sharding strategy generator for an operator.
-        """
+        """Register a sharding strategy generator for an operator."""
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
@@ -71,10 +67,7 @@ class ShardingPropagator:
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
-        """
-        Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas
-        """
+        """Propagate the tensor metadata, it could either return a TensorMeta or a list/tuple of TensorMetas."""
         # NOTE: We must call the tracing in fake tensor mode so that it
         # avoids materializing memory
         with FakeTensorMode():
@@ -115,10 +108,7 @@ class ShardingPropagator:
             None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]
         ],
     ) -> None:
-        """
-        Wrap the output_spec with the tensor metadata from the output.
-        """
-
+        """Wrap the output_spec with the tensor metadata from the output."""
         if isinstance(output_spec, DTensorSpec):
             if not isinstance(output_tensor_meta, TensorMeta):
                 # Either error due to ShardingPropagator or due to incorrect OutputSpec
@@ -160,9 +150,7 @@ class ShardingPropagator:
         op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
-        """
-        Propagate the sharding for an operator given the op_schema.
-        """
+        """Propagate the sharding for an operator given the op_schema."""
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = {

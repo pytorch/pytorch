@@ -69,8 +69,8 @@ class _MeshEnv:
         return self.child_to_parent_mapping.get(device_mesh, None)
 
     def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
-        """
-        Return the index of the mesh dim in the parent mesh.
+        """Return the index of the mesh dim in the parent mesh.
+
         The device_mesh passed in needs to be sliced out from a parent mesh.
         """
         parent_mesh = self.get_parent_mesh(device_mesh)
@@ -99,8 +99,8 @@ _mesh_resources: _MeshEnv = _MeshEnv()
 
 
 def _get_device_handle(device_type: str = "cuda"):
-    """
-    Get the module corresponding to the device_type which is cuda or cuda-like device.
+    """Get the module corresponding to the device_type which is cuda or cuda-like device.
+
     For example, when the device_type is cuda, the module `torch.cuda` is returned.
     Return None when there is no corresponding module for device_type, otherwise
     return the corresponding module.
@@ -110,6 +110,8 @@ def _get_device_handle(device_type: str = "cuda"):
 
 class DeviceMesh:
     """
+    Represent a mesh of devices in a n-d dimension array.
+
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
     array is the global id of the default process group ranks.
@@ -153,7 +155,6 @@ class DeviceMesh:
         A reduction over the first dimension of mesh will reduce across
         columns (0, 4), .. and (3, 7), a reduction over the second dimension
         of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7)
-
     """
 
     device_type: str
@@ -292,9 +293,7 @@ class DeviceMesh:
         )
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
-        """
-        Slice the current DeviceMesh based on the mesh_dim_name given to create a child
-        DeviceMesh.
+        """Slice the current DeviceMesh based on the mesh_dim_name given to create a child DeviceMesh.
 
         Args:
             mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
@@ -369,9 +368,9 @@ class DeviceMesh:
         return get_rank()
 
     def get_coordinate(self) -> Optional[List[int]]:
-        """
-        Return the relative indices of this rank relative to all
-        dimensions of the mesh. If this rank is not part of the mesh, return None.
+        """Return the relative indices of this rank relative to all dimensions of the mesh.
+
+        If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
 
@@ -382,8 +381,8 @@ def init_device_mesh(
     *,
     mesh_dim_names: Optional[Tuple[str, ...]] = None,
 ) -> DeviceMesh:
-    """
-    Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
+    """Initialize a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
+
     This creates a DeviceMesh with a mesh layout of n-d dimensional array, n being the len(mesh_shape)
     and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
     labeled as mesh_dim_names[i].

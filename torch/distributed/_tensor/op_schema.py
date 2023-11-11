@@ -24,9 +24,7 @@ OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
-    """ "
-    This is used to propagate tensor metadata, must be under fake mode
-    """
+    """Propagate tensor metadata, must be under fake mode."""
     assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
     return torch.empty_strided(
         arg.tensor_meta.shape,
@@ -51,9 +49,9 @@ def _is_out_variant_op(op: OpOverload):
 
 @dataclass
 class PlacementStrategy:
-    """
-    A placement strategy describes an acceptable sharding placements of the output
-    and the tensor arguments of an operation.
+    """A placement strategy describes an acceptable sharding placements of the output.
+
+    The tensor arguments of an operation and the output are described by this strategy.
     """
 
     output_spec: DTensorSpec
@@ -87,8 +85,9 @@ class PlacementStrategy:
 
 
 class StrategyType:
-    """
-    Base class type for op strategy, We have two StrategyType:
+    """Base class type for op strategy.
+
+    We have two StrategyType:
         OpStrategy and TupleStrategy
     """
 
@@ -96,9 +95,7 @@ class StrategyType:
 
 
 class OpStrategy(StrategyType):
-    """
-    OpStrategy that consists of a list of placement strategies associated with the op
-    """
+    """OpStrategy that consists of a list of placement strategies associated with the op."""
 
     def __init__(self, strategies: List[PlacementStrategy]) -> None:
         super().__init__()
@@ -110,9 +107,7 @@ class OpStrategy(StrategyType):
         return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
-        """
-        Returns the max number of shards across all placement strategies
-        """
+        """Return the max number of shards across all placement strategies."""
         return max([strategy.output_spec.num_shards for strategy in self.strategies])
 
     @property
@@ -125,11 +120,10 @@ class OpStrategy(StrategyType):
 
 
 class TupleStrategy(StrategyType):
-    """
-    TupleStrategy represents the output strategy of this op is a tuple
-    of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
-    with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    """TupleStrategy represents the output strategy of this op as a tuple of strategies.
+
+    If the output of this op is a tuple of tensors or list of tensors with possibly different placement strategies,
+    we should return a TupleStrategy that contains a tuple of OpStrategy.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
@@ -148,10 +142,11 @@ class TupleStrategy(StrategyType):
 
 @dataclass
 class RuntimeSchemaInfo:
-    """
-    RuntimeSchemaInfo stores the operator schema related information for runtime (eager)
-    execution. This is mainly used for two ways: 1. to generate hash for args to determine
-    whether to re-run sharding prop or not 2. to determine if we need pytree
+    """RuntimeSchemaInfo stores the operator schema related information for runtime (eager) execution.
+
+    This is mainly used for two ways:
+    1. To generate hash for args to determine whether to re-run sharding prop or not.
+    2. To determine if we need pytree.
     """
 
     # This static_argnum records static arg "starting index" for ops that have non-tensor
@@ -169,9 +164,9 @@ class RuntimeSchemaInfo:
 
 @dataclass
 class OpSchema:
-    """
-    OpSchema is a data class that describes an operator input schemas, it
-    includes DTensor DTensorSpecs and non-tensor args/kwargs (positional order
+    """OpSchema is a data class that describes an operator input schemas.
+
+    It includes DTensor DTensorSpecs and non-tensor args/kwargs (positional order
     preserved). It is mainly used by the dispatching logic below to run things like
     sharding propagation.
 
@@ -194,10 +189,9 @@ class OpSchema:
 
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
-        """
-        args_spec: Tuple[DTensorSpec, ...]: contains a clean list of args spec list
-            with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
-            mainly used by sharding propagation to propagate the output spec
+        """Get a clean list of args spec list with NO non-DTensor positional arguments.
+
+        This is mainly used by sharding propagation to propagate the output spec.
         """
         # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
@@ -318,20 +312,20 @@ class OpSchema:
         return True
 
     def gen_fake_args(self) -> ArgsType:
-        """
-        gen_fake_args: generate fake args for the operator, this is mainly used
-            by sharding propagation rules to generate fake args for the operator
-            to run the local tensor operator and get the output spec.
+        """Generate fake args for the operator.
+
+        This is mainly used by sharding propagation rules to generate fake args for the operator
+        to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
             DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema
         )
 
     def gen_fake_kwargs(self) -> KwargsType:
-        """
-        gen_fake_kwargs: generate fake kwargs for the operator, this is mainly used
-            by sharding propagation rules to generate fake kwargs for the operator
-            to run the local tensor operator and get the output spec.
+        """Generate fake kwargs for the operator.
+
+        This is mainly used by sharding propagation rules to generate fake kwargs for the operator
+        to run the local tensor operator and get the output spec.
         """
         return tree_map_only(
             DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
@@ -353,10 +347,10 @@ class OpSchema:
 
 @dataclass
 class OutputSharding:
-    """
-    OutputSharding is a data class that is used by the sharding propagation
-    rules, it could set the output_spec upon successful propagation, and if
-    it failed, output_spec would become None and sharding propagation rules
+    """OutputSharding is a data class that is used by the sharding propagation rules.
+
+    It could set the output_spec upon successful propagation, and if it failed,
+    output_spec would become None and sharding propagation rules
     could give a list of suggestions for inputs to reshard.
 
     NOTE: the schema_suggestion generated by sharding propagation should be
@@ -371,9 +365,7 @@ class OutputSharding:
 
 @dataclass
 class OpInfo:
-    """
-    All Runtime Op execution info are packed here
-    """
+    """All Runtime Op execution info are packed here."""
 
     mesh: DeviceMesh
     schema: OpSchema

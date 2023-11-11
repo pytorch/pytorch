@@ -24,9 +24,7 @@ class EinsumDims:
     @classmethod
     def parse_equation(cls, equation: str) -> Tuple[List[str], str]:
         # parse einop equation and extract arg specs
-        """
-        Parse the einsum equation str to input dim chars and output dim char
-        """
+        """Parse the einsum equation str to input dim chars and output dim char."""
         inputs, outputs = equation.split("->")
         input_dims, output_dims = inputs.split(","), outputs.split(",")
 
@@ -39,10 +37,7 @@ class EinsumDims:
 
     @classmethod
     def parse_dims(cls, input_dims: List[str], output_dim: str) -> "EinsumDims":
-        """
-        Parse the dims and extract the contracting, batch, and free dimensions
-        for the left and right hand sides.
-        """
+        """Parse the dims and extract the contracting, batch, and free dimensions for the left and right hand sides."""
         dim_char_set = set()
         for input_dim in input_dims:
             for input_char in list(input_dim):
@@ -91,9 +86,7 @@ def gen_einsum_strategies(
     *,
     linearity: bool = False,
 ) -> OpStrategy:
-    """
-    Generate a strategy list for the ops that follow einsum style notation.
-    """
+    """Generate a strategy list for the ops that follow einsum style notation."""
     # parse einop equation and extract dims
     input_dims, output_dim = EinsumDims.parse_equation(equation)
     edims = EinsumDims.parse_dims(input_dims, output_dim)

@@ -15,10 +15,7 @@ from torch.distributed._tensor.placement_types import (
 def compute_local_shape(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
-    """
-    Compute the shape of a local shard of the given DTensor on its current
-    coordinate of the mesh.
-    """
+    """Compute the shape of a local shard of the given DTensor on its current coordinate of the mesh."""
     my_coordinate = mesh.get_coordinate()
 
     if my_coordinate is None:
@@ -46,9 +43,10 @@ def compute_local_shape(
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
-    """
-    Compute the local tensor shape and the global offsets into the original tensor
-    of a DTensor on its current global rank. This is useful for checkpointing purpose.
+    """Compute local tensor shape and global offsets.
+
+    This function computes the local tensor shape and the global offsets into the original tensor
+    of a DTensor on its current global rank. This is particularly useful for checkpointing.
 
     Example (2 host with 4GPUs each):
     # Below is a DeviceMesh with mesh_shape of (2, 4)
@@ -113,8 +111,8 @@ def compute_local_shape_and_global_offset(
 def compute_global_tensor_info(
     tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[List[int], List[int]]:
-    """
-    Compute the global size and stride of a DTensor from the given local tensor.
+    """Compute the global size and stride of a DTensor from the given local tensor.
+
     The local size is multiplited by `world_size` per Sharding dim.
     The local stride is multiplited by `world_size` per Sharding dim, as long as the
     dimension is outside sharding dim.

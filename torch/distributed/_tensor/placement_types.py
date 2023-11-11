@@ -41,7 +41,8 @@ class Shard(Placement):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> Tuple[List[torch.Tensor], List[int]]:
-        """
+        """Split a tensor into shards along the Shard placement dimension.
+
         This function uses torch.chunk to split a tensor into num_chunks shards along
         the Shard placement dimension, and return a list of shards with their pad sizes.
 
@@ -119,9 +120,7 @@ class Shard(Placement):
         rank: int,
         return_offset: bool = False,
     ) -> Tuple[int, int]:
-        """
-        returns the local shard size and offset on a given tensor dim
-        """
+        """Return the local shard size and offset on a given tensor dim."""
         assert (
             size_on_dim >= num_chunks
         ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
@@ -150,10 +149,7 @@ class Shard(Placement):
     def _shard_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        """
-        shard and scatter a tensor on a mesh dimension (use coordinate
-        0 on the mesh dimension as source of truth)
-        """
+        """Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the mesh dimension as source of truth)."""
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
 
@@ -181,9 +177,7 @@ class Shard(Placement):
         reduce_op: c10d.ReduceOp.RedOpType,
         mesh_dim: int,
     ) -> torch.Tensor:
-        """
-        reduce and scatter a tensor on a mesh dimension
-        """
+        """Reduce and scatter a tensor on a mesh dimension."""
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
 
@@ -214,7 +208,8 @@ class Shard(Placement):
         mesh: DeviceMesh,
         mesh_dim: int,
     ) -> torch.Tensor:
-        """
+        """Replicate a tensor on a previously sharded mesh dimension.
+
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
@@ -265,13 +260,11 @@ class Shard(Placement):
         return hash(self.dim)
 
     def __repr__(self) -> str:
-        """
-        machine readable representation of the Shard placement
-        """
+        """Machine readable representation of the Shard placement."""
         return f"Shard(dim={self.dim})"
 
     def __str__(self) -> str:
-        """human readable representation of the Shard placement"""
+        """Human readable representation of the Shard placement."""
         return f"S({self.dim})"
 
 
@@ -287,23 +280,20 @@ class Replicate(Placement):
         return -1
 
     def __repr__(self) -> str:
-        """
-        machine readable representation of the Replicate placement
-        """
+        """Machine readable representation of the Replicate placement."""
         return "Replicate()"
 
     def __str__(self) -> str:
-        """
-        human readable representation of the Replicate placement
-        """
+        """Human readable representation of the Replicate placement."""
         return "R"
 
     def _replicate_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         """
-        Replicate (broadcast) a torch.Tensor on a mesh dimension (use
-        the first coordinate on the mesh dimension as source of truth)
+        Replicate (broadcast) a torch.Tensor on a mesh dimension.
+
+        Use the first coordinate on the mesh dimension as source of truth.
         """
         my_coordinate = mesh.get_coordinate()
         if my_coordinate is None:
@@ -354,15 +344,11 @@ class _Partial(Placement):
         return 1 + hash(self.reduce_op)
 
     def __repr__(self) -> str:
-        """
-        machine readable representation of the Partial placement
-        """
+        """Machine readable representation of the Partial placement."""
         return f"_Partial(reduce_op={self.reduce_op})"
 
     def __str__(self) -> str:
-        """
-        human readable representation of the Partial placement
-        """
+        """Human readable representation of the Partial placement."""
         return "P"
 
 
@@ -420,9 +406,7 @@ class DTensorSpec:
         )
 
     def __str__(self) -> str:
-        """
-        human readable representation of the DTensorSpec
-        """
+        """Human readable representation of the DTensorSpec."""
         if len(self.placements) == 1:
             placement_str = str(self.placements[0])
         else:
@@ -457,9 +441,9 @@ class DTensorSpec:
 
     @property
     def dim_map(self) -> List[int]:
-        """
-        dim_map is a property we derive from `placements` of
-        the distributed tensor. It simply return a list of ints
+        """`dim_map` is a property we derive from `placements` of the distributed tensor.
+
+        It simply return a list of ints
         where dim_map[i] denotes the sharding mapping to the mesh
         dimension, and len(dim_map) == dist_tensor.ndim
         dim_map[i] = -1: means tensor dim i replicate on mesh
@@ -494,10 +478,9 @@ class DTensorSpec:
 
     @property
     def sums(self) -> List[int]:
-        """
-        sums is a property we derive from `placements` of the
-        distributed tensor. It simply return a list of ints where
-        sums[i] denotes the pending sum (partial) on mesh dim i
+        """`sums` is a property we derive from `placements` of the distributed tensor.
+
+        It simply return a list of ints where sums[i] denotes the pending sum (partial) on mesh dim i
         """
         return [
             idx
@@ -513,8 +496,7 @@ class DTensorSpec:
         sums: List[int],
         tensor_meta: Optional[TensorMeta] = None,
     ) -> "DTensorSpec":
-        """
-        Construct a DTensorSpec from dim_map list and pending sum.
+        """Construct a DTensorSpec from dim_map list and pending sum.
 
         Args:
             mesh (class:`DeviceMesh`): device mesh to be used in the DTensorSpec
@@ -551,7 +533,5 @@ class DTensorSpec:
         return cls(mesh, tuple(placements), tensor_meta=tensor_meta)
 
     def is_replicated(self):
-        """
-        return True if the current DTensorSpec replicates on all mesh dims (devices)
-        """
+        """Return True if the current DTensorSpec replicates on all mesh dims (devices)."""
         return all(placement.is_replicate() for placement in self.placements)

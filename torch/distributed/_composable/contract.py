@@ -24,9 +24,9 @@ class RegistryItem:
 
 
 def contract(state_cls: Type[_State] = _State):
-    r"""
-    Decorate a function as a composable distributed API, where the first
-    argument of the function must be an :class:`nn.Module` instance. The
+    r"""Decorate a function as a composable distributed API.
+
+    The first argument of the function must be an :class:`nn.Module` instance. The
     decorator verifies that the wrapped function does not modify parameter,
     buffer or sub-module fully-qualified names (FQN).
 
@@ -186,10 +186,7 @@ def contract(state_cls: Type[_State] = _State):
 
 
 def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
-    r"""
-    Get an ``OrderedDict`` of composable APIs that have been applied to the
-    ``module``, indexed by the API name.
-    """
+    r"""Get an ``OrderedDict`` of composable APIs that have been applied to the ``module``, indexed by the API name."""
     registry = getattr(module, REGISTRY_KEY, None)
     if registry is None:
         # https://github.com/pytorch/pytorch/issues/107054

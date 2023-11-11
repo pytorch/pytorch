@@ -1,7 +1,7 @@
 """
-The following example contains a simple MLP model that uses
-different DTensor layouts, and use the checkpointing API to
-checkpoint save/load the model.
+The following example contains a simple MLP model.
+
+This model uses different DTensor layouts, and uses the checkpointing API to save/load the model.
 """
 import os
 
@@ -37,10 +37,7 @@ class SimpleMLP(torch.nn.Module):
 
 
 def gen_tensor_parallel_model(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
-    """
-    generates a nn.Module where parameters are sharded in the tensor-parallel
-    fashion.
-    """
+    """Generate a nn.Module where parameters are sharded in the tensor-parallel fashion."""
     # shard the model
     return parallelize_module(
         model,
@@ -51,7 +48,9 @@ def gen_tensor_parallel_model(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
 
 def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
     """
-    generates a nn.Module where parameters are replicated in the first mesh
+    Create a nn.Module with parameters replicated and sharded across a 2D mesh.
+
+    This function generates a nn.Module where parameters are replicated in the first mesh
     dimension, and sharded in the second mesh dimension.
     """
 
@@ -94,8 +93,10 @@ def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
 
 def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Module:
     """
-    generates a nn.Module where parameters are sharded/replicated only on a
-    sub-mesh (i.e. mesh(0, 2) in a world size of 4)
+    Create a nn.Module with parameters sharded/replicated only on a sub-mesh.
+
+    This function generates a nn.Module where parameters are sharded/replicated only on a
+    sub-mesh (i.e., mesh(0, 2) in a world size of 4).
     """
 
     def parallel_fn(name, module, device_mesh):
@@ -134,9 +135,7 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
 
 
 def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:  # type: ignore[empty-body]
-    """
-    checkpoint save/load models with DTensor parameters
-    """
+    """Checkpoint save/load models with DTensor parameters."""
     # TODO: implement this checkpoint save/load example
     pass
 

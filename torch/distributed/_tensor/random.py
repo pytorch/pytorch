@@ -15,7 +15,8 @@ _rng_tracker: Optional["RNGStateTracker"] = None
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
-    """Checks if the current device of `device_mesh` supports DTensor's random APIs.
+    """Check if the current device of `device_mesh` supports DTensor's random APIs.
+
     Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
     users call this API to test the availability before using our random APIs.
 
@@ -40,7 +41,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
-    """Sets the seed for generating random numbers for the calling rank.
+    """Set the seed for generating random numbers for the calling rank.
 
     Args:
         seed (int): The desired seed.
@@ -93,7 +94,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
 
 
 class RNGStateTracker:
-    """
+    """Store and manage Random Number Generator (RNG) state.
+
     RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
     in a dict, mapping from a corresponding tag to each state tensor. It also provides
     a set of convenient utility methods to help access/modify the state tensors. The most
@@ -148,6 +150,8 @@ class RNGStateTracker:
 
 class OffsetBasedRNGTracker(RNGStateTracker):
     """
+    Define the default policy for sharing and synchronizing RNG states.
+
     This subclass of `RNGStateTracker` defines the default policy of how RNG states
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
@@ -205,8 +209,9 @@ class OffsetBasedRNGTracker(RNGStateTracker):
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
-        """Set the starting RNG offset for current device's local shard before actual
-        op execution. The pre_op_offset value should start from the current RNG offset
+        """Set the starting RNG offset for current device's local shard before actual op execution.
+
+        The pre_op_offset value should start from the current RNG offset
         and increment by the size of local shard until it reaches the size of the whole
         DTensor. For different ranks that hold the same DTensor shard, their pre_op_offset
         will be the same.
@@ -297,8 +302,9 @@ class OffsetBasedRNGTracker(RNGStateTracker):
         self.set_offset("parallel-rng", current_offset + offset_incr)
 
     def _set_post_op_offset(self, spec: DTensorSpec, old_offset: int) -> None:
-        """Sets the RNG to a synchronized state after running the local random op. Every
-        rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
+        """Set the RNG to a synchronized state after running the local random op.
+
+        Every rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
         the offset before calling `set_pre_op_offset` i.e. the offset before running DTensor
         random ops.
 
