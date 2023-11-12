@@ -421,9 +421,12 @@ def percentile(
     *,
     interpolation: NotImplementedType = None,
 ):
+    dt = _dtypes_impl.default_dtypes().float_dtype
+    qq = q / torch.as_tensor(100.0, dtype=dt)
+
     return quantile(
         a,
-        q / 100.0,
+        qq,
         axis=axis,
         overwrite_input=overwrite_input,
         method=method,

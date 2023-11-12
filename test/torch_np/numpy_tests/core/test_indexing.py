@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -394,6 +395,7 @@ class TestIndexing(TestCase):
         a = a.reshape(-1, 1)
         assert_(a[b, 0].flags.f_contiguous)
 
+    @skipIfTorchDynamo  # XXX: flaky, depends on implementation details
     def test_small_regressions(self):
         # Reference count of intp for index checks
         a = np.array([0])

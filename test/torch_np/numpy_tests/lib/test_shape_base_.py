@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -280,6 +281,7 @@ class TestApplyAlongAxis(TestCase):
         assert_equal(actual, np.ones(10))
         assert_raises(ValueError, np.apply_along_axis, empty_to_1, 0, a)
 
+    @skipIfTorchDynamo  # TypeError: descriptor 'union' for 'set' objects doesn't apply to a 'numpy.int64' object
     def test_with_iterable_object(self):
         # from issue 5248
         d = np.array([[{1, 11}, {2, 22}, {3, 33}], [{4, 44}, {5, 55}, {6, 66}]])
@@ -841,7 +843,7 @@ class TestTile(TestCase):
                 assert_equal(large, klarge)
 
 
-@xpassIfTorchDynamo  # (reason="TODO: implement")
+@xfail  # Maybe implement one day
 class TestMayShareMemory(TestCase):
     def test_basic(self):
         d = np.ones((50, 60))

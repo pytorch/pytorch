@@ -1883,6 +1883,9 @@ def histogram(
     if normed is not None:
         raise ValueError("normed argument is deprecated, use density= instead")
 
+    if weights.dtype.is_complex:
+        raise NotImplementedError("complex weights histogram.")
+
     is_a_int = not (a.dtype.is_floating_point or a.dtype.is_complex)
     is_w_int = weights is None or not weights.dtype.is_floating_point
     if is_a_int:

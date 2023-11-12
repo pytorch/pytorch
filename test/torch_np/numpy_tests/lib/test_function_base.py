@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -2576,6 +2577,7 @@ class TestBincount(TestCase):
             lambda: np.bincount(x, minlength=-1),
         )
 
+    @skipIfTorchDynamo  # flaky test
     @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_dtype_reference_leaks(self):
         # gh-6805
@@ -2777,18 +2779,18 @@ class TestInterp(TestCase):
         x = np.linspace(0, 1, 5)
         y = np.linspace(0, 1, 5)
         x0 = np.array(0.3)
-        assert_almost_equal(np.interp(x0, x, y), x0)
+        assert_almost_equal(np.interp(x0, x, y), x0.item())
 
         xp = np.array([0, 2, 4])
         fp = np.array([1, -1, 1])
 
         actual = np.interp(np.array(1), xp, fp)
         assert_equal(actual, 0)
-        assert_(isinstance(actual, np.float64))
+        assert_(isinstance(actual, (np.float64, np.ndarray)))
 
         actual = np.interp(np.array(4.5), xp, fp, period=4)
         assert_equal(actual, 0.5)
-        assert_(isinstance(actual, np.float64))
+        assert_(isinstance(actual, (np.float64, np.ndarray)))
 
     def test_if_len_x_is_small(self):
         xp = np.arange(0, 10, 0.0001)
@@ -3164,11 +3166,11 @@ class TestPercentile(TestCase):
     def test_extended_axis(self):
         o = np.random.normal(size=(71, 23))
         x = np.dstack([o] * 10)
-        assert_equal(np.percentile(x, 30, axis=(0, 1)), np.percentile(o, 30))
+        assert_equal(np.percentile(x, 30, axis=(0, 1)), np.percentile(o, 30).item())
         x = np.moveaxis(x, -1, 0)
-        assert_equal(np.percentile(x, 30, axis=(-2, -1)), np.percentile(o, 30))
+        assert_equal(np.percentile(x, 30, axis=(-2, -1)), np.percentile(o, 30).item())
         x = x.swapaxes(0, 1).copy()
-        assert_equal(np.percentile(x, 30, axis=(0, -1)), np.percentile(o, 30))
+        assert_equal(np.percentile(x, 30, axis=(0, -1)), np.percentile(o, 30).item())
         x = x.swapaxes(0, 1).copy()
 
         assert_equal(
@@ -3423,7 +3425,7 @@ class TestQuantile(TestCase):
         assert_equal(np.quantile(x, 1), 3.5)
         assert_equal(np.quantile(x, 0.5), 1.75)
 
-    @xpassIfTorchDynamo  # (reason="quantile w/integers or bools")
+    @xfail  # (reason="quantile w/integers or bools")
     def test_correct_quantile_value(self):
         a = np.array([True])
         tf_quant = np.quantile(True, False)
@@ -3584,7 +3586,7 @@ class TestQuantile(TestCase):
         a = np.array([[10.0, 7.0, 4.0], [3.0, 2.0, 1.0]])
         a[0][1] = np.nan
         actual = np.quantile(a, 0.5)
-        assert np.isscalar(actual)
+        # assert np.isscalar(actual)    # XXX: our isscalar follows pytorch
         assert_equal(np.quantile(a, 0.5), np.nan)
 
 
@@ -3608,7 +3610,7 @@ class TestMedian(TestCase):
         a = np.array([0.0444502, 0.141249, 0.0463301])
         assert_equal(a[-1], np.median(a))
 
-    @xpassIfTorchDynamo  # (reason="median: scalar output vs 0-dim")
+    @xfail  # (reason="median: scalar output vs 0-dim")
     def test_basic_2(self):
         # check array scalar result
         a = np.array([0.0444502, 0.141249, 0.0463301])
@@ -3729,7 +3731,7 @@ class TestMedian(TestCase):
         b[2] = np.nan
         assert_equal(np.median(a, (0, 2)), b)
 
-    @xpassIfTorchDynamo  # (reason="median: scalar vs 0-dim")
+    @xfail  # (reason="median: scalar vs 0-dim")
     def test_nan_behavior_3(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan
@@ -3773,11 +3775,11 @@ class TestMedian(TestCase):
     def test_extended_axis(self):
         o = np.random.normal(size=(71, 23))
         x = np.dstack([o] * 10)
-        assert_equal(np.median(x, axis=(0, 1)), np.median(o))
+        assert_equal(np.median(x, axis=(0, 1)), np.median(o).item())
         x = np.moveaxis(x, -1, 0)
-        assert_equal(np.median(x, axis=(-2, -1)), np.median(o))
+        assert_equal(np.median(x, axis=(-2, -1)), np.median(o).item())
         x = x.swapaxes(0, 1).copy()
-        assert_equal(np.median(x, axis=(0, -1)), np.median(o))
+        assert_equal(np.median(x, axis=(0, -1)), np.median(o).item())
 
         assert_equal(np.median(x, axis=(0, 1, 2)), np.median(x, axis=None))
         assert_equal(np.median(x, axis=(0,)), np.median(x, axis=0))

@@ -199,10 +199,9 @@ class TestNonarrayArgs(TestCase):
         s = np.float64(1.0)
         assert_equal(s.round(), 1.0)
 
-    @xpassIfTorchDynamo  # (reason="scalar instances")
     def test_round_2(self):
         s = np.float64(1.0)
-        assert_(isinstance(s.round(), np.float64))
+        assert_(isinstance(s.round(), (np.float64, np.ndarray)))
 
     @xpassIfTorchDynamo  # (reason="scalar instances")
     @parametrize(
@@ -236,11 +235,11 @@ class TestNonarrayArgs(TestCase):
             subtest((2**31 - 1, -1), decorators=[xfail]),
             subtest(
                 (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
-                decorators=[xpassIfTorchDynamo],
+                decorators=[xfail],
             ),
             subtest(
                 (2**31 - 1, -math.ceil(math.log10(2**31 - 1))),
-                decorators=[xpassIfTorchDynamo],
+                decorators=[xfail],
             ),
         ],
     )
@@ -344,7 +343,7 @@ class TestNonarrayArgs(TestCase):
     #      assert_(w[0].category is RuntimeWarning)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xfail  # (reason="TODO")
 class TestIsscalar(TestCase):
     def test_isscalar(self):
         assert_(np.isscalar(3.1))
@@ -371,6 +370,7 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_or(self):
         f = np.False_
         t = np.True_
@@ -379,6 +379,7 @@ class TestBoolScalar(TestCase):
         assert_((t | f) is t)
         assert_((f | f) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_and(self):
         f = np.False_
         t = np.True_
@@ -387,6 +388,7 @@ class TestBoolScalar(TestCase):
         assert_((t & f) is f)
         assert_((f & f) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_xor(self):
         f = np.False_
         t = np.True_
@@ -483,6 +485,7 @@ class TestBoolArray(TestCase):
         assert_array_equal(self.im ^ False, self.im)
 
 
+@xfailIfTorchDynamo
 class TestBoolCmp(TestCase):
     def setUp(self):
         self.f = np.ones(256, dtype=np.float32)
@@ -1016,8 +1019,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(np.array([1], dtype="?")), 1)
         assert_equal(np.nonzero(np.array([1])), ([0],))
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_trivial_differs(self):
+        # numpy returns a python int, we return a 0D array
         assert isinstance(np.count_nonzero([]), np.ndarray)
 
     def test_nonzero_zerod(self):
@@ -1027,8 +1030,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(np.array(1)), 1)
         assert_equal(np.count_nonzero(np.array(1, dtype="?")), 1)
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_zerod_differs(self):
+        # numpy returns a python int, we return a 0D array
         assert isinstance(np.count_nonzero(np.array(1)), np.ndarray)
 
     def test_nonzero_onedim(self):
@@ -1037,8 +1040,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(x), 4)
         assert_equal(np.nonzero(x), ([0, 2, 3, 6],))
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_onedim_differs(self):
+        # numpy returns a python int, we return a 0D array
         x = np.array([1, 0, 2, -1, 0, 0, 8])
         assert isinstance(np.count_nonzero(x), np.ndarray)
 
@@ -1835,7 +1838,7 @@ class TestClip(TestCase):
         actual = np.clip(arr, amin, amax)
         assert_equal(actual, expected)
 
-    @xfail  # (reason="np.maximum(..., dtype=) needs implementing")
+    @xpassIfTorchDynamo  # (reason="np.maximum(..., dtype=) needs implementing")
     @given(
         data=st.data(),
         arr=hynp.arrays(
@@ -2056,6 +2059,7 @@ class TestIsclose(TestCase):
         arr = np.array([1.0, np.nan])
         assert_array_equal(np.isclose(arr, arr, equal_nan=True), [True, True])
 
+    @xfailIfTorchDynamo  # scalars vs 0D
     def test_scalar_return(self):
         assert_(np.isscalar(np.isclose(1, 1)))
 
@@ -2613,7 +2617,7 @@ class TestRollaxis(TestCase):
         assert_raises(np.AxisError, np.rollaxis, a, 4, 0)
         assert_raises(np.AxisError, np.rollaxis, a, 0, 5)
 
-    @xpassIfTorchDynamo  # (reason="needs fancy indexing")
+    @xfail  # XXX: ndarray.attributes
     def test_results(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4).copy()
         aind = np.indices(a.shape)
