@@ -1,4 +1,3 @@
-"""Define fuser method mappings."""
 import torch.nn as nn
 import torch.ao.nn.intrinsic as nni
 

@@ -1,4 +1,3 @@
-"""Package to define fuse modules."""
 import copy
 
 import torch.nn as nn

@@ -81,7 +81,6 @@ class MeanShadowLogger(ns.Logger):
             self.stats["float"] = self.float_sum / self.count
 
     def clear(self):
-        """Reset all the attributes of the object to their initial state."""
         self.stats["float"] = None
         self.stats["quantized"] = None
         self.count = 0

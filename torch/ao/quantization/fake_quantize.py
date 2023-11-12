@@ -81,37 +81,30 @@ class FakeQuantizeBase(ABC, Module):
 
     @abstractmethod
     def forward(self, x):
-        """No operation."""
         pass
 
     @abstractmethod
     def calculate_qparams(self, **kwargs):
-        """No operation."""
         pass
 
     @torch.jit.export
     def enable_fake_quant(self, enabled: bool = True) -> None:
-        """Set fake_quant_enabled to specified value."""
         self.fake_quant_enabled[0] = 1 if enabled else 0
 
     @torch.jit.export
     def disable_fake_quant(self):
-        """Disable fake quantizations."""
         self.enable_fake_quant(False)
 
     @torch.jit.export
     def enable_observer(self, enabled: bool = True) -> None:
-        """Set observer_enabled to specified value."""
         self.observer_enabled[0] = 1 if enabled else 0
 
     @torch.jit.export
     def disable_observer(self):
-        """Disable observer."""
         self.enable_observer(False)
 
     @classmethod
     def with_args(cls, **kwargs):
-        """Return fake quantized constructor."""
         fake_quant_constructor = _with_args(cls, **kwargs)
         # need to assign the correct module to fake_quantize
         # constructors to satisfy public v private requirements
@@ -155,7 +148,6 @@ class FakeQuantize(FakeQuantizeBase):
     zero_point: torch.Tensor
 
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, **observer_kwargs):
-        """Initialize the class and register buffers."""
         super().__init__()
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
@@ -194,11 +186,9 @@ class FakeQuantize(FakeQuantizeBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        """Calculate the q parameters."""
         return self.activation_post_process.calculate_qparams()
 
     def forward(self, X):
-        """Define the forward pass for a quantization layer."""
         if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
@@ -222,7 +212,6 @@ class FakeQuantize(FakeQuantizeBase):
 
     @torch.jit.export
     def extra_repr(self):
-        """Define a method to return a string representation of the object's important attributes."""
         return 'fake_quant_enabled={}, observer_enabled={}, ' \
                'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, ' \
                'scale={}, zero_point={}'.format(
@@ -231,7 +220,6 @@ class FakeQuantize(FakeQuantizeBase):
                    self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        """Manually specify serialization."""
         # We cannot currently register scalar values as buffers, so need to manually
         # specify serialization here.
         super()._save_to_state_dict(destination, prefix, keep_vars)
@@ -240,7 +228,6 @@ class FakeQuantize(FakeQuantizeBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        """Manually specify deserialization."""
         # Removing this function throws an error that the size of the loaded tensor does not match the original size
         # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
         local_state = ['scale', 'zero_point']
@@ -281,7 +268,6 @@ class FixedQParamsFakeQuantize(FakeQuantize):
 
     # TODO: rename observer to observer_ctr
     def __init__(self, observer):
-        """Initialize the class with an observer."""
         super().__init__(observer=observer)
         assert type(self.activation_post_process) == FixedQParamsObserver,\
             f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
@@ -293,7 +279,6 @@ class FixedQParamsFakeQuantize(FakeQuantize):
 
     @torch.jit.export
     def calculate_qparams(self):
-        """Return scale and zero point."""
         return self.scale, self.zero_point
 
     @torch.jit.export
@@ -331,7 +316,6 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         quant_max: int = 255,
         **observer_kwargs: Any
     ) -> None:
-        """Initialize the module with specified observer and other values."""
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
         assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)),\
             "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
@@ -341,12 +325,10 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
 
     @torch.jit.export
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Calculate q parameters."""
         return self.activation_post_process.calculate_qparams()
 
     @torch.jit.export
     def extra_repr(self) -> str:
-        """Define a string representation of the object."""
         return (
             "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
             "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
@@ -363,7 +345,6 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        """Return fused moving averages."""
         return torch.fused_moving_avg_obs_fake_quant(
             X,
             self.observer_enabled,

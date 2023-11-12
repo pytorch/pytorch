@@ -20,28 +20,24 @@ _supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intr
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
 
 def set_module_weight(module, weight) -> None:
-    """Set the weight of a given module to a specified value."""
     if type(module) in _supported_types:
         module.weight = torch.nn.Parameter(weight)
     else:
         module[0].weight = torch.nn.Parameter(weight)
 
 def set_module_bias(module, bias) -> None:
-    """Set the bias of a given module to a specified value."""
     if type(module) in _supported_types:
         module.bias = torch.nn.Parameter(bias)
     else:
         module[0].bias = torch.nn.Parameter(bias)
 
 def get_module_weight(module):
-    """Get the weight of a given module."""
     if type(module) in _supported_types:
         return module.weight
     else:
         return module[0].weight
 
 def get_module_bias(module):
-    """Get the bias of a given module."""
     if type(module) in _supported_types:
         return module.bias
     else:

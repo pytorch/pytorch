@@ -1,8 +1,3 @@
-r"""
-The quantization package contains data structures for quantization.
-
-Benefits include reduced memory usage and improved computational speed in deep learning models.
-"""
 # flake8: noqa: F403
 
 from .fake_quantize import *  # noqa: F403
