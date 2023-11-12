@@ -42,6 +42,7 @@ class Threshold(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['threshold', 'value', 'inplace']
 
     threshold: float
@@ -64,7 +65,7 @@ class Threshold(Module):
 
 
 class ReLU(Module):
-    r"""Applies the rectified linear unit function element-wise:
+    r"""Applies the rectified linear unit function element-wise.
 
     :math:`\text{ReLU}(x) = (x)^+ = \max(0, x)`
 
@@ -90,6 +91,7 @@ class ReLU(Module):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input), m(-input)))
     """
+
     __constants__ = ['inplace']
     inplace: bool
 
@@ -106,10 +108,9 @@ class ReLU(Module):
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified linear unit function, element-wise,
-    as described in the paper:
+    r"""Applies the randomized leaky rectified linear unit function, element-wise.
 
-    `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
+    Method described in the paper:`Empirical Evaluation of Rectified Activations in Convolutional Network`_.
 
     The function is defined as:
 
@@ -146,6 +147,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+
     __constants__ = ['lower', 'upper', 'inplace']
 
     lower: float
@@ -203,6 +205,7 @@ class Hardtanh(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['min_val', 'max_val', 'inplace']
 
     min_val: float
@@ -239,7 +242,7 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{ReLU6}(x) = \min(\max(0,x), 6)
@@ -269,7 +272,7 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
@@ -319,6 +322,7 @@ class Hardsigmoid(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['inplace']
 
     inplace: bool
@@ -357,6 +361,7 @@ class Tanh(Module):
 
 class SiLU(Module):
     r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+
     The SiLU function is also known as the swish function.
 
     .. math::
@@ -382,6 +387,7 @@ class SiLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['inplace']
     inplace: bool
 
@@ -398,6 +404,7 @@ class SiLU(Module):
 
 class Mish(Module):
     r"""Applies the Mish function, element-wise.
+
     Mish: A Self Regularized Non-Monotonic Neural Activation Function.
 
     .. math::
@@ -418,6 +425,7 @@ class Mish(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['inplace']
     inplace: bool
 
@@ -433,8 +441,9 @@ class Mish(Module):
         return inplace_str
 
 class Hardswish(Module):
-    r"""Applies the Hardswish function, element-wise, as described in the paper:
-    `Searching for MobileNetV3 <https://arxiv.org/abs/1905.02244>`_.
+    r"""Applies the Hardswish function, element-wise.
+
+    Method described in the paper: `Searching for MobileNetV3 <https://arxiv.org/abs/1905.02244>`_.
 
     Hardswish is defined as:
 
@@ -460,6 +469,7 @@ class Hardswish(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['inplace']
 
     inplace: bool
@@ -473,8 +483,9 @@ class Hardswish(Module):
 
 
 class ELU(Module):
-    r"""Applies the Exponential Linear Unit (ELU) function, element-wise, as described
-    in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
+    r"""Applies the Exponential Linear Unit (ELU) function, element-wise.
+
+    Method described in the paper: `Fast and Accurate Deep Network Learning by Exponential Linear
     Units (ELUs) <https://arxiv.org/abs/1511.07289>`__.
 
     ELU is defined as:
@@ -501,6 +512,7 @@ class ELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['alpha', 'inplace']
     alpha: float
     inplace: bool
@@ -519,7 +531,7 @@ class ELU(Module):
 
 
 class CELU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
@@ -545,6 +557,7 @@ class CELU(Module):
     .. _`Continuously Differentiable Exponential Linear Units`:
         https://arxiv.org/abs/1704.07483
     """
+
     __constants__ = ['alpha', 'inplace']
     alpha: float
     inplace: bool
@@ -563,7 +576,7 @@ class CELU(Module):
 
 
 class SELU(Module):
-    r"""Applied element-wise, as:
+    r"""Applied element-wise, as.
 
     .. math::
         \text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))
@@ -596,6 +609,7 @@ class SELU(Module):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
+
     __constants__ = ['inplace']
     inplace: bool
 
@@ -612,7 +626,8 @@ class SELU(Module):
 
 
 class GLU(Module):
-    r"""Applies the gated linear unit function
+    r"""Applies the gated linear unit function.
+
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
     of the input matrices and :math:`b` is the second half.
 
@@ -630,6 +645,7 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
+
     __constants__ = ['dim']
     dim: int
 
@@ -645,7 +661,7 @@ class GLU(Module):
 
 
 class GELU(Module):
-    r"""Applies the Gaussian Error Linear Units function:
+    r"""Applies the Gaussian Error Linear Units function.
 
     .. math:: \text{GELU}(x) = x * \Phi(x)
 
@@ -671,6 +687,7 @@ class GELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['approximate']
     approximate: str
 
@@ -713,6 +730,7 @@ class Hardshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['lambd']
     lambd: float
 
@@ -728,7 +746,7 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
@@ -761,6 +779,7 @@ class LeakyReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['inplace', 'negative_slope']
     inplace: bool
     negative_slope: float
@@ -779,7 +798,7 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
@@ -802,7 +821,9 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies the Softplus function :math:`\text{Softplus}(x) = \frac{1}{\beta} *
+    r"""Applies the Softplus function.
+
+    .. :math:`\text{Softplus}(x) = \frac{1}{\beta} *
     \log(1 + \exp(\beta * x))` element-wise.
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
@@ -827,6 +848,7 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['beta', 'threshold']
     beta: int
     threshold: int
@@ -844,7 +866,7 @@ class Softplus(Module):
 
 
 class Softshrink(Module):
-    r"""Applies the soft shrinkage function elementwise:
+    r"""Applies the soft shrinkage function elementwise.
 
     .. math::
         \text{SoftShrinkage}(x) =
@@ -869,6 +891,7 @@ class Softshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['lambd']
     lambd: float
 
@@ -904,8 +927,9 @@ def _is_make_fx_tracing():
 
 
 class MultiheadAttention(Module):
-    r"""Allows the model to jointly attend to information
-    from different representation subspaces as described in the paper:
+    r"""Allows the model to jointly attend to information from different representation subspaces.
+
+    Method described in the paper:
     `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
 
     Multi-Head Attention is defined as:
@@ -1050,8 +1074,9 @@ class MultiheadAttention(Module):
             attn_mask: Optional[Tensor] = None,
             average_attn_weights: bool = True,
             is_causal : bool = False) -> Tuple[Tensor, Optional[Tensor]]:
-        r"""
-    Args:
+        r"""Compute attention outputs using query, key, and value embeddings, with optional parameters for padding, masks and attention weights.
+
+        Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
             or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
             :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
@@ -1093,7 +1118,7 @@ class MultiheadAttention(Module):
             incorrect execution, including forward and backward
             compatibility.
 
-    Outputs:
+        Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
           :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
           where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the
@@ -1107,7 +1132,6 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-
         why_not_fast_path = ''
         if ((attn_mask is not None and torch.is_floating_point(attn_mask))
            or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
@@ -1256,8 +1280,9 @@ class MultiheadAttention(Module):
 
     def merge_masks(self, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor],
                     query: Tensor) -> Tuple[Optional[Tensor], Optional[int]]:
-        r"""
-        Determine mask type and combine masks if necessary. If only one mask is provided, that mask
+        r"""Determine mask type and combine masks if necessary.
+
+        If only one mask is provided, that mask
         and the corresponding mask type will be returned. If both masks are provided, they will be both
         expanded to shape ``(batch_size, num_heads, seq_len, seq_len)``, combined with logical ``or``
         and mask type 2 will be returned
@@ -1297,7 +1322,7 @@ class MultiheadAttention(Module):
 
 
 class PReLU(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
@@ -1345,6 +1370,7 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ['num_parameters']
     num_parameters: int
 
@@ -1368,7 +1394,7 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
@@ -1391,7 +1417,7 @@ class Softsign(Module):
 
 
 class Tanhshrink(Module):
-    r"""Applies the element-wise function:
+    r"""Applies the element-wise function.
 
     .. math::
         \text{Tanhshrink}(x) = x - \tanh(x)
@@ -1414,8 +1440,9 @@ class Tanhshrink(Module):
 
 
 class Softmin(Module):
-    r"""Applies the Softmin function to an n-dimensional input Tensor
-    rescaling them so that the elements of the n-dimensional output Tensor
+    r"""Applies the Softmin function to an n-dimensional input Tensor.
+
+    Rescales them so that the elements of the n-dimensional output Tensor
     lie in the range `[0, 1]` and sum to 1.
 
     Softmin is defined as:
@@ -1442,6 +1469,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     __constants__ = ['dim']
     dim: Optional[int]
 
@@ -1461,8 +1489,9 @@ class Softmin(Module):
         return f'dim={self.dim}'
 
 class Softmax(Module):
-    r"""Applies the Softmax function to an n-dimensional input Tensor
-    rescaling them so that the elements of the n-dimensional output Tensor
+    r"""Applies the Softmax function to an n-dimensional input Tensor.
+
+    Rescales them so that the elements of the n-dimensional output Tensor
     lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
@@ -1498,6 +1527,7 @@ class Softmax(Module):
         >>> output = m(input)
 
     """
+
     __constants__ = ['dim']
     dim: Optional[int]
 
@@ -1548,8 +1578,9 @@ class Softmax2d(Module):
 
 
 class LogSoftmax(Module):
-    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
-    input Tensor. The LogSoftmax formulation can be simplified as:
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional input Tensor.
+
+    The LogSoftmax formulation can be simplified as:
 
     .. math::
         \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
@@ -1572,6 +1603,7 @@ class LogSoftmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     __constants__ = ['dim']
     dim: Optional[int]
 
