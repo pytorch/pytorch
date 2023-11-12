@@ -10,6 +10,10 @@ BERT_pytorch,pass,8
 
 
 
+Background_Matting,pass_due_to_skip,0
+
+
+
 LearningToPaint,pass,8
 
 
@@ -42,6 +46,14 @@ dcgan,pass,8
 
 
 
+demucs,pass,11
+
+
+
+densenet121,pass,8
+
+
+
 dlrm,pass,8
 
 
@@ -70,6 +82,10 @@ hf_Bart,pass,7
 
 
 
+hf_BigBird,pass,7
+
+
+
 hf_DistilBert,pass,7
 
 
@@ -78,7 +94,15 @@ hf_GPT2,pass,7
 
 
 
+hf_GPT2_large,pass_due_to_skip,0
+
+
+
 hf_Reformer,pass,27
+
+
+
+hf_T5_base,OOM,4
 
 
 
@@ -103,6 +127,10 @@ mnasnet1_0,pass,8
 
 
 mobilenet_v2,pass,8
+
+
+
+mobilenet_v3_large,pass,8
 
 
 

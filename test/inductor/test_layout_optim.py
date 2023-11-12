@@ -5,10 +5,9 @@ import random
 
 import torch
 from torch import nn
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
 
@@ -285,5 +284,6 @@ class TestLayoutOptim(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)

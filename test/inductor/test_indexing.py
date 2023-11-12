@@ -230,11 +230,11 @@ class ExprPrinterTests(TorchTestCase):
             expr = FloorDiv(s1, s2)
             self.assertEqual(pexpr(expr), "(s1 // s2)")
             if integer:
-                self.assertEqual(cexpr(expr), "at::native::div_floor_integer(s1, s2)")
+                self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
             else:
                 self.assertEqual(
                     cexpr(expr),
-                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
+                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
                 )
 
         for integer in [True, False]:
@@ -248,7 +248,7 @@ class ExprPrinterTests(TorchTestCase):
                 self.assertEqual(pexpr(expr), "(s1 // (-1))")
                 self.assertEqual(
                     cexpr(expr),
-                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
+                    "c10::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
                 )
 
     def test_print_Min_Max(self):
@@ -268,8 +268,6 @@ class ExprPrinterTests(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU or HAS_CUDA:
-        run_tests("sympy")
+    run_inductor_tests()

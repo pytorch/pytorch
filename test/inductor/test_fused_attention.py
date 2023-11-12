@@ -6,14 +6,14 @@ import math
 import torch
 import torch._inductor.config
 import torch.utils.checkpoint
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -664,5 +664,6 @@ if HAS_CPU:
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()

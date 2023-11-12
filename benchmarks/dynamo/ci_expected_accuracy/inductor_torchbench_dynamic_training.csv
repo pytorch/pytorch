@@ -10,6 +10,10 @@ BERT_pytorch,pass,8
 
 
 
+Background_Matting,pass_due_to_skip,0
+
+
+
 LearningToPaint,pass,8
 
 
@@ -42,6 +46,14 @@ dcgan,pass,8
 
 
 
+demucs,fail_to_run,5
+
+
+
+densenet121,pass,8
+
+
+
 dlrm,pass,8
 
 
@@ -70,6 +82,10 @@ hf_Bart,pass,7
 
 
 
+hf_BigBird,fail_to_run,4
+
+
+
 hf_DistilBert,pass,7
 
 
@@ -78,7 +94,15 @@ hf_GPT2,pass,7
 
 
 
+hf_GPT2_large,pass_due_to_skip,0
+
+
+
 hf_Reformer,pass,27
+
+
+
+hf_T5_base,OOM,4
 
 
 
@@ -106,7 +130,15 @@ mobilenet_v2,pass,8
 
 
 
+mobilenet_v3_large,pass,8
+
+
+
 moco,pass,19
+
+
+
+nanogpt,pass,8
 
 
 
@@ -158,6 +190,10 @@ soft_actor_critic,pass,7
 
 
 
+speech_transformer,infra_error,0
+
+
+
 squeezenet1_1,pass,8
 
 
@@ -199,6 +235,10 @@ tts_angular,pass,10
 
 
 vgg16,pass,8
+
+
+
+vision_maskrcnn,fail_accuracy,37
 
 
 
