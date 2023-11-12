@@ -221,7 +221,7 @@ class VariableBuilder:
         assert (
             source is not None
         ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
-        assert TracingContext.get() is not None, "Expected active TracingContext"
+        assert TracingContext.try_get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
         self.source = source

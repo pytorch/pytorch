@@ -536,7 +536,11 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 
 class CompileContext:
     @staticmethod
-    def get() -> Optional[CompileContext]:
+    def get() -> CompileContext:
+        return _TLS.compile_context
+
+    @staticmethod
+    def try_get() -> Optional[CompileContext]:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id):
@@ -546,14 +550,14 @@ class CompileContext:
 
     @staticmethod
     def current_compile_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         return self.compile_id
 
     @staticmethod
     def current_trace_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         if self.compile_id is None:
@@ -570,8 +574,16 @@ class TracingContext:
     """
 
     @staticmethod
-    def get() -> Optional[TracingContext]:
+    def try_get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
+
+    @staticmethod
+    def get() -> TracingContext:
+        if ctx := TracingContext.try_get():
+            return ctx
+        raise RuntimeError(
+            "TracingContext.get() must be called within an ongoing trace."
+        )
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -611,7 +623,6 @@ class TracingContext:
     def patch(**kwargs):
         prior = {}
         ctx = TracingContext.get()
-        assert ctx is not None
 
         for key in kwargs.keys():
             # KeyError on invalid entry
@@ -626,7 +637,7 @@ class TracingContext:
 
     @staticmethod
     def extract_stack():
-        self = TracingContext.get()
+        self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
         stack = list(self.frame_summary_stack)
@@ -640,9 +651,6 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         with unittest.mock.patch.object(
             tc, "frame_summary_stack", []
         ), unittest.mock.patch.object(tc, "loc_in_frame", None):
@@ -676,9 +684,6 @@ class TracingContext:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
@@ -697,7 +702,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides():
-        tc = TracingContext.get()
+        tc = TracingContext.try_get()
         if tc is None:
             yield None
             return
@@ -710,11 +715,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Loc context manager must be called within an ongoing trace."
-        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        TracingContext.get().loc_in_frame = traceback.FrameSummary(
+            filename, lineno, frame_name
+        )
 
 
 @contextmanager
