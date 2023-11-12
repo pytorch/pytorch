@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xpassIfTorchDynamo,
+    skipIfTorchDynamo,
 )
 
 if TEST_WITH_TORCHDYNAMO:
@@ -129,6 +130,7 @@ class TestTypes(TestCase):
             b = atype([1, 2, 3])
             assert_equal(a, b)
 
+    @skipIfTorchDynamo  # freezes under torch.Dynamo (loop unrolling, huh)
     def test_leak(self):
         # test leak of scalar objects
         # a leak would show up in valgrind as still-reachable of ~2.6MB
