@@ -51,7 +51,7 @@ class CollectLoadsAndStore(ast.NodeVisitor):
         self.stores: Set[str] = set()
         self.id = 0
 
-    def visit_Many(self, nodes: list[Any]) -> Any:
+    def visit_Many(self, nodes: List[Any]) -> Any:
         for node in nodes:
             self.visit(node)
 
@@ -195,10 +195,10 @@ def parse(fun):
         val = ast.parse(inspect.getsource(fun))
         parse_cache[fun] = val
         return val
-    except OSError:
-        raise CannotConvertLoop("Loop translation cannot find source")
-    except SyntaxError:
-        raise CannotConvertLoop("Can't parse the loop source code")
+    except OSError as e:
+        raise CannotConvertLoop("Loop translation cannot find source") from e
+    except SyntaxError as e:
+        raise CannotConvertLoop("Can't parse the loop source code") from e
 
 
 def functionalize_loop_body(
@@ -274,7 +274,7 @@ def functionalize_loop_body(
         fun = env[new_wrapper_name]
         assert isinstance(fun, types.FunctionType)
         return (fun.__code__, transformed.outer_parameters)
-    except SyntaxError:
+    except SyntaxError as e:
         raise CannotConvertLoop(
             "SyntaxError in transformed loop. This is a bug. Please submit a report."
-        )
+        ) from e

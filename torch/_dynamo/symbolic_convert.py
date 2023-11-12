@@ -1133,7 +1133,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst: Instruction):
         it = self.pop().realize()
-        if isinstance(it, variables.RangeIteratorVariable):
+        if (
+            isinstance(it, variables.RangeIteratorVariable)
+            and inst.starts_line is not None
+        ):
             try:
                 # Converts a loop to a function body, to benefit
                 # from function compilation caching.
