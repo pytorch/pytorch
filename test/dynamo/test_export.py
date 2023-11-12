@@ -2861,10 +2861,8 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
-        ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
         def f_correct(x):
             a = A()
@@ -3277,7 +3275,9 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         sin = l_x_.sin();  l_x_ = None
@@ -3286,13 +3286,17 @@ class GraphModule(torch.nn.Module):
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         cos = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        true_guard_code = [
+            "cast_symbool_to_symint_guardless(L['pred']) == 1",
+        ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
             "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",

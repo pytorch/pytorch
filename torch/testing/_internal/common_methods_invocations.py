@@ -8580,12 +8580,16 @@ class ForeachRightmostArgType(enum.Enum):
 
 
 class ForeachSampleInput(SampleInput):
+    # For TensorList <op> Scalar/Tensor, we compute the reference
+    # by converting it into TensorList <op> ScalarList/TensorList and
+    # then converting into multiple Tensor <op> Scalar/Tensor.
+    # ref_args contains the args converted to TensorList <op> ScalarList/TensorList
     ref_args: Any
     disable_fastpath: bool
 
-    def __init__(self, *args, disable_fastpath=False, **kwargs):
+    def __init__(self, *args, disable_fastpath=False, ref_args=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ref_args = self.args
+        self.ref_args = ref_args or self.args
         self.disable_fastpath = disable_fastpath
 
 
@@ -8778,11 +8782,10 @@ class foreach_inputs_sample_func:
                 for rightmost_arg in rightmost_arg_list:
                     args.append(rightmost_arg)
                     kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
-                    sample = ForeachSampleInput(input, *args, **kwargs)
                     ref_args = args
                     if rightmost_arg_type in (ForeachRightmostArgType.Scalar, ForeachRightmostArgType.Tensor):
                         ref_args = args[:-1] + [[args[-1] for _ in range(num_tensors)]]
-                    sample.ref_args = ref_args
+                    sample = ForeachSampleInput(input, *args, ref_args=ref_args, **kwargs)
                     yield sample
                     args.pop()
             else:
@@ -8845,7 +8848,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         rightmost_supports_scalar: bool = False,
         rightmost_supports_scalarlist: bool = False,
     ):
-        super().__init__(3 + 1, True, True)
+        super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist)
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
         return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
@@ -8898,38 +8901,128 @@ foreach_unary_op_db: List[OpInfo] = [
         'exp',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'acos',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'asin',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'atan',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'cos',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'cosh',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'log',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'log10',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'log2',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'tan',
@@ -8948,6 +9041,16 @@ foreach_unary_op_db: List[OpInfo] = [
                 device_type='cuda'
             ),
         ),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8963,14 +9066,44 @@ foreach_unary_op_db: List[OpInfo] = [
                 device_type='cuda'
             ),
         ),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'sin',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'sinh',
         foreach_inputs_sample_func(1, False, False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'neg',
@@ -8990,18 +9123,48 @@ foreach_unary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'erf',
         foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'erfc',
         foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'expm1',
@@ -9009,30 +9172,80 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         backward_requires_result=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'floor',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'log1p',
         foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'round',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'frac',
         foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'reciprocal',
@@ -9047,12 +9260,32 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
         backward_requires_result=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'trunc',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'abs',
@@ -9060,12 +9293,40 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
+                         "test_dispatch_meta_inplace", dtypes=complex_types()),
+            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
+                         "test_meta_inplace", dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=complex_types()),
+        ),
     ),
     ForeachFuncInfo(
         'zero',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         has_no_out_of_place=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         'sign',
@@ -9078,6 +9339,16 @@ foreach_unary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
 ]
 
@@ -9088,6 +9359,16 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "sub",
@@ -9095,30 +9376,80 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "clamp_min",
         foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "clamp_max",
         foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
@@ -9128,6 +9459,16 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
         supports_inplace_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
@@ -9137,6 +9478,16 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
         supports_inplace_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "pow",
@@ -9146,6 +9497,16 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
@@ -9156,21 +9517,47 @@ foreach_binary_op_db: List[OpInfo] = [
         has_no_out_of_place=True,
         supports_forward_ad=False,
         supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(3, False, False),
+        foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
     ForeachFuncInfo(
         "addcdiv",
-        sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
 ]
 
@@ -9180,16 +9567,36 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
         foreach_norm_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
 ]
 
-foreach_lerp_op_db: List[ForeachFuncInfo] = [
+foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
         foreach_lerp_sample_func(3, True, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
     ),
 ]
 
@@ -9322,14 +9729,7 @@ def wrapper_set_seed(op, *args, **kwargs):
     """
     with freeze_rng_state():
         torch.manual_seed(42)
-        output = op(*args, **kwargs)
-
-        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
-            # We need to call mark step inside freeze_rng_state so that numerics
-            # match eager execution
-            torch._lazy.mark_step()
-
-        return output
+        return op(*args, **kwargs)
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -16808,7 +17208,6 @@ op_db: List[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
            )),
     OpInfo('cat',
            ref=_cat_np,
@@ -17847,14 +18246,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             # Lazy tensor failures
             DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-            # These tests fail only when built with ASAN
-            DecorateInfo(unittest.skip("Fails with ASAN"), 'TestLazyOpInfo', 'test_correctness', active_if=TEST_WITH_ASAN),
-            DecorateInfo(
-                unittest.skip("Fails with ASAN"),
-                'TestLazyOpInfo',
-                'test_correctness_with_reusing_ir',
-                active_if=TEST_WITH_ASAN
-            ),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
         ),
     ),
     OpInfo(

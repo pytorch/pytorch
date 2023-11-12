@@ -10,18 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -35,7 +24,6 @@ from torch import fx
 from torch._guards import (
     Checkpointable,
     GlobalContextCheckpointState,
-    Guard,
     GuardsCheckpointState,
     Source,
     TracingContext,
@@ -62,7 +50,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .guards import GuardBuilder
+from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
@@ -121,7 +109,6 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
     non_compliant_ops: Set[torch._ops.OpOverload]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
@@ -240,7 +227,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def __init__(
         self,
         code_options: Dict[str, Any],
-        compiler_fn: CompilerFn,
+        compiler_fn: Optional[CompilerFn],
         root_tx,
         export: bool,
         export_constraints,
@@ -320,7 +307,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
-        self.compiler_fn: CompilerFn = compiler_fn
+        self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
@@ -469,11 +456,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.tracing_context.fake_mode.shape_env
 
     @property
-    def guards(self) -> Set[Guard]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self.tracing_context.guards_context.dynamo_guards
 
     @property
-    def nn_modules(self) -> Dict[str, torch.nn.Module]:
+    def nn_modules(self) -> Dict[str, Any]:
         return self.tracing_context.module_context.nn_modules
 
     def save_global_state(self, out=None):
@@ -536,7 +523,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides),
             set(self.non_compliant_ops),
         )
         self.timestamp += 1
@@ -554,7 +540,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
             self.non_compliant_ops,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
@@ -564,7 +549,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
-            if node.meta["creation_timestamp"] > self.timestamp:
+            if (
+                node.meta["creation_timestamp"] > self.timestamp
+                # placeholders here may have been lazily added by existing objects
+                and node.op != "placeholder"
+            ):
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
@@ -626,7 +615,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def get_submodule(self, keys):
         assert keys
-        obj = self.nn_modules
+        obj: Union[torch.nn.Module, Dict[str, torch.nn.Module]] = self.nn_modules
         for k in keys.split("."):
             if isinstance(obj, dict):
                 obj = obj[k]
@@ -673,7 +662,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
-        options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
@@ -695,10 +683,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tracer = self.root_tracer
 
             if not is_constant_source(source):
-                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             if get_static_address_type(target) == "guarded":
-                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -714,7 +702,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
+            install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(target), module_key, **options)
@@ -827,9 +815,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         root = FakeRootModule(self.nn_modules)
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
-        val_to_names: OrderedDict[
-            VariableTracker, List[str]
-        ] = collections.OrderedDict()
+        val_to_names: Dict[VariableTracker, List[str]] = {}
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
@@ -1008,9 +994,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
-        for output in rv:
-            self.guards.update(output.guards)
-
         self.create_node(
             "output",
             "output",
@@ -1064,6 +1047,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        assert self.compiler_fn is not None
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
@@ -1310,7 +1294,7 @@ class SubgraphTracer(fx.Tracer):
         # Map from graph input name to its placeholder proxy object, where the
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
-        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+        self.input_name_to_proxy: Dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
@@ -1327,9 +1311,8 @@ class SubgraphTracer(fx.Tracer):
         # - If we are tracing a HigherOrderOperator's body_fn, then we
         # need to keep track of what free variables were lifted so we can
         # rewrite the HigherOrderOperator call using the traced body_fn.
-        # This is a OrderedDict so that we can
-        # maintain the order of args for the HigherOrderOperator call.
-        self.lifted_freevars = collections.OrderedDict()
+        # Dicts maintain the order of args for the HigherOrderOperator call.
+        self.lifted_freevars = {}
         self.prev_inst = None
 
         self._cur_code = None
