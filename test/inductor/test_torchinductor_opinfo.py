@@ -3,7 +3,6 @@ import atexit
 import contextlib
 import functools
 import os
-import sys
 import unittest
 from collections import defaultdict
 from enum import Enum
@@ -13,7 +12,6 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -42,20 +40,15 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    HAS_CPU,
+    HAS_CUDA,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
-try:
-    try:
-        from .test_torchinductor import check_model, check_model_cuda
-    except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
-except (unittest.SkipTest, ImportError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -623,4 +616,6 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()
