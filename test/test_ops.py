@@ -675,10 +675,7 @@ class TestCommon(TestCase):
         for sample in samples:
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
-            # gh-110790: Don't use functools partial here. It's currently bugged under Dynamo.
-
-            def op_out(out):
-                return op(sample.input, *sample.args, **sample.kwargs, out=out)
+            op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
 
             # Short-circuits if output is not a single tensor or an
             #   iterable of tensors

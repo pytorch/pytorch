@@ -94,8 +94,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
         # For lambdas, try to get their defining name in the module
         try:
             name = inspect.getsource(func).split("=")[0].strip()
-        except Exception:
-            raise RuntimeError("Unable to represent lambda")
+        except Exception as e:
+            raise RuntimeError("Unable to represent lambda") from e
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     # Fixup segment_reduce mismatch
