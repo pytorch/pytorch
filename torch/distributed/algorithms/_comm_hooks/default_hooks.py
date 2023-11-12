@@ -148,7 +148,8 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Opt
 
 def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None):
     r"""
-    Implement FSDP communication hook for a simple gradient compression approach that casts ``grad`` to half-precision floating-point format.
+    Implement FSDP communication hook for a simple gradient compression approach .
+    Casts ``grad`` to half-precision floating-point format.
 
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.gradient_predivide_factor``, and after a communication step (``all_reduce`` or ``reduce_scatter``)
