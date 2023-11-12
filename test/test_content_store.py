@@ -67,7 +67,6 @@ class TestContentStore(TestCase):
         for _ in range(4):
             hash_storage(torch.tensor(2, device=device).untyped_storage())
 
-
     @skipIfRocm
     def test_load_tensor(self, device):
         with tempfile.TemporaryDirectory() as loc:
