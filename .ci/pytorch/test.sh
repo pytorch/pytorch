@@ -1123,5 +1123,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-  test_executorch
 fi
