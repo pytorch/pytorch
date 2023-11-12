@@ -800,8 +800,7 @@ def detect_fake_mode(inputs: Any = None):
 
     fake_modes = []
 
-    context = TracingContext.get()
-    if context is not None:
+    if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
             fake_modes.append((fake_mode, "tracing context", 0))
