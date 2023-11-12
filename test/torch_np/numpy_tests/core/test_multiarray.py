@@ -3017,7 +3017,6 @@ class TestBinop(TestCase):
         assert_equal(b, 3)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
 class TestSubscripting(TestCase):
     def test_test_zero_rank(self):
         x = np.array([1, 2, 3])
