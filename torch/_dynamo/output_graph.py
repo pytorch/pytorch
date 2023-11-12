@@ -930,8 +930,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert self.should_exit
         nodes = list(self.graph.nodes)
         for node in nodes:
-            if "creation_timestamp" in node.meta:
-                del node.meta["creation_timestamp"]
+            node.meta.pop("creation_timestamp", None)
 
         grad_enabled = torch.is_grad_enabled()
         for node1, node2 in zip(nodes, nodes[1:]):
