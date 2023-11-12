@@ -356,7 +356,7 @@ def capture_pre_autograd_graph(
     if kwargs is None:
         kwargs = {}
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
             constraints=constraints,
@@ -512,7 +512,7 @@ def _export_to_torch_ir(
     if isinstance(f, ExportedProgram):
         f = f.module()
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):

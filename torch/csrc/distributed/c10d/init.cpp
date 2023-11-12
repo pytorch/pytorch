@@ -825,7 +825,8 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
@@ -858,7 +859,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ScatterOptions::asyncOp);
 
   py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
       .def(py::init<>())
@@ -2659,6 +2661,10 @@ Example::
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
+#ifdef USE_C10D_NCCL
+  module.attr("_DEFAULT_PG_NCCL_TIMEOUT") =
+      py::cast(::c10d::kProcessGroupNCCLDefaultTimeout);
+#endif
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   module.def(
