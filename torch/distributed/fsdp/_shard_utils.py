@@ -32,8 +32,10 @@ def _create_chunk_sharded_tensor(
     device: Optional[torch.device] = None,
 ) -> ShardedTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
-    corresponding chunk as the local shard to create a ShardedTensor.
+    Shard a tensor to chunks along the first dimension.
+
+    The local rank will gets its corresponding chunk as the local shard
+    to create a ShardedTensor.
     """
     chunks = tensor.chunk(world_size, dim=0)
     if len(chunks) > rank:
@@ -87,8 +89,10 @@ def _create_chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
-    corresponding chunk as the local tensor to create a DTensor.
+    Shard a tensor to chunks along the first dimension.
+
+    The local rank will gets its corresponding chunk as
+    the local tensor to create a DTensor.
     """
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     tensor = tensor.clone().detach()
@@ -109,9 +113,7 @@ def _all_gather_dtensor(
     tensor: DTensor,
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
-    """
-    All gather a DTensor in its sharded dimension and return the local tensor.
-    """
+    """All gather a DTensor in its sharded dimension and return the local tensor."""
     assert parent_mesh is None
 
     placements = list(copy.deepcopy(tensor.placements))
