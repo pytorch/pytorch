@@ -610,14 +610,11 @@ class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
         # True if using default OrderedDict.__init__ and did not implement __post_init__
-        if (
+        return (
             issubclass(cls, collections.OrderedDict)
             and cls.__init__ is collections.OrderedDict.__init__
-            and cls.__getitem__ is collections.OrderedDict.__getitem__
-            and cls.__setitem__ is collections.OrderedDict.__setitem__
             and not hasattr(cls, "__post_init__")
-        ):
-            return True
+        )
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -628,7 +625,7 @@ class CustomizedDictVariable(ConstDictVariable):
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
         # avoid tracing when returning ModelOutput from forward func
-        for attr_name in ("__init__", "__setattr__", "__setitem__"):
+        for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
                 assert callable(fn), f"expect callable attr {attr_name}"
@@ -639,10 +636,10 @@ class CustomizedDictVariable(ConstDictVariable):
             # CustomDict() init with empty arguments
             raw_items = collections.OrderedDict()
         elif not args:
-            # CustomDict(a=1, b=2) in the general (non-dataclass) case.
+            # CustomDict(a=1, b=2) init with keyword arguments
             raw_items = collections.OrderedDict(kwargs)
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
-            # CustomDict({'a': 1, 'b': 2})
+            # CustomDict({'a': 1, 'b': 2}) with a dict literal argument
             raw_items = args[0].items
         else:
             unimplemented("custom dict init with args/kwargs unimplemented")
@@ -697,6 +694,13 @@ class CustomizedDictVariable(ConstDictVariable):
         ):
             # for python dict method without overridden
             return super().call_method(tx, name, args, kwargs)
+        elif name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
+            # for user overridden method
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=source, **options),
+                [self] + list(args),
+                kwargs,
+            )
 
         unimplemented("custom dict: call_method unimplemented name=%s", name)
 
