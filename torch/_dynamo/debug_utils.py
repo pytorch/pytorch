@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 import copy
 import functools
 import getpass
@@ -9,7 +11,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -489,8 +491,10 @@ def backend_accuracy_fails(
 
 
 def _stride_or_default(
-    stride: Optional[Sequence[int]], *, shape: Sequence[int]
-) -> Sequence[int]:
+    stride: Optional["torch._prims_common.StrideType"],
+    *,
+    shape: "torch._prims_common.ShapeType",
+) -> "torch._prims_common.StrideType":
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 

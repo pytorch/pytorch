@@ -1,9 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import functools
 import gc
-import importlib
-import sys
 import unittest
 import warnings
 
@@ -18,35 +15,15 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
-    IS_CI,
     IS_LINUX,
-    IS_WINDOWS,
     skipIfRocm,
-    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA, requires_multigpu
 from torch.utils._python_dispatch import TorchDispatchMode
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
-)
 
 
 def cdata(t):
@@ -461,6 +438,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del out3
             gc.collect()
             self.assertEqual(all_live_block_count(), 0)
+
+        @torch._inductor.config.patch("freezing", True)
+        def test_constant_output(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = torch.nn.Parameter(
+                        torch.tensor([float(i) for i in range(10)], device="cuda")
+                    )
+
+                def forward(self, inp):
+                    return self.param, self.param[0:2], inp + 2
+
+            inp = torch.tensor([2], device="cuda")
+            m = Mod()
+            with torch.no_grad():
+                out_eager = m(inp)
+
+                m_comp = torch.compile(m)
+                for _ in range(3):
+                    self.assertEqual(out_eager, m_comp(inp))
 
         def test_live_outputs_multiple_graphs(self):
             def foo(x):
@@ -1289,12 +1287,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if not TEST_CUDA_GRAPH:
-        if __name__ == "__main__":
-            sys.exit(0)
-        raise unittest.SkipTest("cuda graph test is skipped")
-
-    if HAS_CPU or HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests(cudagraphs=True)

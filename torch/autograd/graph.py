@@ -24,7 +24,7 @@ __all__ = [
 class Node(abc.ABC):
     @abc.abstractmethod
     def name(self) -> str:
-        r"""Returns the name.
+        r"""Return the name.
 
         Example::
 
@@ -44,7 +44,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def metadata(self) -> dict:
-        r"""Returns the metadata."""
+        r"""Return the metadata."""
         ...
 
     @abc.abstractmethod
@@ -53,7 +53,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def register_hook(self, fn: Callable[..., Any]) -> RemovableHandle:
-        r"""Registers a backward hook.
+        r"""Register a backward hook.
 
         The hook will be called every time a gradient with respect to the
         Node is computed. The hook should have the following signature::
@@ -91,7 +91,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def register_prehook(self, fn: Callable[..., Any]) -> RemovableHandle:
-        r"""Registers a backward pre-hook.
+        r"""Register a backward pre-hook.
 
         The hook will be called every time a gradient with respect to the
         Node is computed. The hook should have the following signature::
@@ -144,8 +144,9 @@ you can do ``edge = autograd.graph.get_gradient_edge(tensor)``.
 
 
 def get_gradient_edge(tensor):
-    """This function can be used to get the gradient edge where the gradient of
-    the given Tensor will be computed. In particular, it is equivalent to call
+    """Get the gradient edge for computing the gradient of the given Tensor.
+
+    In particular, it is equivalent to call
     ``g = autograd.grad(loss, input)`` and ``g = autograd.grad(loss, get_gradient_edge(input))``.
     """
     if not tensor.requires_grad:
@@ -163,10 +164,10 @@ def get_gradient_edge(tensor):
 
 
 def increment_version(tensor):
-    """This function can be used to let autograd know that a given Tensor was modified
-    inplace to enable more accurate error checking within the autograd engine.
+    """Update autograd metadata tracking whether the given Tensor was modified in place.
 
-    This is already done automatically by PyTorch functions and within custom Function
+    This is to enable more accurate error checking within the autograd engine.
+    It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
@@ -258,8 +259,7 @@ class saved_tensors_hooks:
 
 
 class save_on_cpu(saved_tensors_hooks):
-    """Context-manager under which tensors saved by the forward pass will be
-    stored on cpu, then retrieved for backward.
+    """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieved for backward.
 
     When performing operations within this context manager, intermediary
     results saved in the graph during the forward pass will be moved to CPU,
@@ -362,7 +362,7 @@ def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
     fn: Callable[[Sequence[Optional[torch.Tensor]]], None],
 ):
-    r"""Registers a multi-grad backward hook.
+    r"""Register a multi-grad backward hook.
 
     The hook will be called after gradients with respect to every tensor in
     :attr:`tensors` have been computed. If a tensor is in :attr:`tensors` but
@@ -585,7 +585,7 @@ class _AllowMutationOnSavedContext:
 
 @contextlib.contextmanager
 def allow_mutation_on_saved_tensors():
-    """Context manager under which mutating tensors saved for backward is allowed
+    """Context manager under which mutating tensors saved for backward is allowed.
 
     Under this context manager, tensors saved for backward are cloned on mutation,
     so the original version can still be used during backward. Normally, mutating a tensor
