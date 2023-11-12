@@ -474,7 +474,7 @@ class KLDivLoss(_Loss):
 
 
 class MSELoss(_Loss):
-    r"""Creates a mean squared (squared L2 norm) error that measures the element-wise squared difference the input :math:`x` and target :math:`y`.
+    r"""Creates a mean squared error that measures the element-wise squared difference the input :math:`x` and target :math:`y`.
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
