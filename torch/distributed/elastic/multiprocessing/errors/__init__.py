@@ -324,6 +324,7 @@ def record(
                    typically this is the main method.
 
     Example
+
     ::
 
      @record
