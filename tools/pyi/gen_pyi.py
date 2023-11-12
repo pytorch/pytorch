@@ -996,10 +996,11 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
+            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) ->Tensor: ...",
+                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
                 "def new(self, storage: Storage) -> Tensor: ...",
                 "def new(self, other: Tensor) -> Tensor: ...",
                 f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
@@ -1093,19 +1094,15 @@ def gen_pyi(
             "is_ipu": ["is_ipu: _bool"],
             "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
-                "def to(self, dtype: _dtype, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
-                "def to({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: Optional[Union[_device, str]] = None",
-                            "dtype: Optional[_dtype] = None",
-                            "non_blocking: _bool = False",
-                            "copy: _bool = False",
-                        ]
-                    )
-                ),
-                "def to(self, other: Tensor, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
+                (
+                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
+                )
+                for args in [
+                    "dtype: _dtype",
+                    "device: Optional[Union[_device, str]] = None, dtype: Optional[_dtype] = None",
+                    "other: Tensor",
+                ]
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
