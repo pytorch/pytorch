@@ -60,6 +60,14 @@ class TestContentStore(TestCase):
         # Should not raise an error
         hash_storage(torch.tensor(2, device=device).untyped_storage())
 
+    @torch._dynamo.config.patch(cache_size_limit=1)
+    def test_repeated_hash(self, device):
+        # Test that repeated hashing doesn't trigger a recompile in dynamo
+        # If it does, we will execute prims.xor_sum in eager which fails
+        for _ in range(4):
+            hash_storage(torch.tensor(2, device=device).untyped_storage())
+
+
     @skipIfRocm
     def test_load_tensor(self, device):
         with tempfile.TemporaryDirectory() as loc:
