@@ -81,6 +81,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 class Tensor(torch._C.TensorBase):
     _dynamo_static_input_type: str  # Set in `mark_static_address`
     _dynamo_dynamic_indices: Set[int]  # Set in `mark_dynamic`
+    _is_param: bool  # Set on torch.nn.Parameter instances
 
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
