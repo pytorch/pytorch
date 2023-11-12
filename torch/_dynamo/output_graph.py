@@ -1476,12 +1476,11 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
+                for field in fx.proxy._COPY_META_FIELDS:
+                    if field in meta:
+                        rv.node.meta[field] = meta[field]
                 if "stack_trace" in meta:
                     rv.node.meta["stack_trace"] = meta["stack_trace"]
-                if "nn_module_stack" in meta:
-                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
-                if "source_fn_stack" in meta:
-                    rv.node.meta["source_fn_stack"] = meta["source_fn_stack"]
 
         if not is_retracing:
             if "nn_module_stack" not in rv.node.meta:
