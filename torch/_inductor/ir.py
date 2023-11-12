@@ -3823,6 +3823,7 @@ class ExternKernelAlloc(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.abi_compatible_kernel = None
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
@@ -3904,7 +3905,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, _ = self.get_kernel_and_configs()
-        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+        # If we are autotuning, not all arguments will be passed
+        self.ordered_kwargs_for_cpp_kernel = [
+            arg for arg in kernel.arg_names if arg in kernel_args
+        ]
 
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
@@ -4302,7 +4306,6 @@ class FallbackKernel(ExternKernelAlloc):
                 self.kernel = (
                     f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
                 )
-        self.abi_compatible_kernel = None
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.kernel)
