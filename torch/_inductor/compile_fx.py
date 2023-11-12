@@ -1119,7 +1119,7 @@ def compile_fx(
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
-            context = torch._guards.TracingContext.get()
+            context = torch._guards.TracingContext.try_get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = (
