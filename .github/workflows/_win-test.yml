@@ -114,6 +114,13 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
         # checks for labels and re-enabled test issues.  It does not actually do
@@ -123,6 +130,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
@@ -153,6 +161,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -187,13 +196,6 @@ jobs:
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*_toprint.log || true
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stop monitoring script
         if: always() && steps.monitor-script.outputs.monitor-script-pid

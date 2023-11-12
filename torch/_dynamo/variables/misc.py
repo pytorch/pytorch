@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -12,7 +13,7 @@ import torch._numpy as tnp
 from .. import config, polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
@@ -90,16 +91,13 @@ class SuperVariable(VariableTracker):
         # special when it comes to finding sources. Compared to other VTs, super
         # requires the attr name to walk the mro and find the actual source (and
         # not just AttrSource).
-        options = VariableTracker.propagate(self, self.objvar, self.typevar)
         value, source = self._resolved_getattr_and_source(self, name)
         if not variables.ConstantVariable.is_literal(value):
-            return GetAttrVariable(self, name, **options)
+            return GetAttrVariable(self, name)
         if source:
-            options["source"] = source
-            return variables.ConstantVariable.create(value, **options).add_guard(
-                source.make_guard(GuardBuilder.CONSTANT_MATCH)
-            )
-        return variables.ConstantVariable.create(value, **options)
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+            return variables.ConstantVariable.create(value, source=source)
+        return variables.ConstantVariable.create(value)
 
     def call_method(
         self,
@@ -108,71 +106,10 @@ class SuperVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(
-            self, args, kwargs.values(), self.objvar, self.typevar
-        )
         inner_fn, source = self._resolved_getattr_and_source(self, name)
 
-        # This variable is True when it corresponds to user code such as
-        #
-        #   super().__torch_function__(...)
-        #
-        # and the super().__torch_function__ attribute resolves
-        # to torch.Tensor.__torch_function__.
-        is_original_tensor_torch_function = (
-            name == "__torch_function__"
-            # for now, only support one level of inheritance
-            and len(self.objvar.value.__mro__) > 1
-            and self.objvar.value.__mro__[1] == torch.Tensor
-        )
-        if is_original_tensor_torch_function:
-            # Instead of tracing inside torch.Tensor.__torch_function__,
-            # record the `call_function` or `call_method` call into the graph.
-            from . import ConstantVariable, ConstDictVariable, TorchVariable
-            from .builder import wrap_fx_proxy
-
-            original_torch_or_getattr_variable = args[0]
-            new_args = args[2].items
-            # TODO (mlazos): this is a hack to handle kwargs properly for a test
-            # we assume that kwargs is either a dict or None.
-            # Rather than inserting the base torch function impl into the graph
-            # we should trace it properly. We should be able to remove all of this
-            # code starting from "is_original_tensor_torch_function" above.
-            if not isinstance(args[3], ConstantVariable):
-                new_kwargs = args[3].items
-                options = VariableTracker.propagate(self, new_args, new_kwargs)
-            else:
-                new_kwargs = ConstDictVariable(dict(), dict).items
-                options = VariableTracker.propagate(self, new_args, [args[3]])
-            # Disable __torch_function__ here to prevent the clone of the
-            # example tensor from going into the override.
-            with torch._C.DisableTorchFunctionSubclass():
-                if isinstance(args[0], TorchVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_function",
-                            original_torch_or_getattr_variable.value,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                elif isinstance(args[0], GetAttrVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_method",
-                            original_torch_or_getattr_variable.name,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                else:
-                    unimplemented(
-                        f"GetAttrVariable.call_function original __torch_function__ {args}"
-                    )
-        elif inner_fn is object.__init__:
-            return LambdaVariable(identity, **options)
+        if inner_fn is object.__init__:
+            return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew
@@ -182,7 +119,6 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
                     objvar,
                     "__call_nn_module_init",
@@ -193,11 +129,11 @@ class SuperVariable(VariableTracker):
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
-                inner_fn, source=source, **options
+                inner_fn, source=source
             ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source, **options
+                inner_fn.__func__, self.objvar, source=source
             ).call_function(tx, args, kwargs)
         elif (
             inner_fn is collections.OrderedDict.__getitem__
@@ -223,18 +159,11 @@ class SuperVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
 
-            newval = collections.OrderedDict(self.objvar.items)
+            newval = dict(self.objvar.items)
             newval[k] = args[1]
-
-            new_rec_contains = self.objvar.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self.objvar,
-                self.objvar.modifed(newval, new_rec_contains, **options),
+                self.objvar.modifed(newval),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -470,7 +399,10 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            bwd_args = [ctx, speculated_fwd_result]
+            if isinstance(speculated_fwd_result, variables.TupleVariable):
+                bwd_args = [ctx, *speculated_fwd_result.items]
+            else:
+                bwd_args = [ctx, speculated_fwd_result]
             safe_or_raise_always_restore(
                 tx,
                 graph_checkpoint,
@@ -490,16 +422,20 @@ class AutogradFunctionVariable(VariableTracker):
                 fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        else:
+            source = None
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
-            return variables.UserFunctionVariable(fn, **options).call_function(
+            return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
             )
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                fn.__func__, variables.UserDefinedClassVariable(self.fn_cls), **options
+                fn.__func__,
+                variables.UserDefinedClassVariable(self.fn_cls),
+                source=source,
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(
@@ -507,8 +443,7 @@ class AutogradFunctionVariable(VariableTracker):
             )
 
     def call_function(self, tx, args, kwargs):
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
+        return AutogradFunctionVariable(self.fn_cls)
 
     def call_method(
         self,
@@ -518,8 +453,7 @@ class AutogradFunctionVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ):
         if name == "apply":
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            return self.call_apply(tx, args, kwargs).add_options(options)
+            return self.call_apply(tx, args, kwargs)
         elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
@@ -557,34 +491,58 @@ class AutogradFunctionVariable(VariableTracker):
             unimplemented(f"Unsupported method: {name}")
 
 
+@dataclasses.dataclass
+class SavedTensorBox:
+    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+
+
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
-        saved_tensors = kwargs.pop("_saved_tensors", [])
+    _nonvar_fields = {
+        "proxy",
+        "inference",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        inference=False,
+        proxy=None,
+        saved_tensors=None,
+        **kwargs,
+    ):
         super().__init__(value=value, value_type=value_type, **kwargs)
-        self._saved_tensors = saved_tensors
         self.inference = inference
+        self.proxy = proxy
+        self.saved_tensors = saved_tensors
 
     @staticmethod
     def create(tx):
-        out = tx.output.side_effects.track_object_new(
-            None,
-            torch.autograd.function.FunctionCtx,
-            functools.partial(AutogradFunctionContextVariable, inference=True),
-            {},
-        )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
+        out = tx.output.side_effects.track_object_new(
+            None,
+            torch.autograd.function.FunctionCtx,
+            functools.partial(
+                AutogradFunctionContextVariable,
+                inference=True,
+                proxy=proxy,
+                saved_tensors=SavedTensorBox(),
+            ),
+            {},
+        )
         proxy.node.meta["example_value"] = out.value
-
-        out.proxy = proxy
         return out
 
     def as_proxy(self):
+        if self.proxy is None:
+            unimplemented("proxy not set")
         return self.proxy
 
     def call_method(
@@ -596,28 +554,26 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
+        if self.saved_tensors is None:
+            unimplemented(
+                "save_for_backward only supported on a newly constructed FunctionCtx"
+            )
 
         if not self.inference:
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        if not hasattr(self, "_saved_tensors"):
-            self._saved_tensors = []
         for arg in args:
-            # as_proxy can return constant values or other non proxy values
-            if isinstance(arg.as_proxy(), torch.fx.Proxy):
-                arg.as_proxy().node.meta["saved_tensor_marked"] = True
-            self._saved_tensors.append(arg)
-        return variables.ConstantVariable.create(None, **options)
+            self.saved_tensors.tensors.append(arg)
+        return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
-        if name == "saved_tensors":
-            return variables.TupleVariable(list(self._saved_tensors))
+            )
+        if name == "saved_tensors" and self.saved_tensors is not None:
+            return variables.TupleVariable(list(self.saved_tensors.tensors))
         return super().var_getattr(tx, name)
 
 
@@ -629,7 +585,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs).add_options(self)
+        return self.fn(*args, **kwargs)
 
 
 class GetAttrVariable(VariableTracker):
@@ -668,7 +624,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def call_method(
         self,
@@ -684,7 +640,6 @@ class GetAttrVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
-                **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -768,26 +723,12 @@ class SkipFilesVariable(VariableTracker):
     ) -> "VariableTracker":
         from .builtin import BuiltinVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict and (
-            len(args) == 0
-            or len(args) == 1
-            and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
-        ):
-            if len(args) == 0:
-                args = dict(kwargs) if kwargs else None
-            else:
-                args = args[0]
-
-            return BuiltinVariable.call_dict_helper(
-                tx,
-                collections.OrderedDict,
-                args,
-                **options,
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
             )
         elif (
             self.value is collections.defaultdict
@@ -799,7 +740,6 @@ class SkipFilesVariable(VariableTracker):
                 collections.defaultdict,
                 args[0],
                 mutable_local=MutableLocal(),
-                **options,
             )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
@@ -812,7 +752,7 @@ class SkipFilesVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal(), **options
+                value, mutable_local=MutableLocal()
             )
         elif (
             self.value is itertools.product
@@ -822,10 +762,8 @@ class SkipFilesVariable(VariableTracker):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = []
             for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is itertools.chain
             and not kwargs
@@ -835,9 +773,7 @@ class SkipFilesVariable(VariableTracker):
             items = []
             for item in itertools.chain(*seqs):
                 items.append(item)
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
 
@@ -881,9 +817,7 @@ class SkipFilesVariable(VariableTracker):
                         )
                 items.append(acc)
 
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is itertools.combinations
             and not kwargs
@@ -896,10 +830,8 @@ class SkipFilesVariable(VariableTracker):
 
             items = []
             for item in itertools.combinations(iterable, r):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is functools.wraps
             and not kwargs
@@ -912,7 +844,7 @@ class SkipFilesVariable(VariableTracker):
                     return fn.clone(wraps_source=args[0].source)
                 unimplemented(f"functools.wraps({fn})")
 
-            return variables.LambdaVariable(wraps, **options)
+            return variables.LambdaVariable(wraps)
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
@@ -920,9 +852,7 @@ class SkipFilesVariable(VariableTracker):
                 items = args[0].unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -932,19 +862,23 @@ class SkipFilesVariable(VariableTracker):
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs, **options
+                fn, args=rest_args, keywords=kwargs
             )
         elif self.value is itertools.repeat:
-            from .builder import SourcelessBuilder
-
             if len(args) < 2:
-                # We cannot risk infinite generator being consumed to exhaustion by dynamo
-                # (i.e. infinite loop)
-                unimplemented("Infinite repeat is not supported")
+                return variables.RepeatIteratorVariable(
+                    *args, mutable_local=MutableLocal()
+                )
+
+            from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
             )
+        elif self.value is itertools.count:
+            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
+        elif self.value is itertools.cycle:
+            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -970,7 +904,6 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
-                **VariableTracker.propagate(self, args),
             )
         unimplemented("typing")
 
@@ -1017,7 +950,6 @@ class NumpyVariable(VariableTracker):
 
         from .tensor import NumpyNdarrayVariable
 
-        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
         if self.value.__name__ == "dtype":
             unimplemented(
@@ -1031,6 +963,14 @@ class NumpyVariable(VariableTracker):
                     " Please file an issue to request support for this function."
                 )
 
+            if (
+                func.__module__ == "torch._numpy.random"
+                and config.use_numpy_random_stream
+            ):
+                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
+                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                unimplemented(msg)
+
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
             proxy = tx.output.create_proxy(
@@ -1038,7 +978,7 @@ class NumpyVariable(VariableTracker):
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
+            return NumpyNdarrayVariable.create(tx, proxy)
 
     def call_method(
         self,

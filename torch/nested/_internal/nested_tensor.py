@@ -2,7 +2,7 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
-from torch.fx.experimental.symbolic_shapes import is_symbolic
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
             torch.jagged,
             values.device,
             False,
-            False,
+            kwargs.get("requires_grad", False),
             "sizes",
             False,
             True,  # dispatch_layout
@@ -164,7 +164,7 @@ class NestedTensor(torch.Tensor):
         # propagated the meta["ragged_size"] which is still a symint and the
         # subclass is responsible for making sure that the symint doesn't leak.
         #
-        if not any(any(is_symbolic(s) for s in x.shape) for x in (values, offsets)):
+        if not has_free_symbols(values) and not has_free_symbols(offsets):
             # Note that we cannot simply check if is_fake(values) because
             # during aot autograd, FunctionalTensors are not fake but hold
             # symbolic sizes.

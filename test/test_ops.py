@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
@@ -78,7 +79,7 @@ from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
 
-from torch.utils._pytree import tree_flatten
+import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
 assert torch.get_default_dtype() == torch.float32
@@ -103,7 +104,6 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
-_ops_and_refs = op_db + python_ref_db
 
 def reduction_dtype_filter(op):
     if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
@@ -118,7 +118,7 @@ def reduction_dtype_filter(op):
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
 # then they do not need to be compared to each other
-_ops_and_refs_with_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
+_ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
@@ -375,7 +375,7 @@ class TestCommon(TestCase):
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
             torch_result = op.torch_opinfo(sample.input, *sample.args, **sample.kwargs)
 
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
+            for a, b in zip(pytree.tree_leaves(ref_result), pytree.tree_leaves(torch_result)):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
                     if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
@@ -443,11 +443,11 @@ class TestCommon(TestCase):
                 return actual_error
 
             ref_distance = 0
-            for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
+            for a, b in zip(pytree.tree_leaves(ref_result), pytree.tree_leaves(precise_result)):
                 ref_distance = ref_distance + _distance(a, b)
 
             torch_distance = 0
-            for a, b in zip(tree_flatten(torch_result)[0], tree_flatten(precise_result)[0]):
+            for a, b in zip(pytree.tree_leaves(torch_result), pytree.tree_leaves(precise_result)):
                 torch_distance = torch_distance + _distance(a, b)
 
             # TODO: consider adding some tolerance to this comparison
@@ -650,8 +650,10 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
+    @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
+        if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
+            self.skipTest("flaky")
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
         if len(supported_dtypes) == 0:
@@ -788,7 +790,7 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
@@ -980,14 +982,14 @@ class TestCommon(TestCase):
                         op_out(out=out)
 
 
-    @ops(filter(reduction_dtype_filter, _ops_and_refs), dtypes=(torch.int16,))
+    @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
         def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
             out = None
             try:
                 if with_out:
                     out = torch.empty(0, dtype=torch.int32, device=device)
-                    op_to_test(inputs, out=out, *args, **kwargs)
+                    op_to_test(inputs, *args, out=out, **kwargs)
                 else:
                     out = op_to_test(inputs, *args, **kwargs)
                 self.assertFalse(expectFail)
@@ -2067,7 +2069,7 @@ class TestFakeTensor(TestCase):
 
 
                 for fake_out, real_out in zip(
-                    tree_flatten(res_fake)[0], tree_flatten(res)[0]
+                    pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
@@ -2115,13 +2117,13 @@ class TestFakeTensor(TestCase):
 
                 if torch.Tag.pointwise in func.tags:
                     shapes = []
-                    for inp in tree_flatten((args, kwargs)):
+                    for inp in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(inp, torch.Tensor):
                             shapes.append(inp.shape)
 
                     out_shape = torch._refs._broadcast_shapes(*shapes)
 
-                    for out_elem in tree_flatten(out):
+                    for out_elem in pytree.tree_leaves(out):
                         if isinstance(out_elem, torch.Tensor):
                             test_self.assertEqual(out_elem.shape, out_shape)
 
@@ -2198,6 +2200,15 @@ class TestFakeTensor(TestCase):
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
+
+    @ops([op for op in ops_and_refs if op.is_factory_function])
+    def test_strided_layout(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            kwargs = sample.kwargs.copy()
+            kwargs['layout'] = torch.strided
+            strided_result = op(sample.input, *sample.args, **kwargs)
+            self.assertEqual(strided_result.layout, torch.strided)
 
 
 instantiate_device_type_tests(TestCommon, globals())

@@ -4,6 +4,7 @@ import collections
 import contextlib
 import enum
 import functools
+import getpass
 import inspect
 import itertools
 import logging
@@ -22,10 +23,12 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterable,
     List,
     NamedTuple,
     Optional,
+    Protocol,
     Set,
     TypeVar,
     Union,
@@ -100,7 +103,11 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     filtered_events = EventList(
-        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+        ]
     )
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
@@ -226,7 +233,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -373,7 +382,20 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
-def cache_on_self(fn):
+RV = TypeVar("RV", covariant=True)
+
+
+# FIXME this should take in a ParamSpec too
+class CachedFunction(Generic[RV], Protocol):
+    @staticmethod
+    def clear_cache(self) -> None:
+        ...
+
+    def __call__(self, *args, **kwargs) -> RV:
+        ...
+
+
+def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -382,7 +404,12 @@ def cache_on_self(fn):
             setattr(self, key, fn(self))
         return getattr(self, key)
 
-    return wrapper
+    def clear_cache(self):
+        if hasattr(self, key):
+            delattr(self, key)
+
+    wrapper.clear_cache = clear_cache  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
 
 
 def aggregate_origins(node_schedule):
@@ -534,7 +561,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
             return sympy_symbol(key)
         return key
 
-    return expr.xreplace(
+    return sympy.sympify(expr).xreplace(
         {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
     )
 
@@ -585,6 +612,15 @@ instance_descriptor = collections.namedtuple(
     ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
     defaults=[tuple(), tuple(), tuple(), tuple()],
 )
+
+
+@functools.lru_cache(None)
+def cache_dir() -> str:
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
 @contextlib.contextmanager
@@ -686,6 +722,9 @@ class IndentedBuffer:
 
     def prefix(self):
         return " " * (self._indent * self.tabwidth)
+
+    def newline(self):
+        self.writeline("\n")
 
     def writeline(self, line):
         if isinstance(line, LineContext):
@@ -836,10 +875,10 @@ def use_aten_gemm_kernels():
 
 class DebugDirManager:
     counter = itertools.count(0)
+    prev_debug_name: str
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root
@@ -1208,8 +1247,8 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+def has_free_symbols(itr: Iterable[Any]):
+    return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
 def is_dynamic(*args):
@@ -1245,73 +1284,34 @@ class Placeholder(enum.Enum):
 
 
 # A utility function for easier AOTInductor testing
-aot_inductor_launcher = """
-#ifdef USE_CUDA
-    #include <c10/cuda/CUDAStream.h>
-#endif // USE_CUDA
-    #include <torch/csrc/inductor/aoti_runtime/interface.h>
-    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+def aot_inductor_launcher(so_path: str, device: str):
+    if device == "cuda":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
-    class RAIIModelContainer {
-    public:
-        RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-                &container_handle,
-                1 /*num_models*/,
-                false /*is_cpu*/,
-                nullptr /*cubin_dir*/));
-        }
+            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
 
-        ~RAIIModelContainer() {
-            AOTI_RUNTIME_ERROR_CODE_CHECK(
-                AOTInductorModelContainerDelete(container_handle));
-        }
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
 
-        AOTInductorModelContainerHandle get() const {
-            return container_handle;
-        }
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    elif device == "cpu":
+        return f"""
+            #include <torch/csrc/inductor/aoti_model_runner.h>
 
-    private:
-        AOTInductorModelContainerHandle container_handle;
-    };
+            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
 
-    // Global instance
-    RAIIModelContainer model_container;
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
 
-    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
-        auto input_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
-
-        // For outputs, we only allocate a vector to hold returned tensor handles,
-        // not allocating the actual output tensor storage here
-        size_t num_outputs;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerGetNumOutputs(
-                model_container.get(),
-                &num_outputs));
-        std::vector<AtenTensorHandle> output_handles(num_outputs);
-
-#ifdef USE_CUDA
-        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
-        const auto stream_id = cuda_stream.stream();
-        AOTInductorStreamHandle stream_handle =
-            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-#else // !USE_CUDA
-        AOTInductorStreamHandle stream_handle = nullptr;
-#endif
-
-        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            model_container.get(),
-            input_handles.data(),
-            input_tensors.size(),
-            output_handles.data(),
-            output_handles.size(),
-            stream_handle,
-            proxy_executor_handle));
-
-        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-            output_handles.data(), output_handles.size());
-    }
-"""
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    else:
+        raise RuntimeError(f"Unsupported device: {device}")

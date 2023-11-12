@@ -2,11 +2,10 @@
 
 import functools
 import unittest
-from typing import Tuple
 
 import torch
 from torch import Tensor
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._inductor import utils
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -14,7 +13,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 
@@ -82,8 +80,8 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
-    @parametrize("shape", ((15, 3, 13), (4, 2048, 4096)))
-    def test_valid_cast(self, dtype: torch.dtype, shape: Tuple[int]):
+    @parametrize("shape", ("15,3,13", "4,2048,4096"))
+    def test_valid_cast(self, dtype: torch.dtype, shape: str):
         def fp8_cast(x):
             y0 = x.to(dtype=torch.float8_e4m3fn).to(dtype)
             y1 = x.to(dtype=torch.float8_e5m2).to(dtype)
@@ -91,6 +89,7 @@ class TestFP8Types(TestCase):
 
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
 
+        shape = [int(dim) for dim in shape.split(",")]
         x = torch.rand(*shape, device="cuda", dtype=dtype)
         y0_fp8, y1_fp8 = compiled_fp8_cast(x)
 
@@ -125,9 +124,9 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("dst_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize("shape", ((16, 16, 16), (4, 2048, 4096)))
+    @parametrize("shape", ("16,16,16", "4,2048,4096"))
     def test_to_fp8_saturated(
-        self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: Tuple[int]
+        self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
     ):
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
@@ -135,6 +134,7 @@ class TestFP8Types(TestCase):
         compiled_fp8_cast = torch.compile(
             fp8_saturated, backend="inductor", dynamic=True
         )
+        shape = [int(dim) for dim in shape.split(",")]
         x = torch.rand(*shape, device="cuda", dtype=src_dtype)
         y_compiled = compiled_fp8_cast(x, dst_dtype)
         y = fp8_saturated(x, dst_dtype)
@@ -144,10 +144,9 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize(
-        "shape", ((1, 1, 15), (1, 10, 15), (1, 10, 512), (1, 10, 4096), (4, 2048, 4096))
-    )
-    def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: Tuple[int]):
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
+    def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
         def amax_fp8(x: Tensor, scale: Tensor):
@@ -170,12 +169,9 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize(
-        "shape", ((1, 1, 15), (1, 10, 15), (1, 10, 512), (1, 10, 4096), (4, 2048, 4096))
-    )
-    def test_amax_along_with_fp8_quant(
-        self, float8_dtype: torch.dtype, shape: Tuple[int]
-    ):
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
+    def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
         def amax_fp8(x: Tensor, scale: Tensor, amax_buffer: Tensor):
@@ -203,10 +199,12 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize(
-        "shape", ((1, 1, 15), (1, 10, 15), (1, 10, 512), (1, 10, 4096), (4, 2048, 4096))
-    )
-    def test_layernorm_fp8_quant(self, float8_dtype: torch.dtype, shape: Tuple[int]):
+    @parametrize("amax_keep_dim", (True, False))
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
+    def test_layernorm_fp8_quant(
+        self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str
+    ):
+        shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
         def ln_fp8(x: Tensor, scale: Tensor, amax_buffer: Tensor):
@@ -217,7 +215,9 @@ class TestFP8Types(TestCase):
                 bias=None,
                 eps=1e-05,
             )
-            amax_buffer.fill_(torch.amax(torch.abs(x)))
+            amax_buffer.fill_(
+                torch.amax(torch.abs(x), keepdim=amax_keep_dim).reshape(-1)[0]
+            )
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
@@ -241,12 +241,13 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize("shape", ((4, 2048, 4096),))
+    @parametrize("shape", ("4,2048,4096",))
     def test_layernorm_fp8_quant_benchmark(
         self,
         float8_dtype: torch.dtype,
-        shape: Tuple[int],
+        shape: str,
     ):
+        shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
         def ln(x: Tensor):
@@ -300,5 +301,6 @@ class TestFP8Types(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True, skip_rocm=True)
