@@ -1790,7 +1790,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         has_sym_size = False
         for node in gm.graph.nodes:
-            if node.target is torch.ops.aten.sym_size:
+            if node.target is torch.ops.aten.sym_size.int:
                 has_sym_size = True
 
         self.assertTrue(has_sym_size)
@@ -2861,10 +2861,8 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
-        ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
         def f_correct(x):
             a = A()
@@ -3192,19 +3190,19 @@ def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     arg0_1 = arg0
     slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
-    sym_size = torch.ops.aten.sym_size(arg0_1, 0)
-    sub = sym_size - 1
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
-    sym_size_1 = torch.ops.aten.sym_size(arg0_1, 2)
-    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_1);  slice_2 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 2)
+    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int_1);  slice_2 = None
     slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
-    sub_1 = sym_size - 2
+    sub_1 = sym_size_int - 2
     slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
-    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_1);  slice_5 = None
+    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int_1);  slice_5 = None
     slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
-    sub_2 = sym_size - 3;  sym_size = None
+    sub_2 = sym_size_int - 3;  sym_size_int = None
     slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
-    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_1);  slice_8 = sym_size_1 = None
+    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int_1);  slice_8 = sym_size_int_1 = None
     slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
     return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )
@@ -3277,7 +3275,9 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         sin = l_x_.sin();  l_x_ = None
@@ -3286,13 +3286,17 @@ class GraphModule(torch.nn.Module):
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         cos = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        true_guard_code = [
+            "cast_symbool_to_symint_guardless(L['pred']) == 1",
+        ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
             "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",

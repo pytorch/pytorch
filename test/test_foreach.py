@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_reduce_op_db, foreach_other_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, floating_types_and, floating_types, integral_types_and,
 )
@@ -119,7 +119,7 @@ class TestForeach(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/100811
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=(torch.float32,)
     )
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
@@ -131,8 +131,9 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm")
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
     @parametrize(
         "noncontiguous,inplace",
@@ -341,10 +342,10 @@ class TestForeach(TestCase):
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0])]]:
+        for tensors in [[torch.randn([0], device=device, dtype=dtype)]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 
@@ -396,27 +397,27 @@ class TestForeach(TestCase):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
         tensors1 = []
         tensors2 = []
+        ops_to_test = [foreach_op, foreach_op_]
 
         # Empty lists
-        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
-            foreach_op(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
-            foreach_op_(tensors1, tensors2)
+        for fop in ops_to_test:
+            with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
+                fop(tensors1, tensors2)
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device, dtype=dtype))
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-            foreach_op(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-            foreach_op_(tensors1, tensors2)
+        for fop in ops_to_test:
+            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                fop(tensors1, tensors2)
 
         # Lists have different amount of tensors
         tensors2.append(torch.tensor([1], device=device))
         tensors2.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
-            foreach_op(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
-            foreach_op_(tensors1, tensors2)
+        for fop in ops_to_test:
+            with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
+                fop(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
+                fop(tensors2, tensors1)
 
         # Corresponding tensors with different sizes that aren't compatible with broadcast
         # If sizes are different then foreach chooses slow path, thus error messages are expected
@@ -439,10 +440,9 @@ class TestForeach(TestCase):
             tensor1 = torch.zeros(10, 10, device="cuda:0", dtype=dtype)
             tensor2 = torch.ones(10, 10, device="cuda:1", dtype=dtype)
             if dtype == torch.bool and foreach_op == torch._foreach_sub:
-                with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
-                    foreach_op([tensor1], [tensor2])
-                with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
-                    foreach_op_([tensor1], [tensor2])
+                for fop in ops_to_test:
+                    with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
+                        fop([tensor1], [tensor2])
                 return
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 foreach_op([tensor1], [tensor2])
@@ -657,7 +657,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         dtypes=(torch.float,),
     )
     def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
@@ -681,7 +681,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
@@ -700,7 +700,7 @@ class TestForeach(TestCase):
     @ops(
         filter(
             lambda op: op.backward_requires_result,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         ),
         dtypes=(torch.float32,),
     )
@@ -809,7 +809,7 @@ class TestForeach(TestCase):
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
     )

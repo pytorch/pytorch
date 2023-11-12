@@ -271,7 +271,7 @@ def _make_prim(
 
     """
 
-    prim.define(schema)
+    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
