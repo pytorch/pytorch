@@ -131,7 +131,7 @@ def report_compile_source_on_error():
         raise exc.with_traceback(tb_next)  # noqa: TRY200
 
 def shorten_filename(fn, *, base=None):
-    """Shorten a source filepath, under the assumption that anything under torch/ directory is "obvious" and doesn't need to be shown to user."""
+    """Shorten a source filepath, with the assumption that torch/ subdirectories don't need to be shown to user."""
     if base is None:
         base = os.path.dirname(os.path.dirname(__file__))
     # Truncate torch/foo.py to foo.py
@@ -151,7 +151,7 @@ def format_frame(frame, *, base=None, line=False):
     extra_line = ""
     if line:
         extra_line = f"{frame.line}  # "
-    return f"{extra_line}{shorten_filename(frame.filename, base=base)}:{frame.lineno} in {frame.name}"
+    return f"{extra_line}{shorten_filename(frame.filename, base=base)}: {frame.lineno} in {frame.name}"
 
 def format_traceback_short(tb):
     """Format a TracebackType in a short way, printing only the inner-most frame."""
