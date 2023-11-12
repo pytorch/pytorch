@@ -44,6 +44,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    RangeIteratorVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -851,6 +852,12 @@ class BuiltinVariable(VariableTracker):
                     mutable_local=MutableLocal(),
                 )
 
+            if self.fn == iter and isinstance(obj, variables.RangeVariable):
+                return RangeIteratorVariable(
+                    list(obj.unpack_var_sequence(tx)),
+                    range_object=obj.as_python_constant(),
+                    mutable_local=MutableLocal(),
+                )
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
