@@ -919,7 +919,9 @@ def _accumulate_sharded_grad(
 @no_type_check
 def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
     """
-    For no-shard, this runs gradient reduction (which directly covers any gradient accumulation implicitly) and the post-reduction callback.
+    For no-shard, this runs gradient reduction and the post-reduction callback.
+
+    This method directly covers any gradient accumulation implicitly.
     """
     flat_param = handle.flat_param
     if state._comm_hook is None:  # default path
@@ -1551,7 +1553,8 @@ def _get_buffers_and_dtypes_for_computation(
     Return all buffers in the module tree rooted at ``root_module``.
 
     The method also returns a corresponding list of the buffer dtypes for
-    computation. Each buffer dtype is either ``None`` if buffer mixed precision is not enabled or the buffer low precision dtype otherwise.
+    computation. Each buffer dtype is either ``None`` if buffer mixed
+    precision is not enabled or the buffer low precision dtype otherwise.
     """
     _p_assert(state._is_root, "Expects the root to cast buffers")
     buffers: List[torch.Tensor] = []

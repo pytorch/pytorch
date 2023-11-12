@@ -557,7 +557,8 @@ def _sharded_post_state_dict_hook(
     """
     Replace the unshared parameters to sharded parameters.
 
-    The hook replaces the unflattened, unsharded parameter in the state_dict with a unflattened, sharded parameter (a ShardedTensor).
+    The hook replaces the unflattened, unsharded parameter in the
+    state_dict with a unflattened, sharded parameter (a ShardedTensor).
     """
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
@@ -603,7 +604,11 @@ def _sharded_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
-    """Combine the unflattened, sharded parameters (ShardedTensor) to a new FlatParameter and shards the new FlatParameter to the local chunk."""
+    """
+    Combine the unflattened, sharded parameters (ShardedTensor) to a new FlatParameter.
+
+    The method also shards the new FlatParameter to the local chunk.
+    """
     _lazy_init(fsdp_state, module)
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
