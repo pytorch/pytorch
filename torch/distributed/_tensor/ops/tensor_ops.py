@@ -83,6 +83,7 @@ def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         arg_spec = arg_strategy.output_spec
         if is_tensor_partial(arg_spec):
             # if the arg_spec have partial, reshard to replicate
+            # otherwise local shard tensor comparison would be invalid
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
                 placements=tuple(

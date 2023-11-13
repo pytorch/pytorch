@@ -265,6 +265,10 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(dist_tensor_1.equal(dist_tensor_3))
         self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
 
+        # test sharding difference with only some shards content difference
+        self.assertFalse(dist_tensor_2.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
+
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
         dtc = DTensorConverter(mesh, args, kwargs)
