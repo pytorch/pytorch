@@ -5,7 +5,7 @@ from typing import Any, Tuple
 
 import torch
 
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
 
@@ -790,7 +790,7 @@ if torch._C._has_mkldnn:
         is_transposed = conv_node.args[-3]
         if is_transposed:
             # TODO: Support dynamic shape case for MKLDNN conv transpose.
-            if free_symbols(input_size):
+            if has_free_symbols(input_size):
                 return False
             groups = conv_node.args[-1]
             in_channels = weight_meta_value.size(0)
@@ -823,7 +823,9 @@ if torch._C._has_mkldnn:
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
         # for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        if not is_bf16_weight and (free_symbols(batch_size) or (not torch._C.has_mkl)):
+        if not is_bf16_weight and (
+            (not torch._C.has_mkl) or has_free_symbols(batch_size)
+        ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
@@ -900,7 +902,7 @@ if torch._C._has_mkldnn:
                     constant_args.insert(1, args[-2])  # output_padding
                     packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
-                if not free_symbols(input_size):
+                if not has_free_symbols(input_size):
                     packed_weight_inputs = (
                         (args[1],) + tuple(constant_args) + (input_size,)
                     )
@@ -995,7 +997,7 @@ if torch._C._has_mkldnn:
                 weight_dtype = weight.meta.get("val").dtype
                 is_bf16_weight = weight_dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                if free_symbols(batch_size):
+                if has_free_symbols(batch_size):
                     assert (
                         is_bf16_weight
                     ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
@@ -1003,7 +1005,7 @@ if torch._C._has_mkldnn:
                 packed_weight_inputs = (
                     transpose_weight_node,
                     batch_size.node.shape_env.size_hint(batch_size.node.expr)
-                    if free_symbols(batch_size)
+                    if has_free_symbols(batch_size)
                     else batch_size,
                 )
                 packed_weight_op = (

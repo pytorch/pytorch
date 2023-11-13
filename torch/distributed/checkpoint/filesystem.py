@@ -49,9 +49,7 @@ __all__ = [
 
 @dataclass
 class _StorageInfo:
-    """
-    This is the per entry storage info
-    """
+    """This is the per entry storage info."""
 
     relative_path: str
     offset: int
@@ -287,7 +285,7 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with open(file_name, "wb") as stream:
+            with file_name.open("wb") as stream:
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
@@ -330,7 +328,7 @@ class FileSystemWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
     ) -> None:
         """
-        Initialize the writer pointing to `path`
+        Initialize the writer pointing to `path`.
 
         Args:
             path: directory where the checkpoint will be written to.
@@ -342,7 +340,9 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        self.path = Path(path)
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
@@ -438,7 +438,8 @@ class FileSystemWriter(StorageWriter):
         metadata.storage_data = storage_md
         with (self.path / ".metadata.tmp").open("wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
-            os.fsync(metadata_file.fileno())
+            if self.sync_files:
+                os.fsync(metadata_file.fileno())
 
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
@@ -446,7 +447,9 @@ class FileSystemWriter(StorageWriter):
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        self.path = Path(path)
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo):

@@ -38,10 +38,6 @@ basic_gnn_sage,pass,8
 
 
 
-clip,pass_due_to_skip,0
-
-
-
 dcgan,pass,8
 
 

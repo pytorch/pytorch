@@ -1,8 +1,8 @@
 # Owner(s): ["module: inductor"]
 import atexit
+import contextlib
 import functools
 import os
-import sys
 import unittest
 from collections import defaultdict
 from enum import Enum
@@ -12,7 +12,6 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -41,19 +40,15 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    HAS_CPU,
+    HAS_CUDA,
+)
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
-try:
-    try:
-        from .test_torchinductor import check_model, check_model_cuda
-    except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
-except (unittest.SkipTest, ImportError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -202,15 +197,13 @@ inductor_expected_failures_single_sample["cpu"] = {
     },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f16, f32, f64},
-    "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "exponential": {f16},
+    "cross": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
-    "geometric": {f16},
-    "log_normal": {f16},
-    "masked_scatter": {f16, f32, f64},
+    "histc": {f16},
+    "linalg.cross": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -219,42 +212,39 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
-    "uniform": {f16},
     "view_as_complex": {f16},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
     "bernoulli": {f16, f32, f64},
-    "cauchy": {f16},
     "cholesky": {f32, f64},
-    "exponential": {f16},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
-    "geometric": {f16},
-    "log_normal": {f16},
-    "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
 }
+
+
+# intentionally not handled
+intentionally_not_handled = {
+    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
+}
+
+inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -417,6 +407,9 @@ def collection_decorator(fn):
 
 
 class TestInductorOpInfo(TestCase):
+    def tearDown(self):
+        torch._dynamo.reset()
+
     check_model = check_model
     check_model_cuda = check_model_cuda
 
@@ -500,7 +493,19 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-        def do_nopython(fn, args, kwargs):
+        class HasRngOp(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.has_rng_op = False
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                if torch.Tag.nondeterministic_seeded in func.tags:
+                    self.has_rng_op = True
+
+                return func(*args, **kwargs)
+
+        def do_nopython_and_has_rng(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
 
@@ -511,20 +516,38 @@ class TestInductorOpInfo(TestCase):
                         return e
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
-                with mode:
+                with HasRngOp() as rng_mode, mode:
                     with enable_python_dispatcher():
                         fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
-                return False
+                return False, rng_mode.has_rng_op
 
-            return True
+            return True, rng_mode.has_rng_op
+
+        def get_contexts(has_rng_op):
+            if has_rng_op:
+                # TODO - enable this, running into errors
+                return (
+                    # (
+                    #     lambda: torch._inductor.config.patch(
+                    #         {"fallback_random": True, "implicit_fallbacks": True}
+                    #     ),
+                    #     {"assert_equal": True},
+                    # ),
+                    (
+                        contextlib.nullcontext,
+                        {"assert_equal": False},
+                    ),
+                )
+            return ((contextlib.nullcontext, {}),)
 
         try:
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 # UNCOMMENT TO DEBUG SEGFAULTS
+
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -532,40 +555,46 @@ class TestInductorOpInfo(TestCase):
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
 
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "copy_to_cuda": False,
-                        "reference_in_float": False,
-                        "check_gradient": requires_grad,
-                        "check_has_compiled": no_python,
-                        "output_process_fn_grad": sample_input.output_process_fn_grad,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
-                    self.check_model_cuda(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "copy_to_cuda": False,
+                                "reference_in_float": False,
+                                "check_gradient": requires_grad,
+                                "check_has_compiled": no_python,
+                                "output_process_fn_grad": sample_input.output_process_fn_grad,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
+                            self.check_model_cuda(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
                 elif device_type == "cpu":
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "check_has_compiled": no_python,
-                        # skip checking gradient on CPU for now
-                        "check_gradient": False,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "check_has_compiled": no_python,
+                                # skip checking gradient on CPU for now
+                                "check_gradient": False,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
 
-                    self.check_model(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                            self.check_model(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
 
         except Exception as e:
             known_failure = False
@@ -587,4 +616,6 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()

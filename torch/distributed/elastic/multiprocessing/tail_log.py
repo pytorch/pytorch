@@ -12,7 +12,7 @@ import time
 from concurrent.futures._base import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, TextIO
+from typing import Dict, List, Optional, TextIO
 
 __all__ = ["tail_logfile", "TailLog"]
 
@@ -55,7 +55,8 @@ class TailLog:
 
     Each log file's line will be suffixed with a header of the form: ``[{name}{idx}]:``,
     where the ``name`` is user-provided and ``idx`` is the index of the log file
-    in the ``log_files`` mapping.
+    in the ``log_files`` mapping. ``log_line_prefixes`` can be used to override the
+    header for each log file.
 
     Usage:
 
@@ -86,6 +87,7 @@ class TailLog:
         name: str,
         log_files: Dict[int, str],
         dst: TextIO,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
         interval_sec: float = 0.1,
     ):
         n = len(log_files)
@@ -99,6 +101,7 @@ class TailLog:
         self._name = name
         self._dst = dst
         self._log_files = log_files
+        self._log_line_prefixes = log_line_prefixes
         self._finished_events: Dict[int, Event] = {
             local_rank: Event() for local_rank in log_files.keys()
         }
@@ -111,10 +114,13 @@ class TailLog:
             return self
 
         for local_rank, file in self._log_files.items():
+            header = f"[{self._name}{local_rank}]:"
+            if self._log_line_prefixes and local_rank in self._log_line_prefixes:
+                header = self._log_line_prefixes[local_rank]
             self._futs.append(
                 self._threadpool.submit(
                     tail_logfile,
-                    header=f"[{self._name}{local_rank}]:",
+                    header=header,
                     file=file,
                     dst=self._dst,
                     finished=self._finished_events[local_rank],
