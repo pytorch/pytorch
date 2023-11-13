@@ -1526,6 +1526,7 @@ def _new_process_group_helper(
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
             pg = backend_class  # type: ignore[assignment]
+            _world.pg_default_device[pg] = torch.device(device)
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
