@@ -83,7 +83,6 @@ namespace detail {
 template <>
 struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(
       std::shared_ptr<torch::CapturedTraceback>,
       _("torch._C._profiler.CapturedTraceback"));
@@ -159,6 +158,7 @@ int RecordFunctionFast_init(
     PyObject* args,
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
+  // NOLINTNEXTLINE(*-c-arrays*)
   constexpr const char* kwlist[] = {"name", nullptr};
   PyObject* name = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
@@ -307,7 +307,7 @@ void initPythonBindings(PyObject* module) {
                 p.enable_cuda_sync_events,
                 p.performance_events);
           },
-          [](py::tuple t) { // __setstate__
+          [](const py::tuple& t) { // __setstate__
             if (t.size() >= 4) {
               throw std::runtime_error("Expected atleast 4 values in state");
             }
@@ -403,7 +403,9 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Vulkan>>(m, "_ExtraFields_Vulkan");
 
   using allocation_t = ExtraFields<EventType::Allocation>;
@@ -463,9 +465,11 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::OutOfMemory>>(
       m, "_ExtraFields_OutOfMemory");
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
@@ -528,7 +532,7 @@ void initPythonBindings(PyObject* module) {
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", [](py::list tbs) {
+  m.def("symbolize_tracebacks", [](const py::list& tbs) {
     std::vector<CapturedTraceback*> tb_ptrs;
     tb_ptrs.reserve(tbs.size());
     for (py::handle tb : tbs) {
@@ -538,6 +542,7 @@ void initPythonBindings(PyObject* module) {
   });
   installCapturedTracebackPython();
 
+  // NOLINTNEXTLINE(*-c-arrays*)
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
