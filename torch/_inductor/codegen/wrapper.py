@@ -873,9 +873,11 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
+            assert key in kernel.signature.parameters, f"Unknown argument name {key}"
+            param = kernel.signature.parameters[key]
             if (
-                key in kernel.__annotations__
-                and "constexpr" in kernel.__annotations__[key]
+                param.annotation is not inspect.Parameter.empty
+                and "constexpr" in param.annotation
             ):
                 constants[key] = arg
                 continue
