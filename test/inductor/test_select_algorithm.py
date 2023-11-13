@@ -7,13 +7,12 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import skipIfRocm
 
 aten = torch.ops.aten
 
@@ -346,7 +345,6 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
-        run_tests()
+    run_inductor_tests(triton=True, big_gpu=True)
