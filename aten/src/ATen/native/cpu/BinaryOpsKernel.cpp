@@ -14,6 +14,7 @@
 #include <ATen/native/cpu/LogAddExp.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/generic_math.h>
 
 namespace at::native {
 
@@ -218,7 +219,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
-        return div_floor_integer(a, b);
+        return c10::div_floor_integer(a, b);
       });
     });
   } else {
@@ -231,7 +232,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<opmath_t>;
         cpu_kernel_vec(iter,
           [=](scalar_t a) -> scalar_t {
-            return div_floor_floating(static_cast<opmath_t>(a), b);
+            return c10::div_floor_floating(static_cast<opmath_t>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
             return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_floating_vec(x, y); });
@@ -242,7 +243,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<scalar_t>;
         cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
-            return div_floor_floating(a, b);
+            return c10::div_floor_floating(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
             return div_floor_floating_vec(a, b);
