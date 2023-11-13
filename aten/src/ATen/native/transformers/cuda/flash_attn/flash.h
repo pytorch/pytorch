@@ -7,8 +7,7 @@
 #include <cuda.h>
 #include <vector>
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
 
 namespace pytorch_flash{
 
