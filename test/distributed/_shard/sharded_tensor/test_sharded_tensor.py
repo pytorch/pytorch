@@ -1594,7 +1594,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # test ability to move st to CPU
         spec_before_move = st.sharding_spec()
         new_st = st.cpu(process_group=gloo_pg)
-        # return a copy of orginal st
+        # return a copy of original st
         self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
@@ -1626,7 +1626,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
         new_st = st.cpu()
-        # return a copy of orginal st
+        # return a copy of original st
         self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()

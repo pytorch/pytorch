@@ -101,6 +101,7 @@ def _get_allowed_globals():
         torch._utils._rebuild_tensor_v2,
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_nested_tensor,
     ]:
         rc[f"torch._utils.{f.__name__}"] = f
 

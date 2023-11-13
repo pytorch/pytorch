@@ -147,7 +147,7 @@ class TestSelfBinningHistogramBase:
     def test_histogram_min_max_equal(self):
         """This test uses exact value match, so is only relevant for float type."""
         X = np.array([0., 0., 0., 0., 0.], dtype='f')
-        logspacing_start = np.float(1e-24)
+        logspacing_start = np.float64(1e-24)
         self._run_single_op_net([X], 3, logspacing_start)
         if self.bin_spacing == "linear":
             self._check_histogram(

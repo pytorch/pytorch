@@ -53,6 +53,47 @@ void stage_pack_weights(
   utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
 }
 
+/*
+ * Alternative packing of weights such that for a 2D tensor, each texel contains
+ * 4 (or less than 4 in the tail case with zeros padded) data elements from the
+ * tensor that are of the same column/height.
+ */
+template <typename T>
+void stage_pack_2d_weights_with_height(
+    api::Context* const context,
+    vTensor& v_weight,
+    const Tensor& weight,
+    const int64_t src_kh_sz,
+    const int64_t src_kw_sz,
+    const int64_t dst_kh_sz,
+    const int64_t dst_kw_sz) {
+  TORCH_CHECK(weight.is_cpu())
+  const T* const src_weight_ptr = weight.data_ptr<T>();
+  api::StorageBuffer staging(context, at::kFloat, v_weight.gpu_numel());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
+
+    T* dst_weight_ptr = mapping.template data<T>();
+
+    memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+    const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+    for (const auto src_h : c10::irange(src_kh_sz)) {
+      for (const auto src_w : c10::irange(src_kw_sz)) {
+        const int64_t dst_plane_idx = src_h % 4;
+        const int64_t dst_offset =
+            (dst_plane_sz * dst_plane_idx) + ((src_h / 4) * dst_kw_sz) + src_w;
+        const int64_t src_offset = src_h * src_kw_sz + src_w;
+        memcpy(
+            dst_weight_ptr + dst_offset,
+            src_weight_ptr + src_offset,
+            sizeof(float));
+      }
+    }
+  }
+  utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
+}
+
 class LinearPackedContext final : virtual public VulkanPackedContext,
                                   public torch::jit::CustomClassHolder {
  private:

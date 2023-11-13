@@ -1,27 +1,13 @@
 # Owner(s): ["module: inductor"]
-
-import sys
-import unittest
 from unittest import mock
 
 import torch
 
-from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-try:
-    import triton
-except ImportError:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires triton")  # noqa: TRY200
-
+from torch._dynamo.test_case import TestCase
 from torch._inductor import config
 from torch._inductor.coordinate_descent_tuner import CoordescTuner
+from torch.testing._internal.triton_utils import triton
 
-config.benchmark_kernel = True
-config.coordinate_descent_tuning = True
 
 orig_compare_config = CoordescTuner.compare_config
 
@@ -44,6 +30,7 @@ def mock_compare_config_prefer_larger_XBLOCK(
     return orig_compare_config(self, func, candidate_config, best_config, best_timing)
 
 
+@config.patch(benchmark_kernel=True, coordinate_descent_tuning=True)
 class TestCoordinateDescentTuner(TestCase):
     def test_abs_function(self):
         """
@@ -100,5 +87,6 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)

@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _capturable_doc, _differentiable_doc, _foreach_doc, _default_to_fused_or_foreach)
+                        _capturable_doc, _differentiable_doc, _foreach_doc, _default_to_fused_or_foreach, _view_as_real)
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -367,12 +367,7 @@ def _multi_tensor_nadam(params: List[Tensor],
 
         # handle complex
         if has_complex:
-            for i in range(len(grouped_params)):
-                if torch.is_complex(grouped_params[i]):
-                    grouped_params[i] = torch.view_as_real(grouped_params[i])
-                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
-                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
+            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
