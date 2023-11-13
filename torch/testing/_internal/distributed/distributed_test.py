@@ -9795,19 +9795,27 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         def test_ddp_update_process_group(self):
+            def get_num_torch_recompiles():
+                guard_failures = torch._dynamo.utils.guard_failures
+                num_recompiles = [len(guard_failures[code]) for code in guard_failures]
+                return 0 if len(num_recompiles) == 0 else max(num_recompiles)
+
             input = torch.rand(10, 10).cuda(self.rank)
             ddp = torch.nn.parallel.DistributedDataParallel(
                 torch.nn.Linear(10, 10).cuda(self.rank),
                 device_ids=[self.rank],
             )
+            model = torch.compile(ddp)
 
             def run_iteration():
-                out = ddp(input)
+                out = model(input)
                 out.sum().backward()
                 torch.cuda.synchronize()
 
             # Run regular iteration.
             run_iteration()
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
 
             # Now reduce world_size and run iteration.
             group_size_2 = dist.new_group(ranks=[0, 1])
@@ -9848,6 +9856,10 @@ class DistributedTest:
                 rank=self.rank,
                 timeout=timedelta(seconds=default_pg_timeout),
             )
+
+            # Validate no more recompiles.
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
 
 
         @skip_if_lt_x_gpu(2)
