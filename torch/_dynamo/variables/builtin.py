@@ -39,7 +39,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, SetVariable
+from .dicts import ConstDictVariable, DictView, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,

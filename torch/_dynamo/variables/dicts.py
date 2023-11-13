@@ -427,7 +427,6 @@ class DictKeys(DictView):
         args: List["VariableTracker"],
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        # TODO Implement intersect / union
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
