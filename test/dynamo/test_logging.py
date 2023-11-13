@@ -249,9 +249,17 @@ LoweringException: AssertionError:
             logger = logging.getLogger(logger_qname)
 
             if logger_qname in dynamo_qnames:
-                self.assertEqual(logger.getEffectiveLevel(), logging.INFO, msg=f"expected {logger_qname} is INFO, got {logger.level}")
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                )
             else:
-                self.assertEqual(logger.getEffectiveLevel(), logging.DEBUG, msg=f"expected {logger_qname} is DEBUG, got {logger.level}")
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):

@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, Optional, Set, Union, List
+from typing import Dict, List, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,11 @@ class LogRegistry:
 
     # flattens all the qnames together (TODO: consider memoizing?)
     def get_log_qnames(self) -> Set[str]:
-        return set(qname for qnames in self.log_alias_to_log_qnames.values() for qname in qnames)
+        return {
+            qname
+            for qnames in self.log_alias_to_log_qnames.values()
+            for qname in qnames
+        }
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
