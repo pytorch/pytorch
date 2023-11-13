@@ -244,14 +244,22 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
+        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname in dynamo_qnames:
-                self.assertEqual(logger.getEffectiveLevel(), logging.INFO, msg=f"expected {logger_qname} is INFO, got {logger.level}")
+            if logger_qname == dynamo_qname:
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                )
             else:
-                self.assertEqual(logger.getEffectiveLevel(), logging.DEBUG, msg=f"expected {logger_qname} is DEBUG, got {logger.level}")
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
