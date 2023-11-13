@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class LogRegistry:
     # Note: this only contains loggers registered
     # from register_log
     # e.g. "dynamo" -> "torch._dynamo"
-    log_alias_to_log_qname: Dict[str, str] = field(default_factory=dict)
+    log_alias_to_log_qnames: Dict[str, List[str]] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
@@ -57,11 +57,13 @@ class LogRegistry:
         return name in self.artifact_names
 
     def is_log(self, alias):
-        return alias in self.log_alias_to_log_qname
+        return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qname):
-        self.log_alias_to_log_qname[alias] = log_qname
+    def register_log(self, alias, log_qnames: Union[str, List[str]]):
+        if isinstance(log_qnames, str):
+            log_qnames = [log_qnames]
+        self.log_alias_to_log_qnames[alias] = log_qnames
 
     # register an artifact name
     def register_artifact_name(
@@ -89,8 +91,13 @@ class LogRegistry:
     def register_child_log(self, log_qname):
         self.child_log_qnames.add(log_qname)
 
-    def get_log_qnames(self):
-        return set(self.log_alias_to_log_qname.values())
+    # flattens all the qnames together (TODO: consider memoizing?)
+    def get_log_qnames(self) -> Set[str]:
+        return {
+            qname
+            for qnames in self.log_alias_to_log_qnames.values()
+            for qname in qnames
+        }
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
@@ -116,8 +123,11 @@ class LogState:
     def is_artifact_enabled(self, name):
         return name in self.artifact_names
 
-    def enable_log(self, log_qname, log_level):
-        self.log_qname_to_level[log_qname] = log_level
+    def enable_log(self, log_qnames, log_level):
+        if isinstance(log_qnames, str):
+            log_qnames = [log_qnames]
+        for log_qname in log_qnames:
+            self.log_qname_to_level[log_qname] = log_level
 
     def get_log_level_pairs(self):
         """Returns all qualified module names for which the user requested
@@ -364,7 +374,7 @@ def set_logs(
                     )
 
                 log_state.enable_log(
-                    log_registry.log_alias_to_log_qname.get(alias, alias), val
+                    log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
             else:
                 raise ValueError(
@@ -498,7 +508,7 @@ def help_message(verbose=False):
         heading = "Visible registered names (use TORCH_LOGS='+help' for full list)"
     lines = (
         ["all"]
-        + list(log_registry.log_alias_to_log_qname.keys())
+        + list(log_registry.log_alias_to_log_qnames.keys())
         + [
             f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
             for name in printed_artifacts
@@ -539,7 +549,7 @@ TORCH_LOGS Info
 def _invalid_settings_err_msg(settings, verbose=False):
     valid_settings = ", ".join(
         ["all"]
-        + list(log_registry.log_alias_to_log_qname.keys())
+        + list(log_registry.log_alias_to_log_qnames.keys())
         + list(log_registry.artifact_names)
     )
     msg = f"""
@@ -590,8 +600,8 @@ def _parse_log_settings(settings):
 
         if log_registry.is_log(name):
             assert level is not None
-            log_qname = log_registry.log_alias_to_log_qname[name]
-            log_state.enable_log(log_qname, level)
+            log_qnames = log_registry.log_alias_to_log_qnames[name]
+            log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
