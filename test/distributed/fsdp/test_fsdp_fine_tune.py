@@ -181,7 +181,7 @@ class TestFSDPFineTune(FSDPTest):
     def test_hooks_multi_traversal(self):
         """
         Tests that the hooks do reshard / unshard correctly in the case of same
-        parameters being used mutliple times during forward pass.
+        parameters being used multiple times during forward pass.
         """
         self.run_subtests(
             {

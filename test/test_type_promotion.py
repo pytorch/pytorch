@@ -1165,6 +1165,19 @@ class TestTypePromotion(TestCase):
                     actual = torch.clamp_max_(inp, val)
                     self.assertEqual(actual, expected, exact_dtype=False)
 
+    @onlyNativeDeviceTypes
+    def test_ternary_out_promotion(self, device):
+        for op in [torch.addcdiv, torch.addcmul]:
+            for dtype in [torch.float32, torch.cfloat]:
+                prom_dtype = torch.float64 if dtype is torch.float32 else torch.cdouble if dtype is torch.cfloat else dtype
+                x = torch.rand(3, device=device, dtype=dtype)
+                y = torch.empty(3, device=device, dtype=dtype)
+                y_promo = torch.empty(3, device=device, dtype=prom_dtype)
+                op(x, x, x, out=y)
+                op(x, x, x, out=y_promo)
+                self.assertEqual(y, y_promo.to(dtype=dtype))
+
+
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())
