@@ -449,9 +449,9 @@ def main(op="scatter_mm", force=False):
                 if not meta_lst:
                     continue
                 meta_lst = sorted(meta_lst)
-                index = [i for i, item in enumerate(meta_lst) if item[1] == sparsity1][
-                    0
-                ]
+                index = next(
+                    i for i, item in enumerate(meta_lst) if item[1] == sparsity1
+                )
                 if meta_lst[0][2] == meta_lst[index][2]:
                     continue
                 speeddiff = (1 - meta_lst[index][0] / meta_lst[0][0]) * 100

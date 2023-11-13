@@ -195,6 +195,9 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_cat_uint8_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),  # cat on uint8 input is using aten fallback on cpu
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #

@@ -359,7 +359,7 @@ def capture_pre_autograd_graph(
     if kwargs is None:
         kwargs = {}
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
             constraints=constraints,
@@ -515,7 +515,7 @@ def _export_to_torch_ir(
             )
         f = f.module()
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             # TODO Horrible hack to skip dynamo
