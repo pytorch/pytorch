@@ -22,7 +22,7 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable, is_hashable
+from .dicts import DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -149,22 +149,12 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif (
-            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
-            and isinstance(self.objvar, variables.CustomizedDictVariable)
-            and args
-            and is_hashable(args[0])
-            and self.objvar.mutable_local
-        ):
+        elif inner_fn in (
+            collections.OrderedDict.__setitem__,
+            object.__setattr__,
+        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable._HashableTracker(args[0])
-
-            newval = dict(self.objvar.items)
-            newval[k] = args[1]
-            return tx.replace_all(
-                self.objvar,
-                self.objvar.modifed(newval),
-            )
+            return self.objvar.call_method(tx, "__setitem__", args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
