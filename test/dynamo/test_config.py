@@ -76,7 +76,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "same_two_models_use_fp64",
             "error_on_recompile",  # safe because: will throw error
             "report_guard_failures",
-            "report_all_guard_failures",
             "base_dir",  # used for minifying / logging
             "DEBUG_DIR_VAR_NAME",
             "debug_dir_root",

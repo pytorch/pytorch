@@ -48,9 +48,9 @@ class Schema:
 
 @dataclass
 class DSymInt:
-    """
-    DSymInt represents a value retrieved by a SymInt op from a DTensor. DSymInt
-    helps View and Factory ops to determine the placement and shape of the
+    """DSymInt represents a value retrieved by a SymInt op from a DTensor.
+
+    DSymInt helps View and Factory ops to determine the placement and shape of the
     output tensor, as those operators either do not have an input DTensor or
     the input DTensor is insufficient to determine the output tensor's placement.
     """
@@ -90,7 +90,7 @@ class DSymInt:
 
 
 def _is_partial_dtensor(obj: Any) -> bool:
-    """check if object is 1) DTensor and  2) with any placement of _Partial"""
+    """Check if object is 1) DTensor and  2) with any placement of _Partial."""
     if not isinstance(obj, DTensor):
         return False
 
@@ -475,8 +475,8 @@ def _get_dtensor_dispatch_graph(
 def _build_dummy_add_graph(
     dt: DTensor, node_to_obj: Dict[fx.Node, Any]
 ) -> Tuple[fx.GraphModule, Any]:
-    """
-    Creates a graph for a dummy add function from a partial DTensor.
+    """Create a graph for a dummy add function from a partial DTensor.
+
     This dummy add is used for triggering all_reduce on a Partial DTensor
     during the DTensor expansion of the traced graph.
     Also returns the actual DTensor after resharding.
@@ -703,10 +703,12 @@ def _convert_to_distributed(
     default_mesh: Optional[DeviceMesh] = None,
     _allow_partial: bool = False,
 ) -> Tuple[fx.GraphModule, Dict[str, Schema]]:
-    """
+    """Transform a graph module to a distributed graph module.
+
     Returns:
         - transformed graph module
         - map from output name to DTensorSpec
+
     """
     global logger
     logger = get_logger("spmd_exp")
