@@ -195,6 +195,7 @@ class CacheBase:
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         if not os.path.exists(self.local_cache_path.parent):
             os.makedirs(self.local_cache_path.parent, exist_ok=True)
+
         write_atomic(
             str(self.local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -283,8 +284,18 @@ class PersistentCache(CacheBase):
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
                 try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
+                    uncached_choices = []
+                    timings = dict()
+                    # We re-use results from local cache, but not from global cache, to ensure
+                    # that results are comparable
+                    for choice in choices:
+                        choice_hash = choice.hash_key()
+                        if choice_hash in local_cache.get(name, {}).get(inputs, {}):
+                            # cache hit
+                            timings[choice] = local_cache[name][inputs][choice_hash]
+                        else:
+                            uncached_choices.append(choice)
+                    timings.update(benchmark(uncached_choices))
                     assert all(choice in timings for choice in choices)
 
                     local_cache.setdefault(name, {})

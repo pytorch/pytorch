@@ -153,6 +153,18 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# Number of threads to use for pre-compilation of kernels
+# in order to populate compilation cache.
+autotune_precompilation_workers = min(
+    torch.get_num_threads(),
+    int(
+        os.environ.get(
+            "TORCHINDUCTOR_MAX_AUTOTUNE_PRECOMPILATION_WORKERS",
+            str(torch.get_num_threads() - 8),
+        )
+    ),
+)
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
