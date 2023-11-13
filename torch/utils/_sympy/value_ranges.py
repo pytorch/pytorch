@@ -126,19 +126,19 @@ class ValueRanges:
 
     @classmethod
     def increasing_map(cls, x, fn):
-        """Increasing: x <= y => f(x) <= f(y)"""
+        """Increasing: x <= y => f(x) <= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
     def decreasing_map(cls, x, fn):
-        """Decreasing: x <= y => f(x) >= f(y)"""
+        """Decreasing: x <= y => f(x) >= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.upper), fn(x.lower))
 
     @classmethod
     def monotone_map(cls, x, fn):
-        """It's increasing or decreasing"""
+        """It's increasing or decreasing."""
         x = cls.wrap(x)
         l = fn(x.lower)
         u = fn(x.upper)
@@ -146,7 +146,7 @@ class ValueRanges:
 
     @classmethod
     def convex_min_zero_map(cls, x, fn):
-        """fn is convex and has a minimum at 0"""
+        """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
             return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
@@ -156,7 +156,9 @@ class ValueRanges:
     @classmethod
     def coordinatewise_increasing_map(cls, x, y, fn):
         """
-        Increasing on each coordinate. Mathematically:
+        It's increasing on each coordinate.
+
+        Mathematically:
         For every 1 <= i <= n and x_i <= y_i we have that
         f(x1, .., xn) <= f(x1, , yi, ..., xn)
         """
@@ -168,7 +170,7 @@ class ValueRanges:
 
     @classmethod
     def coordinatewise_monotone_map(cls, x, y, fn):
-        """It's increasing or decreasing on each coordinate"""
+        """It's increasing or decreasing on each coordinate."""
         x, y = cls.wrap(x), cls.wrap(y)
         products = [
             fn(a, b)

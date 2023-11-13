@@ -641,17 +641,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    with torch._dynamo.utils.CompileProfiler() as prof:
-        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-            model_iter_fn
-        )
-        opt_model_iter_fn(model, example_inputs)
-        output_csv(
-            output_filename, ["model", "profiler report"], [current_name, prof.report()]
-        )
-        met = prof.get_metrics()
-        guard_failures = len(met["guard_failures"])
-        return [guard_failures]
+    prof = torch._dynamo.utils.CompilerProfiler()
+    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+        model_iter_fn
+    )
+    opt_model_iter_fn(model, example_inputs)
+    output_csv(
+        output_filename, ["model", "profiler report"], [current_name, prof.report()]
+    )
+    met = prof.get_metrics()
+    guard_failures = len(met["guard_failures"])
+    return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -1175,7 +1175,10 @@ class AOTInductorModelCache:
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            example_outputs = model(*example_args, **example_kwargs)
+            with torch.no_grad():
+                # copy.deepcopy is required to prevent any surprising side-effect,
+                # see https://github.com/pytorch/pytorch/issues/113029
+                example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
@@ -2055,6 +2058,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -2131,6 +2138,12 @@ class BenchmarkRunner:
                 )
                 self.args.amp = True
                 self.setup_amp()
+            elif self.args.only in self.force_fp16_for_bf16_models:
+                log.warning(
+                    "Model %s does not support bfloat16, running with float16 instead",
+                    self.args.only,
+                )
+                model, example_inputs = cast_to_fp16(model, example_inputs)
             else:
                 model, example_inputs = cast_to_bf16(model, example_inputs)
 
