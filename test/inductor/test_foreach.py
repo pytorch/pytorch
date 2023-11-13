@@ -30,6 +30,12 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+inplace_bin_ops_under_test = [
+    torch._foreach_add_,
+    torch._foreach_mul_,
+    torch._foreach_sub_,
+    torch._foreach_div_,
+]
 
 bin_ops_under_test = [
     torch._foreach_add,
@@ -55,6 +61,9 @@ all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+inplace_bin_ops = parametrize(
+    "op", inplace_bin_ops_under_test, name_fn=lambda f: f.__name__
+)
 scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
@@ -593,6 +602,24 @@ class ForeachTests(TestCase):
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing(self, op):
+        def fn(a0, a1, b0, b1):
+            op([a0, a1], [b0, b1])
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":
