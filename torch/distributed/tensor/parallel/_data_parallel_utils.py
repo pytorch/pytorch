@@ -20,5 +20,7 @@ def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
         spec.mesh,
         spec.placements,
         run_check=False,
+        shape=spec.tensor_meta.shape,
+        stride=spec.tensor_meta.stride,
     )
     return result
