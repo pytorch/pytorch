@@ -11,7 +11,6 @@ TORCH_HALF_MAX = torch.finfo(torch.float16).max
 
 class DQuantType(Enum):
     """
-
     Different quantization methods for auto_quantize API are identified here.
 
     auto_quantize API currently supports fp16 and bfp16 methods.
