@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <ATen/cuda/PhiloxUtils.cuh>
+
 #include <cute/algorithm/copy.hpp>
 #include <cute/algorithm/gemm.hpp>
 
