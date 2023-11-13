@@ -241,7 +241,13 @@ class Guard:
         return output
 
     def create(self, builder: GuardBuilderBase):
-        return self.create_fn(builder, self)
+        try:
+            return self.create_fn(builder, self)
+        except Exception:
+            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            if self.stack:
+                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
+            raise
 
     def is_nn_module(self):
         return self.source.is_nn_module()
@@ -722,7 +728,7 @@ def compile_context(context: CompileContext):
 
 
 @contextmanager
-def tracing(context: TracingContext):
+def tracing(context: Optional[TracingContext]):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
