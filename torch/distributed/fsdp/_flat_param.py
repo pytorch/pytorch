@@ -38,7 +38,11 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
-from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
+from ._fsdp_extensions import (
+    _ext_post_unflatten_transform,
+    _ext_pre_flatten_transform,
+    FSDPExtensions,
+)
 
 __all__ = [
     "FlatParameter",
@@ -469,6 +473,8 @@ class FlatParamHandle:
         keep_low_precision_grads: bool,
         process_group: dist.ProcessGroup,
         use_orig_params: bool,
+        *,
+        fsdp_extension: Optional[FSDPExtensions] = None,
     ):
         super().__init__()
         params = list(params)
@@ -534,6 +540,7 @@ class FlatParamHandle:
             if align_addresses
             else 0
         )
+        self._fsdp_extension = fsdp_extension
         self._init_flat_param_and_metadata(
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
@@ -631,7 +638,10 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(
+                        param,
+                        self._fsdp_extension,
+                    )
                     param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
@@ -1751,7 +1761,11 @@ class FlatParamHandle:
         if tensor is None:
             tensor = flat_param
         views = (
-            _ext_post_unflatten_transform(subtensor.view(shape), param_extension)
+            _ext_post_unflatten_transform(
+                subtensor.view(shape),
+                param_extension,
+                self._fsdp_extension,
+            )
             for (subtensor, shape, param_extension) in zip(
                 torch.split(tensor, flat_param._numels, dim=0),
                 flat_param._shapes,
@@ -1785,6 +1799,7 @@ class FlatParamHandle:
                 _ext_post_unflatten_transform(
                     split.view(flat_param._shapes[idx]),
                     flat_param._param_extensions[idx],
+                    self._fsdp_extension,
                 )
             )
             idx += 1

@@ -167,11 +167,19 @@ AOTIRuntimeError AOTInductorModelCreate(
           reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(
               constant_map_handle);
 
-      for (auto const& kv : *input_map) {
-        constant_map->emplace(kv.first, kv.second);
+      auto model = new torch::aot_inductor::AOTInductorModel(
+          constant_map,
+          ""
+      );
+
+      if (input_map) {
+        for (auto const& kv : *input_map) {
+          constant_map->emplace(kv.first, kv.second);
+        }
+      } else {
+        model->load_constants(/*is_cpu*/true);
       }
 
-      auto model = new torch::aot_inductor::AOTInductorModel(constant_map, "");
       *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
     })}
 
@@ -198,6 +206,15 @@ AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle){
       delete model;
     })}
 
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      *ret_num_outputs = model->num_outputs();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
@@ -216,20 +233,21 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) \
-  static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
+#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
-CACHE_TORCH_DTYPE(bfloat16);
-CACHE_TORCH_DTYPE(float16);
-CACHE_TORCH_DTYPE(float32);
-CACHE_TORCH_DTYPE(float64);
-CACHE_TORCH_DTYPE(uint8);
-CACHE_TORCH_DTYPE(int8);
-CACHE_TORCH_DTYPE(int16);
-CACHE_TORCH_DTYPE(int32);
-CACHE_TORCH_DTYPE(int64);
-CACHE_TORCH_DTYPE(bool);
+  CACHE_TORCH_DTYPE(float8_e5m2);
+  CACHE_TORCH_DTYPE(float8_e4m3fn);
+  CACHE_TORCH_DTYPE(bfloat16);
+  CACHE_TORCH_DTYPE(float16);
+  CACHE_TORCH_DTYPE(float32);
+  CACHE_TORCH_DTYPE(float64);
+  CACHE_TORCH_DTYPE(uint8);
+  CACHE_TORCH_DTYPE(int8);
+  CACHE_TORCH_DTYPE(int16);
+  CACHE_TORCH_DTYPE(int32);
+  CACHE_TORCH_DTYPE(int64);
+  CACHE_TORCH_DTYPE(bool);
 
-static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
+  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
+  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"
