@@ -777,6 +777,16 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           SCALARTYPE8,                             \
           __VA_ARGS__))
 
+#define AT_DISPATCH_CASE_BIT_TYPES(...)                  \
+  AT_DISPATCH_CASE(at::ScalarType::Bits1x8, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits2x4, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits4x2, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits8, __VA_ARGS__)   \
+  AT_DISPATCH_CASE(at::ScalarType::Bits16, __VA_ARGS__)
+
+#define AT_DISPATCH_BIT_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_BIT_TYPES(__VA_ARGS__))
+
 #define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)     \
   AT_DISPATCH_SWITCH(                                \
       TYPE,                                          \

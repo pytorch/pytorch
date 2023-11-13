@@ -43,6 +43,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
+      !isBitsType(self.scalar_type()) &&
       self.sizes().equals(src.sizes()) &&
       self.is_neg() == src.is_neg() &&
       self.is_conj() == src.is_conj() &&
