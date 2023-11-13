@@ -311,7 +311,6 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         for (const auto t : c10::irange(N)) {
           sum += input_data[t * n_channel + c];
         }
-        
         scalar_t mean = sum / N;
         mean_data[c] = mean;
       }
