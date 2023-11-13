@@ -577,6 +577,9 @@ class cuda:
     # are enabled for the CUTLASS backend.
     cutlass_only_evt_capable_ops: bool = False
 
+    # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
+
 
 # create a directory containing lots of debug information
 class trace:
