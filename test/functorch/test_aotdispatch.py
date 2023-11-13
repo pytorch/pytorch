@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+import copy
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -453,6 +454,97 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
+
+    def test_input_mutation_set__input_mutation(self):
+        def f(a):
+            b = torch.arange(9, dtype=a.dtype).reshape(3, 3)
+            with torch.no_grad():
+                a.set_(b)
+            return a * b
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_set__steals_view_chain(self):
+        def f(a, b):
+            a_ = a.mul(2)
+            b_ = b.mul(2)
+            b_slice = b_[1].view(3, 3)
+            # a_clone should inherit the view chain from b_slice
+            a_.set_(b_slice)
+            # Also mutates b_,
+            a_.view(-1).mul_(2)
+            return a_ * b_slice
+        inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 9, requires_grad=False)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_set__and_data_mutation_good(self):
+        def f(a, b):
+            # The data mutation happens *after* the set_(). This is ok (see the graph below)
+            with torch.no_grad():
+                a.set_(b)
+            b.mul_(2)
+            return a + b
+        inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        # Important things to note:
+        # - "return a.set_(b)" desugars into "return b"
+        # - Both a and b are recorded as experiencing mutations,
+        #   which is why we see "b_updated" (output of the mul) twice in the graph outputs.
+        #   a is recorded as both a data mutation and a metadata mutation (due to set_ swapping its storage).
+        # - the runtime epilogue for a is "a.set_(mul)"
+        # - the runtime epilogue for b is "b.copy_(mul)"
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+    mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
+    add = torch.ops.aten.add.Tensor(mul, mul)
+    return [mul, mul, add]""")
+
+    # This is a (hopefully) extremely rare case that is difficult to handle,
+    # so we ban it.
+    def test_set__and_data_mutation_bad(self):
+        def f(a):
+            a_view = a.view(-1)
+            tmp = torch.ones(3, 3, requires_grad=True)
+            # Now, any mutations on either tmp
+            # will be tracked as graph input mutations.
+            with torch.no_grad():
+                a.set_(tmp)
+            # BAD: a_view is now detached from every graph input,
+            # so we won't recognize that this caused an input mutation!
+            a_view.mul_(2)
+            return a + tmp
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
+            self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_input_mutation_set__nop(self):
+        def f(a):
+            b = torch.arange(9, dtype=a.dtype)
+            a_old = torch.ops.aten.alias.default(a)
+            with torch.no_grad():
+                a.set_(b)
+                a.set_(a_old)
+            return a + b.reshape(3, 3)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        # Things to note:
+        # - There are no set_() calls in the graph (we functionalize a.set_(b) into "b")
+        # - There is only **1** graph output. We properly realized that the two set_() calls
+        #   undo each other, and so effectively no inputs are mutated.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    alias = torch.ops.aten.alias.default(primals_1);  primals_1 = None
+    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
+    add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
+    return [add]""")
 
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
@@ -1596,10 +1688,9 @@ def forward(self, primals_1, primals_2):
         # Expectation: fwd() takes in 2 args, and we don't construct a synthetic base.
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
-    t = torch.ops.aten.t.default(view);  view = None
-    add = torch.ops.aten.add.Tensor(t, primals_2);  primals_2 = None
-    return [t, add]""")
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    add = torch.ops.aten.add.Tensor(t, primals_2);  t = primals_2 = None
+    return [add]""")
 
     def test_input_mutation_aliases_and_none_require_gradients(self):
         def f(a, b, c):
@@ -1638,7 +1729,7 @@ def forward(self, primals_1, primals_2):
         # So we don't need to do the base construction / deconstruction
         def f(a, b, c, d):
             b.add_(1)
-            d.t_()
+            d.unsqueeze_(0)
             return a + c + d, b.view(-1)
 
         def inp_callable(req_grad):
@@ -1667,11 +1758,11 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
     as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    t_1 = torch.ops.aten.t.default(as_strided_3);  as_strided_3 = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_3, 0);  as_strided_3 = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
     as_strided_11 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
-    return [as_strided_scatter, add_2, view_1, t_1]""")  # noqa: B950
+    view_2 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
+    return [as_strided_scatter, add_2, view_2, unsqueeze_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
@@ -1909,7 +2000,7 @@ def forward(self, tangents_1):
     def test_dupe_arg_torture(self):
         def f(x, y):
             x.t_()
-            y.t_()
+            y.unsqueeze_(0)
             return x + y
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -1970,8 +2061,8 @@ def forward(self, tangents_1):
     def _test_invalid_dupe(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
-                x.t_()
-                y.t_()
+                x.unsqueeze_(0)
+                y.unsqueeze_(0)
                 return (x + y,)
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -1990,6 +2081,8 @@ def forward(self, tangents_1):
             fxy = aot_module_simplified(F(), (x, y), nop)
 
         fxy(x, y)
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         fxy(x, x)  # is ok!
 
         if fake:
@@ -1997,9 +2090,13 @@ def forward(self, tangents_1):
         else:
             fxx = aot_module_simplified(F(), (x, x), nop)
 
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         fxx(x, x)
         # Note This should not raise! Once we have guards in place here,
         # we will have this working correctly, as it should recompile.
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
@@ -2192,6 +2289,198 @@ def forward(self, tangents_1):
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
 
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4):
+    add = torch.ops.aten.add.Tensor(primals_3, 1)
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_4)
+    mul_1 = torch.ops.aten.mul.Tensor(mul, primals_2)
+    sum_1 = torch.ops.aten.sum.default(mul_1);  mul_1 = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = None
+    return [add_1, primals_1, primals_2, primals_4, mul]""")
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]]))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w @ x).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    add = torch.ops.aten.add.Tensor(primals_2, 1)
+    mm = torch.ops.aten.mm.default(primals_1, primals_3)
+    sum_1 = torch.ops.aten.sum.default(mm);  mm = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = None
+    return [add_1, primals_1, primals_3]""")
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_5, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(primals_6, primals_1, primals_2, primals_3, primals_4, True, 0.1, 1e-05);  primals_2 = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_1 = _native_batch_norm_legit_functional[1]
+    getitem_2 = _native_batch_norm_legit_functional[2]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
+    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
+    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
+    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]""")  # noqa: B950
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+        self.assertEqual(eager_grads, compile_grads)
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4, tangents_1):
+    native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(tangents_1, primals_6, primals_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  tangents_1 = primals_6 = primals_1 = getitem_3 = getitem_4 = getitem_1 = getitem_2 = None
+    getitem_5 = native_batch_norm_backward[0]
+    getitem_6 = native_batch_norm_backward[1]
+    getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
+    return [getitem_6, getitem_7, None, None, None, getitem_5]""")  # noqa: B950
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_new_inp_requires_grad_now(self):
+        def f(x, y):
+            return x.add_(y)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+
+        inp_ref = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+        inp_test = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+
+        out_ref = f(*inp_ref)
+        out_test = compiled_f(*inp_test)
+
+        # There is no copy_ method
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    add = torch.ops.aten.add.Tensor(clone, primals_2);  clone = primals_2 = None
+    return [add, add]""")  # noqa: B950
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, tangents_1):
+    return [None, tangents_1]""")  # noqa: B950
+
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
 
@@ -2319,38 +2608,38 @@ class TestAOTExport(AOTTestCase):
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_1: f32[3] = _native_batch_norm_legit_functional[1]
-        getitem_2: f32[3] = _native_batch_norm_legit_functional[2]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-        ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
-        expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_1: "f32[3]" = _native_batch_norm_legit_functional[1]
+        getitem_2: "f32[3]" = _native_batch_norm_legit_functional[2]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
-        getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
-        getitem_6: f32[3] = native_batch_norm_backward[1]
-        getitem_7: f32[3] = native_batch_norm_backward[2];  native_batch_norm_backward = None
+        getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
+        getitem_6: "f32[3]" = native_batch_norm_backward[1]
+        getitem_7: "f32[3]" = native_batch_norm_backward[2];  native_batch_norm_backward = None
         convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
         getitem_8 = convolution_backward[0]
-        getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
-        getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
+        getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
+        getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
@@ -2370,18 +2659,18 @@ class <lambda>(torch.nn.Module):
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  convolution = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         return (getitem_3, getitem_4, add, sum_1, detach_1)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
@@ -2428,7 +2717,7 @@ class <lambda>(torch.nn.Module):
             x.t_()
             return (x * 2,)
         mod = TestMod(fn)
-        inp = torch.randn(2)
+        inp = torch.randn(2, 4)
         with self.assertRaisesRegex(
             RuntimeError, "Found an input that received a metadata mutation"
         ):
@@ -3137,7 +3426,7 @@ def forward(self, tangents_1, tangents_2):
     def test_aot_dispatch_input_metadata_mutation(self):
         def f(a, b):
             a.t_()
-            b.t_()
+            b.unsqueeze_(0)
             return a + b
 
         b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
@@ -3182,7 +3471,7 @@ def forward(self, tangents_1, tangents_2):
     def test_aot_dispatch_input_data_and_metadata_mutation(self):
         def f(a, b):
             a.t_()
-            b.t_()
+            b.unsqueeze_(0)
             a.mul_(2)
             b.mul_(3)
             return a + b
@@ -3489,7 +3778,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
