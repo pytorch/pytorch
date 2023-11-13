@@ -45,6 +45,16 @@ def decompose_handler(
         raise RuntimeError("Decomposition failed")
 
 
+def is_same_size_handler(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+) -> bool:
+    lhs = cast(torch.Tensor, args[0])
+    rhs = cast(torch.Tensor, args[1])
+    return lhs.shape == rhs.shape
+
+
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
@@ -66,7 +76,7 @@ class OpDispatcher:
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
-            aten.is_same_size.default: lambda op, x, y: x.shape == y.shape,
+            aten.is_same_size.default: is_same_size_handler,
         }
 
     def dispatch(
