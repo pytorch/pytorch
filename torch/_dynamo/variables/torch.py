@@ -171,7 +171,7 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, False, initialized=False)
+                ctx = GradModeVariable.create(tx, False)
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
@@ -179,11 +179,13 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, True, initialized=False)
+                ctx = GradModeVariable.create(tx, True)
                 return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant())
+            return GradModeVariable.create(
+                tx, args[0].as_python_constant(), initialized=True
+            )
         elif self.value is torch.inference_mode:
             return InferenceModeVariable.create(tx, args[0].as_python_constant())
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
@@ -685,16 +687,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     *proxy_args_kwargs(args, kwargs),
                 ),
             )
-
-            if (
-                isinstance(tensor_variable, TensorVariable)
-                and "requires_grad" in kwargs
-                and kwargs["requires_grad"].as_python_constant()
-            ):
-                unimplemented(
-                    """factory functions that return tensors that require grad are not supported.
-Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
-                )
 
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)
