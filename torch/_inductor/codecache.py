@@ -1394,8 +1394,8 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
-    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
-    if not config.is_fbcode():
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.aot_inductor.abi_compatible:
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
 
