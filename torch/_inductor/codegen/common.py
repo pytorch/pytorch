@@ -1171,7 +1171,7 @@ class OptimizationContext:
     # Load value as mask
     is_load_as_mask: bool = False
 
-    dtype: torch.dtype = None
+    dtype: Optional[torch.dtype] = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 
@@ -1190,6 +1190,7 @@ def jinja2_env():
     except ImportError:
         return None
 
+PrimitiveInfoType = Union[int, float, bool, str]
 
 class ChoiceCaller:
     """
@@ -1222,7 +1223,7 @@ class ChoiceCaller:
     def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
         raise NotImplementedError()
 
-    def info_dict(self) -> dict[str, str]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
 

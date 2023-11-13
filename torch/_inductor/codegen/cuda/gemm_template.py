@@ -460,14 +460,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         c_layout = Bias.get_layout() if Bias is not None else None
         d_layout = Y.get_layout()
         all_match = all(
-            [
-                CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
-                for buf, op_layout in zip(
-                    [X, W, Bias, Y],
-                    [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
-                )
-                if buf is not None
-            ]
+            CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
+            for buf, op_layout in zip(
+                [X, W, Bias, Y],
+                [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
+            )
+            if buf is not None
         )
         if all_match:
             return op
