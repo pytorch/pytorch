@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     skipIfRocm,
 )
+from torch.testing._internal.inductor_utils import requires_cuda
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -1338,6 +1339,95 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
+
+    def test_partial_across_graph_break_uninvoked(self):
+        from functools import partial
+
+        def bar(x, **kwargs):
+            return x + x
+
+        @torch.compile(backend="eager", dynamic=True)
+        def foo(x, i):
+            def inner():
+                print("this is a graph_break")
+                return op(x)
+
+            op = partial(bar, dim=10)
+            x = inner()
+            op = partial(bar, other=10)
+            return inner() + x
+
+        foo(torch.rand(1), 10)
+
+    def test_no_recompile_inner_function(self):
+        def forward(inp):
+            def g(y):
+                return inp + y
+
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_no_recompile_inner_lambda(self):
+        def forward(inp):
+            g = lambda y: inp + y
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+
+                return x
+
+            return a()
+
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
 
 
 def udf_mul(x, y):

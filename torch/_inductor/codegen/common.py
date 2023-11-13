@@ -1171,7 +1171,7 @@ class OptimizationContext:
     # Load value as mask
     is_load_as_mask: bool = False
 
-    dtype: torch.dtype = None
+    dtype: Optional[torch.dtype] = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 
