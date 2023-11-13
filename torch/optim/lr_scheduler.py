@@ -1269,18 +1269,19 @@ class CyclicLR(LRScheduler):
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
             if 'momentum' not in optimizer.defaults and 'betas' not in optimizer.defaults:
-                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
+                raise ValueError('optimizer must support momentum or betas1 with `cycle_momentum` option enabled')
 
             self.use_beta1 = 'betas' in self.optimizer.defaults
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
             max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             if last_epoch == -1:
-                for momentum, group in zip(base_momentums, optimizer.param_groups):
-                    group['momentum'] = momentum
+                for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
                     if self.use_beta1:
                         group['betas'] = (m_momentum, *group['betas'][1:])
                     else:
                         group['momentum'] = m_momentum
+                    group['max_momentum'] = m_momentum
+                    group['base_momentum'] = b_momentum
 
         super().__init__(optimizer, last_epoch, verbose)
         self.base_lrs = base_lrs
@@ -1728,7 +1729,7 @@ class OneCycleLR(LRScheduler):
         self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
             if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+                raise ValueError('optimizer must support momentum or betas1 with `cycle_momentum` option enabled')
             self.use_beta1 = 'betas' in self.optimizer.defaults
             max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
