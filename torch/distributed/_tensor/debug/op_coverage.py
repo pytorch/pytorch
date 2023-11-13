@@ -81,7 +81,7 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
     op_infos = []
 
     for op, count in op_counts.items():
-        supported = op in DTensor._propagator.op_to_rules
+        supported = op in DTensor._op_dispatcher.sharding_propagator.op_to_rules
         op_infos.append([op, str(op._schema), count, supported])
 
     # sort the op info base on the total count index
