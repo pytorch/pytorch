@@ -611,6 +611,7 @@ class ONNXProgram:
     _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
+    _graph_module: Final[Optional[torch.fx.GraphModule]]
 
     @_beartype.beartype
     def __init__(
@@ -622,6 +623,7 @@ class ONNXProgram:
         *,
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
+        graph_module: Optional[torch.fx.GraphModule] = None,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
@@ -629,6 +631,7 @@ class ONNXProgram:
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
+        self._graph_module = graph_module
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -1011,12 +1014,13 @@ class Exporter:
                 self.options.onnx_registry.opset_version,
             )
 
-            return torch.onnx.ONNXProgram(
+            return ONNXProgram(
                 onnx_model,
                 self.options.fx_tracer.input_adapter,
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
+                graph_module=graph_module,
             )
 
     def _assert_fake_tensor_mode(self):
