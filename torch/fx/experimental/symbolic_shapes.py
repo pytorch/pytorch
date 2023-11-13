@@ -2204,10 +2204,6 @@ class ShapeEnv:
         positive: Optional[bool] = True,
         do_not_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
-        source_name = source.name() if source else None
-        if source_name and source_name in self.source_to_symint_node_cache:
-            return self.source_to_symint_node_cache[source_name]
-
         if do_not_specialize_zero_one:
             specialize_zero_one = False
         else:
@@ -2226,7 +2222,6 @@ class ShapeEnv:
             # dynamic=False, because automatic_dynamic skipped for
             # nested tensors.
             out = sympy.Integer(val)
-            self.source_to_symint_node_cache[source_name] = out
             return out
 
         elif dynamic_dim is DimDynamic.DUCK:
@@ -2304,7 +2299,6 @@ class ShapeEnv:
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
 
-        self.source_to_symint_node_cache[source_name] = r
         return r
 
     def debug_name(self, source):
@@ -3224,6 +3218,32 @@ class ShapeEnv:
                 r = try_solve(expr, mod_expr, floordiv_inequality=False)
                 if r is not None and r[1] == 0:
                     self._add_divisible(mod_expr)
+                    # This is a little bit of extra logic to make things like
+                    # torch.empty(i0, q).view(c, -1, q) work out
+                    p, q = mod_expr.args
+                    if isinstance(q, sympy.Number) and isinstance(p, sympy.Mul) and len(p.args) == 2:
+                        c, i0 = p.args
+                        # Given Mod(c * i0, q) == 0
+                        if (
+                            isinstance(c, sympy.Number) and
+                            isinstance(i0, sympy.Symbol) and
+                            self.is_unbacked_symint(i0)
+                        ):
+                            # We have Mod(i0, q / c) == 0, which means we can
+                            # rewrite i0 as (q / gcd(q, c)) * i1
+                            d = q / sympy.gcd(q, c)
+                            i1 = self.create_unbacked_symint().node.expr
+                            # Propagate the value ranges.  It doesn't really
+                            # matter if we use truediv or floordiv, because we
+                            # have established divisibility.
+                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.var_to_range[i0], ValueRanges.wrap(d)
+                            )
+                            self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.runtime_var_to_range[i0], ValueRanges.wrap(d)
+                            )
+                            self._set_replacement(i0, d * i1)
+
             except NotImplementedError:
                 pass
         return
