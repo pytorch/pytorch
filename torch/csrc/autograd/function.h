@@ -747,9 +747,7 @@ struct TypeAndSize {
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
 
-  at::Tensor zeros() {
-    return at::zeros_symint(sym_sizes, options);
-  }
+  at::Tensor zeros();
 
   std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;

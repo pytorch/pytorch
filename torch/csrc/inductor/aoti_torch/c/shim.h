@@ -83,6 +83,8 @@ using AOTITorchError = int32_t;
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -126,6 +128,15 @@ aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
+    AtenTensorHandle self,
+    int64_t offset_bytes,
+    int32_t dtype,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret_new_tensor);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
@@ -185,6 +196,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret8 // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    int32_t* out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1);
+
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -229,7 +252,7 @@ aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
-    int64_t output_size,
+    int64_t* output_size,
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError

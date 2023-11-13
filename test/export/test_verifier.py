@@ -7,7 +7,7 @@ from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
 
-from torch._export.verifier import ATenDialectVerifier, SpecViolationError, Verifier
+from torch._export.verifier import SpecViolationError, Verifier
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -20,7 +20,7 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(100), torch.randn(100)))
 
         verifier = Verifier()
-        verifier(ep.graph_module)
+        verifier.check(ep)
 
     def test_verifier_call_module(self) -> None:
         class M(torch.nn.Module):
@@ -35,7 +35,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(gm)
+            verifier._check_graph_module(gm)
 
     def test_verifier_no_functional(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -48,7 +48,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(ep.graph_module)
+            verifier.check(ep)
 
     def test_verifier_higher_order(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -65,7 +65,7 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(3, 3), torch.randn(3, 3)))
 
         verifier = Verifier()
-        verifier(ep.graph_module)
+        verifier.check(ep)
 
     def test_verifier_nested_invalid_module(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -86,22 +86,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(ep.graph_module)
-
-    def test_aten_verifier_wrong_op(self) -> None:
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return torch.ops.aten._add_relu(x, x)
-
-        m = TestModel()
-        egm = torch.fx.symbolic_trace(m)
-        verifier = ATenDialectVerifier()
-        with self.assertRaises(SpecViolationError):
-            verifier(egm)
-        self.assertFalse(verifier.is_valid(egm))
+            verifier.check(ep)
 
     def test_ep_verifier_basic(self) -> None:
         class M(torch.nn.Module):
@@ -219,17 +204,13 @@ class TestVerifier(TestCase):
         ep = export(M(), (torch.tensor(5.0), torch.tensor(6.0)))
 
         output_node = list(ep.graph.nodes)[-1]
-        with ep.graph.inserting_before(output_node):
-            additional_output_node = ep.graph.call_function(
-                torch.add, args=(output_node.args[0][0], output_node.args[0][0])
-            )
-            output_node.args = (
-                (
-                    output_node.args[0][0],
-                    additional_output_node,
-                    output_node.args[0][1],
-                ),
-            )
+        output_node.args = (
+            (
+                output_node.args[0][0],
+                list(ep.graph.nodes)[0],
+                output_node.args[0][1],
+            ),
+        )
 
         with self.assertRaisesRegex(SpecViolationError, "Number of output nodes"):
             ep._validate()

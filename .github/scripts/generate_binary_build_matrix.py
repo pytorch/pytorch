@@ -94,23 +94,29 @@ def arch_type(arch_version: str) -> str:
         return "cpu"
 
 
+# This can be updated to the release version when cutting release branch, i.e. 2.1
+DEFAULT_TAG = "main"
+
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}"
+        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "cpu": "pytorch/manylinux-builder:cpu",
-    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
+    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
+    "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
 }
 
 CONDA_CONTAINER_IMAGES = {
-    **{gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
-    "cpu": "pytorch/conda-builder:cpu",
+    **{
+        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    "cpu": f"pytorch/conda-builder:cpu-{DEFAULT_TAG}",
 }
 
 PRE_CXX11_ABI = "pre-cxx11"
@@ -120,23 +126,35 @@ DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:cuda{gpu_arch}"
+        (
+            gpu_arch,
+            PRE_CXX11_ABI,
+        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
+        (
+            gpu_arch,
+            CXX11_ABI,
+        ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        (
+            gpu_arch,
+            PRE_CXX11_ABI,
+        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}"
+        (
+            gpu_arch,
+            CXX11_ABI,
+        ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
-    ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
+    ("cpu", PRE_CXX11_ABI): f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]

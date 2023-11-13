@@ -32,6 +32,11 @@ aten = torch.ops.aten
 _random_ops = {
     aten.native_dropout.default,
     aten.normal_.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+    aten.randint_like.low_dtype_out,
     aten.uniform_.default,
 }
 
