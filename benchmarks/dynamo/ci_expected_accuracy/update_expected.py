@@ -141,13 +141,22 @@ if __name__ == "__main__":
 
     repo = "pytorch/pytorch"
     suites = {
+        "aot_eager_huggingface",
         "aot_inductor_huggingface",
+        "dynamic_aot_eager_huggingface",
+        "dynamo_eager_huggingface",
         "inductor_huggingface",
         "inductor_huggingface_dynamic",
+        "aot_eager_timm",
         "aot_inductor_timm",
+        "dynamic_aot_eager_timm",
+        "dynamo_eager_timm",
         "inductor_timm",
         "inductor_timm_dynamic",
+        "aot_eager_torchbench",
         "aot_inductor_torchbench",
+        "dynamic_aot_eager_torchbench",
+        "dynamo_eager_torchbench",
         "inductor_torchbench",
         "inductor_torchbench_dynamic",
     }
