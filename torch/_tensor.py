@@ -5,7 +5,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 
 import torch
 import torch._C as _C
@@ -80,6 +80,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _dynamo_static_input_type: str  # Set in `mark_static_address`
+    _dynamo_dynamic_indices: Set[int]  # Set in `mark_dynamic`
 
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):

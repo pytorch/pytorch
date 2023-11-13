@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
-
 #include <cute/algorithm/copy.hpp>
 
 #include <cutlass/cutlass.h>

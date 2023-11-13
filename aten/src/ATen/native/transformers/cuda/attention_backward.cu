@@ -6,6 +6,7 @@
 #include <ATen/TensorOperators.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>

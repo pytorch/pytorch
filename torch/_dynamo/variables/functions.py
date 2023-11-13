@@ -653,9 +653,13 @@ class TritonKernelVariable(VariableTracker):
             # Make sure other arguments are defaulted
             defaults = inspect.signature(Autotuner).parameters
             if (
-                defaults["warmup"].default != kernel.warmup
-                or defaults["rep"].default != kernel.rep
-                or defaults["prune_configs_by"].default != kernel.early_config_prune
+                ("warmup" in defaults and defaults["warmup"].default != kernel.warmup)
+                or ("rep" in defaults and defaults["rep"].default != kernel.rep)
+                or (
+                    "prune_configs_by" in defaults
+                    and defaults["prune_configs_by"].default
+                    != kernel.early_config_prune
+                )
             ):
                 raise Unsupported(
                     "Only configs and keys are supported for triton.autotune"
