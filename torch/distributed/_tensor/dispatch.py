@@ -66,7 +66,7 @@ class OpDispatcher:
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
-            aten.is_same_size.default: lambda op_call, x, y: x.shape == y.shape,
+            aten.is_same_size.default: lambda op, x, y: x.shape == y.shape,
         }
 
     def dispatch(
@@ -80,7 +80,7 @@ class OpDispatcher:
         """
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
-            return self._custom_op_handlers[op_call](op_call, *args, **kwargs)  # type: ignore[operator]
+            return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         # extract local tensor and sharding infos and run sharding propagation
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
