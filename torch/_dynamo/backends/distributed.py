@@ -8,7 +8,6 @@ from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
-from torch.utils.weak import WeakIdRef
 
 log = logging.getLogger(__name__)
 ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
@@ -410,17 +409,13 @@ or file a github issue."""
                     if isinstance(arg, torch.Tensor) and not isinstance(
                         arg, torch._subclasses.FakeTensor
                     ):
-                        widr = WeakIdRef(arg)
-                        tc = torch._guards.TracingContext.get()
                         # See Note - [On fake tensor policy and fresh fake modes for backends]
-                        if tc and widr in tc.weak_tensor_ref_to_fakification_policy:
-                            policy = tc.weak_tensor_ref_to_fakification_policy[widr]
+                        if arg in fake_mode.policy_cache:
+                            policy = fake_mode.policy_cache[arg]
                             new_args.append(
                                 fake_mode.from_tensor(
                                     arg,
                                     ignore_subclass=policy.ignore_subclass,
-                                    dynamic_dims=policy.dynamic_dims,
-                                    constraint_dims=policy.constraint_dims,
                                     source=policy.source,
                                 )
                             )

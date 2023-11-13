@@ -47,7 +47,7 @@ from torch.utils._python_dispatch import (
 
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import WeakIdKeyDictionary, WeakIdRef
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features
@@ -1314,6 +1314,49 @@ class FakeTensor(torch.Tensor):
 # memory should not significantly increase.
 
 
+# Note - [On fake tensor policy and fresh fake modes for backends]
+#
+# FakeTensorMode does memoization - this memoization is generally fine, but there are some cases
+# where we want to disable memoization in favor of producing fake tensors anew. In dynamo, the
+# case for when this happens is when we call a backend. All backends are invoked with a fresh fake_mode
+# because after dynamo trace, the memoized tensors reflect the state of the fake tensor *at the end* of
+# trace, rather than at the beginning.
+# Consider a motivating example of .data setting mutating metadata
+#
+# def foo(x, y):
+#     x.data = y
+#     return x
+#
+# Where x is size([6]) and y is size([3]). If we run foo(x, y), then x.data is size([3]), and the
+# fake tensor at the beginning of our backend, as memoized, is size([3]). However, this means that
+# the backend sees a tensor of size([3]) which has been resized by the user, and so is not reflective
+# of the state of the tensor at the start of trace! In the case of aot_autograd, this causes us to produce
+# incorrect code (concretely in this example, a view into x sized at ([3]))
+#
+#
+# If we do not faithfully preserve those policy decisions through to the new fake_mode, we will produce
+# fake tensors in a slightly different way, with different dynamic indices, which in turn may create new symbols
+# where there should not be any.
+#
+# The solution, therefore, is a combination of a fresh fake mode for backends, with a shared shape_env
+# that caches our source->symbol decisions. This ensures that we have a consistent view of the world
+# w/r/t tensor shape dynamism, while also preserving other policies like ignoring sublcass.
+
+# NOTE - an alternative design was considered where we pass a FakificationPolicyStore to the FakeTensorMode
+# constructor, allowing us to query that as the source of truth instead of always passing it through the top
+# at from_tensor creation time. We rejected this because reconciling arguments that may differ between the
+# stored policy and the user provided value for dynamic_dims, constraint_dims, and source is non-trivial.
+# Forcing the user to provide the values in a single place moves this decision closer to the callsite, and
+# forces the caller of from_tensor to think about what it is they want, instead of relying on some hidden
+# internal policy storage.
+
+
+@dataclass
+class FakificationPolicy:
+    source: Source
+    ignore_subclass: bool = False
+
+
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
         self,
@@ -1322,6 +1365,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        policy_cache=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -1365,6 +1409,8 @@ class FakeTensorMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
+
+        self.policy_cache = WeakIdKeyDictionary() if not policy_cache else policy_cache
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
@@ -1875,7 +1921,7 @@ class FakeTensorMode(TorchDispatchMode):
                 dynamic_dims is None
             ), "cannot set both static_shapes and dynamic_dims"
             shape_env = None
-        return self.fake_tensor_converter(
+        result = self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
@@ -1885,6 +1931,10 @@ class FakeTensorMode(TorchDispatchMode):
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
         )
+        self.policy_cache[tensor] = FakificationPolicy(
+            source=source, ignore_subclass=ignore_subclass
+        )
+        return result
 
 
 # NB: returns fake tensors
