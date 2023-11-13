@@ -308,6 +308,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             atol,
             rtol,
             has_mutation=has_mutation,
+            model_type=model_type,
         )
         # This confirms the exported mode accepts different input shapes
         # when dynamic shape is enabled.
@@ -331,6 +332,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     atol,
                     rtol,
                     has_mutation=has_mutation,
+                    model_type=model_type,
                 )
 
 
@@ -405,6 +407,7 @@ def _compare_pytorch_onnx_with_ort(
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
     has_mutation: bool = False,
+    model_type: str = None,
 ):
     if has_mutation:
         ref_model = _try_clone_model(model)
@@ -422,7 +425,11 @@ def _compare_pytorch_onnx_with_ort(
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
-    ort_outputs = run_ort(onnx_program, onnx_format_args)
+
+    if model_type == "torch.export.ExportedProgram":
+        ort_outputs = onnx_program(*input_args, **input_kwargs)
+    else:
+        ort_outputs = run_ort(onnx_program, onnx_format_args)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
