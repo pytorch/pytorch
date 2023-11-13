@@ -3006,12 +3006,33 @@ def register_meta_foreach(ops):
     ],
 )
 def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
+    torch._check(
+        isinstance(args[0], list),
+        lambda: (
+            f"The first argument must be List[Tensor], but got {type(self)}."
+        ),
+    )
     nelem = len(args[0])
 
     nlists = 0
-    for arg in args:
+    for iarg, arg in enumerate(args):
         if isinstance(arg, list):
             nlists += 1
+            torch._check(
+                nelem > 0 and len(arg) == nelem,
+                lambda: (
+                    f"self and argument-{iarg+1} must be non-empty and match in length, "
+                    f"but got {nlem} and {len(arg)}."
+                ),
+            )
+        elif isinstance(arg, Tensor):
+            torch._check(
+                arg.dim() == 0 and arg.numel() == 1,
+                lambda: (
+                    "scalar tensor expected to be 0 dim but it has "
+                    f"{arg.dim()} dimensions and {arg.numel()} elements."
+                ),
+            )
         else:
             break
 
