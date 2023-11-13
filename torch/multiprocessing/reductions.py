@@ -24,7 +24,8 @@ class StorageWeakRef:
     r"""A weak reference to a Storage.
 
     The cdata member is a Python number containing the integer representation of
-    the Storage pointer."""
+    the Storage pointer.
+    """
 
     __slots__ = ["cdata", "_free_weak_ref"]
 
@@ -57,7 +58,7 @@ class StorageWeakRef:
 
 
 class SharedCache(dict):
-    """dictionary from multiprocessing handles to StorageWeakRef"""
+    """Dictionary from multiprocessing handles to StorageWeakRef."""
 
     def __init__(self):
         # free_dead_references() is called if the len exceeds the current
