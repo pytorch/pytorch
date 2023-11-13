@@ -873,10 +873,10 @@ def use_aten_gemm_kernels():
 
 class DebugDirManager:
     counter = itertools.count(0)
+    prev_debug_name: str
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root
@@ -1245,8 +1245,8 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+def has_free_symbols(itr: Iterable[Any]):
+    return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
 def is_dynamic(*args):
