@@ -1832,8 +1832,36 @@ except RuntimeError as e:
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
+    def test_balanced_sampler_oversample(self):
+        from torch.utils.data import BalancedSampler
+
+        majority_class, majority_class_count = 0, 5
+
+        targets = [majority_class] * majority_class_count
+        targets.extend([2, 1, 3, 2, 3, 3, 4])
+
+        ov_sampler = BalancedSampler(targets, 'oversample')
+        ov_targets = [targets[i] for i in ov_sampler]
+
+        for label in set(targets):
+            self.assertEqual(ov_targets.count(label), majority_class_count)
+
+    def test_balanced_sampler_undersample(self):
+        from torch.utils.data import BalancedSampler
+
+        minority_class, minority_class_count = 0, 1
+
+        targets = [minority_class] * minority_class_count
+        targets.extend([2, 1, 3, 2, 3, 3, 4])
+
+        un_sampler = BalancedSampler(targets, 'undersample')
+        un_targets = [targets[i] for i in un_sampler]
+
+        for label in set(targets):
+            self.assertEqual(un_targets.count(label), minority_class_count)
+
     def test_sampler_reproducibility(self):
-        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
+        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler, BalancedSampler
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (
@@ -1842,6 +1870,8 @@ except RuntimeError as e:
             lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
             lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
             lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
+            lambda: BalancedSampler(self.labels, 'oversample', generator=torch.Generator().manual_seed(42)),
+            lambda: BalancedSampler(self.labels, 'undersample', generator=torch.Generator().manual_seed(42)),
         ):
             self.assertEqual(list(fn()), list(fn()))
 
@@ -1851,6 +1881,8 @@ except RuntimeError as e:
             WeightedRandomSampler(weights, num_samples=5, replacement=True),
             WeightedRandomSampler(weights, num_samples=5, replacement=False),
             SubsetRandomSampler(range(10)),
+            BalancedSampler(self.labels, 'oversample'),
+            BalancedSampler(self.labels, 'undersample'),
         ):
             torch.manual_seed(0)
             l1 = list(sampler) + list(sampler)
