@@ -3982,7 +3982,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
-        raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
+        raise ValueError("Anti-alias option is restricted to bilinear and bicubic modes and requires a 4-D tensor as input")
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)

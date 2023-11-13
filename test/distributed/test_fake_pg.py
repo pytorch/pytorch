@@ -10,7 +10,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing import FileCheck
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -190,12 +190,26 @@ class TestFakePG(TestCase):
         device_mesh = DeviceMesh(
             "cuda", torch.arange(0, world_size).view(-1, tp_size)
         )
+        device_mesh = init_device_mesh(
+            "cuda",
+            (world_size // tp_size, tp_size),
+            mesh_dim_names=["dp", "tp"]
+        )
 
+        # TODO: update test to use RowwiseParallel and ColwiseParallel instead.
         for parallel_style in [SequenceParallel(), PairwiseParallel()]:
 
-            my_module = parallelize_module(MLPModule(device="cuda"), device_mesh, parallel_style, tp_mesh_dim=1)
+            my_module = parallelize_module(
+                MLPModule(device="cuda"),
+                device_mesh["tp"],
+                parallel_style,
+            )
 
-            sharded_module = FSDP(my_module, use_orig_params=True)
+            sharded_module = FSDP(
+                my_module,
+                use_orig_params=True,
+                device_mesh=device_mesh["dp"]
+            )
             optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
 
             for i in range(10):
