@@ -106,7 +106,7 @@ jx_nest_base,pass,8
 
 
 
-lcnet_050,pass,8
+lcnet_050,fail_accuracy,8
 
 
 

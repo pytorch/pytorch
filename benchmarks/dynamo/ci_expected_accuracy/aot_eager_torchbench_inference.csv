@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,fail_to_run,11
+detectron2_fcos_r_50_fpn,pass,41
 
 
 
@@ -94,7 +94,7 @@ hf_Bart,pass,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,pass,0
 
 
 

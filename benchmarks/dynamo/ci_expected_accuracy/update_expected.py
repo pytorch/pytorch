@@ -65,7 +65,10 @@ S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 def get_artifacts_urls(results, suites):
     urls = {}
     for r in results:
-        if "inductor" == r["workflowName"] and "test" in r["jobName"]:
+        if (
+            r["workflowName"] in ("inductor", "inductor-periodic")
+            and "test" in r["jobName"]
+        ):
             config_str, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
@@ -82,7 +85,7 @@ def get_artifacts_urls(results, suites):
 
 def normalize_suite_filename(suite_name):
     strs = suite_name.split("_")
-    subsuite = strs[2] if strs[0] == "aot" else strs[1]
+    subsuite = strs[-1]
     if "timm" in subsuite:
         subsuite = subsuite.replace("timm", "timm_models")
 

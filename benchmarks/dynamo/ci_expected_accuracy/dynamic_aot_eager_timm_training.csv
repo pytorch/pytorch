@@ -106,7 +106,7 @@ jx_nest_base,pass,8
 
 
 
-lcnet_050,pass,8
+lcnet_050,fail_accuracy,8
 
 
 
@@ -238,4 +238,4 @@ volo_d1_224,pass,8
 
 
 
-xcit_large_24_p8_224,pass,8
+xcit_large_24_p8_224,eager_two_runs_differ,0

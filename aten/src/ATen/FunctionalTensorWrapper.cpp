@@ -232,6 +232,35 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   mutation_counter_++;
 }
 
+bool FunctionalTensorWrapper::has_data_mutation() {
+  // Current tensor's data was mutated if its storage saw any mutations.
+  return functional_storage_impl()->generation() > 0;
+}
+
+void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
+  // self.set_(src) will cause self to have all of the tensor properties of self.
+  value_ = other->value_;
+  generation_ = other->generation_;
+  view_metas_ = other->view_metas_;
+  // FREEZE the old storage, preventing mutations to it.
+  // this is a huge pain to handle properly in all cases, so we ban it.
+  functional_storage_impl()->freeze();
+  // Unsafely swap out the storage with other's storage,
+  // disconnecting `self` with its view chain
+  storage_ = other->storage_;
+  /// explicitly mark the tensor as having its storage changed from set_()
+  // Otherwise, we don't actually have a 100% accurate way to check this.
+  // (We could check if the updated value has a new storage than the original value,
+  // but this won't also let us uniquely determine if the tensor **also**
+  // experienced a data mutation).
+  was_storage_changed_ = true;
+
+  auto sizes_ = value_.sym_sizes();
+  auto strides_ = value_.sym_strides();
+  auto storage_offset_ = value_.sym_storage_offset();
+  set_sizes_and_strides(sizes_, strides_, storage_offset_);
+}
+
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // Note [resize_() in functionalization pass]
   // resize_() is a special operator in functionalization because it can reallocate its underlying storage.
