@@ -17,8 +17,6 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 
-# avoids circular dependency
-
 
 class VerifyStateDictMixin:
     def _compare_tensor(self, orig_tensor, dist_tensor):
