@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -43,6 +43,7 @@ from user code:
 
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
     @make_logging_test()
+    @unittest.skipIf(IS_FBCODE, "stack trace slightly different in fbcode")
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
             def f(ctx):

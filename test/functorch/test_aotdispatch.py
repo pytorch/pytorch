@@ -2512,38 +2512,38 @@ class TestAOTExport(AOTTestCase):
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_1: f32[3] = _native_batch_norm_legit_functional[1]
-        getitem_2: f32[3] = _native_batch_norm_legit_functional[2]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-        ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
-        expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_1: "f32[3]" = _native_batch_norm_legit_functional[1]
+        getitem_2: "f32[3]" = _native_batch_norm_legit_functional[2]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
-        getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
-        getitem_6: f32[3] = native_batch_norm_backward[1]
-        getitem_7: f32[3] = native_batch_norm_backward[2];  native_batch_norm_backward = None
+        getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
+        getitem_6: "f32[3]" = native_batch_norm_backward[1]
+        getitem_7: "f32[3]" = native_batch_norm_backward[2];  native_batch_norm_backward = None
         convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
         getitem_8 = convolution_backward[0]
-        getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
-        getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
+        getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
+        getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
@@ -2563,18 +2563,18 @@ class <lambda>(torch.nn.Module):
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  convolution = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         return (getitem_3, getitem_4, add, sum_1, detach_1)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:

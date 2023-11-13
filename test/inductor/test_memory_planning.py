@@ -1,30 +1,18 @@
 # Owner(s): ["module: inductor"]
 
-import sys
-
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_memory_planning yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-import unittest
 from typing import List
 
 import torch
-from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
+from torch._dynamo.testing import load_test_module
 from torch._dynamo.utils import same
 from torch._inductor import config
-from torch.utils._triton import has_triton
+
+from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.inductor_utils import run_and_get_cpp_code
 
 
-@unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
@@ -80,8 +68,9 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTInductorModelRunner
-
+        AOTInductorModelRunner = load_test_module(
+            __file__, "inductor.test_aot_inductor"
+        ).AOTInductorModelRunner
         f, args = self._generate(device="cuda")
         constraints: List[torch.export.Constraint] = [
             torch._export.dynamic_dim(args[0], 0) >= 1,
@@ -117,4 +106,6 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)
