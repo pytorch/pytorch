@@ -1435,7 +1435,7 @@ class FakeTensorMode(TorchDispatchMode):
         ), func
         try:
             return self.dispatch(func, types, args, kwargs)
-        except TypeError as e:
+        except TypeError:
             log.exception("fake tensor raised TypeError")
             raise
 

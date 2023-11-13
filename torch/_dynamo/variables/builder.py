@@ -1716,12 +1716,10 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-
         static_shapes, reason = tensor_always_has_static_shape(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        widr = WeakIdRef(e)
         dynamic_dims, constraint_dims = None, None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
@@ -1736,7 +1734,6 @@ def wrap_to_fake_tensor_and_record(
             dynamic_dims,
             constraint_dims,
         )
-
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,

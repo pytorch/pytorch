@@ -1221,9 +1221,7 @@ class BuiltinVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
 
                 name = name_var.as_python_constant()
-                if name == "requires_grad" and isinstance(
-                    obj, variables.TensorVariable
-                ):
+                if name == "requires_grad":
                     # TODO(voz): Make it work properly
                     unimplemented(
                         "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
