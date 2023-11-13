@@ -14,7 +14,6 @@ from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
 
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.dispatch import _operator_dispatch
 from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -419,15 +418,6 @@ def _get_dtensor_dispatch_graph(
                 node, args, kwargs, default_mesh
             )
             return None
-
-        # run dispatch once to get the real DTensor output.
-        out, op_schema, output_sharding = _operator_dispatch(
-            op_overload,
-            args,
-            kwargs,  # kwargs in this set of tests are all constants
-            DTensor._propagator,
-        )
-        node_to_obj[node] = out
 
         assert output_sharding is not None
 
