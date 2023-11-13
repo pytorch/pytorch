@@ -208,6 +208,7 @@ class PContext(abc.ABC):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -224,8 +225,8 @@ class PContext(abc.ABC):
         self.error_files = error_files
         self.nprocs = nprocs
 
-        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout)
-        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr)
+        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout, log_line_prefixes)
+        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
         """
@@ -389,6 +390,7 @@ class MultiprocessContext(PContext):
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
         start_method: str,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
             name,
@@ -400,6 +402,7 @@ class MultiprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            log_line_prefixes,
         )
 
         self.start_method = start_method
@@ -611,6 +614,7 @@ class SubprocessContext(PContext):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
             name,
@@ -622,6 +626,7 @@ class SubprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            log_line_prefixes,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
