@@ -494,7 +494,7 @@ def split_tensor(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split")
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split")
 
     return tuple(
         NestedTensor(values=x, **extract_kwargs(inp))
@@ -512,7 +512,7 @@ def split_with_sizes_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split_with_sizes")
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split_with_sizes")
 
     return [
         NestedTensor(values=x, **extract_kwargs(inp))
