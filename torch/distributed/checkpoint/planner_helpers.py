@@ -141,7 +141,7 @@ def create_read_items_for_chunk_list(
     local_chunks: List[ChunkStorageMetadata],
 ) -> List[ReadItem]:
     """
-    Creates a list of ``ReadItem`` based on the checkpoint and local chunks.
+    Create a list of ``ReadItem`` based on the checkpoint and local chunks.
 
     This applies the resharding algorithm and computes the reads needed
     to satisfy ``local_chunks`` with a checkpoint described by ``checkpoint_md``.

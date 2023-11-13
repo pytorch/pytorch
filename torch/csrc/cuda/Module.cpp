@@ -1491,6 +1491,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
+    {"_nccl_version_suffix",
+     THCPModule_nccl_version_suffix,
+     METH_NOARGS,
+     nullptr},
     {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
     {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
     {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},
