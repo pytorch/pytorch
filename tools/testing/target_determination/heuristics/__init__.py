@@ -27,7 +27,7 @@ from tools.testing.target_determination.heuristics.profiling import Profiling
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
-    HistoricalClassFailurCorrelation(trial_mode=True),
+    # HistoricalClassFailurCorrelation(trial_mode=True),  TODO: https://github.com/pytorch/pytorch/pull/113497
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(trial_mode=True),
     Profiling(trial_mode=True),
