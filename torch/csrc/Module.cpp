@@ -85,6 +85,10 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
+#include <c10/util/Logging.h>
+#include <torch/csrc/profiler/combined_traceback.h>
+#include <sstream>
+
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
@@ -141,6 +145,34 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
+#if !defined(FBCODE_CAFFE2)
+  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+    c10::SetStackTraceFetcher([]() -> std::string {
+      auto tb = torch::CapturedTraceback::gather(false, false, true);
+      LOG(WARNING)
+          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+          << std::endl;
+      auto s_tbs = torch::symbolize({tb.get()});
+      std::stringstream oss;
+      oss << "C++ CapturedTraceback:" << std::endl;
+      const auto& s_tb = s_tbs.tracebacks.at(0);
+      for (auto idx : c10::irange(s_tb.size())) {
+        // Skip the first few frames:
+        //  #1 torch::CapturedTraceback::gather(bool, bool, bool)
+        //  #2 THPModule_initExtension
+        //  #3 THPModule_initExtension(_object*, _object*)::{lambda()#1}
+        if (idx <= 3) {
+          continue;
+        }
+        auto frame_id = s_tb[idx];
+        const auto& frame = s_tbs.all_frames.at(frame_id);
+        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+            << ":" << frame.lineno << std::endl;
+      }
+      return oss.str();
+    });
+  }
+#endif
   if (!THPUtils_checkString(shm_manager_path)) {
     THPUtils_setError(
         "initialization error - expected bytes/string object as shm_manager_path!");
@@ -685,6 +717,26 @@ PyObject* THPModule_deterministicAlgorithmsWarnOnly(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setDeterministicFillUninitializedMemory(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      PyBool_Check(arg), "expected a bool, but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministicFillUninitializedMemory(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deterministicFillUninitializedMemory(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().deterministicFillUninitializedMemory())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1118,6 +1170,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      castPyCFunctionWithKeywords(THPModule_setDeterministicAlgorithms),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_get_deterministic_fill_uninitialized_memory",
+     THPModule_deterministicFillUninitializedMemory,
+     METH_NOARGS,
+     nullptr},
+    {"_set_deterministic_fill_uninitialized_memory",
+     THPModule_setDeterministicFillUninitializedMemory,
+     METH_O,
+     nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
     {"_warn", THPModule_warn, METH_NOARGS, nullptr},
@@ -1517,12 +1577,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias_opt,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_) {
+         c10::SymInt groups_) {
         return at::native::select_conv_backend(
             input,
             weight,
@@ -1532,7 +1592,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             c10::nullopt);
       },
       py::arg("input"),
@@ -1551,12 +1611,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_,
+         c10::SymInt groups_,
          c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
@@ -1571,7 +1631,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             ref);
       },
       py::arg("input"),

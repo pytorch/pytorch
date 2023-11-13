@@ -3,9 +3,12 @@ consumed by TensorBoard for visualization."""
 
 import os
 import time
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 from tensorboard.compat import tf
 from tensorboard.compat.proto import event_pb2
 from tensorboard.compat.proto.event_pb2 import Event, SessionLog
@@ -755,17 +758,24 @@ class SummaryWriter:
             walltime,
         )
 
-    def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
+    def add_figure(
+        self,
+        tag: str,
+        figure: Union["Figure", List["Figure"]],
+        global_step: Optional[int] = None,
+        close: bool = True,
+        walltime: Optional[float] = None
+    ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 
         Note that this requires the ``matplotlib`` package.
 
         Args:
-            tag (str): Data identifier
-            figure (matplotlib.pyplot.figure) or list of figures: Figure or a list of figures
-            global_step (int): Global step value to record
-            close (bool): Flag to automatically close the figure
-            walltime (float): Optional override default walltime (time.time())
+            tag: Data identifier
+            figure: Figure or a list of figures
+            global_step: Global step value to record
+            close: Flag to automatically close the figure
+            walltime: Optional override default walltime (time.time())
               seconds after epoch of event
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_figure")

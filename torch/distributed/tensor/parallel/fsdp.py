@@ -17,7 +17,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
-from torch.distributed._tensor.device_mesh import mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions, FSDPExtensions
@@ -227,10 +227,11 @@ def _chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
-    corresponding chunk as the local tensor to create a DTensor.
+    Shard a tensor to chunks along the first dimension.
+
+    The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
     if parent_mesh.ndim != 2:
@@ -242,7 +243,9 @@ def _chunk_dtensor(
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     tensor = tensor.clone().detach()
 
-    # if a tensor has not yet sharded by TP
+    # When a layer is not involved in TP, then the tensor will not be a DTensor.
+    # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
+    # e.g. When you do PairwiseParallel on a 3 layer model, TP will have no effect on the third layer.
     if isinstance(tensor, torch.Tensor) and not isinstance(tensor, DTensor):
 
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
@@ -265,7 +268,7 @@ def _chunk_dtensor(
 
         tensor = tensor.to_local()
 
-        # For DTensors, it is sharded across tp dimension first and then shardeed across FSDP dimension.
+        # For DTensors, it is sharded across tp dimension first and then sharded across FSDP dimension.
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), tp_placement).
         replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
@@ -297,9 +300,7 @@ def _all_gather_dtensor(
     tensor: DTensor,
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
-    """
-    All gather a DTensor in its FSDP dimension and return the local tensor.
-    """
+    """All gather a DTensor in its FSDP dimension and return the local tensor."""
     assert parent_mesh == tensor.device_mesh
 
     placements = list(copy.deepcopy(tensor.placements))
@@ -316,6 +317,7 @@ def _all_gather_dtensor(
 class DTensorExtensions(FSDPExtensions):
     """
     DTensorExtension is the TensorFlattener extension needed for 2D FSDP + TP.
+
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
@@ -369,15 +371,14 @@ class DTensorExtensions(FSDPExtensions):
 # TODO: remove enable_2d_with_fsdp() once we roll out the new 2D flow.
 def enable_2d_with_fsdp() -> bool:
     """
-    The API registers the extension which is needed for Tensor Parallelism (TP)
-    to work with FullyShardedDataParallel (FSDP). We first parallelize parameters
-    within one module or sub_modules based on a parallelize_plan and will let FSDP
+    Register the extension which is needed for Tensor Parallelism (TP) to work with FullyShardedDataParallel (FSDP).
+
+    We first parallelize parameters within one module or sub_modules based on a parallelize_plan and will let FSDP
     reshard the local tensor of distributed parameter which is essentially a DTensor.
 
     Return:
         A `bool` indicated whether extension registration succeeds or not.
     """
-
     torch._C._log_api_usage_once(
         "torch.distributed.tensor.parallel.enable_2d_with_fsdp"
     )

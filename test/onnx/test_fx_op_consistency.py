@@ -142,8 +142,10 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
+        "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
+        "linalg.vector_norm",
         "scatter_add",
         "scatter_reduce",
         "square",
@@ -244,6 +246,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
+    xfail_torchlib_forward_compatibility(
+        "all",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.all.dims"),
+        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
+    ),
     xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
@@ -256,6 +263,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
+    ),
+    xfail_torchlib_forward_compatibility(
+        "any",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.any.dims"),
+        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
     ),
     xfail(
         "arange",
@@ -371,6 +383,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
     ),
+    # See https://github.com/pytorch/pytorch/issues/111454
+    xfail(
+        "cumsum", dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("RUNTIME_EXCEPTION : \
+            Exception during initialization: /onnxruntime_src/onnxruntime/core/framework/\
+            allocation_planner.cc:230 int& onnxruntime::PlannerImpl::\
+            UseCount(onnxruntime::OrtValueIndex) n >= 0 && static_cast<size_t>(n) \
+            < ort_value_info_.size() was false.")
+    ),
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
@@ -440,10 +461,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.dropout",
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
-    ),
-    xfail(
-        "nn.functional.embedding",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
     ),
     xfail(
         "nn.functional.max_pool2d",
@@ -754,6 +771,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
+        "logit",
     ]
 
     @common_device_type.ops(

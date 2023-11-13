@@ -77,7 +77,7 @@ TEST(ModuleAPITest, MethodRunAsync) {
 
   future->wait();
 
-  // expect 2 forks and 2 wait callbacks being excuted on provided taskLauncher
+  // expect 2 forks and 2 wait callbacks being executed on provided taskLauncher
   // but ivalue::Future would be marked completed and release wait before
   // finishing all callbacks
   ASSERT_GE(counter, 2);

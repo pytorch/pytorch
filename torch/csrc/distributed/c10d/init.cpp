@@ -3,6 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
@@ -32,7 +33,6 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -290,63 +290,6 @@ void _register_builtin_comm_hook(
     ::c10d::Reducer& reducer,
     ::c10d::BuiltinCommHookType comm_hook_type) {
   reducer.register_builtin_comm_hook(comm_hook_type);
-}
-
-std::atomic<bool> event_queue_enabled = false;
-int sync_pipe;
-std::mutex event_queue_lock;
-std::deque<::c10d::EventInfo> event_queue;
-// we start dropping events after this
-const size_t MAX_QUEUE_SIZE = 512;
-
-void enqueue_event_for_python(const ::c10d::EventInfo& evt) {
-  if (!event_queue_enabled.load())
-    return;
-
-  std::unique_lock<std::mutex> lock(event_queue_lock);
-  if (event_queue.size() >= MAX_QUEUE_SIZE) {
-    event_queue.back().drop_count++;
-  } else {
-    event_queue.push_back(std::move(evt));
-    char m = 'x';
-    write(sync_pipe, &m, 1);
-  }
-}
-
-void enable_python_event_collection(int pipe) {
-  sync_pipe = pipe;
-  event_queue_enabled.store(true);
-  ::c10d::register_collective_callback(enqueue_event_for_python);
-}
-
-bool dequeue_c10d_event(::c10d::EventInfo& evt) {
-  std::unique_lock<std::mutex> lock(event_queue_lock);
-  if (event_queue.size() == 0) {
-    return false;
-  }
-  evt = event_queue.front();
-  event_queue.pop_front();
-  return true;
-}
-
-py::object c10d_dequeue_python_event() {
-  ::c10d::EventInfo evt;
-  if (!dequeue_c10d_event(evt)) {
-    return py::none();
-  }
-
-  py::dict data;
-  data["event_kind"] = (int)evt.event_kind;
-
-  data["pg_name"] = evt.pg_name;
-  data["backend"] = evt.backend;
-  data["sequence_number"] = evt.sequence_number;
-  data["operation"] = evt.operation;
-  data["timestamp"] = evt.timestamp;
-  data["duration"] = evt.duration_ms.value_or(-1);
-  data["drop_count"] = evt.drop_count;
-
-  return std::move(data);
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
@@ -698,11 +641,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::EventKind>(module, "EventKind", R"(
-An enum for collective hooks event types.)")
-      .value("START", ::c10d::EventKind::CollectiveStart)
-      .value("END", ::c10d::EventKind::CollectiveEnd);
-
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug levels of the
       torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
@@ -726,16 +664,7 @@ An enum for collective hooks event types.)")
           "set_debug_level_from_env",
           ::c10d::setDebugLevelFromEnvironment,
           R"(Sets the debug level of the torch.distributed package from the
-          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)")
-      .def(
-          "_enable_event_collection",
-          &enable_python_event_collection,
-          "(Enables events collection).",
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_dequeue_c10d_event",
-          &c10d_dequeue_python_event,
-          "(Blocks until a c10d event is available and return it as a python dictionary).");
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   // TODO(crcrpar): Hardening `ReduceOp`.
   //    While keeping most op types as enum value,
@@ -872,11 +801,32 @@ This class does not support ``__members__`` property.)");
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
+  // TODO(yifu): _{register, resolve}_process_group currently only work for
+  // c10d_functional. Later, we'll unify the name -> group mapping across
+  // Python and C++, and spanning both functional and non-functional
+  // collectives.
+  module.def(
+      "_register_process_group",
+      [](const std::string& group_name,
+         c10::intrusive_ptr<::c10d::ProcessGroup> group) {
+        ::c10d::register_process_group(group_name, group);
+      },
+      py::arg("group_name"),
+      py::arg("group"));
+
+  module.def(
+      "_resolve_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
+
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
@@ -898,7 +848,8 @@ This class does not support ``__members__`` property.)");
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -908,12 +859,14 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ScatterOptions::asyncOp);
 
   py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -1351,7 +1304,7 @@ Arguments:
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is None (None indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
-    wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
+    wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
 Example::
@@ -1842,7 +1795,15 @@ Arguments:
           .def_property_readonly(
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
-              "(Gets this process group name. It's cluster unique)");
+              "(Gets this process group name. It's cluster unique)")
+          .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          })
+          .def_static("unbox", [](py::object obj) {
+              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
+              auto ivalue = torch::jit::toIValue(obj, typePtr);
+              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+          });
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -2309,12 +2270,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_abort",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::optional<std::string>& abortReason) {
-                return self->abort(abortReason);
+              "_shutdown",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+                return self->shutdown();
               },
-              py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
@@ -2563,7 +2522,18 @@ Example::
               .. warning ::
                   This API only works for NCCL backend for now and must set
                   NCCL_ENABLE_TIMING environment variable.
-            )");
+            )")
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<::c10d::Work> self) {
+            return torch::jit::toPyObject(c10::IValue(self));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.Work");
+        auto ivalue = torch::jit::toIValue(obj, typePtr);
+        return ivalue.toCustomClass<::c10d::Work>();
+      });
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
@@ -2691,6 +2661,10 @@ Example::
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
+#ifdef USE_C10D_NCCL
+  module.attr("_DEFAULT_PG_NCCL_TIMEOUT") =
+      py::cast(::c10d::kProcessGroupNCCLDefaultTimeout);
+#endif
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   module.def(
@@ -2736,6 +2710,11 @@ Example::
             The provided Future object result must be a Tensor or a list of Tensors.
            )");
 
+#ifdef USE_C10D_NCCL
+  module.def("_dump_nccl_trace", []() {
+    return py::bytes(::c10d::dump_nccl_trace());
+  });
+#endif
   Py_RETURN_TRUE;
 }
 

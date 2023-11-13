@@ -28,7 +28,7 @@ for device in ["cpu", "cuda"]:
             dynamic_dim(x, 0) <= 1024,
             dynamic_dim(x, 0) == dynamic_dim(y, 0),
         ]
-        model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
+        model_so_path = aot_compile(model, (x, y), constraints=constraints)
 
     data.update({
         f"model_so_path_{device}": model_so_path,

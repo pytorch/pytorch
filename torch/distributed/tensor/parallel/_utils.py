@@ -1,9 +1,16 @@
 import functools
-from typing import Callable, Optional, Union
+import warnings
+from typing import Callable, Tuple, Optional, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.device_mesh import mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed._tensor.placement_types import Placement
+try:
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+except Exception:
+    def is_torchdynamo_compiling():  # type: ignore[misc]
+        return False
 
 _PrepareInputType = Callable[
     [Union[torch.Tensor, DTensor], Optional[DeviceMesh], Optional[int]], DTensor
@@ -13,13 +20,27 @@ _PrepareOutputType = Callable[
     [DTensor, Optional[DeviceMesh], Optional[int]], Union[torch.Tensor, DTensor]
 ]
 
+LayoutsType = Union[Placement, Tuple[Placement, ...]]
+
+def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
+    """
+    Inject common validation logics for `_prepare_input` funcs via this decorator.
+
+    Include verifying that input needs to be either a :class:`Tensor` or :class:`DTensor`
+    and only 1D :class:`DeviceMesh` is passed in.
+    """
+    # TODO: Will follow up with dynamo POC to make warnings.warn working with dynamo.
+    if not is_torchdynamo_compiling():
+        warnings.warn(f"{func_name} is deprecated and will be removed soon. {extra_msg}")
+
 
 def _prepare_input_validate(
     _prepare_input_func: _PrepareInputType,
 ) -> _PrepareInputType:
     """
-    Inject common validation logics for `_prepare_input` funcs via this
-    decorator, including verifying that input needs to be either
+    Inject common validation logics for `_prepare_input` funcs via this decorator.
+
+    Include verifying that input needs to be either
     a :class:`Tensor` or :class:`DTensor` and only 1D :class:`DeviceMesh`
     is passed in.
 
@@ -41,7 +62,6 @@ def _prepare_input_validate(
         >>> dtensor = make_input_shard_1d(input, device_mesh, 1)
         >>> # This will call '_prepare_input_validate' first
     """
-
     @functools.wraps(_prepare_input_func)
     def wrapper(*args, **kwargs):  # pyre-ignore[2, 3]
         assert len(args) >= 1, "_prepare_input needs at least one arg."
@@ -71,8 +91,9 @@ def _prepare_output_validate(
     _prepare_output_func: _PrepareOutputType,
 ) -> _PrepareOutputType:
     """
-    Inject common validation logics for _prepare_output funcs via this
-    decorator, including verifying that output needs to be a DTensor
+    Inject common validation logics for _prepare_output funcs via this decorator.
+
+    Include verifying that output needs to be a DTensor
     and only 1D Device Mesh is passed in.
 
     Example::
@@ -92,7 +113,6 @@ def _prepare_output_validate(
     Return:
         func (Callable): Same input func with validation logic added.
     """
-
     @functools.wraps(_prepare_output_func)
     def wrapper(*args, **kwargs):  # pyre-ignore[2, 3]
         assert len(args) >= 1, "_prepare_output needs at least one arg."
@@ -118,8 +138,7 @@ def _prepare_output_validate(
 
 def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> DeviceMesh:
     """
-    This function converts a N-D ``device_mesh`` into a 1D ``device_mesh``
-    for 1D Tensor Parallelism.
+    Convert a N-D ``device_mesh`` into a 1D ``device_mesh`` for 1D Tensor Parallelism.
 
     Args:
         device_mesh (DeviceMesh):
@@ -171,7 +190,7 @@ def _validate_tp_mesh_dim(
         `True` if the mesh dimension
         is valid, `False` otherwise.
     """
-    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
         if parent_mesh.ndim != 2:
             raise RuntimeError(
@@ -179,7 +198,7 @@ def _validate_tp_mesh_dim(
                 "Currently we only support 2D TP composition with DP.",
             )
 
-        tp_mesh_dim = mesh_resources.get_parent_mesh_dim(device_mesh)
+        tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
         if tp_mesh_dim != 1:
             raise RuntimeError(
                 f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",

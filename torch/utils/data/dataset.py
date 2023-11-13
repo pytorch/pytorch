@@ -195,6 +195,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
+
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
@@ -226,6 +227,7 @@ class StackDataset(Dataset[T_stack]):
         *args (Dataset): Datasets for stacking returned as tuple.
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
+
     datasets: Union[tuple, dict]
 
     def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
@@ -296,6 +298,7 @@ class ConcatDataset(Dataset[T_co]):
     Args:
         datasets (sequence): List of datasets to be concatenated
     """
+
     datasets: List[Dataset[T_co]]
     cumulative_sizes: List[int]
 
@@ -348,6 +351,7 @@ class ChainDataset(IterableDataset):
     Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
+
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = datasets
@@ -373,6 +377,7 @@ class Subset(Dataset[T_co]):
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
+
     dataset: Dataset[T_co]
     indices: Sequence[int]
 

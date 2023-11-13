@@ -123,7 +123,7 @@ THManagedMapAllocator::THManagedMapAllocator(
     int flags,
     size_t size)
     : THManagedMapAllocatorInit(manager_handle, filename),
-      c10::RefcountedMapAllocator(filename, flags, size) {}
+      at::RefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
   if (closed_)
@@ -131,7 +131,7 @@ void THManagedMapAllocator::close() {
   AllocInfo info = get_alloc_info(filename());
   info.free = true;
   ClientSocket& socket = get_manager_socket(manager_handle_);
-  c10::RefcountedMapAllocator::close();
+  at::RefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
 
@@ -139,7 +139,7 @@ static void deleteTHManagedMapAllocator(void* ptr) {
   delete static_cast<THManagedMapAllocator*>(ptr);
 }
 
-c10::DataPtr THManagedMapAllocator::makeDataPtr(
+at::DataPtr THManagedMapAllocator::makeDataPtr(
     const char* manager_handle,
     const char* filename,
     int flags,
@@ -150,10 +150,10 @@ c10::DataPtr THManagedMapAllocator::makeDataPtr(
       context->data(),
       context,
       &deleteTHManagedMapAllocator,
-      c10::DeviceType::CPU};
+      at::DeviceType::CPU};
 }
 
 THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(
-    const c10::DataPtr& dptr) {
+    const at::DataPtr& dptr) {
   return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
 }

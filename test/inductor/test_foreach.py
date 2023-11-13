@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import sys
 import unittest
 
 import torch
@@ -11,24 +10,16 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    requires_cuda,
+)
 
 aten = torch.ops.aten
-
-try:
-    try:
-        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
-    except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, requires_cuda
-except (unittest.SkipTest, ImportError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 
 bin_ops_under_test = [
@@ -497,6 +488,46 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
+    def test_fuse_concat(self):
+        def fn(x1, x2, x3, w1, w2, w3):
+            x = torch.stack([x1, x2, x3])
+            w = torch.stack([w1, w2, w3])
+
+            y = torch.bmm(x, w)
+
+            return y
+
+        x1 = torch.randn(5, 4).cuda()
+        x2 = x1 + 1
+        x3 = x1 + 2
+        w1 = torch.randn(4, 3).cuda()
+        w2 = w1 + 1
+        w3 = w1 + 2
+
+        args = (x1, x2, x3, w1, w2, w3)
+
+        self.check_model_cuda(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda()
+    def test_zero_elems(self):
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     @bin_ops
     def test_2d_blocking(self, op):
         def fn(a0, a1, b0, b1):
@@ -556,7 +587,6 @@ class ForeachTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
-        run_tests(needs="filelock")
+    run_inductor_tests(skip_rocm=True)
