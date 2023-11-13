@@ -30,6 +30,7 @@ from github_utils import (
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+    gh_update_pr_state,
     GitHubComment,
 )
 
@@ -1803,6 +1804,7 @@ def try_revert(
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+        gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
