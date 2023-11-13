@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, \
-     parametrize, TEST_WITH_ASAN, noncontiguous_like
+    parametrize, TEST_WITH_ASAN, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
