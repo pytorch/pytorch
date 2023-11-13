@@ -195,8 +195,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == "output":
             false_outs.extend(node.args)
 
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
@@ -282,8 +282,8 @@ def inner(mode, pred, true_fn, false_fn, operands):
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     with mode:
         true_outs = true_fn(*operands)
-        flat_true_outs, _ = pytree.tree_flatten(true_outs)
-        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+        flat_true_outs = pytree.tree_leaves(true_outs)
+        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
@@ -371,7 +371,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                         return out_storage in input_storages
                     return False
 
-                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
+                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
                     return True
 
         for _, module in gm.named_children():

@@ -291,12 +291,19 @@ def node_summary(snode):
     detail = ""
     if isinstance(snode.node, ir.ExternKernelOut):
         detail = f" ({snode.node.kernel})"
-    out_tensor_info = (
-        f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
-    )
-    return (
-        f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({snode.node.name})"
-    )
+    out_tensor_info = ""
+    if (
+        hasattr(snode.node, "layout")
+        and hasattr(snode.node.layout, "size")
+        and hasattr(snode.node.layout, "stride")
+    ):
+        out_tensor_info = (
+            f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
+        )
+    node_name = ""
+    if hasattr(snode.node, "name"):
+        node_name = snode.node.name
+    return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name})"
 
 
 def visualize_overlap(order):
@@ -317,7 +324,7 @@ def visualize_overlap(order):
         else:  # cur_comm_node is not None
             if isinstance(snode.node, ir.CollectiveKernel):
                 raise Exception(
-                    "Found two collectives running at the same time, which is unexpected. "
+                    "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
             elif isinstance(snode.node, ir.Wait):  # end of this comm op
@@ -341,11 +348,17 @@ def reorder_compute_and_comm_for_overlap(
             overlap_log.debug(
                 f"==== Visualize overlap before reordering pass {p} ===="  # noqa: G004
             )
-            visualize_overlap(order)
+            try:
+                visualize_overlap(order)
+            except Exception as e:
+                overlap_log.debug(str(e))
         order = p(order)  # type: ignore[operator]
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004
             )
-            visualize_overlap(order)
+            try:
+                visualize_overlap(order)
+            except Exception as e:
+                overlap_log.debug(str(e))
     return order

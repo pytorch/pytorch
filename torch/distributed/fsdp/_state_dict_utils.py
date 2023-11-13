@@ -17,7 +17,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.device_mesh import mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
@@ -291,7 +291,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        parent_mesh = mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
         if parent_mesh:
             raise RuntimeError(
                 f"Found FSDP's device_mesh {fsdp_state._device_mesh} has a parent device_mesh {parent_mesh}.",
@@ -558,12 +558,14 @@ def _sharded_post_state_dict_hook(
                 world_size=fsdp_state.world_size,
                 num_devices_per_node=fsdp_state._device_handle.device_count(),
                 pg=fsdp_state.process_group,
+                fsdp_extension=fsdp_state._fsdp_extension,
             )
         else:
             sharded_tensor = _ext_chunk_dtensor(
                 tensor=param,
                 rank=fsdp_state.rank,
                 device_mesh=fsdp_state._device_mesh,
+                fsdp_extension=fsdp_state._fsdp_extension,
             )
         if fsdp_state._state_dict_config.offload_to_cpu:
             sharded_tensor = sharded_tensor.cpu()
@@ -627,7 +629,9 @@ def _sharded_pre_load_state_dict_hook(
 
         if not fsdp_state._state_dict_config._use_dtensor:
             # All-gather the param (ShardedTensor)
-            param, shards = _ext_pre_load_state_dict_transform(param)
+            param, shards = _ext_pre_load_state_dict_transform(
+                param, fsdp_state._fsdp_extension
+            )
 
             assert len(shards) < 2, (
                 "Expects 0 or 1 shard per rank "
@@ -666,12 +670,16 @@ def _sharded_pre_load_state_dict_hook(
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
 
-            parent_mesh = mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
-            local_tensor = _ext_all_gather_dtensor(param, parent_mesh)
+            parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            local_tensor = _ext_all_gather_dtensor(
+                param, parent_mesh, fsdp_state._fsdp_extension
+            )
 
             if fqn_to_param_ext.get(fqn) is not None:
                 ext = fqn_to_param_ext[fqn]
-                local_tensor = _ext_post_unflatten_transform(local_tensor, ext)
+                local_tensor = _ext_post_unflatten_transform(
+                    local_tensor, ext, fsdp_state._fsdp_extension
+                )
             state_dict[fqn_from_global_root] = local_tensor
 
     with SimpleProfiler.profile("_enter_unshard_params_ctx"):
