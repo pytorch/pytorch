@@ -125,8 +125,9 @@ def _wait_for_all(rpc_futs):
 
 class DistributedOptimizer:
     """
-    DistributedOptimizer takes remote references to parameters scattered
-    across workers and applies the given optimizer locally for each parameter.
+    DistributedOptimizer takes remote references to parameters scattered across workers.
+
+    And it applies the given optimizer locally for each parameter.
 
     This class uses :meth:`~torch.distributed.autograd.get_gradients` in order
     to retrieve the gradients for specific parameters.
@@ -222,7 +223,7 @@ class DistributedOptimizer:
 
     def step(self, context_id):
         """
-        Performs a single optimization step.
+        Perform a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on each worker
         containing parameters to be optimized, and will block until all workers

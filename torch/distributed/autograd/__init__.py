@@ -27,13 +27,13 @@ if is_available():
 
 
 class context:
-    '''
-    Context object to wrap forward and backward passes when using
-    distributed autograd. The ``context_id`` generated in the ``with``
-    statement  is required to uniquely identify a distributed backward pass
-    on all workers. Each worker stores metadata associated with this
-    ``context_id``, which is required to correctly execute a distributed
-    autograd pass.
+    """
+    Context object to wrap forward and backward passes when using distributed autograd.
+
+    The ``context_id`` generated in the ``with`` statement  is required
+    to uniquely identify a distributed backward pass on all workers.
+    Each worker stores metadata associated with this ``context_id``,
+    which is required to correctly execute a distributed autograd pass.
 
     Example::
         >>> # xdoctest: +SKIP
@@ -43,7 +43,8 @@ class context:
         >>>     t2 = torch.rand((3, 3), requires_grad=True)
         >>>     loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
         >>>     dist_autograd.backward(context_id, [loss])
-    '''
+    """
+
     def __enter__(self):
         self.autograd_context = _new_context()
         return self.autograd_context._context_id()

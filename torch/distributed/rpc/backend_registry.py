@@ -42,7 +42,7 @@ if BackendType.__doc__:
 
 def backend_registered(backend_name):
     """
-    Checks if backend_name is registered as an RPC backend.
+    Check if backend_name is registered as an RPC backend.
 
     Args:
         backend_name (str): string to identify the RPC backend.
@@ -56,7 +56,7 @@ def backend_registered(backend_name):
 def register_backend(
     backend_name, construct_rpc_backend_options_handler, init_backend_handler
 ):
-    """Registers a new RPC backend.
+    """Register a new RPC backend.
 
     Args:
         backend_name (str): backend string to identify the handler.

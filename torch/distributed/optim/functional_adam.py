@@ -63,10 +63,7 @@ class _FunctionalAdam:
         self.param_group = {"params": params}
 
     def step_param(self, param: Tensor, grad: Optional[Tensor]):
-        """
-        Similar to step, but operates on a single parameter and optionally a
-        gradient tensor.
-        """
+        """Similar to step, but operates on a single parameter and optionally a gradient tensor."""
         params_with_grad = []
         grads = []
         exp_avgs = []

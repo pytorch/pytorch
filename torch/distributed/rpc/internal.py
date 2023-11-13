@@ -29,8 +29,8 @@ class RPCExecMode(Enum):
 
 class _InternalRPCPickler:
     r"""
-    This class provides serialize() and deserialize() interfaces to serialize
-    data to be "binary string + tensor table" format
+    This class provides serialize() and deserialize() interfaces to serialize data to be "binary string + tensor table" format.
+
     So for RPC python UDF function and args, non tensor data will be serialized
     into regular binary string, tensor data will be put into thread local tensor
     tables, this serialization format is consistent with builtin operator and args
@@ -74,27 +74,19 @@ class _InternalRPCPickler:
 
     @classmethod
     def _script_module_receiver(cls, script_module_serialized):
-        """
-        Given a serialized representation of a ScriptModule created with torch.jit.save,
-        loads and returns the ScriptModule.
-        """
+        """Given a serialized representation of a ScriptModule created with torch.jit.save, loads and returns the ScriptModule."""
         f = io.BytesIO(script_module_serialized)
         m = torch.jit.load(f)
         return m
 
     def _script_module_reducer(self, script_module):
-        """
-        Serializes a ScriptModule.
-        """
+        """Serialize a ScriptModule."""
         f = io.BytesIO()
         torch.jit.save(script_module, f)
         return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
 
     def serialize(self, obj):
-        r"""
-        Serialize non tensor data into binary string, tensor data into
-        tensor table
-        """
+        r"""Serialize non tensor data into binary string, tensor data into tensor table."""
         f = io.BytesIO()
         p = _pickler(f)
         p.dispatch_table = self._dispatch_table
@@ -144,9 +136,7 @@ class _InternalRPCPickler:
         return (f.getvalue(), tensors)
 
     def deserialize(self, binary_data, tensor_table):
-        r"""
-        Deserialize binary string + tensor table to original obj
-        """
+        r"""Deserialize binary string + tensor table to original obj."""
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
@@ -195,7 +185,8 @@ def deserialize(binary_data, tensor_table):
 
 def _run_function(python_udf):
     r"""
-    This function is exclusively called from C++.
+    Exclusively called from C++.
+
     See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
 
     Runs a Python UDF and returns its return value.
@@ -238,7 +229,8 @@ def _build_rpc_profiling_key(
     exec_type, func_name, current_worker_name, dst_worker_name
 ):
     """
-    Builds the key that RPC calls are profiled with using the autograd profiler.
+    Build the key that RPC calls are profiled with using the autograd profiler.
+
     This will be the name of the corresponding Event recorded in the profiler.
 
     Args:
@@ -256,9 +248,9 @@ def _build_rpc_profiling_key(
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
     """
-    This function should be called from RPC/RRef functions to create a
-    RecordFunction object for profiling. This function also runs the before
-    callbacks that start the profiling, though the user is responsible for
+    Call from RPC/RRef functions to create a RecordFunction object for profiling.
+
+    This function also runs the before callbacks that start the profiling, though the user is responsible for
     running the appropriate callbacks when the function to be profiled finishes.
 
     Args:

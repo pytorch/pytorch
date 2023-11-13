@@ -49,9 +49,7 @@ class _FunctionalSGD:
         self.param_group = {"params": params}
 
     def step_param(self, param: Tensor, grad: Optional[Tensor]):
-        """Similar to self.step, but operates on a single parameter and
-        its gradient.
-        """
+        """Similar to self.step, but operates on a single parameter and its gradient."""
         # TODO: Once step_param interface is robust, refactor step to call
         # step param on each param.
         weight_decay = self.defaults["weight_decay"]

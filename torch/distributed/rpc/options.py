@@ -42,9 +42,7 @@ def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     r"""
-    The backend options for
-    :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
-    :class:`~torch.distributed.rpc.RpcBackendOptions`.
+    The backend options for :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from :class:`~torch.distributed.rpc.RpcBackendOptions`.
 
     Args:
         num_worker_threads (int, optional): The number of threads in the
@@ -103,8 +101,9 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
 
     def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
         r"""
-        Set device mapping between each RPC caller and callee pair. This
-        function can be called multiple times to incrementally add
+        Set device mapping between each RPC caller and callee pair.
+
+        This function can be called multiple times to incrementally add
         device placement configurations.
 
         Args:
@@ -161,8 +160,9 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
 
     def set_devices(self, devices: List[DeviceType]):
         r"""
-        Set local devices used by the TensorPipe RPC agent. When processing
-        CUDA RPC requests, the TensorPipe RPC agent will properly synchronize
+        Set local devices used by the TensorPipe RPC agent.
+
+        When processing CUDA RPC requests, the TensorPipe RPC agent will properly synchronize
         CUDA streams for all devices in this ``List``.
 
         Args:

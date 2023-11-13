@@ -6,7 +6,8 @@ import torch.distributed.algorithms.model_averaging.averagers as averagers
 
 class PostLocalSGDOptimizer(torch.optim.Optimizer):
     r"""
-    Wraps an arbitrary :class:`torch.optim.Optimizer` and runs `post-local SGD <https://arxiv.org/abs/1808.07217>`_,
+    Wraps an arbitrary :class:`torch.optim.Optimizer` and runs `post-local SGD <https://arxiv.org/abs/1808.07217>`_.
+
     This optimizer runs local optimizer at every step.
     After the warm-up stage, it averages parameters periodically afer the local optimizer is applied.
 
@@ -68,8 +69,9 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
 
     def state_dict(self):
         r"""
-        This is the same as :class:`torch.optim.Optimizer` :meth:`state_dict`,
-        but adds an extra entry to record model averager's step to the checkpoint
+        Having similarity as :class:`torch.optim.Optimizer` :meth:`state_dict`.
+
+        But it adds an extra entry to record model averager's step to the checkpoint
         to ensure reload does not cause unnecessary warm up again.
         """
         optim_state_dict = self.optim.state_dict()
@@ -78,8 +80,9 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
 
     def load_state_dict(self, state_dict):
         r"""
-        This is the same as :class:`torch.optim.Optimizer` :meth:`load_state_dict`,
-        but also restores model averager's step value to the one
+        Having similarity as :class:`torch.optim.Optimizer` :meth:`load_state_dict`.
+
+        But it also restores model averager's step value to the one
         saved in the provided ``state_dict``.
 
         If there is no ``"step"`` entry in ``state_dict``,
@@ -96,9 +99,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
             self.averager.step = 0
 
     def step(self):
-        r"""
-        Performs a single optimization step (parameter update).
-        """
+        r"""Perform a single optimization method (parameter update)."""
         self.optim.step()
         self.averager.average_parameters(params=self.param_groups)
 

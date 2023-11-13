@@ -15,8 +15,9 @@ __all__: List[str] = []
 
 class _server_process_global_profile(profile):
     """
-    It has the same API as ``torch.autograd.profiler.profile`` class,
-    except that it enables profiling on all threads running RPC server request callbacks.
+    It has the same API as ``torch.autograd.profiler.profile`` class.
+
+    Except that it enables profiling on all threads running RPC server request callbacks.
 
     Context manager that manages autograd profiler state and holds a summary of results.
     Under the hood it just records events of functions being executed in C++ and
@@ -101,6 +102,7 @@ class _server_process_global_profile(profile):
     def __enter__(self):
         """
         Turn on server-side process-global profiling.
+
         This enables thread-local profiler on all RPC threads running server-side request callbacks.
         """
         if not self.enabled:
@@ -129,6 +131,7 @@ class _server_process_global_profile(profile):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         Turn off server-side process-global profiling.
+
         Aggregate all profiling events recorded by RPC threads.
 
         These attributes are assigned on exiting context.

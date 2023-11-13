@@ -60,9 +60,7 @@ _default_pickler = _internal_rpc_pickler
 
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
-    r"""
-    rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
-    """
+    r"""rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler."""
     global _default_pickler
     _default_pickler = rpc_pickler
     try:
@@ -151,8 +149,9 @@ _thread_local_var = threading.local()
 @contextlib.contextmanager
 def _wait_all():
     r"""
-    A context manager that collects all futures returned by ``rpc_async`` and
-    waits them on the context manager's exit; relieving the user of needing
+    Collect all futures returned by ``rpc_async`` is connected.
+
+    And it waits them on the context manager's exit; relieving the user of needing
     to explicitly call wait.
 
 
@@ -180,8 +179,9 @@ def _wait_all():
 @_require_initialized
 def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
     r"""
-    This is similar to torch.distributed.all_gather(), but is using RPC. It
-    picks the worker with the smallest name (alphabetic order) as the leader.
+    Similar to be with torch.distributed.all_gather(), but is using RPC.
+
+    It picks the worker with the smallest name (alphabetic order) as the leader.
     Then all followers send their data ``obj`` to the leader. After the leader
     has received all, it will broadcast the results back to all followers. This
     function blocks until all workers have received the gathered results.
@@ -270,7 +270,7 @@ def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
 @_require_initialized
 def _barrier(worker_names):
     r"""
-    Synchronizes local and remote RPC processes.
+    Synchronize local and remote RPC processes.
 
     This will block until all local and remote RPC processes specified under worker_names
     reach this method to wait for all outstanding work to complete.
@@ -290,11 +290,10 @@ def _barrier(worker_names):
 @_require_initialized
 def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
-    Block until all local and remote RPC processes reach this method and wait
-    for all outstanding work to complete. Every RPC process must call this
-    method before exit to perform a graceful shutdown. This should be used to
-    terminate the RPC framework, and there is no guarantee that the RPC
-    framework will work after this method returns.
+    Block until all local and remote RPC processes reach this method and wait for all outstanding work to complete.
+
+    Every RPC process must call this method before exit to perform a graceful shutdown. This should be used to
+    terminate the RPC framework, and there is no guarantee that the RPC framework will work after this method returns.
     """
     try:
         _all_gather(None, timeout=timeout)
@@ -308,8 +307,9 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
 @_require_initialized
 def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
-    Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
-    stops the local agent from accepting outstanding requests, and shuts
+    Perform a shutdown of the RPC agent, and then destroy the RPC agent.
+
+    This stops the local agent from accepting outstanding requests, and shuts
     down the RPC framework by terminating all RPC threads. If ``graceful=True``,
     this will block until all local and remote RPC processes reach this method
     and wait for all outstanding work to complete. Otherwise, if
@@ -404,6 +404,7 @@ def _finalize_shutdown():
 def get_worker_info(worker_name=None):
     r"""
     Get :class:`~torch.distributed.rpc.WorkerInfo` of a given worker name.
+
     Use this :class:`~torch.distributed.rpc.WorkerInfo` to avoid passing an
     expensive string on every invocation.
 
@@ -526,8 +527,8 @@ for method_name, method in inspect.getmembers(PyRRef):
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
-    Make a remote call to run ``func`` on worker ``to`` and return an
-    :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+    Make a remote call to run ``func`` on worker ``to`` and return an :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+
     Worker ``to`` will be the owner of the returned
     :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
     a user. The owner manages the global reference count of its
@@ -742,8 +743,9 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout: float =
 @_require_initialized
 def rpc_sync(to, func, args=None, kwargs=None, timeout: float = UNSET_RPC_TIMEOUT):
     r"""
-    Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
-    messages are sent and received in parallel to execution of Python code. This
+    Make a blocking RPC call to run function ``func`` on worker ``to``.
+
+    RPC messages are sent and received in parallel to execution of Python code. This
     method is thread-safe.
 
     Args:
@@ -816,8 +818,9 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout: float = UNSET_RPC_TIMEOU
 @_require_initialized
 def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
-    Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
-    messages are sent and received in parallel to execution of Python code. This
+    Make a non-blocking RPC call to run function ``func`` on worker ``to``.
+
+    RPC messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
     :class:`~torch.futures.Future` that can be awaited on.
 

@@ -3,9 +3,9 @@ import functools
 
 def async_execution(fn):
     r"""
-    A decorator for a function indicating that the return value of the function
-    is guaranteed to be a :class:`~torch.futures.Future` object and this
-    function can run asynchronously on the RPC callee. More specifically, the
+    Return value of the function is guaranteed to be a :class:`~torch.futures.Future` object, given by the decorator.
+
+    This function can run asynchronously on the RPC callee. More specifically, the
     callee extracts the :class:`~torch.futures.Future` returned by the wrapped
     function and installs subsequent processing steps as a callback to that
     :class:`~torch.futures.Future`. The installed callback will read the value

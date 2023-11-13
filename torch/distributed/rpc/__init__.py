@@ -88,9 +88,9 @@ if is_available():
         rpc_backend_options=None,
     ):
         r"""
-        Initializes RPC primitives such as the local RPC agent
-        and distributed autograd, which immediately makes the current
-        process ready to send and receive RPCs.
+        Initialize RPC primitives such as the local RPC agent and distributed autograd.
+
+        That immediately makes the current process ready to send and receive RPCs.
 
         Args:
             name (str): a globally unique name of this node. (e.g.,
