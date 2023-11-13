@@ -222,18 +222,14 @@ class ConstDictVariable(VariableTracker):
 
             newval = dict(self.items)
             newval[k] = args[1]
-
-            return tx.replace_all(
-                self,
-                self.modifed(newval),
-            )
+            return tx.replace_all(self, self.clone(items=newval))
         elif name in ("pop", "get") and args[0] not in self and len(args) == 2:
             # missing item, return the default value
             return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
             newval = dict(self.items)
             result = newval.pop(Hashable(args[0]))
-            tx.replace_all(self, self.modifed(newval))
+            tx.replace_all(self, self.clone(items=newval))
             return result
         elif (
             name == "update"
@@ -243,18 +239,13 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = dict(self.items)
             newval.update(args[0].items)
-            result = self.modifed(newval)
-            return tx.replace_all(self, result)
+            return tx.replace_all(self, self.clone(items=newval))
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
         else:
             return super().call_method(tx, name, args, kwargs)
-
-    def modifed(self, items, **options):
-        """a copy of self with different items"""
-        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
@@ -287,21 +278,19 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        Hashable = ConstDictVariable._HashableTracker
-
         if name == "__getitem__":
-            k = Hashable(args[0])
+            assert len(args) == 1
 
-            if k in self.items:
+            if args[0] in self:
                 return self.getitem_const(args[0])
             else:
                 if self.default_factory is None:
-                    raise KeyError(f"{k}")
+                    raise KeyError(f"{args[0]}")
                 else:
-                    new_val = dict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
-                    new_val[k] = default_var
-                    tx.replace_all(self, self.modifed(new_val))
+                    super().call_method(
+                        tx, "__setitem__", (args[0], default_var), kwargs
+                    )
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)

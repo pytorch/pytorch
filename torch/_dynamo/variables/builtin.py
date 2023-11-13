@@ -1489,8 +1489,9 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
-        return None
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
@@ -1504,6 +1505,8 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -1517,7 +1520,10 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(a, ListVariable):
+        # Unwrap the underlying ConstDictVariable
+        if isinstance(a, DictView):
+            a = a.dv_dict
+        if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None
