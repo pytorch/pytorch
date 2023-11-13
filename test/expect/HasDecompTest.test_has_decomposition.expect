@@ -592,8 +592,6 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
-aten::_weight_norm_interface
-aten::_weight_norm_interface.out
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out
@@ -885,6 +883,7 @@ aten::lu_unpack.out
 aten::masked_scatter
 aten::masked_scatter.out
 aten::masked_scatter_
+aten::masked_scatter_backward
 aten::masked_select
 aten::masked_select.out
 aten::matmul_backward

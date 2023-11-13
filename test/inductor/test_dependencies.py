@@ -9,7 +9,7 @@ from torch._inductor.ir import Buffer, FixedLayout, Pointwise
 from torch._inductor.virtualized import ops, V
 
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestDependencies(TorchTestCase):
@@ -58,7 +58,6 @@ class TestDependencies(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU or HAS_CUDA:
-        run_tests("sympy")
+    run_inductor_tests()

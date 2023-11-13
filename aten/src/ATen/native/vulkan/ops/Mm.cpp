@@ -13,6 +13,68 @@ namespace {
 using namespace api::utils;
 using namespace at::native::vulkan::ops;
 
+vTensor pack_2d_inputs_with_width(const Tensor& input_maybe_cpu) {
+  Tensor input_arg;
+  if (input_maybe_cpu.is_vulkan()) {
+    // need to reformat the memory using cpu host code
+    input_arg = input_maybe_cpu.cpu();
+  } else {
+    input_arg = input_maybe_cpu;
+  }
+  api::Context* const context = api::context();
+
+  const Tensor input = input_arg.contiguous();
+  const IntArrayRef input_sizes = input_arg.sizes();
+  const float* const src_input_ptr = input.data_ptr<float>();
+
+  /* Source */
+  const int64_t src_width_sz = input_sizes[Layout::Parameter::width] != 0
+      ? input_sizes[Layout::Parameter::width]
+      : 1;
+  const int64_t src_height_sz = input_sizes[Layout::Parameter::height] != 0
+      ? input_sizes[Layout::Parameter::height]
+      : 1;
+
+  /* Destination */
+  const int64_t dst_width_sz = div_up(src_width_sz, INT64_C(4));
+  const int64_t dst_height_sz = src_height_sz;
+  const int64_t dst_plane_sz = dst_width_sz * dst_height_sz;
+
+  vTensor v_input{
+      context,
+      {
+          4,
+          dst_height_sz,
+          dst_width_sz,
+      },
+      input_arg.scalar_type(),
+  };
+  api::StorageBuffer staging(context, at::kFloat, v_input.gpu_numel());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
+
+    float* dst_input_ptr = mapping.template data<float>();
+
+    memset(dst_input_ptr, 0, v_input.nbytes());
+
+    for (const auto src_h : c10::irange(src_height_sz)) {
+      for (const auto src_w : c10::irange(src_width_sz)) {
+        const int64_t dst_plane_idx = src_w % 4;
+        const int64_t dst_offset = (dst_plane_sz * dst_plane_idx) +
+            (src_h * dst_width_sz) + (src_w / 4);
+        const int64_t src_offset = src_h * src_width_sz + src_w;
+        memcpy(
+            dst_input_ptr + dst_offset,
+            src_input_ptr + src_offset,
+            sizeof(float));
+      }
+    }
+  }
+  utils::pack_staging_to_vtensor(staging.buffer(), v_input);
+
+  return v_input;
+}
+
 vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
@@ -38,28 +100,51 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         "Vulkan Linear not usable! "
         "Reason: Unable to perform weight packing with batch; the input tensor of a batch of matrices should contain 3 dimensions: batch, height, width.");
   }
-
   /* Source */
-  const int64_t src_kb_sz =
-      use_batch ? w_sizes[Layout::BatchMatrices::batch] : 1;
-  const int64_t src_kw_sz = use_batch ? w_sizes[Layout::BatchMatrices::width]
-                                      : w_sizes[Layout::Parameter::width];
-  const int64_t src_kh_sz = use_batch ? w_sizes[Layout::BatchMatrices::height]
-                                      : w_sizes[Layout::Parameter::height];
-
+  int64_t src_kb_sz = 0;
+  int64_t src_kw_sz = 0;
+  int64_t src_kh_sz = 0;
   /* Destination */
-  const int64_t dst_kb_sz = src_kb_sz;
-  const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
-  const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+  int64_t dst_kb_sz = 0;
+  int64_t dst_kw_sz = 0;
+  int64_t dst_kh_sz = 0;
+  std::vector<int64_t> dst_vtensor_sizes;
+  if (use_batch || quantized) {
+    /* Source */
+    src_kb_sz = use_batch ? w_sizes[Layout::BatchMatrices::batch] : 1;
+    src_kw_sz = use_batch ? w_sizes[Layout::BatchMatrices::width]
+                          : w_sizes[Layout::Parameter::width];
+    src_kh_sz = use_batch ? w_sizes[Layout::BatchMatrices::height]
+                          : w_sizes[Layout::Parameter::height];
+
+    /* Destination */
+    dst_kb_sz = src_kb_sz;
+    dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+    dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+    dst_vtensor_sizes = {
+        dst_kb_sz,
+        4,
+        dst_kh_sz,
+        dst_kw_sz,
+    };
+  } else {
+    /* Source */
+    src_kw_sz = w_sizes[Layout::Parameter::width];
+    src_kh_sz = w_sizes[Layout::Parameter::height];
+
+    /* Destination */
+    dst_kw_sz = src_kw_sz;
+    dst_kh_sz = div_up(src_kh_sz, INT64_C(4));
+    dst_vtensor_sizes = {
+        4,
+        dst_kh_sz,
+        dst_kw_sz,
+    };
+  }
 
   vTensor v_weight{
       context,
-      {
-          dst_kb_sz,
-          4,
-          dst_kh_sz,
-          dst_kw_sz,
-      },
+      dst_vtensor_sizes,
       weight_arg.scalar_type(),
   };
   if (quantized) {
@@ -78,7 +163,7 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         src_kw_sz,
         dst_kh_sz,
         dst_kw_sz);
-  } else {
+  } else if (use_batch) {
     stage_pack_weights<float>(
         context,
         v_weight,
@@ -88,6 +173,9 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         src_kw_sz,
         dst_kh_sz,
         dst_kw_sz);
+  } else {
+    stage_pack_2d_weights_with_height<float>(
+        context, v_weight, weight, src_kh_sz, src_kw_sz, dst_kh_sz, dst_kw_sz);
   }
   return v_weight;
 }
@@ -127,15 +215,11 @@ vTensor pack_biases(
         src_kw_sz = b_sizes[Layout::BatchMatrices::batch];
         src_kh_sz = 1;
       }
-    } else {
-      src_kb_sz = 1;
-      if (bias.sizes().size() == 2) {
-        src_kw_sz = b_sizes[Layout::Parameter::width];
-        src_kh_sz = b_sizes[Layout::Parameter::height];
-      } else {
-        src_kw_sz = b_sizes[Layout::Parameter::height];
-        src_kh_sz = 1;
-      }
+    } else if (bias.scalar_type() == at::kFloat) {
+      // if it is float/unquantized and not batch case, we use improved
+      // algorithm with no packed bias for compiler-optimizable broadcasting
+      return convert(bias.vulkan());
+      ;
     }
     const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
 
@@ -358,7 +442,7 @@ Tensor run_addmm_context(
       input_arg.dim() == 2 ? input_arg : reshape_to_2d(input_arg);
   const Tensor input =
       input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
-  const vTensor& v_input = convert(input);
+  const vTensor& v_input = pack_2d_inputs_with_width(input);
 
   const vTensor& packed_v_weight = convert(
       linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
@@ -386,7 +470,7 @@ Tensor run_addmm_context(
   vTensor v_output{
       context,
       {
-          v_input.sizes()[Layout::Parameter::height],
+          input_arg_2d.sizes()[Layout::Parameter::height],
           unpacked_weight_sizes[Layout::Parameter::width],
       },
       input_arg.scalar_type(),
@@ -453,15 +537,14 @@ Tensor run_addmm_context(
     } else {
       compute_shader = VK_KERNEL(addmm);
       const struct {
-        uvec3 size;
-        int32_t K;
+        uvec3 shader_extents;
+        uint32_t tensor_row_size;
         uvec3 bias_size;
         int32_t _;
         vec2 multiplier;
       } block{
           v_output.extents(),
-          safe_downcast<int32_t>(
-              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents().data[0u],
           packed_v_bias.extents(),
           0,
           {
@@ -469,11 +552,11 @@ Tensor run_addmm_context(
               beta,
           },
       };
+
       params = api::UniformParamsBuffer(context, block);
     }
 
     api::PipelineBarrier pipeline_barrier{};
-
     context->submit_compute_job(
         // shader descriptor
         compute_shader,
@@ -481,10 +564,10 @@ Tensor run_addmm_context(
         pipeline_barrier,
         // global work group size
         {
-            safe_downcast<uint32_t>(div_up(
-                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
-                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+            safe_downcast<uint32_t>(div_up(
+                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
             1,
         },
         // local work group size
@@ -545,12 +628,11 @@ Tensor run_addmm_context(
           : VK_KERNEL(quantized_mm_quint8);
     } else {
       const struct {
-        uvec3 size;
-        int32_t K;
+        uvec3 shader_extents;
+        uint32_t tensor_row_size;
       } block_no_bias{
           v_output.extents(),
-          safe_downcast<int32_t>(
-              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents().data[0u],
       };
       params = api::UniformParamsBuffer(context, block_no_bias);
       compute_shader = VK_KERNEL(mm);
@@ -565,10 +647,10 @@ Tensor run_addmm_context(
         pipeline_barrier,
         // global work group size
         {
-            safe_downcast<uint32_t>(div_up(
-                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
-                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+            safe_downcast<uint32_t>(div_up(
+                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
             1,
         },
         // local work group size

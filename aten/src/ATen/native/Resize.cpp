@@ -174,7 +174,7 @@ static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_byt
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
     TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
-  } else if (new_size_bytes > storage.nbytes()) {
+  } else if (new_size_bytes > storage.sym_nbytes()) {
     resize_bytes_meta(storage.unsafeGetStorageImpl(), std::move(new_size_bytes));
   }
 }
@@ -239,7 +239,7 @@ const Tensor& _resize_(
     ArrayRef<T> size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
-  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
+  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
   _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
   if (optional_memory_format.has_value()) {
@@ -252,7 +252,7 @@ const Tensor& _resize_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory() && old_storage_nbytes != -1)) {
     at::native::fill_resize_deterministic_(self, old_storage_nbytes);
   }
   return self;

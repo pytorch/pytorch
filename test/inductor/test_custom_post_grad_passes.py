@@ -4,15 +4,12 @@ import contextlib
 import torch
 import torch._inductor.pattern_matcher as pattern_matcher
 
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 
 from torch._inductor import config
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
-
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 @config.patch({"freezing": True})
@@ -168,5 +165,6 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(mkl=True)

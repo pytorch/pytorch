@@ -1556,7 +1556,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
     @skipIf(TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10',
-            "Segfauls with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173")
+            "Segfaults with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173")
     @parametrize('case', [
         subtest(_make_case(torch.add), name='add'),
         subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
@@ -2092,7 +2092,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
             # Interesting case #2: Batch dim at end of tensor, success cases
             # view_as_complex requires that the dim with size 2 have stride 1
-            # in order for the view to function propertly
+            # in order for the view to function property
             test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
             test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
             test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
@@ -3598,8 +3598,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
         xfail('addcdiv'),
@@ -3743,8 +3741,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('_softmax_backward_data'),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # One or more of the overload doesn't have a Batch rule.
         xfail('bincount'),
@@ -4355,7 +4351,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def test_searchsorted_bucketize(self, device):
         # OpInfo generates test with repeated samples in batch dim.
-        # Thus we test explicitily with different samples across a batch.
+        # Thus we test explicitly with different samples across a batch.
 
         def test():
             boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 6, 8, 10]], device=device)
@@ -4541,7 +4537,7 @@ class TestRandomness(TestCase):
                 vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
             return
 
-        # I have no clue how to actually test corectness of alpha dropout because the docs
+        # I have no clue how to actually test correctness of alpha dropout because the docs
         # seem wrong: https://github.com/pytorch/pytorch/issues/74004
         vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
         if randomness == 'different':
@@ -4608,7 +4604,7 @@ class TestRandomness(TestCase):
 
         vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
 
-        # I have no clue how to actually test corectness of alpha dropout because the docs
+        # I have no clue how to actually test correctness of alpha dropout because the docs
         # seem wrong: https://github.com/pytorch/pytorch/issues/74004
 
         # Check the "feature" pattern
