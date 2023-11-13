@@ -244,64 +244,92 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
-  scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-
-  // compute mean per input
-  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads,
-                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
-      const scalar_t* x_ptr = input_data + i * n_channel;
-      vec::map2<scalar_t>(
-          [](Vec x, Vec y) { return x + y; },
-          buffer_ptr,
-          x_ptr,
-          buffer_ptr,
-          n_channel);
-    }
-  });
-
-  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      accscalar_t sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
-        sum += buffer_data[t * n_channel + c];
+  
+  if (N > num_threads) {
+    Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
+    scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
+    
+    // compute mean per input
+    at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+      int tid = at::get_thread_num();
+      TORCH_CHECK(tid < num_threads,
+                  "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+      scalar_t* buffer_ptr = buffer_data + tid * n_channel;
+      for (const auto i : c10::irange(begin, end)) {
+        const scalar_t* x_ptr = input_data + i * n_channel;
+        vec::map2<scalar_t>(
+            [](Vec x, Vec y) { return x + y; },
+            buffer_ptr,
+            x_ptr,
+            buffer_ptr,
+            n_channel);
       }
-      scalar_t mean = sum / N;
-      mean_data[c] = mean;
-    }
-  });
-
-  // compute variance per input, reuse the immediate buffer
-  buffer.zero_();
-  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
-      const scalar_t* x_ptr = input_data + i * n_channel;
-      vec::map3<scalar_t>(
-          [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
-          buffer_ptr,
-          x_ptr,
-          buffer_ptr,
-          mean_data,
-          n_channel);
-    }
-  });
-
-  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      accscalar_t _var_sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
-        _var_sum += buffer_data[t * n_channel + c];
+    });
+  
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t sum = 0;
+        for (const auto t : c10::irange(num_threads)) {
+          sum += buffer_data[t * n_channel + c];
+        }
+        scalar_t mean = sum / N;
+        mean_data[c] = mean;
       }
-      var_sum_data[c] = _var_sum;
-    }
-  });
+    });
+    
+    // compute variance per input, reuse the immediate buffer
+    buffer.zero_();
+    at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+      int tid = at::get_thread_num();
+      TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+      scalar_t* buffer_ptr = buffer_data + tid * n_channel;
+      for (const auto i : c10::irange(begin, end)) {
+        const scalar_t* x_ptr = input_data + i * n_channel;
+        vec::map3<scalar_t>(
+            [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
+            buffer_ptr,
+            x_ptr,
+            buffer_ptr,
+            mean_data,
+            n_channel);
+      }
+    });
+  
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t _var_sum = 0;
+        for (const auto t : c10::irange(num_threads)) {
+          _var_sum += buffer_data[t * n_channel + c];
+        }
+        var_sum_data[c] = _var_sum;
+      }
+    });
+  } else {
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t sum = 0;
+        accscalar_t _var_sum = 0;
+        for (const auto t : c10::irange(N)) {
+          const accscalar_t x = input_data[t * n_channel + c];
+          sum += x;
+          _var_sum += (x - (sum/N)) * (x - (sum/N));
+        }
+        
+        scalar_t mean = sum / N;
+        mean_data[c] = mean;
+      }
+    });
+    
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t _var_sum = 0;
+        for (const auto t : c10::irange(N)) {
+          _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+        }
+        var_sum_data[c] = _var_sum;
+      }
+    });
+  }
 }
 
 template <typename scalar_t>
