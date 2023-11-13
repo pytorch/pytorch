@@ -61,7 +61,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       output_handles.data(), output_handles.size());
 }
 
-std::vector<const char*> AOTIModelContainerRunner::get_call_spec() {
+std::vector<const char*> AOTIModelRunner::get_call_spec() {
   const char* in_spec;
   const char* out_spec;
   AOTI_RUNTIME_ERROR_CODE_CHECK(

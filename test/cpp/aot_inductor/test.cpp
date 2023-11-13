@@ -31,12 +31,12 @@ void test_aoti(const std::string& device) {
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
-  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  std::unique_ptr<torch::inductor::AOTIModelRunner> runner;
   if (device == "cuda") {
-    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+    runner = std::make_unique<torch::inductor::AOTIModelRunnerCuda>(
         model_so_path.c_str());
   } else if (device == "cpu") {
-    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
+    runner = std::make_unique<torch::inductor::AOTIModelRunnerCpu>(
         model_so_path.c_str());
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
