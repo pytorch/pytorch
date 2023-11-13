@@ -314,9 +314,9 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"at::native::div_floor_integer({x}, {div})"
+                x = f"c10::div_floor_integer({x}, {div})"
             else:
-                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+                x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
@@ -325,8 +325,8 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"at::native::div_floor_integer({x}, {div})"
-        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+            return f"c10::div_floor_integer({x}, {div})"
+        return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -838,6 +838,14 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
+    def add(a, b):
+        return f"decltype({a})({a} + {b})"
+
+    @staticmethod
+    def sub(a, b):
+        return f"decltype({a})({a} - {b})"
+
+    @staticmethod
     def mul(a, b):
         return f"decltype({a})({a} * {b})"
 
@@ -1269,10 +1277,14 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
                     f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
             )

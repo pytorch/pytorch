@@ -7,12 +7,7 @@ from typing import List, Tuple, Union
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    parametrize,
-    run_tests,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import parametrize, TEST_CUDA
 from torch.utils._triton import has_triton
 
 
@@ -180,7 +175,8 @@ class TestDecomp(NNTestCase):
 device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
 
+
 if __name__ == "__main__":
-    # We don't support torch.compile() on Windows presently
-    if not IS_WINDOWS:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()
