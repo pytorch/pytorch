@@ -11,7 +11,6 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
 
 
 aten = torch._ops.ops.aten
@@ -101,8 +100,8 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         r = func(*args, **kwargs)
         if fake_r is not None:
-            r_flat, _ = tree_flatten(r)
-            f_flat, _ = tree_flatten(fake_r)
+            r_flat = pytree.tree_leaves(r)
+            f_flat = pytree.tree_leaves(fake_r)
             assert len(f_flat) == len(
                 r_flat
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
@@ -128,7 +127,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                 )
 
             for idx, (r_out, fake_out) in enumerate(
-                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+                zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
             ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
