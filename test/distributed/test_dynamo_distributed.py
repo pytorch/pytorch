@@ -31,6 +31,9 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
 )
 import torch._dynamo.logging
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+)
 from torch._dynamo.comptime import comptime
 
 def reset_rng_state():
@@ -415,6 +418,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    @unittest.skipIf(
+        PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Inaccurate results with fused SDPA kernels"
+    )
     def test_hf_bert_fsdp(self):
 
         def apply_fsdp(model, wrap_policy):
@@ -551,7 +558,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-        # ensure compatibilty with dynamo explain
+        # ensure compatibility with dynamo explain
 
         explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
@@ -579,7 +586,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_no_split(self):
         """
         Ensures the DDPOptimizer returns a correct, compiled module without
-        introducing graph splits. (Based on model parmeters fitting in the bucket)
+        introducing graph splits. (Based on model parameters fitting in the bucket)
         """
         # DDP will always do a 'first bucket' with a really small size;  so only a tiny model will escape this
         m, inputs, correct_outputs = self.get_model(hidden_feat=5)

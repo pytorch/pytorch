@@ -238,8 +238,8 @@ class TestControlFlow(TestCase):
 
         def fwbw(map_op, f, x, y):
             z = map_op(f, x, y)
-            flat_x, _ = pytree.tree_flatten(x)
-            flat_z, _ = pytree.tree_flatten(z)
+            flat_x = pytree.tree_leaves(x)
+            flat_z = pytree.tree_leaves(z)
             grads = torch.autograd.grad(flat_z, flat_x, [torch.ones_like(z) for z in flat_z])
             return z, grads
 
@@ -680,34 +680,20 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
-        # Brittle, yet, delicious
-        out = """
-        def forward(self, x_1, pred_1, pred2_1):
-            true_graph_0 = self.true_graph_0
-            false_graph_0 = self.false_graph_0
-            conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-            true_graph_1 = self.true_graph_1
-            false_graph_1 = self.false_graph_1
-            conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-            return add
-        """  # noqa: B950
-        code = graph.code
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
-
-        code = graph.true_graph_0.code
-        out = """
-        def forward(self, arg0_1):
-            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return mul
-        """
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
+        self.assertExpectedInline(graph.code.strip(), """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    return add""")  # noqa: B950
+        self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return mul""")
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -845,34 +831,20 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f, tracing_mode="fake")(x, torch.tensor(False), torch.tensor(False))
 
-        # Brittle, yet, delicious
-        out = """
-            def forward(self, x_1, pred_1, pred2_1):
-                true_graph_0 = self.true_graph_0
-                false_graph_0 = self.false_graph_0
-                conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-                true_graph_1 = self.true_graph_1
-                false_graph_1 = self.false_graph_1
-                conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-                add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-                return add
-        """  # noqa: B950
-        code = graph.code
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
-
-        code = graph.true_graph_0.code
-        out = """
-        def forward(self, arg0_1):
-            mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return mul
-        """
-        # Normalization hack, cause .code makes some weird whitespace
-        code = "".join(code.split())
-        out = "".join(out.split())
-        self.assertEqual(code, out)
+        self.assertExpectedInline(graph.code.strip(), """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    return add""")  # noqa: B950
+        self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return mul""")
 
     def test_raise_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
@@ -913,7 +885,7 @@ class TestControlFlowTraced(TestCase):
         i = 0
         for m in gm.modules():
             for node in m.graph.nodes:
-                if node.op == "call_function" and node.target == torch.ops.map_impl:
+                if node.op == "call_function" and node.target == torch.ops.higher_order.map_impl:
                     i += 1
         self.assertEqual(i, op_count)
 
@@ -1003,8 +975,8 @@ class TestControlFlowTraced(TestCase):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 
@@ -1023,8 +995,8 @@ class TestControlFlowTraced(TestCase):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 
@@ -1069,13 +1041,13 @@ class TestControlFlowTraced(TestCase):
             c = 0
             for node in gm.graph.nodes:
                 if node.op == "call_function":
-                    if node.target == torch.ops.map_impl:
+                    if node.target == torch.ops.higher_order.map_impl:
                         c += count_mutable(getattr(gm, str(node.args[0])))
                     elif schema := getattr(node.target, "_schema", None):
                         c += int(schema.is_mutable)
             return c
         self.assertEqual(count_mutable(fgm), 0)
-        # One for forward, one for recompuation logic in backward
+        # One for forward, one for recomputation logic in backward
         self.assertEqual(count_mutable(gm), 2)
 
     def test_map_functionalized(self):
@@ -1278,20 +1250,17 @@ class TestControlFlowTraced(TestCase):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
-        # The symbols in make_fx's shape_env should not be speciliazed.
+        # The symbols in make_fx's shape_env should not be specialized.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
-        exp_code = """\
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 4;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
-eq = true_graph_0 = false_graph_0 = x_1 = None
-    return conditional
-"""
-        self._expected_inline_normalized(gm.code, exp_code)
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
@@ -1303,6 +1272,7 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)
         gm = make_fx(f)(*args)
+        gm.print_readable()
         self.assertEqual(gm(*args), exp_res)
 
         def cnt_placeholder(gm):
@@ -1356,32 +1326,19 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
         inp = torch.randn(2, 3)
 
         gm = make_fx(foo)(inp)
-        # normalization
-        actual = "".join(gm.code.split())
-        exp = """\
+
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, \
-_tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
-    return conditional
-"""
-        exp = "".join(exp.split())
-        self.assertEqual(exp, actual)
-
-        actual = gm.true_graph_0.code
-        # normalization
-        actual = "".join(actual.split())
-        exp = """
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
+    return conditional""")  # noqa: B950
+        self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    return add
-"""
-        # Normalization hack, cause .code makes some weird whitespace
-        exp = "".join(exp.split())
-        self.assertEqual(exp, actual)
+    return add""")
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
@@ -1465,11 +1422,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return cond(x.shape[0] > 4, inner_true_fn, inner_false_fn, [x])
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-    def _expected_inline_normalized(self, actual_code, exp_code):
-        normalized_actual = "".join(actual_code.split())
-        normalized_exp = "".join(exp_code.split())
-        self.assertExpectedInline(normalized_actual, normalized_exp)
-
     def test_map_unfunc_boolean_tensor_for_nested_map_cond(self):
         def map_fn(pred, x):
             def fn(x, pred):
@@ -1491,24 +1443,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return wrapper
 
         gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
-        exp_graph = """\
+        self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, 1, x_1, pred_1);\
   body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
-    return getitem
-"""
-        exp_body_graph = """\
+    return getitem""")
+        self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0,\
- [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
-    return [conditional]
-"""
-        self._expected_inline_normalized(gm.code, exp_graph)
-        self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
+    conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
+    return [conditional]""")  # noqa: B950
 
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
 
@@ -1547,9 +1494,15 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.ones(3, 4)
         exp_out = inp.sin()
         iter_n = torch._dynamo.config.cache_size_limit + 1
+
+        # Need this because Dynamo checks lambda code ID not object itself.
+        def make_dummy_fn(op):
+            exec(f"temp = lambda x: x.{op}()")
+            return locals()["temp"]
+
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
-            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+            self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
@@ -1563,36 +1516,29 @@ def forward(self, arg0_1, arg1_1):
         def foo(x):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-        exp_graph = """\
-class foo(torch.nn.Module):
-    def forward(self, x_1: f32[s0, s1]):
-        # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
-        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, s1] = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
-eq = true_graph_0 = false_graph_0 = x_1 = None
-        return conditional
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
-            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
-            return sub
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
-            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
-            return add
-"""
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
-            self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
+            self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
+
+            self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    cos = torch.ops.aten.cos.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+    return sub""")
+
+            self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+    return add""")
 
     def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
         if nested_level == 0:

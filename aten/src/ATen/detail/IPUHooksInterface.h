@@ -17,8 +17,7 @@ struct TORCH_API IPUHooksInterface {
         "available.");
   }
 
-  virtual const Generator& newIPUGenerator(
-      DeviceIndex device_index = -1) const {
+  virtual Generator newIPUGenerator(DeviceIndex device_index = -1) const {
     AT_ERROR(
         "Cannot create a new IPU generator: the IPU backend is not available.");
   }

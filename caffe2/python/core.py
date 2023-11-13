@@ -1645,7 +1645,7 @@ class Net:
             return do_set(self.GivenTensorInt64Fill)
         elif array.dtype == str:
             return do_set(self.GivenTensorStringFill)
-        elif array.dtype == np.bool:
+        elif array.dtype == bool:
             return do_set(self.GivenTensorBoolFill)
         else:
             return do_set(self.GivenTensorFill)

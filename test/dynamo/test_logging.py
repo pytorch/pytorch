@@ -278,6 +278,26 @@ LoweringException: AssertionError:
         )
 
     @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format_exc(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        try:
+            raise RuntimeError("foo")
+        except RuntimeError:
+            dynamo_log.exception("test dynamo")
+            dynamo_log.info("with exc", exc_info=True)
+        dynamo_log.info("with stack", stack_info=True)
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("Traceback", handler.format(records[0]))
+        self.assertIn("Traceback", handler.format(records[1]))
+        self.assertIn("Stack", handler.format(records[2]))
+
+    @make_logging_test(dynamo=logging.INFO)
     def test_custom_format(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)
         test_log = torch._logging.getArtifactLogger(
@@ -551,7 +571,7 @@ print("arf")
         fn_opt = torch._dynamo.optimize("eager")(fn)
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -562,7 +582,7 @@ print("arf")
                 ~~^~~""",
         )
         self.assertExpectedInline(
-            messages[1],
+            messages[-1],
             """\
             return x * 3
                    ~~^~~""",
@@ -597,7 +617,9 @@ exclusions = {
     "output_code",
     "schedule",
     "fusion",
+    "overlap",
     "aot_graphs",
+    "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
     "graph_breaks",

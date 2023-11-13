@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
-from torch.distributed import DistNetworkError, DistError
+from torch.distributed import DistNetworkError, DistError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
@@ -404,6 +404,14 @@ class TCPStoreTest(TestCase, StoreTestBase):
         v0, v1 = store.multi_get(["foo", "bar"])
         self.assertEqual(b"po", v0)
         self.assertEqual(b"tato", v1)
+
+    def test_store_timeout_on_missing_clients(self):
+        with self.assertRaisesRegex(DistStoreError, r"Timed out after \d+ seconds waiting for clients. \d+/\d+ clients joined."):
+            # world_size is 2 so it should timeout
+            dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2))
+
+        # when wait_for_workers is not set, then there should be no exception raised
+        dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2), wait_for_workers=False)
 
 class LibUvTCPStoreTest(TCPStoreTest):
 

@@ -118,8 +118,8 @@ enum class ConvBackend {
 // This overload is exposed to python for testing, etc.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, SymIntArrayRef padding, IntArrayRef dilation,
-    bool transposed, SymIntArrayRef output_padding, int64_t groups, const at::OptionalSymIntArrayRef bias_sizes_opt);
+    SymIntArrayRef stride, SymIntArrayRef padding, SymIntArrayRef dilation,
+    bool transposed, SymIntArrayRef output_padding, c10::SymInt groups, const at::OptionalSymIntArrayRef bias_sizes_opt);
 
 TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
     const Tensor& weight,
@@ -211,7 +211,7 @@ static void convolution_shape_check(
 template <typename T>
 static inline std::vector<T> _conv_output_size(
     ArrayRef<T> input_size, ArrayRef<T> weight_size,
-    ArrayRef<T> padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+    ArrayRef<T> padding, ArrayRef<T> stride, ArrayRef<T> dilation = ArrayRef<T>()
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
@@ -237,7 +237,7 @@ static inline std::vector<int64_t> conv_output_size(
 
 static inline std::vector<c10::SymInt> conv_output_size(
     SymIntArrayRef input_size, SymIntArrayRef weight_size,
-    SymIntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+    SymIntArrayRef padding, SymIntArrayRef stride, SymIntArrayRef dilation = SymIntArrayRef()
 ) {
   return _conv_output_size(input_size, weight_size, padding, stride, dilation);
 }
@@ -245,7 +245,7 @@ static inline std::vector<c10::SymInt> conv_output_size(
 template <typename T>
 std::vector<T> _conv_input_size(
     ArrayRef<T> output_size, ArrayRef<T> weight_size,
-    ArrayRef<T> padding, ArrayRef<T> output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+    ArrayRef<T> padding, ArrayRef<T> output_padding, ArrayRef<T> stride, ArrayRef<T> dilation, T groups
 ) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
@@ -263,7 +263,7 @@ std::vector<T> _conv_input_size(
 
 static inline std::vector<c10::SymInt> conv_input_size(
     SymIntArrayRef output_size, SymIntArrayRef weight_size,
-    SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+    SymIntArrayRef padding, SymIntArrayRef output_padding, SymIntArrayRef stride, SymIntArrayRef dilation, c10::SymInt groups
 ) {
   return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
 }

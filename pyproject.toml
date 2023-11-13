@@ -28,8 +28,8 @@ ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
     "B018", # Useless expression
-    "B019", "B020",
-    "B023", "B026",
+    "B019",
+    "B023",
     "B028", # No explicit `stacklevel` keyword argument found
     "B904",
     "E402",
@@ -46,14 +46,11 @@ ignore = [
     "G101", "G201", "G202",
     # these ignores are from RUFF perf; please fix!
     "PERF203", "PERF4",
-    "PYI001", # these ignores are from PYI; please fix!
+    # these ignores are from PYI; please fix!
     "PYI019",
     "PYI024",
-    "PYI034",
     "PYI036",
     "PYI041",
-    "PYI042",
-    "PYI045",
     "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
@@ -80,6 +77,7 @@ select = [
     "UP",
     "PERF",
     "PGH004",
+    "PIE794",
     "PIE807",
     "PIE810",
     "PLE",
@@ -93,6 +91,7 @@ select = [
     "PT026",
     "PYI",
     "RUF017",
+    "TRY200",
     "TRY302",
 ]
 

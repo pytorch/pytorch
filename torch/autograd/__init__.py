@@ -40,7 +40,10 @@ def _calculate_shape(
     output: torch.Tensor, grad: torch.Tensor, is_grads_batched: bool
 ) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     # is_same_size ensures that both tensors are either nested or non nested
-    if output.is_nested:
+    # circular import
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    if output.is_nested and not isinstance(output, NestedTensor):
         if is_grads_batched:
             raise RuntimeError("Batched grads are not supported with Nested Tensor.")
         out_shape = output._nested_tensor_size()
@@ -61,8 +64,20 @@ def _make_grads(
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
+            from torch.fx.experimental.symbolic_shapes import expect_true, sym_eq
+
             first_grad = grad if not is_grads_batched else grad[0]
-            if not torch.is_same_size(out, first_grad):
+            # TODO: We can remove this conditional once we uniformly use
+            # singleton int to represent jagged dimension, so that size() call
+            # on nested tensor works
+            if out.is_nested or first_grad.is_nested:
+                shape_matches = torch.is_same_size(out, first_grad)
+            else:
+                # We need to do a regular size check, without going through
+                # the operator, to be able to handle unbacked symints
+                # (expect_true ensures we can deal with unbacked)
+                shape_matches = expect_true(sym_eq(out.size(), first_grad.size()))
+            if not shape_matches:
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )

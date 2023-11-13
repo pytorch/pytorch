@@ -760,7 +760,9 @@ void launch_grid_sampler_2d_forward_kernel(
   auto W = grid.size(2);
   int64_t count = N * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_2d_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_2d_kernel<scalar_t>
@@ -803,7 +805,9 @@ void launch_grid_sampler_3d_forward_kernel(
   auto W = grid.size(3);
   int64_t count = N * D * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_3d_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_3d_kernel<scalar_t>
@@ -856,7 +860,9 @@ void launch_grid_sampler_2d_backward_kernel(
 
   int64_t count = N * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_2d_backward_kernel<scalar_t>
@@ -913,7 +919,9 @@ void launch_grid_sampler_3d_backward_kernel(
   int64_t count = N * D * H * W;
   auto input_requires_grad = output_mask[0];
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_3d_backward_kernel<scalar_t>

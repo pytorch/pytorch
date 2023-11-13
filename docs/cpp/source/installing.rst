@@ -97,7 +97,7 @@ using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration
 
 .. code-block:: sh
 
-  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+  cmake -DCMAKE_PREFIX_PATH=`python3 -c 'import torch;print(torch.utils.cmake_prefix_path)'` ..
 
 If all goes well, it will look something like this:
 
