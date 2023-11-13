@@ -3735,6 +3735,36 @@ class TestAutograd(TestCase):
             y = x * 2
         self.assertTrue(y.requires_grad)
 
+    def test_set_grad_enabled_wraps(self):
+        for decorator in [True, False]:
+            with torch.enable_grad():
+                self.assertTrue(torch.is_grad_enabled())
+
+                if decorator:
+                    # This should not mutate the global grad mode!
+                    @torch.set_grad_enabled(False)
+                    def inner_func(x):
+                        return x.sin()
+                else:
+                    def inner_func(x):
+                        return x.sin()
+
+                    # This is non-idiomatic usage!
+                    # More idiomatic usage: torch.set_grad_enabled(False)(inner_func)
+                    obj = torch.set_grad_enabled(False)
+                    self.assertTrue(not torch.is_grad_enabled())
+
+                    # this will consume the set_grad_enabled global mutation!
+                    inner_func = obj(inner_func)
+                    self.assertTrue(torch.is_grad_enabled())
+
+                self.assertTrue(torch.is_grad_enabled())
+
+                x = torch.zeros(1, requires_grad=True)
+                self.assertTrue(
+                    not inner_func(x).requires_grad
+                )
+
     def test_simple_reentrant(self):
         y_data = torch.randn(2, 2)
 
