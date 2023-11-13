@@ -5,7 +5,6 @@ import torch
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
 
@@ -166,7 +165,6 @@ class MemoryBoundedTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests(triton=True)

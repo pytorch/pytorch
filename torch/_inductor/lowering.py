@@ -1186,12 +1186,14 @@ def unfold(x, dimension, size, step):
     if ndim == 0:
         return slice_(unsqueeze(x, 0), end=size)
 
+    dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_leq(size, dim_size)
     sizevars.guard_lt(0, step)
 
-    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
-    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+    new_dim_size = FloorDiv(dim_size - size, step) + 1
+    if sizevars.size_hint(dim_size) > 0:
+        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -2214,6 +2216,7 @@ make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
+make_fallback(aten.masked_scatter_backward)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 make_fallback(aten.triangular_solve)
@@ -2926,6 +2929,11 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
+def needs_fallback_due_to_atomic_add_limitations(dtype):
+    # tl.atomic_add does NOT support the following types
+    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+
+
 def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
@@ -2950,8 +2958,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
-    if self.get_dtype() in {torch.int64, torch.bool}:
+    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -3079,6 +3086,10 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
+        or (
+            isinstance(src, TensorBox)
+            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
+        )
         or (
             fn == "aten.scatter_reduce_"
             and reduce == "sum"
@@ -5028,12 +5039,27 @@ def sym_constrain_range(a, min, max):
 
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
-    return a.get_size()[dim]
+    val = V.graph.current_node.meta["val"]
+    # Note [Can val be an int?]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # In principle, someone could construct an FX graph where
+    # a call to size/stride has a val that is a plain int (not
+    # SymInt).  However, we will maintain the invariant that
+    # this is not possible: if you are constructing an FX graph
+    # where there is a call to size/stride that returns an
+    # int, but you KNOW that int must always be a constant,
+    # then you do not need trace that call at all (and just
+    # constant propagate the integer as is.)
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
-    return a.get_stride()[dim]
+    val = V.graph.current_node.meta["val"]
+    # See Note [Can val be an int?]
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_numel)
@@ -5087,6 +5113,10 @@ try:
     @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(c10d_functional.broadcast)
+    def broadcast(input, src, tag, ranks, group_size):
+        return ir.Broadcast.create(input, src, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):

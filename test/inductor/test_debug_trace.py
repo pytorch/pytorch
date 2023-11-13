@@ -1,33 +1,16 @@
 # Owner(s): ["module: inductor"]
 import logging
-import os
 import pathlib
 import re
 import shutil
-import sys
-import unittest
 
 import torch
 from torch._inductor import config, test_operators
-
-try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
-except unittest.SkipTest:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
-def filesize(filename: pathlib.Path):
-    assert filename.exists(), f"{filename} is missing"
-    return os.stat(filename).st_size
+from torch.testing._internal.inductor_utils import filesize, TestCase
 
 
 @config.patch("trace.enabled", True)
-class TestDebugTrace(test_torchinductor.TestCase):
+class TestDebugTrace(TestCase):
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
@@ -162,8 +145,6 @@ buf2.node.kernel = extern_kernels.mm""",
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU:
-        run_tests(needs="filelock")
+    run_inductor_tests()
