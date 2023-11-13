@@ -1094,9 +1094,9 @@ Frequently Asked Questions
 
 2. Where can I get ONNX support for my quantized model?
 
-   If you encounter an issue when exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository, prefix the issue title with ``[ONNX]``, and tag the issue as ``module: onnx``.
+   If you get errors exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository, prefix the issue title with ``[ONNX]``, and tag the issue as ``module: onnx``.
 
-   If you encounter an issue with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
+   If you encounter issues with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
 
 3. How can I use quantization with LSTM's?:
 
