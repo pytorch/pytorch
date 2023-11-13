@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import dataclasses
 import functools
 import logging
@@ -52,6 +51,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
+from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -302,11 +302,11 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                     **kwargs,
                     "cpp_wrapper": False,
                 }
-                # clone graph makes sure no graph modification from the first pass will
+                # clone_graph(gm) makes sure no graph modification from the first pass will
                 # leak to the second pass. It does increase memory pressure, but the problem
                 # can be alleviated once we have parameters as FakeTensor.
                 compiled = inner_compile(
-                    copy.deepcopy(gm), example_inputs, **kwargs_patched
+                    clone_graph(gm), example_inputs, **kwargs_patched
                 )
 
                 def materialize(x):
@@ -340,7 +340,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
 
                 # second pass
                 kwargs_patched = {**kwargs, "cpp_wrapper": True}
-                return inner_compile(gm, example_inputs, **kwargs_patched)
+                return inner_compile(clone_graph(gm), example_inputs, **kwargs_patched)
 
     return wrapper
 
