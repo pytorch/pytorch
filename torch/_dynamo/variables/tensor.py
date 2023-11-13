@@ -598,6 +598,14 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
+        elif name == "set_" and len(args) > 1:
+            # torch.Tensor.set_() has several overloads.
+            # aten::set_.source_Tensor(Tensor) gets special handling
+            # in AOTAutograd and functionalization, because it is the most common
+            # overload and is used by FSDP.
+            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
+            # unless we find that we need to make it work.
+            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
