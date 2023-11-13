@@ -1252,9 +1252,6 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
-    # TODO: Remove this; this is grandfathered in because we suppressed errors
-    # on test suite previously
-    torch._dynamo.config.suppress_errors = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
@@ -1309,6 +1306,26 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         return fn
 
     return decorator
+
+def markDynamoStrictTest(cls_or_func):
+    """
+    Marks the test as 'strict'. In strict mode, we reset before and after the
+    test, and run without suppress errors.
+    """
+    if inspect.isclass(cls_or_func):
+        cls_or_func.dynamo_strict = True
+        return cls_or_func
+
+    fn = cls_or_func
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        torch._dynamo.reset()
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
+            fn(*args, **kwargs)
+        torch._dynamo.reset()
+    return wrapper
+
 
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
     return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
@@ -2620,15 +2637,36 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        if TEST_WITH_TORCHINDUCTOR:
-            super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-        elif TEST_WITH_TORCHDYNAMO:
-            # TorchDynamo optimize annotation
-            super_run = torch._dynamo.optimize("eager")(super_run)
+        test_cls = super_run.__self__
 
-        super_run(result=result)
+        # Are we compiling?
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
+        # Is the class strict and compiling?
+        strict_mode = getattr(test_cls, "dynamo_strict", False) and compiled
+
+        if strict_mode:
+            torch._dynamo.reset()
+
+        # TODO: Remove this; this is grandfathered in because we suppressed errors
+        # on test suite previously
+        # When strict mode is False, supress_errors is True
+        if compiled:
+            supress_errors = not strict_mode
+        else:
+            supress_errors = torch._dynamo.config.suppress_errors
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
+            if TEST_WITH_TORCHINDUCTOR:
+                super_run = torch._dynamo.optimize("inductor")(super_run)
+            elif TEST_WITH_AOT_EAGER:
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+            elif TEST_WITH_TORCHDYNAMO:
+                # TorchDynamo optimize annotation
+                super_run = torch._dynamo.optimize("eager")(super_run)
+
+            super_run(result=result)
+
+        if strict_mode:
+            torch._dynamo.reset()
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
