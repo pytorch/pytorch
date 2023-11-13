@@ -66,7 +66,7 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_FALSE((bool)empty);
   EXPECT_FALSE(empty.has_value());
 
-  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(empty.value(), c10::bad_optional_access);
 }
 
@@ -89,7 +89,9 @@ TYPED_TEST(OptionalTest, Initialized) {
     EXPECT_TRUE((bool)opt);
     EXPECT_TRUE(opt.has_value());
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     EXPECT_EQ(opt.value(), val);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     EXPECT_EQ(*opt, val);
   }
 }
