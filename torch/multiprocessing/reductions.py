@@ -415,18 +415,19 @@ def rebuild_storage_fd(cls, df, size):
         os.close(fd)
 
 
-def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
+def rebuild_storage_filename(cls, manager, handle, size, filename, dtype=None):
     storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(
         cls, handle
     )
     if storage is not None:
+        # storage.filename = filename
         return storage._shared_decref()
     if dtype is None:
-        storage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, size)
+        storage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, size, filename)
     else:
         byte_size = size * torch._utils._element_size(dtype)
         untyped_storage: torch.UntypedStorage = (
-            torch.UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size)
+            torch.UntypedStorage._new_shared_filename_cpu(manager, handle, byte_size, filename)
         )
         storage = torch.TypedStorage(
             wrap_storage=untyped_storage, dtype=dtype, _internal=True
@@ -468,6 +469,7 @@ def reduce_storage(storage):
         metadata = storage._share_filename_cpu_()
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
+        metadata += (storage.filename,)
         if isinstance(storage, torch.TypedStorage):
             metadata += (storage.dtype,)
         storage._shared_incref()
