@@ -22,7 +22,7 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Dict, List, Optional, Union, Tuple
-from torch.torch_version import TorchVersion
+from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
 
@@ -401,7 +401,8 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     if cuda_version is None:
         return
 
-    cuda_ver = cuda_str_version = cuda_version.group(1)
+    cuda_str_version = cuda_version.group(1)
+    cuda_ver = Version(cuda_str_version)
     if torch.version.cuda is None:
         return
 
@@ -1450,8 +1451,8 @@ def _check_and_build_extension_h_precompiler_headers(
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
     extra_cflags_str = listToString(extra_cflags)
-    extra_include_paths_str = (
-        "" if extra_include_paths is None else " ".join([f"-I{include}" for include in extra_include_paths])
+    extra_include_paths_str = " ".join(
+        [f"-I{include}" for include in extra_include_paths] if extra_include_paths else []
     )
 
     lib_include = os.path.join(_TORCH_PATH, 'include')
