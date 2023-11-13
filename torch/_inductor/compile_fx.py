@@ -305,8 +305,9 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                 # clone_graph(gm) makes sure no graph modification from the first pass will
                 # leak to the second pass. It does increase memory pressure, but the problem
                 # can be alleviated once we have parameters as FakeTensor.
+                from copy import deepcopy
                 compiled = inner_compile(
-                    clone_graph(gm), example_inputs, **kwargs_patched
+                    deepcopy(gm), example_inputs, **kwargs_patched
                 )
 
                 def materialize(x):
@@ -669,10 +670,10 @@ def fx_codegen_and_compile(
                 const_graph.run()
                 if cpp_wrapper:
                     const_code, _ = const_graph.codegen()
+                    original_constants = const_graph.constants
+                    const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
                 else:
                     const_graph.compile_to_fn()([])
-                original_constants = const_graph.constants
-                const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
 
         graph = GraphLowering(
             gm,
