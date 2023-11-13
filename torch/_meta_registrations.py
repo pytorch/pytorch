@@ -1880,7 +1880,8 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta([aten.mm.default])
+@register_meta(aten.mm)
+@out_wrapper()
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
@@ -2161,7 +2162,8 @@ if torch._C._has_mkldnn:
         post_op_algorithm,
     ):
         output_shape = list(x.shape)
-        output_shape[-1] = w.shape[0]
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
         assert output_dtype in [torch.float32, torch.bfloat16]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out

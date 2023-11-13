@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import importlib
 import math
-import os
 import sys
 import unittest
 from functools import partial
@@ -10,7 +8,7 @@ from functools import partial
 import torch
 import torch._custom_ops as custom_ops
 import torch.library
-from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import load_test_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -23,7 +21,20 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    copy_tests,
+    HAS_CPU,
+    HAS_CUDA,
+    make_dynamic_cls,
+    TestFailure,
+)
+
+
+CommonTemplate = load_test_module(
+    __file__, "inductor.test_torchinductor"
+).CommonTemplate
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -33,18 +44,6 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
-    check_model,
-    check_model_cuda,
-    CommonTemplate,
-    copy_tests,
-    TestFailure,
-)
-
-importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
@@ -63,16 +62,6 @@ if TEST_WITH_ROCM:
     )
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
-    )
-
-
-def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
-    return make_test_cls_with_patches(
-        cls,
-        "DynamicShapes",
-        "_dynamic_shapes",
-        (torch._dynamo.config, "assume_static_by_default", False),
-        xfail_prop=xfail_prop,
     )
 
 
