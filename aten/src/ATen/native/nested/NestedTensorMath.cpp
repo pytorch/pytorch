@@ -259,6 +259,10 @@ Tensor NestedTensor_to_padded_tensor_generic(
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
     return nt.get_buffer().clone();
   }
+  TORCH_CHECK(
+      t.numel() > 0,
+      "to_padded_tensor: at least one constituent tensor should have non-zero numel"
+  )
 
   // TODO: doesn't handle empty/scalar entries because we don't need
   // it for transformers; see to_padded_tensor in

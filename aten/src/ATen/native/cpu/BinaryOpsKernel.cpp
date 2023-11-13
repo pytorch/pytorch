@@ -14,6 +14,7 @@
 #include <ATen/native/cpu/LogAddExp.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/generic_math.h>
 
 namespace at::native {
 
@@ -51,7 +52,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
 }
 
 void atan2_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "atan2_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
   },
@@ -218,7 +219,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
-        return div_floor_integer(a, b);
+        return c10::div_floor_integer(a, b);
       });
     });
   } else {
@@ -231,7 +232,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<opmath_t>;
         cpu_kernel_vec(iter,
           [=](scalar_t a) -> scalar_t {
-            return div_floor_floating(static_cast<opmath_t>(a), b);
+            return c10::div_floor_floating(static_cast<opmath_t>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
             return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_floating_vec(x, y); });
@@ -242,7 +243,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<scalar_t>;
         cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
-            return div_floor_floating(a, b);
+            return c10::div_floor_floating(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
             return div_floor_floating_vec(a, b);
@@ -934,10 +935,12 @@ void fmod_kernel(TensorIteratorBase& iter) {
 }
 
 void logaddexp_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+    using Vec = Vectorized<scalar_t>;
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+        [=](scalar_t a, scalar_t b) -> scalar_t {
           float a0 = static_cast<float>(a);
           float b0 = static_cast<float>(b);
           if (std::isinf(a0) && a0 == b0) {
@@ -947,10 +950,10 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
             return m0 + std::log1p(std::exp(-std::abs(a0 - b0)));
           }
         },
-        [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+        [=](Vec a, Vec b) -> Vec {
           Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           Vectorized<float> inf(std::numeric_limits<float>::infinity());
           Vectorized<float> m0 = maximum(a0, b0);
           Vectorized<float> m1 = maximum(a1, b1);
@@ -962,8 +965,9 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
               m1 + (a1 - b1).abs().neg().exp().log1p(),
               a1,
               (a1 == b1) & (a1.abs() == inf));
-          return convert_float_bfloat16(a0, a1);
+          return convert_from_float<scalar_t>(a0, a1);
         });
+    });
   } else if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
       cpu_kernel(
@@ -997,11 +1001,13 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
 }
 
 void logaddexp2_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == kBFloat16) {
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+    using Vec = Vectorized<scalar_t>;
     constexpr auto inv_log_2 = static_cast<float>(1.0 / c10::ln_2<double>);
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+        [=](scalar_t a, scalar_t b) -> scalar_t {
           float a0 = static_cast<float>(a);
           float b0 = static_cast<float>(b);
           if (std::isinf(a0) && a0 == b0) {
@@ -1011,10 +1017,10 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
             return m0 + std::log1p(std::exp2(-std::abs(a0 - b0))) * inv_log_2;
           }
         },
-        [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+        [=](Vec a, Vec b) -> Vec {
           Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          std::tie(b0, b1) = convert_bfloat16_float(b);
+          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           Vectorized<float> inf(std::numeric_limits<float>::infinity());
           Vectorized<float> inv_log_2_vec(inv_log_2);
           Vectorized<float> m0 = maximum(a0, b0);
@@ -1027,8 +1033,9 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
               m1 + (a1 - b1).abs().neg().exp2().log1p() * inv_log_2_vec,
               a1,
               (a1 == b1) & (a1.abs() == inf));
-          return convert_float_bfloat16(a0, a1);
+          return convert_from_float<scalar_t>(a0, a1);
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
       constexpr auto inv_log_2 = static_cast<scalar_t>(1.0 / c10::ln_2<double>);
@@ -1077,7 +1084,7 @@ void lcm_kernel(TensorIteratorBase& iter) {
 }
 
 void hypot_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "hypot_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -1116,13 +1123,14 @@ void igammac_kernel(TensorIteratorBase& iter) {
 }
 
 void nextafter_kernel(TensorIteratorBase& iter) {
-  if (iter.common_dtype() == kBFloat16) {
-    using scalar_t = c10::BFloat16;
+  if (at::isReducedFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
             return std::nextafter(a, b);
         });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(

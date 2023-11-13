@@ -122,9 +122,9 @@ def calculate_gain(nonlinearity, param=None):
 
 
 def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
-    r"""Fill the input Tensor with values drawn from the uniform.
+    r"""Fill the input Tensor with values drawn from the uniform distribution.
 
-    distribution :math:`\mathcal{U}(a, b)`.
+    :math:`\mathcal{U}(a, b)`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -315,11 +315,10 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fill the input `Tensor` with values using a uniform distribution.
+    r"""Fill the input `Tensor` with values using a Xavier uniform distribution.
 
-    Described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010).
-
+    The method is described in `Understanding the difficulty of training
+    deep feedforward neural networks` - Glorot, X. & Bengio, Y. (2010).
     The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-a, a)` where
 
@@ -344,9 +343,9 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
 
 
 def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fill the input `Tensor` with values using a normal distribution.
+    r"""Fill the input `Tensor` with values using a Xavier normal distribution.
 
-    Described in `Understanding the difficulty of training deep feedforward
+    The method is described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010). The resulting tensor
     will have values sampled from :math:`\mathcal{N}(0, \text{std}^2)` where
 
@@ -382,10 +381,10 @@ def _calculate_correct_fan(tensor, mode):
 def kaiming_uniform_(
     tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
 ):
-    r"""Fill the input `Tensor` with values using a uniform distribution.
+    r"""Fill the input `Tensor` with values using a Kaiming uniform distribution.
 
-    Described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015).
+    The method is described in `Delving deep into rectifiers: Surpassing
+    human-level performance on ImageNet classification` - He, K. et al. (2015).
     The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
@@ -432,10 +431,10 @@ def kaiming_uniform_(
 def kaiming_normal_(
     tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
 ):
-    r"""Fill the input `Tensor` with values using a normal distribution.
+    r"""Fill the input `Tensor` with values using a Kaiming normal distribution.
 
-    Described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015).
+    The method is described in `Delving deep into rectifiers: Surpassing
+    human-level performance on ImageNet classification` - He, K. et al. (2015).
     The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std}^2)` where
 

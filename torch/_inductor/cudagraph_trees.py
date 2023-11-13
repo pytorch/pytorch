@@ -129,6 +129,7 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
+    constants: Tuple[torch.Tensor, ...]
 
 
 def clear_cublass_cache():
@@ -393,6 +394,7 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
@@ -408,6 +410,7 @@ def cudagraphify(
         static_input_idxs,
         stack_traces,
         mode,
+        constants,
     )
 
 
@@ -582,14 +585,18 @@ class CUDAWarmupNode:
         existing_path_data_ptrs = {
             t.data_ptr() for t in self.path_live_weakrefs() if t()
         }
-        non_cudagraph_inps = set()
-        for i in range(len(new_inputs)):
-            if (
-                isinstance(new_inputs[i], torch.Tensor)
-                and new_inputs[i].untyped_storage().data_ptr()
-                not in existing_path_data_ptrs
-            ):
-                non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
+
+        def get_non_cudagraph_inps():
+            non_cudagraph_inps = set()
+            for t in itertools.chain(new_inputs, self.wrapped_function.constants):
+                if (
+                    isinstance(t, torch.Tensor)
+                    and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
+                ):
+                    non_cudagraph_inps.add(t.untyped_storage().data_ptr())
+            return non_cudagraph_inps
+
+        non_cudagraph_inps = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
@@ -1051,12 +1058,19 @@ class CUDAGraphNode:
     def _record(self, model, inputs):
         "Record the model"
 
+        def static_input_iter():
+            for i in self.wrapped_function.static_input_idxs:
+                if isinstance(
+                    inputs[i], torch.Tensor
+                ) and not self._is_cuda_graph_recorded_tensor(inputs[i]):
+                    yield inputs[i]
+
         # see: output_is_alias_of_persistent_static_inputs above
         static_input_persistent_storage_ptrs: Dict[int, StorageWeakRefWrapper] = {
-            inputs[i].untyped_storage().data_ptr(): StorageWeakRefWrapper(inputs[i])
-            for i in self.wrapped_function.static_input_idxs
-            if isinstance(inputs[i], torch.Tensor)
-            and not self._is_cuda_graph_recorded_tensor(inputs[i])
+            inp.untyped_storage().data_ptr(): StorageWeakRefWrapper(inp)
+            for inp in itertools.chain(
+                static_input_iter(), self.wrapped_function.constants
+            )
         }
 
         if config.triton.slow_path_cudagraph_asserts:
@@ -1134,7 +1148,7 @@ class CUDAGraphNode:
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
             is_empty_storage = o.untyped_storage().data_ptr() == 0
-            if ref and ref() is not None or is_empty_storage:
+            if (ref and ref() is not None) or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
                 continue
@@ -1909,10 +1923,16 @@ class CUDAGraphTreeManager:
         static_input_idxs,
         stack_traces,
         mode,
+        constants,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(model, static_input_idxs, id)
+        self.ids_to_funcs[id] = WrappedFunction(
+            model,
+            static_input_idxs,
+            id,
+            tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
+        )
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
