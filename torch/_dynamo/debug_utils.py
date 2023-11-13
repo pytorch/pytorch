@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 import copy
 import functools
 import getpass
@@ -9,7 +11,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -252,9 +254,11 @@ def generate_config_string(*, stable_output=False):
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
+import torch.fx.experimental._config
 {torch._dynamo.config.codegen_config()}
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
+{torch.fx.experimental._config.codegen_config()}
 """
 
 
@@ -376,7 +380,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -487,8 +491,10 @@ def backend_accuracy_fails(
 
 
 def _stride_or_default(
-    stride: Optional[Sequence[int]], *, shape: Sequence[int]
-) -> Sequence[int]:
+    stride: Optional["torch._prims_common.StrideType"],
+    *,
+    shape: "torch._prims_common.ShapeType",
+) -> "torch._prims_common.StrideType":
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 

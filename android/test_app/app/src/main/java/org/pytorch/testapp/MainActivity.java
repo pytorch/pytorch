@@ -1,7 +1,6 @@
 package org.pytorch.testapp;
 
 import android.content.Context;
-import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -17,8 +16,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.FloatBuffer;
 import org.pytorch.Device;
 import org.pytorch.IValue;
@@ -45,13 +42,7 @@ public class MainActivity extends AppCompatActivity {
       new Runnable() {
         @Override
         public void run() {
-          final Result result;
-          try {
-            result = doModuleForward();
-          } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException |
-                   InvocationTargetException e) {
-            throw new RuntimeException(e);
-          }
+          final Result result = doModuleForward();
           runOnUiThread(
               new Runnable() {
                 @Override
@@ -127,7 +118,7 @@ public class MainActivity extends AppCompatActivity {
 
   @WorkerThread
   @Nullable
-  protected Result doModuleForward() throws ClassNotFoundException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
+  protected Result doModuleForward() {
     if (mModule == null) {
       final long[] shape = BuildConfig.INPUT_TENSOR_SHAPE;
       long numElements = 1;
@@ -138,29 +129,12 @@ public class MainActivity extends AppCompatActivity {
       mInputTensor =
           Tensor.fromBlob(
               mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE, MemoryFormat.CHANNELS_LAST);
-
-      Class ptAndroid;
-      if (BuildConfig.BUILD_LITE_INTERPRETER == 1) {
-        ptAndroid = Class.forName("org.pytorch.LitePyTorchAndroid");
-      }
-      else {
-        ptAndroid = Class.forName("org.pytorch.PyTorchAndroid");
-      }
-
-      Method setNumThreads = ptAndroid.getMethod("setNumThreads", int.class);
-      setNumThreads.invoke(null,1);
-
-      Method loadModuleFromAsset = ptAndroid.getMethod(
-              "loadModuleFromAsset",
-              AssetManager.class,
-              String.class,
-              Device.class
-              );
-      mModule = (Module) (BuildConfig.USE_VULKAN_DEVICE
-                    ? loadModuleFromAsset.invoke(
-                            null, getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
-                    : loadModuleFromAsset.invoke(
-                            null, getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.CPU));
+      PyTorchAndroid.setNumThreads(1);
+      mModule =
+          BuildConfig.USE_VULKAN_DEVICE
+              ? PyTorchAndroid.loadModuleFromAsset(
+                  getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
+              : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
     final long startTime = SystemClock.elapsedRealtime();

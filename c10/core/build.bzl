@@ -19,27 +19,6 @@ def define_targets(rules):
     )
 
     rules.cc_library(
-        name = "MapAllocator",
-        srcs = ["MapAllocator.cpp"],
-        hdrs = ["MapAllocator.h"],
-        linkstatic = True,
-        local_defines = [
-            "C10_BUILD_MAIN_LIB",
-            "HAVE_MMAP=1",
-            "HAVE_SHM_OPEN=1",
-            "HAVE_SHM_UNLINK=1",
-        ],
-        visibility = ["//visibility:public"],
-        deps = [
-            ":CPUAllocator",
-            ":base",
-            "//c10/util:base",
-        ],
-        linkopts = ["-lrt"],
-        alwayslink = True,
-    )
-
-    rules.cc_library(
         name = "ScalarType",
         hdrs = ["ScalarType.h"],
         linkstatic = True,
@@ -79,24 +58,22 @@ def define_targets(rules):
             [
                 "*.cpp",
                 "impl/*.cpp",
-                "impl/cow/*.cpp",
             ],
             exclude = [
                 "CPUAllocator.cpp",
-                "MapAllocator.cpp",
                 "impl/alloc_cpu.cpp",
+                "impl/cow/*.cpp",
             ],
         ),
         hdrs = rules.glob(
             [
                 "*.h",
                 "impl/*.h",
-                "impl/cow/*.h",
             ],
             exclude = [
                 "CPUAllocator.h",
-                "MapAllocator.h",
                 "impl/alloc_cpu.h",
+                "impl/cow/*.h",
             ],
         ),
         linkstatic = True,
@@ -113,6 +90,22 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
+    )
+
+    rules.cc_library(
+        name = "impl_cow",
+        srcs = rules.glob([
+            "impl/cow/*.cpp",
+        ]),
+        hdrs = rules.glob([
+            "impl/cow/*.h",
+        ]),
+        deps = [
+            ":base",
+            ":CPUAllocator",
+        ],
+        visibility = ["//c10/test:__pkg__"],
+
     )
 
     rules.filegroup(

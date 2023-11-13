@@ -162,7 +162,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.24.3',
     'expecttest==0.1.6',
-    'mypy==1.4.1',
+    'mypy==1.6.0',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
@@ -178,26 +178,17 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
-    'torch/_dynamo/eval_frame.py',
-    'torch/_dynamo/convert_frame.py',
-    'torch/_dynamo/symbolic_convert.py',
-    'torch/_dynamo/types.py',
-    'torch/_dynamo/output_graph.py',
-    'torch/_dynamo/guards.py',
-    'torch/_dynamo/side_effects.py',
-    'torch/_dynamo/optimizations/__init__.py',
-    'torch/_dynamo/optimizations/backends.py',
-    'torch/_dynamo/optimizations/training.py',
-    'torch/_dynamo/debug_utils.py',
-    'torch/_dynamo/repro/**/*.py',
+    'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/_dynamo/backends/**/*.py',
+    'torch/_dynamo/variables/**/*.py',
+    'torch/_dynamo/polyfill.py',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/scheduler.py',
 ]
 command = [
     'python3',
@@ -249,6 +240,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'torch/csrc/**/*.cpp',
 ]
@@ -260,12 +252,11 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
-    'torch/csrc/autograd/functions/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
-    'torch/csrc/CudaIPCTypes.cpp',
     'torch/csrc/cuda/**',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
@@ -1176,6 +1167,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
@@ -1561,7 +1553,6 @@ exclude_patterns = [
     'test/test_pruning_op.py',
     'test/test_public_bindings.py',
     'test/test_python_dispatch.py',
-    'test/test_pytree.py',
     'test/test_quantization.py',
     'test/test_reductions.py',
     'test/test_scatter_gather_ops.py',
@@ -1591,7 +1582,6 @@ exclude_patterns = [
     'test/test_type_hints.py',
     'test/test_type_info.py',
     'test/test_type_promotion.py',
-    'test/test_typing.py',
     'test/test_unary_ufuncs.py',
     'test/test_utils.py',
     'test/test_view_ops.py',
@@ -1686,7 +1676,6 @@ exclude_patterns = [
     'torch/_functorch/partitioners.py',
     'torch/_functorch/pyfunctorch.py',
     'torch/_functorch/python_key.py',
-    'torch/_functorch/pytree_hacks.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/utils.py',
     'torch/_functorch/vmap.py',
@@ -2443,7 +2432,6 @@ exclude_patterns = [
     'torch/utils/_freeze.py',
     'torch/utils/_mode_utils.py',
     'torch/utils/_python_dispatch.py',
-    'torch/utils/_pytree.py',
     'torch/utils/_stats.py',
     'torch/utils/_sympy/__init__.py',
     'torch/utils/_sympy/functions.py',
@@ -2660,6 +2648,20 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.291',
+    'ruff==0.1.5',
+]
+is_formatter = true
+
+# This linter prevents merge conlicts in csv files in pytorch by enforcing
+# three lines of whitespace between entries such that unless people are modifying
+# the same line, merge conflicts should not arise in git or hg
+[[linter]]
+code = 'MERGE_CONFLICTLESS_CSV'
+include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+command = [
+    'python3',
+    'tools/linter/adapters/no_merge_conflict_csv_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
 ]
 is_formatter = true

@@ -7,8 +7,8 @@
  */
 #pragma once
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
+#include <c10/util/Exception.h>
 
 #include <curand_kernel.h>
 #include <cmath>
@@ -297,9 +297,11 @@ struct AttentionKernel {
       // 15/16th of tensor core compute In that case :
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
-      if (num_queries == 1 && k_strideH == 0 && v_strideH == 0) {
-        if (head_id % kQueriesPerBlock != 0)
+      if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
+          logsumexp_ptr == nullptr) {
+        if (head_id % kQueriesPerBlock != 0) {
           return false;
+        }
         q_strideM = q_strideH;
         num_queries = num_heads;
         num_heads = 1; // unused but here for intent
