@@ -1,13 +1,24 @@
 import contextlib
 import dataclasses
 import functools
-import itertools
 import logging
+import os
 import sys
 import time
 import warnings
+from itertools import count
 
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -21,8 +32,8 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode
-from torch._functorch.aot_autograd import make_boxed_func
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -54,6 +65,7 @@ else:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
 
 
@@ -132,6 +144,35 @@ def _warn_tf32_disabled():
         )
 
 
+def _unlift_graph(mod, gm, graph_signature):
+    state_dict = {}
+    for name, param in mod.named_parameters(remove_duplicate=False):
+        state_dict[name] = param
+    for name, param in mod.named_buffers(remove_duplicate=False):
+        state_dict[name] = param
+
+    from torch._export.exported_program import (
+        _construct_inp_pos_to_param_buffer_name,
+        _unlift,
+    )
+
+    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
+        gm,
+        graph_signature,
+        state_dict,
+    )
+    unlifted_gm = _unlift(
+        gm,
+        inp_pos_to_param_buffer_name,
+        pytree.LeafSpec(),
+        None,
+        state_dict,
+        graph_signature.buffers_to_mutate,
+        set(graph_signature.user_outputs),
+    )
+    return unlifted_gm
+
+
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
     tf32_ops = {
@@ -195,7 +236,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(  # type: ignore[attr-defined]
+            with config.patch(
                 {
                     "triton.store_cubin": True,
                 }
@@ -294,15 +335,19 @@ def compile_fx_inner(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-):
+) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
 
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    if dynamo_utils.count_calls(gm.graph) == 0:
+    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
+
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if config.save_args:
         save_args_for_compile_fx_inner(
@@ -325,8 +370,7 @@ def compile_fx_inner(
 
     # Inputs to fx_codegen_and_compile
     # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
-    graph_args = [gm, example_inputs]
+    # of fx_codegen_and_compile changes, the dict should be updated accordingly
     graph_kwargs = {
         "cudagraphs": cudagraphs,
         "num_fixed": num_fixed,
@@ -342,16 +386,22 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(
-            fx_codegen_and_compile, graph_args, graph_kwargs
+    if config.fx_graph_cache and not aot_mode:
+        compiled_graph = FxGraphCache.load(
+            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
         )
     else:
         compiled_graph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        context.output_strides.extend(compiled_graph.output_strides)
 
     if aot_mode:
         return compiled_graph
@@ -423,6 +473,7 @@ def compile_fx_inner(
                 stack_traces=stack_traces,
                 is_backward=is_backward,
                 is_inference=is_inference,
+                constants=tuple(compiled_graph.constants.values()),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -485,7 +536,7 @@ def fx_codegen_and_compile(
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> CompiledFxGraph:
+) -> Union[CompiledFxGraph, str]:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -521,7 +572,12 @@ def fx_codegen_and_compile(
     # .view() call.
     view_to_reshape(gm)
 
-    fake_mode = fake_tensor_prop(gm, example_inputs)
+    # It is safe to run FakeTensorProp under no_grad because by the time
+    # we're in inductor, we assume that AOTAutograd has already "taken care"
+    # of autograd, so there should be no more autograd-related API's in the
+    # graph.
+    with torch.no_grad():
+        fake_mode = fake_tensor_prop(gm, example_inputs)
 
     # pattern matcher passes might not preserve striding information
     # on node.meta["val"]. if in the future we rely on these being
@@ -531,6 +587,7 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
+        post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
@@ -542,23 +599,23 @@ def fx_codegen_and_compile(
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
+            is_inference=is_inference,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            context = torch._guards.TracingContext.get()
-            if context is not None and context.output_strides is not None:
-                # Return the output strides to the caller via TracingContext
-                assert len(context.output_strides) == 0
-                assert graph.graph_outputs is not None
+            output_strides: List[Optional[Tuple[int, ...]]] = []
+            if graph.graph_outputs is not None:
+                # We'll put the output strides in the compiled graph so we
+                # can later return them to the caller via TracingContext
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
-                        context.output_strides.append(
+                        output_strides.append(
                             tuple(  # type: ignore[arg-type]
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
                     else:
-                        context.output_strides.append(None)
+                        output_strides.append(None)
 
             compiled_fn = graph.compile_to_fn()
 
@@ -568,17 +625,8 @@ def fx_codegen_and_compile(
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
-            compiled_graph = CompiledFxGraph(
-                compiled_artifact=compiled_fn,
-                cache_key=graph.cache_key,
-                artifact_path=graph.cache_path,
-                cache_linemap=graph.cache_linemap,
-                device_types=graph.device_types,
-                device_idxs=graph.device_idxs,
-                mutated_inputs=graph.mutated_inputs,
-                mutated_input_idxs=set(graph.mutated_input_idxs),
-                constants=graph.constants,
-            )
+            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+
     return compiled_graph
 
 
@@ -651,6 +699,7 @@ def cudagraphify(
     stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -664,6 +713,7 @@ def cudagraphify(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
+            constants=constants,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -861,7 +911,7 @@ def compile_fx_aot(
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
-        return compile_fx(
+        compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -871,9 +921,13 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
+        assert os.path.exists(
+            compiled_lib_path
+        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
+        return compiled_lib_path
 
 
-_graph_counter = itertools.count(0)
+_graph_counter = count(0)
 
 
 def fw_compiler_freezing(
@@ -961,17 +1015,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):  # type: ignore[attr-defined]
+        with config.patch(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
+                inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(  # type: ignore[attr-defined]
+        with config.patch(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -988,6 +1042,14 @@ def compile_fx(
                     if node.op == "placeholder"
                 ]
                 if all(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi.device != i.device:
+                            raise ValueError(
+                                f"Device mismatch between fake input and example input at position #{idx}: "
+                                f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                "make sure torch.export() and torch.aot_compile() run on the same device."
+                            )
                     inputs_ = fake_inputs
             return compile_fx(
                 model_,
@@ -1018,11 +1080,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        if not config.from_export:
-            # Since handle_dynamo_export_graph will trigger compile_fx again,
-            # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-            # If we come from export, the graph is already in aten IR, so pre-grad passes is no-op.
-            model_ = pre_grad_passes(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1059,13 +1117,15 @@ def compile_fx(
         if config.keep_output_stride:
             *_, model_outputs_node = model.graph.nodes
             assert model_outputs_node.op == "output"
-            model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
-                original_output_start_index = context.fw_metadata.num_mutated_inputs
+                original_output_start_index = (
+                    context.fw_metadata.num_mutated_inp_runtime_indices
+                )
             else:
                 original_output_start_index = 0
 
@@ -1161,9 +1221,13 @@ def compile_fx(
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
 
-    if config.from_export and V.aot_compilation is True:
+    if V.aot_compilation is True:
+        gm, graph_signature = aot_export_module(
+            model_, example_inputs_, trace_joint=False, decompositions=decompositions
+        )
+        unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(model_, example_inputs_)
+            return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context
@@ -1180,8 +1244,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):  # type: ignore[attr-defined]
-        return config.get_config_copy()  # type: ignore[attr-defined]
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
@@ -1278,7 +1342,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     @functools.wraps(compiled_fn)
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.tree_flatten(args)[0])
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

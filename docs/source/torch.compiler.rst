@@ -73,6 +73,8 @@ Some of the most commonly used backends include:
      - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
    * - ``torch.compile(m, backend="tvm")``
      - Uses Apache TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
+   * - ``torch.compile(m, backend="openvino")``
+     - Uses OpenVINO for inference optimizations. `Read more <https://docs.openvino.ai/2023.1/pytorch_2_0_torch_compile.html>`__
 
 Read More
 ~~~~~~~~~
@@ -83,12 +85,13 @@ Read More
 
    torch.compiler_get_started
    torch.compiler_api
-   torch.compiler_performance_dashboard
    torch.compiler_fine_grain_apis
+   torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
    torch.compiler_profiling_torch_compile
    torch.compiler_faq
    torch.compiler_troubleshooting
+   torch.compiler_performance_dashboard
 
 ..
   _If you want to contribute a developer-level topic

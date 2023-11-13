@@ -21,8 +21,8 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import expect_true, guard_int
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -50,7 +50,7 @@ def type_casts(
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [
-            x for x in tree_flatten((args, kwargs))[0] if isinstance(x, Tensor)
+            x for x in pytree.arg_tree_leaves(*args, **kwargs) if isinstance(x, Tensor)
         ]
         computation_dtype, result_dtype = utils.elementwise_dtypes(
             *flat_args, type_promotion_kind=type_promotion
@@ -1230,6 +1230,10 @@ def split_with_sizes(
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import expect_true
+
     for i in range(num_splits):
         length = split_sizes[i]
         torch._check_is_size(
@@ -1264,6 +1268,10 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
         assert dim_size == 0
         return (self,)
     chunks = (dim_size + split_size - 1) // split_size
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import guard_int
+
     chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
     split_sizes[-1] = split_size - (split_size * chunks - dim_size)
@@ -4083,7 +4091,6 @@ def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -4104,9 +4111,11 @@ def scaled_dot_product_flash_attention(
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
-        lambda: "q, k, v must be a 4 dimensional tensor",
+        lambda: f"q, k, v must be a 4 dimensional tensor, got {query.dim()}, {key.dim()}, {value.dim()}",
     )
-    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        dropout_p == 0.0, lambda: f"dropout probability must be zero, got {dropout_p}"
+    )
     torch._check(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
@@ -4130,7 +4139,7 @@ def scaled_dot_product_flash_attention(
         requires_grad=query.requires_grad,
     )
     output, _ = aten._scaled_dot_product_attention_math.default(
-        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+        query, key, value, None, dropout_p, is_causal, None, scale=scale
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
@@ -4230,6 +4239,14 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:
         return aten.squeeze.dims(self, [dim])
+
+
+@register_decomposition(torch.ops.aten._weight_norm_interface)
+def _weight_norm_interface(x, y, dim):
+    # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
+    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
+    norm = x.norm(2, keep_dim, keepdim=True)
+    return x * (y / norm), norm
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

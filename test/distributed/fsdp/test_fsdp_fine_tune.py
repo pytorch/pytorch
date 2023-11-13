@@ -169,15 +169,19 @@ class TestFSDPFineTune(FSDPTest):
                 x = self.layer_0(x)
                 for _ in range(10):
                     x = self.layer_no_grad(self.layer_with_grad(x))
+                    # Make sure calling the same layer multiple times works
+                    # regardless whether gradient is enabled.
+                    with torch.no_grad():
+                        x += self.layer_with_grad(x)
                 return x
 
         return TestModule()
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_hooks_multi_traversal(self):
+    def test_hooks_multi_traversal(self):
         """
-        Tests that the backward hooks do reshard / unshard correctly in the case
-        of same parameters being used mutliple times during forward pass.
+        Tests that the hooks do reshard / unshard correctly in the case of same
+        parameters being used multiple times during forward pass.
         """
         self.run_subtests(
             {
@@ -188,15 +192,17 @@ class TestFSDPFineTune(FSDPTest):
                 ],
                 "use_orig_params": [False, True],
                 "inp_requires_grad": [False, True],
+                "forward_prefetch": [False, True],
             },
-            self._test_backward_hooks_multi_traversal,
+            self._test_hooks_multi_traversal,
         )
 
-    def _test_backward_hooks_multi_traversal(
+    def _test_hooks_multi_traversal(
         self,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         inp_requires_grad: bool,
+        forward_prefetch: bool,
     ):
         seq = self._init_multi_traversal_module()
         policy = ModuleWrapPolicy({nn.Linear})
@@ -205,6 +211,7 @@ class TestFSDPFineTune(FSDPTest):
             auto_wrap_policy=policy,
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
+            forward_prefetch=forward_prefetch,
         )
         ddp_seq = DDP(copy.deepcopy(seq), device_ids=[self.rank])
         fsdp_optim = torch.optim.Adam(fsdp_seq.parameters(), lr=1e-2)

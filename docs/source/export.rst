@@ -571,6 +571,12 @@ API Reference
 .. autoclass:: ModuleCallEntry
 
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
-.. py:module:: torch.export.exported_program
+.. automodule:: torch.export.exported_program
+.. automodule:: torch.export.graph_signature
+.. autoclass:: InputKind
+.. autoclass:: InputSpec
+.. autoclass:: OutputKind
+.. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses

@@ -8,39 +8,22 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 
-try:
-    from extension_backends.extension_codegen_backend import (
-        ExtensionScheduling,
-        ExtensionWrapperCodegen,
-    )
-except ImportError:
-    from .extension_backends.extension_codegen_backend import (
-        ExtensionScheduling,
-        ExtensionWrapperCodegen,
-    )
-
 from torch._C import FileCheck
+from torch._dynamo.testing import load_test_module
 from torch._inductor import metrics
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import run_and_get_cpp_code, TestCase
 
-try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
-except unittest.SkipTest:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
-run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
-TestCase = test_torchinductor.TestCase
+extension_codegen_backend = load_test_module(
+    __name__, "inductor.extension_backends.extension_codegen_backend"
+)
+ExtensionScheduling = extension_codegen_backend.ExtensionScheduling
+ExtensionWrapperCodegen = extension_codegen_backend.ExtensionWrapperCodegen
 
 
 def remove_build_path():
@@ -52,6 +35,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(TestCase):
     module = None
 
@@ -129,7 +113,7 @@ class ExtensionBackendTests(TestCase):
 
         metrics.reset()
         opt_fn = torch.compile()(fn)
-        code = run_and_get_cpp_code(opt_fn, x, y, z)
+        _, code = run_and_get_cpp_code(opt_fn, x, y, z)
         FileCheck().check("void kernel").check("loadu").check("extension_device").run(
             code
         )
@@ -139,8 +123,6 @@ class ExtensionBackendTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU and not IS_MACOS:
-        run_tests(needs="filelock")
+    run_inductor_tests(skip_fbcode=True, skip_mac=True)

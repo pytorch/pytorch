@@ -3785,7 +3785,7 @@ def new_empty(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3867,7 +3867,7 @@ def zeros_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
+    if symbolic_helper._is_none(dtype):
         scalar_type = _type_utils.JitScalarType.from_value(
             input, _type_utils.JitScalarType.FLOAT
         )
@@ -3886,7 +3886,8 @@ def new_zeros(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3929,7 +3930,7 @@ def ones_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
+    if symbolic_helper._is_none(dtype):
         scalar_type = _type_utils.JitScalarType.from_value(
             input, _type_utils.JitScalarType.FLOAT
         )
@@ -3948,7 +3949,7 @@ def new_ones(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
@@ -4025,7 +4026,7 @@ def new_full(
     pin_memory=False,
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
@@ -5415,10 +5416,12 @@ def _any(g: jit_utils.GraphContext, *args):
     if len(args) == 1:
         input = args[0]
         dim, keepdim = None, 0
-    # aten::any(Tensor self, int dim, bool keepdim)
+    # aten::any(Tensor self, int[]? dim, bool keepdim)
     else:
         input, dim, keepdim = args
-        dim = [symbolic_helper._parse_arg(dim, "i")]
+        # Can be int list or single int
+        dim = symbolic_helper._parse_arg(dim, "t")
+        dim = [int(d) for d in dim.view(-1)]
         keepdim = symbolic_helper._parse_arg(keepdim, "i")
     input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
     input_sum = symbolic_helper._reducesum_helper(
@@ -5434,7 +5437,7 @@ def _all(g: jit_utils.GraphContext, *args):
     # aten::all(Tensor self)
     if len(args) == 1:
         return g.op("Not", _any(g, input))
-    # aten::all(Tensor self, int dim, bool keepdim)
+    # aten::all(Tensor self, int[]? dim, bool keepdim)
     else:
         return g.op("Not", _any(g, input, args[1], args[2]))
 
@@ -5993,7 +5996,7 @@ def linalg_vector_norm(
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
-    if dim is None:
+    if symbolic_helper._is_none(dim):
         self = symbolic_helper._reshape_helper(g, self, [-1])
         keepdim = False
 
@@ -6005,6 +6008,10 @@ def linalg_vector_norm(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
+    elif ord == 1:
+        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+    elif ord == 2:
+        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
@@ -6019,6 +6026,10 @@ def linalg_vector_norm(
                 ord_op,
             ),
         )
+
+    if not symbolic_helper._is_none(dtype):
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
     return result
 
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -22,9 +23,9 @@ class MinifierTestResult:
     repro_code: str
 
     def _get_module(self, t):
-        r = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t).group(
-            0
-        )
+        match = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t)
+        assert match is not None, "failed to find module"
+        r = match.group(0)
         r = re.sub(r"\s+$", "\n", r, flags=re.MULTILINE)
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
@@ -97,8 +98,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config._config.copy()
-            inductor_config = torch._inductor.config._config.copy()
+            dynamo_config = torch._dynamo.config.shallow_copy_dict()
+            inductor_config = torch._inductor.config.shallow_copy_dict()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
@@ -122,8 +123,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     # around
                     torch._dynamo.reset()
             finally:
-                object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
-                object.__setattr__(torch._inductor.config, "_config", inductor_config)
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
@@ -213,7 +214,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # crash the process
     def _run_full_test(
         self, run_code, repro_after, expected_error, *, isolate, minifier_args=()
-    ):
+    ) -> Optional[MinifierTestResult]:
         if isolate:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
@@ -227,7 +228,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             # Just check that there was no error
             self.assertEqual(test_proc.returncode, 0)
             self.assertIsNone(repro_dir)
-            return
+            return None
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))

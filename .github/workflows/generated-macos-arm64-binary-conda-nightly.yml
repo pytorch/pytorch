@@ -140,7 +140,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       use_s3: False
@@ -149,6 +149,7 @@ jobs:
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -256,7 +257,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       use_s3: False
@@ -265,6 +266,7 @@ jobs:
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -372,7 +374,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       use_s3: False
@@ -381,6 +383,7 @@ jobs:
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -488,7 +491,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       use_s3: False
@@ -497,4 +500,5 @@ jobs:
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

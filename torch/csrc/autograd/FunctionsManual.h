@@ -407,10 +407,6 @@ Tensor std_mean_backward(
     at::OptionalIntArrayRef dim_opt,
     const c10::optional<c10::Scalar>& correction,
     bool keepdim);
-at::Tensor masked_scatter_backward(
-    const at::Tensor& grad,
-    const at::Tensor& mask,
-    c10::SymIntArrayRef sizes);
 at::Tensor cholesky_backward(
     const at::Tensor& grad,
     bool upper,
@@ -971,12 +967,12 @@ Tensor convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups);
+    const c10::SymInt& groups);
 
 Tensor _convolution_jvp(
     const Tensor& input_p,
@@ -985,12 +981,12 @@ Tensor _convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
@@ -1023,12 +1019,12 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    at::IntArrayRef padding,
-    at::IntArrayRef output_padding,
-    at::IntArrayRef stride,
-    at::IntArrayRef dilation,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef output_padding,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef dilation,
     bool transposed,
-    int64_t groups,
+    c10::SymInt groups,
     ::std::array<bool, 2> output_mask);
 
 Tensor scatter_reduce_jvp(

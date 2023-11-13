@@ -1,7 +1,6 @@
 """
 This file includes private common utilities for FSDP.
 """
-
 import logging
 import traceback
 import warnings
@@ -32,6 +31,7 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -70,10 +70,10 @@ class _FSDPDeviceHandle:
             try:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
-            except AttributeError:
+            except AttributeError as exc:
                 raise AttributeError(
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
-                )
+                ) from exc
         else:
             self.__backend = backend
 
@@ -92,10 +92,10 @@ class _FSDPDeviceHandle:
     def __getattr__(self, __name: str) -> Any:
         try:
             return getattr(self.__backend, __name)
-        except AttributeError:
+        except AttributeError as exc:
             raise AttributeError(
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
-            )
+            ) from exc
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
@@ -142,7 +142,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-        self._enable_extension: bool = False
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

@@ -26,6 +26,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import Self
+
 from torchgen.code_template import CodeTemplate
 
 
@@ -486,7 +488,7 @@ class OrderedSet(Generic[T]):
     def __or__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
         return OrderedSet.union(self, other)
 
-    def __ior__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+    def __ior__(self, other: "OrderedSet[T]") -> Self:
         self.update(other)
         return self
 

@@ -657,7 +657,7 @@ struct TORCH_API TupleTypeFactory<TupleType> {
 
 template <>
 struct TORCH_API TupleTypeFactory<c10::DynamicType> {
-  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr create(const std::vector<TypePtr>& elemTypes);
   static DynamicTypePtr fallback(const Type&);
 };
 

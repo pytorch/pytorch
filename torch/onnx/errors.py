@@ -12,8 +12,8 @@ __all__ = [
     "OnnxExporterError",
     "OnnxExporterWarning",
     "CheckerError",
-    "UnsupportedOperatorError",
     "SymbolicValueError",
+    "UnsupportedOperatorError",
 ]
 
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/MapAllocator.h>
+#include <ATen/MapAllocator.h>
 
 #ifdef __cplusplus
 
@@ -12,21 +12,21 @@
 
 SHM_API void libshm_init(const char* manager_exec_path);
 
-class SHM_API THManagedMapAllocator : public c10::RefcountedMapAllocator {
+class SHM_API THManagedMapAllocator : public at::RefcountedMapAllocator {
  public:
   THManagedMapAllocator(
       const char* manager_handle,
       const char* filename,
       int flags,
       size_t size)
-      : c10::RefcountedMapAllocator(filename, flags, size) {}
+      : at::RefcountedMapAllocator(filename, flags, size) {}
 
-  static c10::DataPtr makeDataPtr(
+  static at::DataPtr makeDataPtr(
       const char* manager_handle,
       const char* filename,
       int flags,
       size_t size);
-  static THManagedMapAllocator* fromDataPtr(const c10::DataPtr&);
+  static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
 
   const char* manager_handle() const {
     return "no_manager";

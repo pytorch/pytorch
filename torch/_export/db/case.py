@@ -14,6 +14,8 @@ _TAGS: Dict[str, Dict[str, Any]] = {
         "escape-hatch": {},
         "map": {},
         "dynamic-value": {},
+        "operator": {},
+        "mutation": {},
     },
     "python": {
         "assert": {},
@@ -23,6 +25,7 @@ _TAGS: Dict[str, Dict[str, Any]] = {
         "control-flow": {},
         "data-structure": {},
         "standard-library": {},
+        "object-model": {},
     },
 }
 
