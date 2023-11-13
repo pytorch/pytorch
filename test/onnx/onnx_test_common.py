@@ -224,7 +224,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ]
         ] = None,
         skip_dynamic_shapes_check: bool = False,
-        model_type: str = None,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -252,14 +251,11 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         """
 
-        if model_type is None:
-            raise ValueError("model_type must be specified")
-
         # avoid mutable data structure
         if input_kwargs is None:
             input_kwargs = {}
 
-        if has_mutation and model_type != "torch.export.ExportedProgram":
+        if has_mutation:
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
                 input_args, input_kwargs
@@ -268,18 +264,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_model = model
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
-
-        assert isinstance(ref_model, torch.nn.Module) or callable(
-            ref_model
-        ), "Model must be a torch.nn.Module or callable"
-        if model_type == "torch.export.ExportedProgram":
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
-            if (
-                self.dynamic_shapes
-            ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
-                pytest.xfail(
-                    reason="torch.export.ExportedProgram does not support dynamic shapes"
-                )
 
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
@@ -389,9 +373,7 @@ def run_ort(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
 
-    ort_input = {
-        k: v.detach().cpu().numpy() for k, v in zip(input_names, pytorch_inputs)
-    }
+    ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     return session.run(None, ort_input)
 
 
@@ -442,22 +424,11 @@ def _compare_pytorch_onnx_with_ort(
     )
     ort_outputs = run_ort(onnx_program, onnx_format_args)
 
-    # When model is a torch.export.ExportedProgram, the number of outputs in the ONNX model can be greater
-    # than the number of outputs in the original model. This is because the ONNX model may contain
-    # additional outputs for the exported program's mutated inputs and buffers.
-    # Therefore, we need to ignore the first few outputs from ort_outputs when comparing results length, type and shape.
-    len_ref_outputs = len(ref_outputs)
-    ort_outputs_offset = 0  # The first ort_outputs_offset outputs from ort_outputs must be ignore by the checks below
-    if isinstance(model, torch.export.ExportedProgram):
-        len_ref_outputs = len(model.graph_signature.output_specs)
-        ort_outputs_offset = len_ref_outputs - len(ref_outputs)
-
-    if len_ref_outputs != len(ort_outputs):  # Ignore
+    if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
         )
-
-    for ref_output, ort_output in zip(ref_outputs, ort_outputs[ort_outputs_offset:]):
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )
