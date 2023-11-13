@@ -208,6 +208,15 @@ AOTIRuntimeError AOTInductorModelDelete(
   })
 }
 
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      *ret_num_outputs = model->num_outputs();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
@@ -225,6 +234,8 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
 #define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
+  CACHE_TORCH_DTYPE(float8_e5m2);
+  CACHE_TORCH_DTYPE(float8_e4m3fn);
   CACHE_TORCH_DTYPE(bfloat16);
   CACHE_TORCH_DTYPE(float16);
   CACHE_TORCH_DTYPE(float32);

@@ -934,21 +934,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
 
-    # https://github.com/pytorch/pytorch/issues/90552
-    def test_intermediate_leaf_requires_grad(self):
-        def f(x):
-            leaf = torch.ones(2, requires_grad=True)
-            return leaf, leaf * 2
-
-        f_compiled = torch.compile(f, backend="aot_eager")
-        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
-
-        leaf, out = f(x)
-        leaf_test, out_test = f_compiled(x)
-        out.sum().backward()
-        out_test.sum().backward()
-        self.assertEqual(leaf.grad, leaf_test.grad)
-
     # https://github.com/pytorch/pytorch/issues/109053
     def test_view_dtype_overload(self):
         def f(x):
@@ -965,6 +950,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_ref = f(x2)
         out_test = f_compiled(x2)
         self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/90552
+    def test_intermediate_leaf_requires_grad(self):
+        def f(x):
+            leaf = torch.ones(2, requires_grad=True)
+            return leaf, leaf * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        leaf, out = f(x)
+        leaf_test, out_test = f_compiled(x)
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(leaf.grad, leaf_test.grad)
 
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
@@ -1583,85 +1583,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
-
-    def test_tensor_setattr_data_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func1(x, y):
-            x.data = y
-            x.add_(1)
-            return x
-
-        def func2(x, y):
-            x.data = y
-            y.data = torch.zeros([0])
-            return x
-
-        for func in [func1, func2]:
-            a = torch.rand([6])
-            a1 = torch.clone(a)
-            b = torch.rand([6])
-            b1 = torch.clone(b)
-
-            cnt = torch._dynamo.testing.CompileCounter()
-
-            _ = func(a, b)
-            _ = torch.compile(func, backend=cnt)(a1, b1)
-
-            self.assertEqual(a, a1)
-            self.assertEqual(b, b1)
-            self.assertEqual(cnt.frame_count, 2)  # graph breaks
-
-    def test_tensor_untracked_setattr_data_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func(y):
-            x = torch.tensor([0])
-            x.data = y  # Setattr for untracked tensors is unsupported
-            x.add_(1)
-            return x
-
-        a = torch.rand([6])
-        a1 = torch.clone(a)
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        _ = func(a)
-        _ = torch.compile(func, backend=cnt)(a1)
-
-        self.assertEqual(a, a1)
-        self.assertEqual(cnt.frame_count, 2)  # graph breaks
-
-    def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func(x):
-            y = torch.tensor([0])
-            # If we setattr to untracked tensor, it aliases a new tensor.
-            # we need to start tracking y even though it is created in graph
-            x.data = y
-            x.add_(1)
-            return x, y
-
-            a = torch.rand([6])
-            a1 = torch.clone(a)
-
-            cnt = torch._dynamo.testing.CompileCounter()
-
-            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
-            self.assertEqual(a, a1)
-            self.assertEqual(cnt.frame_count, 2)
-
-    def test_setattr_data_tensor_raises(self):
-        def func(x):
-            x.data = None
-            x.add_(1)
-            return x
-
-        a = torch.rand([6])
-        a1 = torch.clone(a)
-
-        with self.assertRaises(TypeError):
-            func(a)
-        with self.assertRaises(TypeError):
-            torch.compile(func, backend="eager")(a1)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
@@ -3624,6 +3545,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
+
+    def test_setattr_requires_grad_graph_breaks(self):
+        def fn(x):
+            z = x + 4
+            x.requires_grad = True
+            y = x * z
+            return y
+
+        for backend in ["count", "eager", "aot_eager"]:
+            if backend == "count":
+                backend = CompileCounter()
+            opt_fn = torch.compile(fn, backend=backend)
+
+            eager = torch.zeros(5)
+            compiled = eager.clone()
+
+            out_eager = fn(eager)
+            out_opt = opt_fn(compiled)
+
+            self.assertEqual(out_eager, out_opt)
+
+            out_eager.sum().backward()
+            out_opt.sum().backward()
+
+            self.assertEqual(eager, compiled)
+            if isinstance(backend, CompileCounter):
+                self.assertEqual(backend.frame_count, 2)  # graph breaks
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
