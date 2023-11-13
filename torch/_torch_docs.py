@@ -25,17 +25,6 @@ def parse_kwargs(desc):
 
 
 def merge_dicts(*dicts):
-    """
-    Merge multiple dictionaries into one.
-
-    Args:
-        *dicts: A variable length list of dictionaries.
-
-    Returns:
-        dict: A single dictionary containing the merged key-value pairs.
-        If the same key exists in more than one input dictionary,
-        the value from the last dictionary with that key is used.
-    """
     return {x: d[x] for d in dicts for x in d}
 
 

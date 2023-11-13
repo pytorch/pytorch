@@ -54,8 +54,9 @@ __all__ = [
 def _disable_user_warnings(
         func: Callable, regex: str = '.*is deprecated, please use.*', module: str = 'torch') -> Callable:
     """
-    Temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the given ``regex`` pattern.
-
+    Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
+    given ``regex`` pattern.
+    
     Arguments
     ---------
     func : function
@@ -1945,15 +1946,6 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 
 @contextlib.contextmanager
 def enable_reentrant_dispatch():
-    """
-    Context manager to temporarily enable reentrant dispatch.
-
-    Operations can be dispatched in a reentrant manner
-    without the risk of interfering with other operations.
-
-    Yields:
-        None
-    """
     # NB: this can't simply be
     # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`
     # because:

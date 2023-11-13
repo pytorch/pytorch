@@ -1,4 +1,3 @@
-"""Utilities and functionalities for serializing and deserializing PyTorch models, tensors, and other related objects."""
 
 import difflib
 import os
@@ -58,18 +57,12 @@ __all__ = [
 
 
 class SourceChangeWarning(Warning):
-    """Warning used to notify about changes in the source code of serialized objects."""
-
     pass
 
 
 @contextmanager
 def mkdtemp():
-    """Create a temporary directory and ensure its cleanup after usage.
-
-    Yields:
-        str: The path to the created temporary directory.
-    """
+    
     path = tempfile.mkdtemp()
     try:
         yield path
@@ -80,8 +73,6 @@ def mkdtemp():
 _package_registry = []
 
 class LoadEndianness(Enum):
-    """Enumeration representing the endianness of data to be loaded."""
-
     NATIVE = 1
     LITTLE = 2
     BIG = 3
@@ -89,8 +80,8 @@ class LoadEndianness(Enum):
 _default_load_endian: Optional[LoadEndianness] = None
 
 def get_default_load_endianness() -> Optional[LoadEndianness]:
-    """
-    Get fallback byte order for loading files.
+    '''
+    Get fallback byte order for loading files
 
     If byteorder mark is not present in saved checkpoint,
     this byte order is used as fallback.
@@ -98,12 +89,12 @@ def get_default_load_endianness() -> Optional[LoadEndianness]:
 
     Returns:
         default_load_endian: Optional[LoadEndianness]
-    """
+    '''
     return _default_load_endian
 
 def set_default_load_endianness(endianness):
-    """
-    Set fallback byte order for loading files.
+    '''
+    Set fallback byte order for loading files
 
     If byteorder mark is not present in saved checkpoint,
     this byte order is used as fallback.
@@ -111,7 +102,7 @@ def set_default_load_endianness(endianness):
 
     Args:
         endianness: the new fallback byte order
-    """
+    '''
     global _default_load_endian
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
@@ -256,15 +247,7 @@ def _cpu_deserialize(obj, location):
 
 
 def validate_cuda_device(location):
-    """Validate the specified CUDA device and checks its availability.
-
-    Args:
-        location: Device location to be validated.
-
-    Returns:
-        device: int
-
-    """
+  
     device = torch.cuda._utils._get_device_index(location, True)
 
     if not torch.cuda.is_available():
@@ -293,14 +276,7 @@ def _cuda_deserialize(obj, location):
 
 
 def validate_hpu_device(location):
-    """Validate the specified HPU device and checks its availability.
-
-    Args:
-        location (str): Device location to be validated.
-
-    Returns:
-        device: int
-    """
+   
     hpu = getattr(torch, "hpu", None)
     assert hpu is not None, "HPU device module is not loaded"
     device = hpu._utils._get_device_index(location, optional=True)
@@ -343,7 +319,7 @@ def _meta_deserialize(obj, location):
 
 
 def _validate_privateuse1_device(location, backend_name):
-    """
+    '''
     Check whether the device index of privateuse1 is valid.
 
     Register a device_module of privateuse1 by torch._register_device_module.
@@ -357,7 +333,7 @@ def _validate_privateuse1_device(location, backend_name):
 
     Returns:
         device_index: int
-    """
+    '''
     if not hasattr(torch, backend_name):
         raise RuntimeError(f'The {backend_name.upper()} device module is not registered. '
                            'If you are running on a CPU-only machine, '
@@ -407,11 +383,7 @@ register_package(24, _hpu_tag, _hpu_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
-    """Determine the data location tag of a given storage object.
-
-    Args:
-        storage (Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]).
-    """
+    
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
@@ -421,12 +393,7 @@ def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.Untyp
 
 
 def default_restore_location(storage, location):
-    """Determine the default restore location for a given storage object based on its tag.
-
-    Args:
-        storage: Storage object whose restore location is to be determined.
-        location (str): Location tag associated with the storage object.
-    """
+    
     for _, _, fn in _package_registry:
         result = fn(storage, location)
         if result is not None:
@@ -437,27 +404,10 @@ def default_restore_location(storage, location):
 
 
 def normalize_storage_type(storage_type):
-    """Normalize a given storage type by retrieving the corresponding attribute from the `torch` module.
-
-    Args:
-        storage_type (type): The storage type to be normalized.
-    """
     return getattr(torch, storage_type.__name__)
 
 
 def storage_to_tensor_type(storage):
-    """Convert a given storage type to its corresponding tensor type.
-
-    This function maps a storage type to its equivalent tensor type by modifying the type name
-    (replacing 'Storage' with 'Tensor') and retrieving the corresponding attribute from the module
-    in which the storage type is defined.
-
-    Args:
-        storage: An instance of the storage type to be converted.
-
-    Returns:
-        getattr(module, storage_type.__name__.replace('Storage', 'Tensor')): type.
-    """
     storage_type = type(storage)
     module = _import_dotted_name(storage_type.__module__)
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
@@ -642,9 +592,9 @@ def save(
     # The first line of this docstring overrides the one Sphinx generates for the
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
-    """Save an object to a disk file.
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
 
-    save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+    Save an object to a disk file.
 
     See also: :ref:`saving-loading-tensors`
 
@@ -933,11 +883,9 @@ def load(
     # The first line of this docstring overrides the one Sphinx generates for the
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
-    """Load an object saved with :func:`torch.save` from a file.
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
-    load(f, map_location=None, pickle_module=pickle, `*`, weights_only=False, mmap=None, `**pickle_load_args`)
-
-
+    Loads an object saved with :func:`torch.save` from a file.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
@@ -1099,7 +1047,8 @@ def load(
 # Register pickling support for layout instances such as
 # torch.sparse_coo, etc
 def _get_layout(name):
-    """Get layout extension object from its string representation."""
+    """Get layout extension object from its string representation.
+    """
     cache = _get_layout.cache   # type: ignore[attr-defined]
     if not cache:
         for v in torch.__dict__.values():
@@ -1374,24 +1323,10 @@ def _get_restore_location(map_location):
 
 
 class StorageType:
-    """Represent a storage type with a specific data type (dtype)."""
-
     def __init__(self, name):
-        """Initialize the StorageType instance.
-
-        Args:
-            name (str): The name of the storage type.
-        """
         self.dtype = _get_dtype_from_pickle_storage_type(name)
 
     def __str__(self):
-        """Return a string representation of the StorageType object.
-
-        The representation includes the data type (`dtype`) of the storage.
-
-        Returns:
-            f'StorageType(dtype={self.dtype}): str.
-        """
         return f'StorageType(dtype={self.dtype})'
 
 

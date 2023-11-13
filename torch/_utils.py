@@ -182,11 +182,6 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
 
 def get_tensor_metadata(tensor):
-    """Return a dictionary containing metadata information about the tensor.
-
-    Args:
-        tensor (torch.Tensor): The tensor for which the metadata is to be retrieved.
-    """
     # Tensor's Metadata for serializing.
     # Currently, this only returns a dict[string, bool] specifing whether
     # `conj` or `neg` bit is set.
@@ -195,16 +190,7 @@ def get_tensor_metadata(tensor):
 
 
 def set_tensor_metadata(tensor, metadata):
-    """Set metadata to a PyTorch tensor.
-
-    This function doesn't affect tensor computations and is intended for informational purposes.
-
-    Args:
-    tensor (torch.Tensor): The tensor to which metadata should be attached.
-    metadata (dict): The metadata to attach to the tensor.
-    """
     # See `get_tensor_metadata` above
-
     assert isinstance(metadata, dict)
     assert isinstance(tensor, torch.Tensor)
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
@@ -276,7 +262,7 @@ def _validate_loaded_sparse_tensors():
 
 
 def _rebuild_sparse_tensor(layout, data):
-    """Rebuilds a sparse tensor from its sparse storage representation.
+    """Rebuild a sparse tensor from its sparse storage representation.
 
     Args:
         layout (str): The sparse storage layout of the tensor.
@@ -517,7 +503,7 @@ def _flatten_dense_tensors(tensors):
 def _flatten_sparse_tensors(tensors):
     """Flatten sparse tensors into two contiguous 1D buffers, one of indices and one of values.
 
-       Assume tensors are of same sparse type.
+    Assume tensors are of same sparse type.
 
     Args:
         tensors (Iterable[Tensor]): sparse tensors to flatten.
@@ -583,7 +569,7 @@ def _unflatten_sparse_tensors(flat, tensors):
 def _reorder_tensors_as(tensors, ordered_tensors):
     """Assume that tensors are of same order as ordered_tensors within their types, e.g., from _take_tensors.
 
-        Reorder them to be of same order as ordered_tensors.
+    Reorder them to be of same order as ordered_tensors.
 
     Args:
         tensors (Iterable[Tensor]): tensors to be reordered. They should be of
@@ -641,16 +627,7 @@ def _take_tensors(tensors, size_limit):
 
 # annotation decorator to get annotations in a way that is compatible
 # with both Python 2 and 3
-def annotate(ret, **kwargs):
-    """Add annotations to functions in a way that's compatible with both Python 2 and 3.
-
-    Args:
-        ret: The return type annotation.
-        **kwargs: Type annotations for function arguments.
-
-    Returns:
-        A decorated function with the provided type annotations.
-    """
+def annotate(ret, **kwargs):w
 
     def dec(fun):
         fun.__annotations__ = dict(kwargs)
@@ -661,16 +638,6 @@ def annotate(ret, **kwargs):
 
 
 def render_call(fn, args, kwargs):
-    """Render a function call as a string. If tensor, specific print options are applied limiting verbosity.
-
-    Args:
-        fn (callable): The function to render.
-        args (tuple): The positional arguments for the function.
-        kwargs (dict): The keyword arguments for the function.
-
-    Returns:
-        str: A string representation of the function call with the provided arguments and keyword arguments.
-    """
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
         str_fn = str(fn)
@@ -696,11 +663,6 @@ class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr."""
 
     def __repr__(self):
-        """Return the string representation of the object itself.
-
-        Returns:
-        str: The string value of the object.
-        """
         return self
 
 
@@ -708,15 +670,6 @@ class ExceptionWrapper:
     r"""Wraps an exception plus traceback to communicate across threads."""
 
     def __init__(self, exc_info=None, where="in background"):
-        """Initialize the ExceptionWrapper with exception information and its origin.
-
-        Args:
-            exc_info (tuple, optional): A tuple of three elements: the exception type,
-                the exception instance, and a traceback object. If not provided,
-                it defaults to the result of `sys.exc_info()`.
-            where (str, optional): A description of where the exception occurred.
-                Defaults to "in background".
-        """
         # It is important that we don't store exc_info, see
         # NOTE [ Python Traceback Reference Cycle Problem ]
         if exc_info is None:
@@ -726,7 +679,7 @@ class ExceptionWrapper:
         self.where = where
 
     def reraise(self):
-        r"""Reraises the wrapped exception in the current thread."""
+        r"""Reraise the wrapped exception in the current thread."""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
         msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
@@ -789,9 +742,8 @@ def _get_devices_properties(device_ids):
 
 
 def get_current_device_index() -> int:
-    r"""Check if there are CUDA devices available.
+    r"""Returns the device index of the current default CUDA device.
 
-    Returns the device index of the current default CUDA device.
     Returns -1 in case there are no CUDA devices available.
 
     Arguments: ``None``
@@ -804,7 +756,8 @@ def get_current_device_index() -> int:
 def _get_device_index(
     device: Any, optional: bool = False, allow_cpu: bool = False
 ) -> int:
-    r"""Get the device index from :attr:`device`, which can be a torch.device object, a Python integer, or ``None``.
+    r"""Get the device index from :attr:`device`, which can be a ``torch.device`` object,
+    a Python integer, or ``None``.
 
     If :attr:`device` is a torch.device object, returns the device index if it
     has index. Note that for a device without a specified index,
@@ -846,7 +799,7 @@ def _get_device_index(
 
 
 def _handle_complex(tensor):
-    """Return a real view of a tensor if complex dtype else just the tensor.
+    """Return a real view of a tensor if its dtype is complex otherwise returns the tensor.
 
     Need to check if a tensor is an UninitializedParameter because otherwise checking is_complex is an error for a LazyModule.
     """
@@ -885,16 +838,6 @@ class _ClassPropertyDescriptor:
 
 
 def classproperty(func):
-    """Define a method that can be accessed as a property on the class itself, rather than on instances of the class.
-
-    Args:
-        func (callable): The function or method to be decorated. This can be an instance method,
-            classmethod, or staticmethod.
-
-    Returns:
-        _ClassPropertyDescriptor: A descriptor object that allows the decorated method
-            to be used as a class-level property.
-    """
     if not isinstance(func, (classmethod, staticmethod)):
         func = classmethod(func)
     return _ClassPropertyDescriptor(func)
@@ -902,11 +845,6 @@ def classproperty(func):
 
 # Whether we are compiling with torch.compile or not
 def is_compiling():
-    """Determine if the current code execution is within a compilation context with `torch.compile`.
-
-    Returns:
-        bool: Always returns `False`, indicating that the code is not being compiled with `torch.compile`.
-    """
     return False
 
 
