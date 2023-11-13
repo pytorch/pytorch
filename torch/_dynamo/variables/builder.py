@@ -1537,6 +1537,13 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif (
+        isinstance(example_value, bool)
+        and proxy.node.target == "is_contiguous"
+        and proxy.node.op == "call_method"
+    ):
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
