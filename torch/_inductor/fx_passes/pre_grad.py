@@ -32,6 +32,7 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+remove_unsqueeze_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -40,6 +41,10 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     split_cat_pass,
     unbind_stack_pass,
     efficient_conv_bn_eval_pass,
+]
+
+pre_group_batch_fusion_passes: List[PatternMatcherPass] = [
+    remove_unsqueeze_pass,
 ]
 
 
@@ -67,6 +72,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        for pattern_matcher_pass in pre_group_batch_fusion_passes:
+            pattern_matcher_pass.apply(gm.graph)
         group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
