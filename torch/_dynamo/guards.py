@@ -14,6 +14,7 @@ import math
 import os
 import re
 import sys
+import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
@@ -51,9 +52,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
-from . import config, convert_frame, mutation_guard
-from .eval_frame import set_guard_error_hook, set_guard_fail_hook
-from .exc import unimplemented
+from . import config, convert_frame, exc, mutation_guard
+from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -71,6 +71,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -90,46 +91,37 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-CLOSURE_VARS = collections.OrderedDict(
-    [
-        ("___check_type_id", check_type_id),
-        ("___check_obj_id", check_obj_id),
-        (
-            "___current_backend",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend,
-        ),
-        (
-            "___lookup_backend",
-            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-                backend_obj_id
-            ],
-        ),
-        (
-            "___skip_backend_check",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
-        ),
-        ("___odict_getitem", collections.OrderedDict.__getitem__),
-        ("___dict_param_key_ids", dict_param_key_ids),
-        ("___dict_const_keys", dict_const_keys),
-        ("___dict_version", dict_version),
-        ("___dict_contains", lambda a, b: a in b),
-        ("___tuple_iterator_len", tuple_iterator_len),
-        ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("__math_isnan", math.isnan),
-        ("inf", float("inf")),
-        ("__load_module", lambda name: importlib.import_module(name)),
-        ("utils_device", torch.utils._device),
-        ("device", torch.device),
-        (
-            "___from_numpy",
-            # If not numpy array, piggy back on e.g. tensor guards to check type
-            lambda a: torch.as_tensor(a)
-            if isinstance(a, (np.generic, np.ndarray))
-            else a,
-        ),
-        ("torch", torch),
-    ]
-)
+CLOSURE_VARS = {
+    "___check_type_id": check_type_id,
+    "___check_obj_id": check_obj_id,
+    "___current_backend": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
+    ),
+    "___lookup_backend": (
+        lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
+            backend_obj_id
+        ]
+    ),
+    "___skip_backend_check": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
+    ),
+    "___odict_getitem": collections.OrderedDict.__getitem__,
+    "___dict_param_key_ids": dict_param_key_ids,
+    "___dict_const_keys": dict_const_keys,
+    "___dict_version": dict_version,
+    "___dict_contains": lambda a, b: a in b,
+    "___tuple_iterator_len": tuple_iterator_len,
+    "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "__math_isnan": math.isnan,
+    "inf": float("inf"),
+    "__load_module": lambda name: importlib.import_module(name),
+    "utils_device": torch.utils._device,
+    "device": torch.device,
+    "___from_numpy":
+    # If not numpy array, piggy back on e.g. tensor guards to check type
+    (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
+    "torch": torch,
+}
 
 if sys.version_info[:2] <= (3, 8):
     # [Note: Python Version <= 3.8]
@@ -195,7 +187,7 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Type[object]], str],
+        id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -468,12 +460,26 @@ class GuardBuilder(GuardBuilderBase):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
             setup_guard()
         else:
-            unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         if guard.is_local():
             return self.ID_MATCH(guard)
+
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = [
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                ]
+                self._produce_guard_code(guard, code)
+            else:
+                self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -586,7 +592,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
         code = [
-            f"___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id})"
+            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
         ]
         self._produce_guard_code(guard, code)
 
@@ -927,7 +933,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
@@ -1137,17 +1143,15 @@ class CheckFunctionManager:
         if global_state is None:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
-        closure_vars = collections.OrderedDict(
-            [
-                ("___guarded_code", self),
-                ("___check_tensors", check_tensors_fn),
-                ("___check_tensors_verbose", check_tensors_verbose_fn),
-                ("___check_global_state", global_state.check),
-                ("tensor_check_names", tensor_check_names),
-            ]
-            + list(SYMPY_INTERP.items())
-        )
-        closure_vars.update(CLOSURE_VARS)
+        closure_vars = {
+            "___guarded_code": self,
+            "___check_tensors": check_tensors_fn,
+            "___check_tensors_verbose": check_tensors_verbose_fn,
+            "___check_global_state": global_state.check,
+            "tensor_check_names": tensor_check_names,
+            **SYMPY_INTERP,
+            **CLOSURE_VARS,
+        }
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1155,13 +1159,6 @@ class CheckFunctionManager:
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
-
-        if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
-            # Guard fail hook is called everytime guard eval fails. For a cache
-            # lookup where there are multiple entries in the same cache line,
-            # this can lead to very high performance overhead. So, we have
-            # decided to hide this behing a config flag.
-            set_guard_fail_hook(guard_fail_hook)
 
         out: Dict[str, Any] = dict()
         exec(pycode, builder.scope, out)
@@ -1247,24 +1244,16 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
-stashed_first_fail_reason = None
-
-
-def guard_fail_hook(
+def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
-    last: bool,
-) -> None:
+) -> str:
     """
-    called whenever a guard fails.
+    Return the reason why `guard_fn` failed.
+    Updates `guard_failures` with the generated reason.
+    Only the first failed check of guard_fn is reported.
     """
-    first = index == 0
-    global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
-        return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
@@ -1278,29 +1267,14 @@ def guard_fail_hook(
         # for everything else we just report the code that failed
 
         if isinstance(fail_reason, bool) and not fail_reason:
-            fail_reason = part
-        if isinstance(fail_reason, str):
-            reason += fail_reason
-            if config.report_all_guard_failures:
-                reason += "\n"
-            else:
-                break
+            reason = part
+            break
+        elif isinstance(fail_reason, str):
+            reason = fail_reason
+            break
 
-    if first:
-        stashed_first_fail_reason = reason
+    guard_failures[orig_code_map[code]].append(reason)
 
-    if not last:
-        return
-
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -1311,6 +1285,47 @@ def guard_fail_hook(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
             exc_info=True,
         )
+
+    return reason
+
+
+def get_and_maybe_log_recompilation_reason(
+    cache_entry, frame: types.FrameType
+) -> List[str]:
+    """
+    Return the list of guard failure reasons using cache_entry.
+    Logs the recompilation reason if `recompiles` logging is enabled.
+    Raises a RecompileError if `config.error_on_recompile` is enabled.
+    """
+    reasons = []
+    while cache_entry is not None:
+        reason = get_guard_fail_reason(
+            cache_entry.check_fn, cache_entry.code, frame.f_locals
+        )
+        if reason:
+            reasons.append(reason)
+        cache_entry = cache_entry.next
+
+    code = frame.f_code
+
+    do_recompiles_log = (
+        is_guard_failure_reporting_enabled()
+        and recompiles_log.isEnabledFor(logging.DEBUG)
+    )
+
+    if do_recompiles_log or config.error_on_recompile:
+        failures = "\n".join(reasons)
+        guard_failure_details = f"triggered by the following guard failure(s):\n{textwrap.indent(failures, '- ')}"
+        message = (
+            f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
+            f"{textwrap.indent(guard_failure_details, '    ')}"
+        )
+        if do_recompiles_log:
+            recompiles_log.debug(message, stack_info=True)
+        if config.error_on_recompile:
+            raise exc.RecompileError(message)
+
+    return reasons
 
 
 def guard_error_hook(
@@ -1366,3 +1381,19 @@ def make_dupe_guard(obj_source, dupe_source):
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_guard(*guards, skip=0):
+    """
+    Add dynamo guards to the current tracing context.
+
+    Args:
+        guards: guard(s) to add
+        skip: number of stack frames to ignore for debug stack trace
+    """
+    from torch._guards import TracingContext
+
+    add = TracingContext.get().guards_context.dynamo_guards.add
+    for guard in guards:
+        assert isinstance(guard, Guard)
+        add(guard, skip=skip + 1)

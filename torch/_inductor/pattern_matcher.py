@@ -71,9 +71,9 @@ class Match:
         self.args = args or []
         self.kwargs = kwargs or {}
         # The nodes matched in this expression
-        self.nodes: List[torch.fx.Nodes] = []
+        self.nodes: List[torch.fx.Node] = []
         # Mapping CallFunction to the node.target
-        self.targets: Dict[_TargetExpr, torch.fx.Target] = {}
+        self.targets: Dict[_TargetExpr, torch.fx.node.Target] = {}
         self.ctx: Optional[MatchContext] = None
         self.replacement_graph: Optional[torch.fx.Graph] = None
 
@@ -86,7 +86,7 @@ class Match:
         if self.kwargs:
             for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
-                    raise FailedMatch(f"kwarg mismatch: {key}")
+                    raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
         self.nodes.extend(other.nodes)
         self.kwargs.update(other.kwargs)
@@ -113,7 +113,7 @@ class Match:
         ]
 
     def output_node(self) -> torch.fx.Node:
-        return [p for p in self.output_nodes() if p][0]
+        return next(p for p in self.output_nodes() if p)
 
     def replace_with_graph(self, replacement_graph, args):
         assert self.ctx
@@ -139,6 +139,12 @@ class Match:
 class FailedMatch(RuntimeError):
     def __init__(self, format_string, *args, **kwargs):
         self.format_string = format_string
+        # We want to construct error messages lazily instead of eagerly, as
+        # constructing them eagerly can significantly worsen compile times.
+        if len(format_string) > 200:
+            raise RuntimeError(
+                f"Format string too long - use lazy construction of strings instead. Format string is\n {format_string}"
+            )
         self.args = args
         self.kwargs = kwargs
 
@@ -403,7 +409,7 @@ class _TargetArgsExpr(_TargetExpr):
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if not self._match_fns(node) or len(node.args) != len(self.args):
-            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users {}", self)
@@ -418,14 +424,14 @@ class _TargetArgsExpr(_TargetExpr):
             )
 
             if normalized_args_and_kwargs is None:
-                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
             else:
                 _args, _kwargs = normalized_args_and_kwargs
                 if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
                     _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
                 else:
                     return FailedMatch(
-                        f"function_mismatch: node={node}, pattern={self}"
+                        "function_mismatch: node={}, pattern={}", node, self
                     )
         else:
             _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
@@ -561,7 +567,7 @@ class ListOf(PatternExpr):
             pattern_to_node = child_ctx.filter_multi_user_patterns()
             if not child_match:
                 if not self.partial:
-                    return FailedMatch(f"list[{i}]: {child_match}")
+                    return FailedMatch("list[{}]: {}", i, child_match)
                 continue
             matched = True
             m.extend(child_match.bundle())
@@ -1085,12 +1091,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 class PatternMatcherPass:
     def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
-        self.patterns: DefaultDict[torch.fx.Target, List[PatternEntry]] = defaultdict(
-            list
-        )
+        self.patterns: DefaultDict[
+            torch.fx.node.Target, List[PatternEntry]
+        ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
 
-    def __getitem__(self, item: torch.fx.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1245,6 +1251,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
             lambda g, i: make_boxed_func(g),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
+            keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
     assert gm

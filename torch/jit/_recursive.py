@@ -184,8 +184,9 @@ def get_annotations(obj):
 
 def infer_concrete_type_builder(nn_module, share_types=True):
     """
-    Build a ConcreteModuleTypeBuilder from an nn.Module. This
-    ConcreteModuleType doesn't have a JIT type associated with it yet, it
+    Build a ConcreteModuleTypeBuilder from an nn.Module.
+
+    This ConcreteModuleType doesn't have a JIT type associated with it yet, it
     must be filled in by the caller.
     """
     concrete_type_builder = torch._C.ConcreteModuleTypeBuilder(type(nn_module))
@@ -431,10 +432,7 @@ class ConcreteTypeStore:
         self.methods_compiled = set()
 
     def get_or_create_concrete_type(self, nn_module):
-        """
-        Infer a ConcreteType from this `nn.Module` instance. Underlying JIT
-        types are re-used if possible.
-        """
+        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are re-used if possible."""
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -483,9 +481,10 @@ def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
 
 def get_module_concrete_type(nn_module, share_types=True):
     """
-    Gets a concrete type for nn_modules. If share_types is True, the concrete
-    type is fetched from concrete_type_store. If it is False, a new concrete type
-    is created without first searching concrete_type_store.
+    Get a concrete type for nn_modules.
+
+    If share_types is True, the concrete type is fetched from concrete_type_store.
+    If it is False, a new concrete type is created without first searching concrete_type_store.
 
     Args:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
@@ -537,7 +536,7 @@ def create_script_class(obj):
 
 def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False):
     """
-    Creates a new ScriptModule from an nn.Module
+    Create a new ScriptModule from an nn.Module.
 
     Args:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
@@ -839,9 +838,9 @@ def check_module_initialized(mod):
 
 
 def infer_methods_to_compile(nn_module):
-    """
-    Implements the default rules for which methods should act as starting
-    points for compilation (TODO add a link when the rules are published).
+    """Implement the default rules for which methods should act as starting points for compilation.
+
+    (TODO add a link when the rules are published).
     """
     check_module_initialized(nn_module)
     user_annotated_ignored_attributes = getattr(
@@ -901,9 +900,7 @@ def infer_methods_to_compile(nn_module):
 
 
 def get_hook_stubs(nn_module):
-    """
-    Returns forward hook and pre_hook ScriptModuleStubs
-    """
+    """Return forward hook and pre_hook ScriptModuleStubs."""
     check_module_initialized(nn_module)
     hook_map: Dict = {}
 
@@ -937,10 +934,7 @@ def get_hook_stubs(nn_module):
 
 
 def get_property_stubs(nn_module):
-    """
-    Create property stubs for the properties of the module by creating method
-    stubs for the getter and setter.
-    """
+    """Create property stubs for the properties of the module by creating method stubs for the getter and setter."""
     module_ty = type(nn_module)
     properties_asts = get_class_properties(module_ty, self_name="RecursiveScriptModule")
     rcbs = {}
@@ -961,8 +955,7 @@ def get_property_stubs(nn_module):
 
 def interface_script(mod_interface, nn_module):
     """
-    Makes a ScriptModule from an nn.Module, using the interface methods rule for
-    determining which methods to compile.
+    Make a ScriptModule from an nn.Module, using the interface methods rule for determining which methods to compile.
 
     Args:
         mod_interface: the interface type that the module have
@@ -974,9 +967,9 @@ def interface_script(mod_interface, nn_module):
     check_module_initialized(nn_module)
 
     def infer_interface_methods_to_compile(nn_module):
-        """
-        Rule to infer the methods from the interface type to know which
-        methods need to act as starting points for compilation.
+        """Rule to infer the methods from the interface type.
+
+        It is used to know which methods need to act as starting points for compilation.
         """
         stubs = []
         for method in mod_interface.getMethodNames():
@@ -1011,16 +1004,12 @@ def try_compile_fn(fn, loc):
 
 
 def wrap_cpp_class(cpp_class):
-    """
-    Wrap this torch._C.Object in a Python RecursiveScriptClass.
-    """
+    """Wrap this torch._C.Object in a Python RecursiveScriptClass."""
     return torch.jit.RecursiveScriptClass(cpp_class)
 
 
 def wrap_cpp_module(cpp_module):
-    """
-    Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
-    """
+    """Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules."""
 
     def init_fn(script_module):
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
@@ -1050,10 +1039,10 @@ def compile_unbound_method(concrete_type, fn):
 
 def lazy_bind(concrete_type, unbound_method):
     """
-    Returns a function that lazily binds `unbound_method` to a provided
-    Module IValue, then invokes the method. We do this so that any Python
-    shenanigans that will poison type sharing are impossible at compile
-    time.
+    Return a function that lazily binds `unbound_method` to a provided Module IValue, then invokes the method.
+
+    We do this so that any Python shenanigans that
+    will poison type sharing are impossible at compile time.
     """
 
     def lazy_binding_method(cpp_module, *args):
