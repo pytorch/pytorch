@@ -2,7 +2,7 @@
     :class: hidden-section
 
 torch.nn.utils.attention
-===================
+========================
 
 .. currentmodule:: torch.nn.utils.attention
 
