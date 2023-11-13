@@ -5,11 +5,10 @@ import sys
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestKernelBenchmark(TestCase):
@@ -105,5 +104,6 @@ class TestKernelBenchmark(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)
