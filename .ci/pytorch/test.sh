@@ -443,8 +443,7 @@ test_single_dynamo_benchmark() {
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
 
-    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
-      # other jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       python benchmarks/dynamo/check_accuracy.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
         --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"

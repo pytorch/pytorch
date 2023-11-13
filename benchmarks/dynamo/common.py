@@ -112,86 +112,6 @@ class CI(NamedTuple):
 
 CI_SKIP = collections.defaultdict(list)
 
-
-# Skips for dynamic=False
-
-# Here eager really means dynamo+eager
-CI_SKIP[CI("eager", training=False)] = [
-    # TorchBench
-    "DALLE2_pytorch",  # AttributeError: text_encodings
-    "hf_BigBird",  # fail_accuracy
-    # TypeError: pad_center() takes 1 positional argument but 2 were given
-    "tacotron2",
-    # Huggingface
-    "DebertaV2ForQuestionAnswering",  # OOM
-]
-
-CI_SKIP[CI("eager", training=True)] = [
-    *CI_SKIP[CI("eager", training=False)],
-    # TorchBench
-    "BERT_pytorch",  # accuracy
-    "Background_Matting",  # fp64_OOM
-    "hf_BigBird",  # fp64_OOM
-    "hf_T5_base",  # fp64_OOM
-    "llama",  # Accuracy failed: allclose not within tol=0.001
-    "vision_maskrcnn",  # The size of tensor a (29) must match the size of tensor b (33) (doesn't repro)
-    # Huggingface
-    "XGLMForCausalLM",  # OOM
-    # TIMM
-    "cait_m36_384",  # fp64_OOM
-    "convit_base",  # fp64_OOM
-    "mobilenetv2_100",  # accuracy
-    "xcit_large_24_p8_224",  # fp64_OOM,
-]
-
-CI_SKIP[CI("aot_eager", training=False)] = [
-    *CI_SKIP[CI("eager", training=False)],
-    # all dynamic shapes errors for detectron variants
-    "demucs",  # OOM
-    "detectron2_fasterrcnn_r_101_c4",
-    "detectron2_fasterrcnn_r_101_dc5",
-    "detectron2_fasterrcnn_r_101_fpn",
-    "detectron2_fasterrcnn_r_50_c4",
-    "detectron2_fasterrcnn_r_50_dc5",
-    "detectron2_fasterrcnn_r_50_fpn",
-    "detectron2_fcos_r_50_fpn",
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
-    "hf_BigBird",  # OOM
-    "tacotron2",  # AssertionError: Deduped args out of bounds
-    # Huggingface
-    "BartForConditionalGeneration",  # OOM
-    "DebertaV2ForQuestionAnswering",  # OOM
-    # Torchbench
-    "speech_transformer",  # https://github.com/pytorch/pytorch/issues/99893
-    "pyhpc_isoneutral_mixing",  # https://github.com/pytorch/pytorch/issues/99893
-    "pyhpc_turbulent_kinetic_energy",  # https://github.com/pytorch/pytorch/issues/99893
-]
-
-CI_SKIP[CI("aot_eager", training=True)] = [
-    *CI_SKIP[CI("aot_eager", training=False)],
-    # TorchBench
-    "Background_Matting",  # fp64_OOM
-    "hf_T5_base",  # fp64_OOM
-    "mobilenet_v2_quantized_qat",  # fp64_OOM
-    "resnet50_quantized_qat",  # fp64_OOM
-    "pytorch_struct",
-    # Huggingface
-    "MBartForConditionalGeneration",  # OOM
-    "M2M100ForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # OOM
-    # TIMM
-    "cait_m36_384",  # fp64_OOM
-    "convit_base",  # fp64_OOM
-    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
-    "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
-    "lcnet_050",  # Accuracy (blocks.1.0.bn2.weight.grad)
-    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
-    "xcit_large_24_p8_224",  # fp64_OOM,
-]
-
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TorchBench
     "drq",  # Need to update torchbench
@@ -226,23 +146,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "pnasnet5large",  # OOM
     "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
     "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
-]
-
-# Skips for dynamic=True
-
-CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=False)],
-    "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
-    # https://github.com/pytorch/pytorch/issues/103760
-    "hf_T5_generate",
-    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
-]
-
-CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
-    *CI_SKIP[CI("aot_eager", training=True)],
-    *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    "llama",  # AssertionError: cannot compute free_symbols of True
-    "torchrec_dlrm",  # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
