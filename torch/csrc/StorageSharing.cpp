@@ -160,6 +160,7 @@ static PyObject* THPStorage_newSharedFilename(
   PyObject* _manager_handle = PyTuple_GET_ITEM(args, 0);
   PyObject* _object_handle = PyTuple_GET_ITEM(args, 1);
   PyObject* _size = PyTuple_GET_ITEM(args, 2);
+  PyObject* _filename = PyTuple_GET_ITEM(args, 3);
   if (!PyBytes_Check(_manager_handle) || !PyBytes_Check(_object_handle) ||
       !THPUtils_checkLong(_size)) {
     THPUtils_invalidArguments(
