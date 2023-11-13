@@ -46,7 +46,7 @@ def quantize_per_tensor(
     from floating point to quantized values
 
     Args:
-       input (torch.Tensor): original float32 Tensor
+       input (torch.Tensor): original float32 or bfloat16 Tensor
        scale (float): quantization parameter for affine quantization
        zero_point (int): quantization parameter for affine quantization
        quant_min (int): minimum quantized value for output Tensor
@@ -57,6 +57,9 @@ def quantize_per_tensor(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
+
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
 
@@ -355,7 +358,7 @@ def quantize_per_channel(
     parameters for each channel/axis to map from floating point to quantized values
 
     Args:
-       input (torch.Tensor): original float32 Tensor
+       input (torch.Tensor): original float32 or bfloat16 Tensor
        scales (torch.Tensor): a list of scale quantization parameter for
        affine quantization, one per channel
        zero_point (torch.Tensor): a list of zero_point quantization parameter for
@@ -368,6 +371,9 @@ def quantize_per_channel(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
+
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)

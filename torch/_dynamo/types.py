@@ -1,25 +1,17 @@
 import dataclasses
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Protocol,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
+
+from typing_extensions import TypeAlias
 
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
 
-    DynamoFrameType = eval_frame._PyInterpreterFrame
+    DynamoFrameType: TypeAlias = eval_frame._PyInterpreterFrame
 else:
-    DynamoFrameType = types.FrameType
+    DynamoFrameType: TypeAlias = types.FrameType
 
 import torch
 
@@ -39,7 +31,7 @@ class GuardFail(NamedTuple):
 
 
 class GuardFn(Protocol):
-    closure_vars: OrderedDict[str, object]
+    closure_vars: Dict[str, object]
     args: List[str]
     code_parts: List[str]
     verbose_code_parts: List[str]

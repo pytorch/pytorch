@@ -54,6 +54,7 @@ TensorMetadata::TensorMetadata(
     const RawTensorMetadata& r,
     std::vector<int64_t> sizes,
     std::vector<int64_t> strides)
+    // NOLINTNEXTLINE(cppcoreguidelines-slicing)
     : RawTensorMetadataBase(r),
       weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
       device_{r.device_type_, r.device_index_},
@@ -283,10 +284,9 @@ ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::EventBlock() {
 template <class... Args>
 std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::
     TorchOpStorage::OpList::emplace_back(Args&&... args) {
-  maybe_grow();
-  *next_ = {std::forward<Args>(args)...};
-  auto corr_id = buffer_last_->correlation_id(next_);
-  return {next_++, corr_id};
+  auto event_ptr = AppendOnlyList::emplace_back(std::forward<Args>(args)...);
+  auto corr_id = buffer_last_->correlation_id(event_ptr);
+  return {event_ptr, corr_id};
 }
 
 uint64_t ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(
@@ -624,8 +624,10 @@ c10::DeviceType Result::deviceType() const {
 
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
-    const ProfilerConfig& config)
-    : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
+    ProfilerConfig config)
+    : tid_{tid},
+      config_{std::move(config)},
+      kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
   if (!config_.experimental_config.performance_events.empty()) {
     perf_profiler_ =
@@ -635,9 +637,11 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
 }
 
 RecordQueue::RecordQueue(
-    const ProfilerConfig& config,
+    ProfilerConfig config,
     std::set<ActivityType> activities)
-    : id_(++queue_id_), config_{config}, activities_{std::move(activities)} {
+    : id_(++queue_id_),
+      config_{std::move(config)},
+      activities_{std::move(activities)} {
   if (tracePython()) {
     python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
@@ -806,12 +810,13 @@ void passEventsToKineto(
     uint64_t end_time_us,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
-  TraceWrapper cpu_trace(start_time_us, "PyTorch Profiler");
+  TraceWrapper cpu_trace(
+      static_cast<int64_t>(start_time_us), "PyTorch Profiler");
 
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    const auto* activity = cpu_trace.addCPUActivity(
+    auto* activity = cpu_trace.addCPUActivity(
         e->name(),
         e->kinetoType(),
         e->kineto_info_,
@@ -840,7 +845,7 @@ void passEventsToKineto(
   }
 
   // Kineto adds the events that it collected.
-  cpu_trace.transferCpuTrace(end_time_us);
+  cpu_trace.transferCpuTrace(static_cast<int64_t>(end_time_us));
 }
 
 #ifdef USE_KINETO
@@ -1029,7 +1034,7 @@ class TransferEvents {
 
   void setParents() {
     // First pass: Collect start events and set parent to linked event.
-    ska::flat_hash_map<int, std::shared_ptr<Result>> flow_map;
+    ska::flat_hash_map<uint32_t, std::shared_ptr<Result>> flow_map;
     for (auto& e : results_.get()) {
       TORCH_INTERNAL_ASSERT(e != nullptr);
       e->visit(c10::overloaded(
@@ -1403,7 +1408,9 @@ RecordQueue::getRecords(
 
   if (python_tracer_) {
     for (const auto& i : python_tracer_->getEvents(
-             converter, python_enters, end_time_us * 1000)) {
+             converter,
+             python_enters,
+             static_cast<c10::time_t>(end_time_us * 1000))) {
       out.push_back(i);
     }
     python_tracer_.reset();
