@@ -107,7 +107,7 @@ class BaseSchedulerNode:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
-            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
@@ -777,7 +777,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
-        self.node: ir.Buffer
+        self.node: ir.Buffer = None  # type: ignore[assignment]
         self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
@@ -1022,7 +1022,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
-            self.node: ir.Buffer
+            self.node: ir.Buffer = None  # type: ignore[assignment]
             self.users: List[NodeUser] = []
 
             self.set_read_writes(
