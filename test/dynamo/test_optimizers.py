@@ -99,6 +99,27 @@ for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
 
 
+class MyOptimizer(torch.optim.Optimizer):
+    def __init__(self, params):
+        super().__init__(params, {})
+
+    def _init_group(self, params, group):
+        any_complex = False
+        for p in group["params"]:
+            params.append(p)
+            any_complex |= p.is_complex()
+        return any_complex
+
+    def step(self):
+        for group in self.param_groups:
+            params = []
+            any_complex = self._init_group(params, group)
+            if any_complex:
+                params[0] -= 1
+            else:
+                params[0] += 1
+
+
 class End2EndTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
@@ -149,6 +170,23 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
             torch.randn(5, requires_grad=True),
         )
         optimizer.step(fn)
+
+    def test_init_group(self):
+        for dtype in [torch.float32, torch.cfloat]:
+            tensor = torch.randn(5, 5, dtype=dtype)
+            params = Parameter(tensor.detach().clone(), requires_grad=False)
+            opt_params = Parameter(tensor.detach().clone(), requires_grad=False)
+            print(params, opt_params)
+
+            optim = MyOptimizer([params])
+            optim.step()
+
+            opt_optim = MyOptimizer([opt_params])
+            opt_step = torch.compile(backend="eager", fullgraph=True)(opt_optim.step)
+            opt_step()
+            print(params, opt_params)
+
+            self.assertEqual(params, opt_params)
 
 
 if __name__ == "__main__":

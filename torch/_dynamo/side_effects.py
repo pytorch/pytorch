@@ -1,4 +1,3 @@
-import collections
 import inspect
 from typing import Any, Dict, List, Optional
 
@@ -76,8 +75,8 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
-        self.id_to_variable = id_to_variable or collections.OrderedDict()
-        self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
+        self.id_to_variable = id_to_variable or {}
+        self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
@@ -115,11 +114,10 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
-            id_to_variable=collections.OrderedDict(self.id_to_variable),
-            store_attr_mutations=collections.OrderedDict(
-                (k, collections.OrderedDict(v))
-                for k, v in self.store_attr_mutations.items()
-            ),
+            id_to_variable=dict(self.id_to_variable),
+            store_attr_mutations={
+                k: dict(v) for k, v in self.store_attr_mutations.items()
+            },
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
@@ -129,14 +127,14 @@ class SideEffects:
         if cache is None:
             cache = dict()
 
-        self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
+        self.id_to_variable = {
+            k: VariableTracker.apply(fn, v, cache, skip_fn)
             for k, v in self.id_to_variable.items()
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
+        }
+        self.store_attr_mutations = {
+            k: VariableTracker.apply(fn, v, cache, skip_fn)
             for k, v in self.store_attr_mutations.items()
-        )
+        }
         self.save_for_backward = VariableTracker.apply(
             fn, self.save_for_backward, cache, skip_fn
         )
@@ -164,7 +162,7 @@ class SideEffects:
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
-            self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
+            self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
@@ -320,12 +318,12 @@ class SideEffects:
         for skip_obj, setattrs in self.store_attr_mutations.items():
             VariableTracker.apply(visit, setattrs)
 
-        self.id_to_variable = collections.OrderedDict(
-            (k, v) for k, v in self.id_to_variable.items() if is_live(v)
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, v) for k, v in self.store_attr_mutations.items() if is_live(k)
-        )
+        self.id_to_variable = {
+            k: v for k, v in self.id_to_variable.items() if is_live(v)
+        }
+        self.store_attr_mutations = {
+            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+        }
 
     def mutation(self, oldvar, newvar):
         self.check_allowed_side_effect(oldvar)
@@ -380,9 +378,9 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle):
+    def register_hook(self, tensor, hook, handle, name):
         idx = len(self.tensor_hooks.keys())
-        self.tensor_hooks[idx] = (tensor, hook, handle)
+        self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
 
@@ -394,6 +392,7 @@ class SideEffects:
             tensor,
             hook,
             handle,
+            name,
         ) in self.tensor_hooks.values():
             # Note: [On tensor.register_hook]
             #
@@ -430,7 +429,7 @@ class SideEffects:
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
-            cg.extend_output([cg.create_load_attr("register_hook")])
+            cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
             # Let's go over how handles work.

@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+import copy
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -850,7 +851,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -903,7 +904,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -923,7 +924,7 @@ def forward(self, primals_1):
         out_ref = f2(inp_ref)
         out_test = f2_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -946,7 +947,7 @@ def forward(self, primals_1):
         out_ref = f3(inp_ref)
         out_test = f3_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -2192,6 +2193,198 @@ def forward(self, tangents_1):
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
 
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4):
+    add = torch.ops.aten.add.Tensor(primals_3, 1)
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_4)
+    mul_1 = torch.ops.aten.mul.Tensor(mul, primals_2)
+    sum_1 = torch.ops.aten.sum.default(mul_1);  mul_1 = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = None
+    return [add_1, primals_1, primals_2, primals_4, mul]""")
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]]))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w @ x).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    add = torch.ops.aten.add.Tensor(primals_2, 1)
+    mm = torch.ops.aten.mm.default(primals_1, primals_3)
+    sum_1 = torch.ops.aten.sum.default(mm);  mm = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = None
+    return [add_1, primals_1, primals_3]""")
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+
+        self.assertEqual(eager_grads, compile_grads)
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_module(
+            model_for_compile,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_5, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(primals_6, primals_1, primals_2, primals_3, primals_4, True, 0.1, 1e-05);  primals_2 = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_1 = _native_batch_norm_legit_functional[1]
+    getitem_2 = _native_batch_norm_legit_functional[2]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
+    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
+    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
+    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]""")  # noqa: B950
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        eager_grads = [p.grad for _, p in model_for_eager.named_parameters()]
+        compile_grads = [p.grad for _, p in model_for_compile.named_parameters()]
+        self.assertEqual(eager_grads, compile_grads)
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4, tangents_1):
+    native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(tangents_1, primals_6, primals_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  tangents_1 = primals_6 = primals_1 = getitem_3 = getitem_4 = getitem_1 = getitem_2 = None
+    getitem_5 = native_batch_norm_backward[0]
+    getitem_6 = native_batch_norm_backward[1]
+    getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
+    return [getitem_6, getitem_7, None, None, None, getitem_5]""")  # noqa: B950
+
+        self.assertEqual(inp_ref.grad, inp_test.grad)
+
+    def test_new_inp_requires_grad_now(self):
+        def f(x, y):
+            return x.add_(y)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            bw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=bw_graph_cell)),
+            keep_inference_input_mutations=True,
+        )
+
+        inp_ref = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+        inp_test = (torch.ones(20, 100, requires_grad=False), torch.ones(20, 100, requires_grad=True))
+
+        out_ref = f(*inp_ref)
+        out_test = compiled_f(*inp_test)
+
+        # There is no copy_ method
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    add = torch.ops.aten.add.Tensor(clone, primals_2);  clone = primals_2 = None
+    return [add, add]""")  # noqa: B950
+
+        self.assertEqual(out_ref, out_test)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, tangents_1):
+    return [None, tangents_1]""")  # noqa: B950
+
     def test_real_weights_in_symbolic_mode(self):
         from functorch.experimental import functionalize
 
@@ -2319,38 +2512,38 @@ class TestAOTExport(AOTTestCase):
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_1: f32[3] = _native_batch_norm_legit_functional[1]
-        getitem_2: f32[3] = _native_batch_norm_legit_functional[2]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-        ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
-        expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_1: "f32[3]" = _native_batch_norm_legit_functional[1]
+        getitem_2: "f32[3]" = _native_batch_norm_legit_functional[2]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
-        getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
-        getitem_6: f32[3] = native_batch_norm_backward[1]
-        getitem_7: f32[3] = native_batch_norm_backward[2];  native_batch_norm_backward = None
+        getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
+        getitem_6: "f32[3]" = native_batch_norm_backward[1]
+        getitem_7: "f32[3]" = native_batch_norm_backward[2];  native_batch_norm_backward = None
         convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
         getitem_8 = convolution_backward[0]
-        getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
-        getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
+        getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
+        getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
@@ -2370,18 +2563,18 @@ class <lambda>(torch.nn.Module):
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
         # No stacktrace found for following nodes
-        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
-        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
+        add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
         _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  convolution = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
-        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
-        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
-        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
+        getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+        getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+        getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         return (getitem_3, getitem_4, add, sum_1, detach_1)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
@@ -2628,8 +2821,8 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(str(fw_output[0]), "sum_1")
         # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
         # rather than saving the sizes of the primals input for use in backward expand
-        self.assertEqual(str(fw_output[1]), "sym_size")
-        self.assertEqual(str(fw_output[2]), "sym_size_1")
+        self.assertEqual(str(fw_output[1]), "sym_size_int")
+        self.assertEqual(str(fw_output[2]), "sym_size_int_1")
 
         inp = [
             torch.randn(10, requires_grad=True),
@@ -3482,18 +3675,13 @@ symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -3507,11 +3695,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList

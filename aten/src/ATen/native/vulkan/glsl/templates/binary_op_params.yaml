@@ -40,6 +40,9 @@ binary_op_tensor:
       - NAME: pow
         IS_DIV: 0
         OPERATOR: pow(X, Y)
+      - NAME: floor_divide
+        IS_DIV: 1
+        OPERATOR: floor(X / Y)
 
 binary_op_tensor_inplace:
   parameter_names_with_default_values:
@@ -59,3 +62,6 @@ binary_op_tensor_inplace:
       - NAME: pow_
         IS_DIV: 0
         OPERATOR: pow(X, Y)
+      - NAME: floor_divide_
+        IS_DIV: 1
+        OPERATOR: floor(X / Y)
