@@ -51,7 +51,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super().__new__(cls)
 
     def capture_begin(self, pool=None, capture_error_mode="global"):
-        r"""Begins capturing CUDA work on the current stream.
+        r"""Begin capturing CUDA work on the current stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
         Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
