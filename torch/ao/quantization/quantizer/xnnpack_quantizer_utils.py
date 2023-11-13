@@ -462,7 +462,7 @@ def _annotate_gru_io_only(
         # subgraph
         input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
-        input_act_user = list(input_act.users.keys())[0]
+        input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)
         assert isinstance(input_act_user, Node)
         input_act_user.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -473,7 +473,7 @@ def _annotate_gru_io_only(
         )
 
         hidden_state = input_nodes[1]
-        hidden_state_user = list(hidden_state.users.keys())[0]
+        hidden_state_user = next(iter(hidden_state.users.keys()))
         assert isinstance(hidden_state, Node)
         assert isinstance(hidden_state_user, Node)
         hidden_state_user.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -861,7 +861,8 @@ def propagate_annotation(model: torch.fx.GraphModule) -> None:
         )
 
 
-def convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+# TODO: make the list of ops customizable
+def _convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for n in model.graph.nodes:
         if n.op != "call_function" or n.target not in [
             torch.ops.aten.add.Tensor,

@@ -10,7 +10,7 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
-from torch._dynamo.testing import same
+from torch._dynamo.testing import CompileCounter, same
 
 
 # The intention of this test file is you should put test cases specifically
@@ -110,7 +110,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
-    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be reffering
+    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be referring
     # to a name from a source that is not there. If we call .item() and take the wrapped_value out, where we do
     # wrapped_value = wrapped_value.item() where we send unspec down to wrap_fx_proxy, this test passes and then
     # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
@@ -163,6 +163,12 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+        random.seed(10)
+        res1 = fn(x)
+        random.seed(10)
+        res2 = opt_fn(x)
+        self.assertTrue(same(res1, res2))
+
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -174,6 +180,37 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
+
+    def test_use_and_specialize(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(x, y):
+            x = x + y
+            if y == 2:
+                return x - 1
+            else:
+                return x + 1
+
+        self.assertTrue(same(fn(torch.tensor([5]), 2), 6))
+        self.assertTrue(same(fn(torch.tensor([6]), 2), 7))
+        self.assertTrue(same(fn(torch.tensor([5]), 3), 9))
+        self.assertTrue(same(fn(torch.tensor([4]), 3), 8))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_no_recompiles(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(x, y):
+            return x + y
+
+        self.assertTrue(same(fn(torch.tensor([5]), 100), 105))
+        self.assertTrue(same(fn(torch.tensor([4]), 200), 204))
+        self.assertTrue(same(fn(torch.tensor([3]), 300), 303))
+        self.assertTrue(same(fn(torch.tensor([2]), 400), 402))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_builtin_functions_on_cuda(self):
@@ -214,7 +251,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @unittest.expectedFailure  # fails as long as numpy scalars are 0D arrays
     def test_specializing_numpy_float_in_control_flow(self):
-        # np.float is unspecialized by default,
+        # np.float64 is unspecialized by default,
         # but it should be specialized when used in control flow.
         def fn(x, y):
             if y > 1.0:

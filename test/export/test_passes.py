@@ -26,7 +26,7 @@ from torch._export.passes.functionalize_side_effectful_ops_pass import (
 from functorch.experimental.control_flow import cond
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.infra.partitioner import Partition
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -55,7 +55,7 @@ def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
 
 def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
-    args = tree_flatten(output_node.args)[0]
+    args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
     #     args = args[0]
     return [str(arg) for arg in args]
