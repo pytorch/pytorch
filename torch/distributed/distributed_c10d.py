@@ -1396,9 +1396,6 @@ def _new_process_group_helper(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     pg._set_group_name(group_name)
-    # TODO:
-    # - remove python mapping
-    # - remove tags
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
