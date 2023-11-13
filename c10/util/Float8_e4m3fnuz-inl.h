@@ -52,7 +52,7 @@ class numeric_limits<c10::Float8_e4m3fnuz> {
   static constexpr int digits10 = 0;
   static constexpr int max_digits10 = 3;
   static constexpr int radix = 2;
-  static constexpr int min_exponent = -5;
+  static constexpr int min_exponent = -6;
   static constexpr int min_exponent10 = -1;
   static constexpr int max_exponent = 8;
   static constexpr int max_exponent10 = 2;

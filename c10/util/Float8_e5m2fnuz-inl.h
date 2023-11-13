@@ -48,8 +48,8 @@ class numeric_limits<c10::Float8_e5m2fnuz> {
   static constexpr bool is_integer = false;
   static constexpr bool is_specialized = true;
   static constexpr bool is_exact = false;
-  static constexpr bool has_infinity = true;
-  static constexpr bool has_quiet_NaN = false;
+  static constexpr bool has_infinity = false;
+  static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
   static constexpr auto has_denorm = true;
   static constexpr auto has_denorm_loss = true;
@@ -61,7 +61,7 @@ class numeric_limits<c10::Float8_e5m2fnuz> {
   static constexpr int digits10 = 0;
   static constexpr int max_digits10 = 2;
   static constexpr int radix = 2;
-  static constexpr int min_exponent = -13;
+  static constexpr int min_exponent = -14;
   static constexpr int min_exponent10 = -4;
   static constexpr int max_exponent = 16;
   static constexpr int max_exponent10 = 4;
@@ -70,13 +70,13 @@ class numeric_limits<c10::Float8_e5m2fnuz> {
       numeric_limits<float>::tinyness_before;
 
   static constexpr c10::Float8_e5m2fnuz min() {
-    return c10::Float8_e5m2fnuz(0x4, c10::Float8_e5m2fnuz::from_bits());
+    return c10::Float8_e5m2fnuz(0x04, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz max() {
-    return c10::Float8_e5m2fnuz(0x7B, c10::Float8_e5m2fnuz::from_bits());
+    return c10::Float8_e5m2fnuz(0x7F, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz lowest() {
-    return c10::Float8_e5m2fnuz(0xFB, c10::Float8_e5m2fnuz::from_bits());
+    return c10::Float8_e5m2fnuz(0xFF, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz epsilon() {
     return c10::Float8_e5m2fnuz(0x34, c10::Float8_e5m2fnuz::from_bits());
