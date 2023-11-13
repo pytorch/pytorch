@@ -257,8 +257,8 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention_v2(
     AtenTensorHandle key,
     AtenTensorHandle value,
     double dropout_p,
-    bool is_causal,
-    bool return_debug_mask,
+    int is_causal,
+    int return_debug_mask,
     double* scale,
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
