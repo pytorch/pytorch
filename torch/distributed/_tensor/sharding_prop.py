@@ -1,6 +1,6 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence
+from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -21,6 +21,14 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.placement_types import TensorMeta
 
 aten = torch.ops.aten
+
+
+def _length(obj) -> int:
+    if obj is None:
+        return 0
+    if not isinstance(obj, Sequence):
+        return 1
+    return len(obj)
 
 
 class ShardingPropagator:
@@ -60,7 +68,9 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
+    def _propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -102,22 +112,45 @@ class ShardingPropagator:
             return None
 
     def _wrap_output_spec_tensor_meta(
-        self, output_spec: OutputSpecType, output_tensor_meta: object
+        self,
+        op: OpOverload,
+        output_spec: OutputSpecType,
+        output_tensor_meta: Union[
+            None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]
+        ],
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
         """
-        if output_spec is not None:
-            if isinstance(output_spec, DTensorSpec):
-                assert isinstance(output_tensor_meta, TensorMeta)
-                output_spec.tensor_meta = output_tensor_meta
-            elif isinstance(output_spec, (tuple, list)):
-                for i, spec in enumerate(output_spec):
-                    if isinstance(spec, DTensorSpec):
-                        assert isinstance(output_tensor_meta, (tuple, list))
-                        output_tensor_meta_i = output_tensor_meta[i]
-                        assert isinstance(output_tensor_meta_i, TensorMeta)
-                        spec.tensor_meta = output_tensor_meta_i
+
+        if isinstance(output_spec, DTensorSpec):
+            if not isinstance(output_tensor_meta, TensorMeta):
+                # Either error due to ShardingPropagator or due to incorrect OutputSpec
+                if not isinstance(output_tensor_meta, (tuple, list)):
+                    raise ValueError(
+                        "ShardingPropagator error: output does not have an associated TensorMeta"
+                    )
+                raise ValueError(
+                    f"For the op {op.name()}, `output_spec` has 1 output which does not equal the "
+                    f"number of op outputs: {len(output_tensor_meta)}."
+                )
+            output_spec.tensor_meta = output_tensor_meta
+        elif isinstance(output_spec, (tuple, list)):
+            if not isinstance(output_tensor_meta, (tuple, list)) or len(
+                output_spec
+            ) != len(output_tensor_meta):
+                raise ValueError(
+                    f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the "
+                    f"number of op outputs {_length(output_tensor_meta)}."
+                )
+            for i, spec in enumerate(output_spec):
+                if isinstance(spec, DTensorSpec):
+                    output_tensor_meta_i = output_tensor_meta[i]
+                    if not isinstance(output_tensor_meta_i, TensorMeta):
+                        raise ValueError(
+                            f"ShardingPropagator error: output {i} does not have an associated TensorMeta"
+                        )
+                    spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
@@ -276,7 +309,7 @@ class ShardingPropagator:
 
             # associate the output sharding with the output tensor metadata
             self._wrap_output_spec_tensor_meta(
-                output_sharding.output_spec, out_tensor_meta
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
             return output_sharding
         elif op_schema.op in self.op_to_rules:
@@ -322,7 +355,7 @@ class ShardingPropagator:
 
             # associate the output sharding with the output tensor metadata
             self._wrap_output_spec_tensor_meta(
-                output_sharding.output_spec, out_tensor_meta
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
 
             return output_sharding
