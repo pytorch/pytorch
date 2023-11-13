@@ -16,8 +16,8 @@ def _replace_dropout(m: torch.fx.GraphModule, for_eval_mode: bool):
     See https://github.com/pytorch/pytorch/issues/103681.
     """
     # Avoid circular dependencies
-    from .utils import get_aten_graph_module
     from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+    from .utils import get_aten_graph_module
 
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
