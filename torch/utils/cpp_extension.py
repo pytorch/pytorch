@@ -406,7 +406,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     if torch.version.cuda is None:
         return
 
-    torch_cuda_version = TorchVersion(torch.version.cuda)
+    torch_cuda_version = Version(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
         if getattr(cuda_ver, "major", None) is None:
