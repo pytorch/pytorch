@@ -2094,6 +2094,54 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_dict_order_keys(self):
+        def fn(d):
+            return d["a"] - d["b"]
+
+        args1 = {}
+        args1["a"] = torch.rand(10)
+        args1["b"] = torch.rand(10)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(fn(args1), opt_fn(args1))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+        # A different order of keys recompiles
+        args2 = {}
+        args2["b"] = args1["b"]
+        args2["a"] = args1["a"]
+        self.assertEqual(fn(args2), opt_fn(args2))
+        self.assertEqual(cnts.frame_count, 2)
+        # Extra calls don't recompile
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_order_keys_tensors(self):
+        def fn(d, x):
+            return d[x] + 3
+
+        args1 = {}
+        x = torch.randn(10)
+        y = torch.randn(10)
+        z = torch.randn(10)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
 
