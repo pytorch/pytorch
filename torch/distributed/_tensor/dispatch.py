@@ -396,7 +396,31 @@ class OpDispatcher:
                 else:
                     res_list.append(None)  # type: ignore[arg-type]
 
+<<<<<<< HEAD
             return tuple(res_list) if isinstance(res, tuple) else res_list
+=======
+        # run local op computation with potentially modified args/kwargs
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        if op_call in _random_ops and is_rng_supported_mesh(mesh):
+            if not random._rng_tracker:
+                raise RuntimeError(
+                    "A CudaRNGStateTracker instance must be instantiated "
+                    "before executing a random op over a DTensor. "
+                    "Try calling random.manual_seed() or distribute_tensor() "
+                    "before executing a DTensor random op."
+                )
+            # For DTensor random operator, run it within a distribute region
+            with random._rng_tracker._distribute_region(
+                cast(DTensorSpec, args_schema[0])
+            ):
+                local_results = op_call(*local_tensor_args, **local_kwargs)
+        elif op_call == torch.ops.aten.convolution.default:
+            local_results = tp_convolution(op_call, local_tensor_args, local_kwargs)
+        elif op_call == torch.ops.aten.convolution_backward.default:
+            local_results = tp_convolution_backward(
+                op_call, local_tensor_args, local_kwargs
+            )
+>>>>>>> fix linter errors 3
         else:
             # if the res contains only non tensor values, we simply return it without rewrapping
             return res

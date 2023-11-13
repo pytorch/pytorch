@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import cast, Dict, Tuple
+from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -102,20 +102,20 @@ def _ring_send_recv_aggregate(grad_in_tensor, d1, d2, left, right, rank, size):
 
 def tp_convolution(
     op_call: torch._ops.OpOverload,
-    *local_tensor_args: Tuple[object, ...],
-    **local_tensor_kwargs: Dict[str, object],
+    local_tensor_args: Tuple[object, ...],
+    local_tensor_kwargs: Dict[str, object],
 ) -> object:
     assert op_call == aten.convolution.default
     assert len(local_tensor_args) == 9
 
     rank = dist.get_rank()
     size = dist.get_world_size()
-    in_tensor = local_tensor_args[0]
-    weight = local_tensor_args[1]
-    bias = local_tensor_args[2]
+    in_tensor = cast(torch.Tensor, local_tensor_args[0])
+    weight = cast(torch.Tensor, local_tensor_args[1])
     stride, padding, dilation = local_tensor_args[3:6]
 
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
+    assert isinstance(padding, List)
 
     if not _requires_data_exchange(padding):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -141,35 +141,35 @@ def tp_convolution(
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
         # step3 remove extra ouputs from the results
-        padding = local_tensor_args[4][1]
+        padding_w = padding[1]
         w = local_results.size(3)
         if rank == 0:
-            local_results = local_results[:, :, :, : w - padding]
+            local_results = local_results[:, :, :, : w - padding_w]
         elif rank == size - 1:
-            local_results = local_results[:, :, :, padding:]
+            local_results = local_results[:, :, :, padding_w:]
         else:
-            local_results = local_results[:, :, :, padding : w - padding]
+            local_results = local_results[:, :, :, padding_w : w - padding_w]
 
         return local_results
 
 
 def tp_convolution_backward(
     op_call: torch._ops.OpOverload,
-    *local_tensor_args: Tuple[object, ...],
-    **local_tensor_kwargs: Dict[str, object],
+    local_tensor_args: Tuple[object, ...],
+    local_tensor_kwargs: Dict[str, object],
 ) -> object:
     assert op_call == aten.convolution_backward.default
     assert len(local_tensor_args) == 11
 
     rank = dist.get_rank()
     size = dist.get_world_size()
-    grad_out_tensor = local_tensor_args[0]
-    in_tensor = local_tensor_args[1]
-    weight = local_tensor_args[2]
-    bias = local_tensor_args[3]
+    grad_out_tensor = cast(torch.Tensor, local_tensor_args[0])
+    in_tensor = cast(torch.Tensor, local_tensor_args[1])
+    weight = cast(torch.Tensor, local_tensor_args[2])
     stride, padding, dilation = local_tensor_args[4:7]
 
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
+    assert isinstance(padding, List)
 
     if not _requires_data_exchange(padding):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -190,18 +190,18 @@ def tp_convolution_backward(
 
         # step2 reconstruct local gradient output tensor
         N, C_out, H_out, _ = grad_out_tensor.shape
-        padding = local_tensor_args[5][1]
+        padding_w = padding[1]
         if rank == 0:
             grad_out_tensor = torch.nn.functional.pad(
-                grad_out_tensor, (0, padding), "constant", 0
+                grad_out_tensor, (0, padding_w), "constant", 0
             )
         elif rank == size - 1:
             grad_out_tensor = torch.nn.functional.pad(
-                grad_out_tensor, (padding, 0), "constant", 0
+                grad_out_tensor, (padding_w, 0), "constant", 0
             )
         else:
             grad_out_tensor = torch.nn.functional.pad(
-                grad_out_tensor, (padding, padding), "constant", 0
+                grad_out_tensor, (padding_w, padding_w), "constant", 0
             )
 
         # step3 feed local input tensor to op_call

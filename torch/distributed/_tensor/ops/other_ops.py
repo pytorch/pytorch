@@ -16,6 +16,8 @@ aten = torch.ops.aten
 def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
     grad_output_spec, input_sizes, dim, start, end, step = op_schema.args_schema
     assert isinstance(grad_output_spec, DTensorSpec)
+    assert isinstance(input_sizes, List)
+    assert grad_output_spec.tensor_meta is not None
     grad_input_stride = list(np.cumprod(input_sizes[::-1])[:-1][::-1])
     grad_input_stride.append(1)
     dim_map = grad_output_spec.dim_map
@@ -48,6 +50,7 @@ def bernoulli_rules(op_schema: OpSchema) -> OutputSharding:
 def nll_loss_forward_rules(op_schema: OpSchema) -> OutputSharding:
     input_spec = op_schema.args_schema[0]
     assert isinstance(input_spec, DTensorSpec)
+    assert input_spec.tensor_meta is not None
     result_shape: List[int] = []
     result_stride: List[int] = []
     result_dim = 0

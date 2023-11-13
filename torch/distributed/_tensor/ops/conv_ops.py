@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
+from typing import List
 
 import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
@@ -26,8 +27,14 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
     assert isinstance(bias_spec, DTensorSpec)
+    assert input_spec.tensor_meta is not None
+    assert weight_spec.tensor_meta is not None
     in_shape = input_spec.tensor_meta.shape
     weight_shape = weight_spec.tensor_meta.shape
+    assert isinstance(stride, List)
+    assert isinstance(padding, List)
+    assert isinstance(dilation, List)
+    assert isinstance(weight_shape, torch.Size)
     N, C_in, H_in, W_in = in_shape[0], in_shape[1], in_shape[2], in_shape[3]
     C_out = weight_shape[0]
     H_out = (H_in + 2 * padding[0] - dilation[0] * (weight_shape[2] - 1) - 1) // stride[
@@ -76,7 +83,8 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(grad_output_spec, DTensorSpec)
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
-
+    assert isinstance(bias_shape_opt, List)
+    assert input_spec.tensor_meta is not None
     weight_tensor_meta = weight_spec.tensor_meta
     bias_tensor_meta = TensorMeta(
         torch.Size(bias_shape_opt),

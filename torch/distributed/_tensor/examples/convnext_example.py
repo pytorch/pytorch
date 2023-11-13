@@ -105,7 +105,8 @@ class DownSampling(nn.Module):
 def init_weights(m):
     if type(m) == nn.Conv2d or type(m) == nn.Linear:
         nn.init.ones_(m.weight)
-        nn.init.zeros_(m.bias)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
 
 
 class ConvNeXt(nn.Module):
