@@ -419,31 +419,14 @@ def _get_dtensor_dispatch_graph(
             )
             return None
 
-        assert output_sharding is not None
-
-        # If no redistribution is needed, we don't need to replace
-        # the original node.
-        if not output_sharding.needs_redistribute:
-            _update_node_from_op_schema(node, op_schema)
-            return None
-
-        # TODO: this is broken when kwargs contains tensors
-        # or if a non-tensor kwarg was modified by the sharding propagation
-        # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
-        assert output_sharding.schema_suggestions is not None
-        target_schema = output_sharding.schema_suggestions[0]
-        updated_args_spec, unflattened_args = _update_specs_for_redistribute(
-            args, target_schema, output_sharding.needs_redistribute
-        )
-
         dispatch = partial(
             _dispatch_with_local_tensors,
             op_overload,
             kwargs=kwargs,
-            specs=updated_args_spec,
+            specs=args,
         )
 
-        gm = make_fx(dispatch, _allow_non_fake_inputs=False)(unflattened_args)
+        gm = make_fx(dispatch, _allow_non_fake_inputs=False)(args)
         # FIXME(@wanchaol, @mrshenli): the above seems to accidentally captured
         # DeviceMesh tensor ops when handling inplace operators? The ``_to_copy`` is
         # not connected to graph output. So, using DCE to get rid of it, but this
