@@ -1072,10 +1072,9 @@ class GraphModule(torch.nn.Module):
 
                             inner_func = torch.set_grad_enabled(mode)(inner_func)
 
-                        # decorator will mutate global state even if it wraps a function
-                        # This behaviour is not desirable and may change in the future
-                        # https://github.com/pytorch/pytorch/issues/113298
-                        assert torch.is_grad_enabled() == mode
+                        # Consuming set_grad_enabled by calling it on a function
+                        # should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
 
                     with torch.set_grad_enabled(mode_inverse):
                         return inner_func(x)
