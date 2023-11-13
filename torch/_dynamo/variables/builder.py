@@ -330,7 +330,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     InspectSignatureVariable.create,
                     source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (comptime, lambda self, value: ComptimeVariable()),
@@ -713,7 +713,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return UserFunctionVariable(
                 value,
                 source=self.source,

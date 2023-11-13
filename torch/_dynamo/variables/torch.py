@@ -171,7 +171,7 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, False, initialized=False)
+                ctx = GradModeVariable.create(tx, False)
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
@@ -179,11 +179,13 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, True, initialized=False)
+                ctx = GradModeVariable.create(tx, True)
                 return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant())
+            return GradModeVariable.create(
+                tx, args[0].as_python_constant(), initialized=True
+            )
         elif self.value is torch.inference_mode:
             return InferenceModeVariable.create(tx, args[0].as_python_constant())
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
