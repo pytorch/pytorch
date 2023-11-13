@@ -66,12 +66,12 @@ class OpDispatcher:
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
-            aten.is_same_size.default: lambda x, y: x.shape == y.shape,
+            aten.is_same_size.default: lambda op_call, x, y: x.shape == y.shape,
             # directly wrap a new DTensor with the input DTensor's local_shard and spec, this
             # this because detach only relates to autograd and we don't need to run local
             # compute or sharding propagation here (and since we safely maintain local tensor
             # and wrapper autograd via `view_as`, it's safe to directly re-wrap)
-            aten.detach.default: lambda x: self.wrap(x._local_tensor, x._spec),
+            aten.detach.default: lambda op_call, x: self.wrap(x._local_tensor, x._spec),
         }
 
     def dispatch(
@@ -84,13 +84,10 @@ class OpDispatcher:
         Main dispatching logic
         """
         # operators that does not need to go through sharding propagation
-        # if op_call == aten.is_same_size.default:
-        #     assert isinstance(args[0], torch.Tensor)
-        #     assert isinstance(args[1], torch.Tensor)
-        #     return args[0].shape == args[1].shape # type: ignore[return-value]
         if op_call in self._custom_op_handlers:
-            return self._custom_op_handlers[op_call](*args, **kwargs)  # type: ignore[operator]
+            return self._custom_op_handlers[op_call](op_call, *args, **kwargs)  # type: ignore[operator]
 
+        # extract local tensor and sharding infos and run sharding propagation
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
