@@ -336,7 +336,7 @@ class CutlassEVTEpilogueArgumentFormatter:
           },                // end binary op
           {} // ternary args : multiply_add
         }   // end ternary op
-        """ % (
+        """ % (  # noqa: UP031`
             beta,
             alpha,
         )
