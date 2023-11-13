@@ -233,7 +233,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -873,10 +875,10 @@ def use_aten_gemm_kernels():
 
 class DebugDirManager:
     counter = itertools.count(0)
+    prev_debug_name: str
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root
