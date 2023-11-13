@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._pytree.api.cxx import tree_map_only
+    from torch.utils._cxx_pytree import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -126,6 +126,20 @@ def wait_tensor(tensor):
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
     return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+
+
+def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Broadcasts the tensor to all processes in the given process group.
+
+    Args:
+        src (int): Source rank
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    return _maybe_wrap_tensor(tensor)
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -523,6 +537,9 @@ def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
     return [mk_out_tensor(t) for t in self]
 
 # We now register meta kernels to deal with tracing
+def _broadcast_meta(self, *args):
+    return torch.empty_like(self)
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
 
@@ -596,6 +613,7 @@ def _reduce_scatter_tensor_coalesced_native_meta(inputs, reduce_op, group_size, 
 
 def _register_ops():
     ops_defs = [
+        "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
