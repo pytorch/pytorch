@@ -505,7 +505,7 @@ class DebugFormatter:
             except Exception as e:
                 pass
             try:
-                node_info["dtype"] = str(node.get_dtpe())
+                node_info["dtype"] = str(node.get_dtype())
             except Exception as e:
                 pass
             try:
