@@ -249,6 +249,33 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             .run(code)
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_single(self) -> None:
+        self._init_process_group()
+        torch.cuda.set_device(self.device)
+
+        torch.manual_seed(42)
+        send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
+
+        input_split_sizes = send_sz_matrix[self.rank].tolist()
+        output_split_sizes = send_sz_matrix[:, self.rank].tolist()
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).cuda()
+
+        output = torch.ops._c10d_functional.all_to_all_single(
+            input,
+            output_split_sizes,
+            input_split_sizes,
+            "default",
+        )
+        output = torch.ops._c10d_functional.wait_tensor(output)
+        expect = torch.cat(
+            [
+                torch.full((sz,), float(rank)).cuda()
+                for rank, sz in enumerate(output_split_sizes)
+            ]
+        )
+        assert output.eq(expect).all()
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_all_reduce_single(self):
         torch._inductor.config.debug = True
@@ -504,6 +531,60 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         )
         out = compiled(args)
         correct = func(args)
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_inductor_all_to_all_single(self):
+        torch._inductor.config.debug = True
+        self._init_process_group()
+        torch.cuda.set_device(self.device)
+
+        def _tolist_with_constrain_as_size(tensor):
+            lst = tensor.tolist()
+            for elem in lst:
+                torch._constrain_as_size(elem)
+            return lst
+
+        def func(
+            input: torch.Tensor,
+            output_split_sizes: torch.Tensor,
+            input_split_sizes: torch.Tensor,
+        ) -> torch.Tensor:
+            output = torch.ops._c10d_functional.all_to_all_single(
+                input,
+                _tolist_with_constrain_as_size(output_split_sizes),
+                _tolist_with_constrain_as_size(input_split_sizes),
+                "default",
+            )
+            return torch.ops._c10d_functional.wait_tensor(output)
+
+        torch.manual_seed(42)
+        send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
+
+        input_split_sizes = send_sz_matrix[self.rank]
+        output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).cuda()
+
+        with torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ):
+            compiled = torch.compile(func, dynamic=True)
+            code = run_and_get_triton_code(
+                compiled, input, output_split_sizes, input_split_sizes
+            )
+        (
+            FileCheck()
+            .check_regex(
+                "torch.ops._c10d_functional.all_to_all_single.default\\("
+                "arg\\d+_\\d+, \\[i\\d+, i\\d+\\], \\[i\\d+, i\\d+\\]"
+            )
+            .check("torch.ops._c10d_functional.wait_tensor.default(")
+            .run(code)
+        )
+        out = compiled(input, output_split_sizes, input_split_sizes)
+        correct = func(input, output_split_sizes, input_split_sizes)
         assert same(out, correct), f"{out} va {correct}"
 
 
