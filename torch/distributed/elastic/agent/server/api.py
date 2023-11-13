@@ -185,8 +185,7 @@ class Worker:
 
 
 class WorkerState(str, Enum):
-    """
-    A state of the ``WorkerGroup``.
+    """A state of the ``WorkerGroup``.
 
     Workers in a worker group change state as a unit. If a single worker
     in a worker group fails the entire set is considered failed::
@@ -261,8 +260,7 @@ class WorkerGroup:
 
 
 class _RoleInstanceInfo:
-    """
-    The class is used by the agent to exchange the information with other agents.
+    """The class is used by the agent to exchange the information with other agents.
 
     The information is used to determine the rank of the workers that agent
     manages in heterogeneous environments, where different agents can have
@@ -320,8 +318,7 @@ class _RoleInstanceInfo:
 
 @dataclass
 class RunResult:
-    """
-    Return results of the worker executions.
+    """Return results of the worker executions.
 
     Run results follow an "all-or-nothing" policy where the run is successful if and
     only if ALL local workers managed by this agent complete successfully.
@@ -354,8 +351,7 @@ class RunResult:
 
 
 def _get_socket_with_port() -> socket.socket:
-    """
-    Return a free port on localhost.
+    """Return a free port on localhost.
 
     The free port is "reserved" by binding a temporary socket on it.
     Close the socket before passing the port to the entity that
@@ -426,8 +422,9 @@ class ElasticAgent(abc.ABC):
 
     @abc.abstractmethod
     def run(self, role: str = DEFAULT_ROLE) -> RunResult:
-        """
-        Run the agent, retrying the worker group on failures up to ``max_restarts``.
+        """Run the agent.
+
+        Supports retrying the worker group on failures up to ``max_restarts``.
 
         Returns:
             The result of the execution, containing the return values or
@@ -440,8 +437,7 @@ class ElasticAgent(abc.ABC):
 
     @abc.abstractmethod
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
-        """
-        Return the ``WorkerGroup`` for the given ``role``.
+        """Return the ``WorkerGroup`` for the given ``role``.
 
         Note that the worker group is a mutable object and hence in a
         multi-threaded/process environment it may change state.
@@ -452,8 +448,7 @@ class ElasticAgent(abc.ABC):
 
 
 class SimpleElasticAgent(ElasticAgent):
-    """
-    An ``ElasticAgent`` that manages one particular type of worker role.
+    """An ``ElasticAgent`` that manages one particular type of worker role.
 
     An ``ElasticAgent`` that manages workers (``WorkerGroup``) for a single ``WorkerSpec``
     such as one particular type of worker role.
@@ -617,8 +612,7 @@ class SimpleElasticAgent(ElasticAgent):
     def _assign_worker_ranks(
         self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
     ) -> List[Worker]:
-        """
-        Determine proper ranks for worker processes.
+        """Determine proper ranks for worker processes.
 
         The rank assignment is done according to the following algorithm:
 
@@ -685,8 +679,7 @@ class SimpleElasticAgent(ElasticAgent):
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _initialize_workers(self, worker_group: WorkerGroup) -> None:
-        r"""
-        Start a fresh set of workers for the worker_group.
+        r"""Start a fresh set of workers for the worker_group.
 
         Essentially, a rendezvous followed by a ``start_workers``.
         The caller should first call ``_stop_workers()`` to stop running workers
