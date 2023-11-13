@@ -1268,15 +1268,19 @@ class CyclicLR(LRScheduler):
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
-            if 'momentum' not in optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            if 'momentum' not in optimizer.defaults and 'betas' not in optimizer.defaults:
+                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
 
+            self.use_beta1 = 'betas' in self.optimizer.defaults
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
+            max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             if last_epoch == -1:
                 for momentum, group in zip(base_momentums, optimizer.param_groups):
                     group['momentum'] = momentum
-            self.base_momentums = [group['momentum'] for group in optimizer.param_groups]
-            self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+                    if self.use_beta1:
+                        group['betas'] = (m_momentum, *group['betas'][1:])
+                    else:
+                        group['momentum'] = m_momentum
 
         super().__init__(optimizer, last_epoch, verbose)
         self.base_lrs = base_lrs
@@ -1359,7 +1363,10 @@ class CyclicLR(LRScheduler):
                     momentum = max_momentum - base_height * self.scale_fn(self.last_epoch)
                 momentums.append(momentum)
             for param_group, momentum in zip(self.optimizer.param_groups, momentums):
-                param_group['momentum'] = momentum
+                if self.use_beta1:
+                    param_group['betas'] = (momentum, *param_group['betas'][1:])
+                else:
+                    param_group['momentum'] = momentum
 
         return lrs
 
