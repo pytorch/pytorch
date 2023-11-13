@@ -2941,38 +2941,18 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
 
 def register_meta_foreach(ops):
     def wrapper(fn):
-        def register(op_packet):
-            op_name = str(op_packet).split(".")[-1]
-            for overload in op_packet.overloads():
-                if overload not in [
-                    "default",
-                    "Scalar",
-                    "Tensor",
-                    "List",
-                    "ScalarList",
-                ]:
-                    continue
-                op = getattr(op_packet, overload)
+        def register(op):
+            op_name = str(op).split(".")[1]
+            scalar_op = getattr(aten, op_name.replace("_foreach_", ""))
 
-                scalar_overload = (
-                    "Scalar" if overload.startswith("Scalar") else "Tensor"
-                )
-
-                scalar_op_packet = getattr(aten, op_name.replace("_foreach_", ""))
-                scalar_op = getattr(
-                    scalar_op_packet,
-                    scalar_overload,
-                    getattr(scalar_op_packet, "default", None),
-                )
-
-                _add_op_to_registry(
-                    meta_table,
-                    op,
-                    partial(
-                        fn,
-                        _scalar_op=scalar_op,
-                    ),
-                )
+            _add_op_to_registry(
+                meta_table,
+                op,
+                partial(
+                    fn,
+                    _scalar_op=scalar_op,
+                ),
+            )
 
         pytree.tree_map_(register, ops)
         return fn
