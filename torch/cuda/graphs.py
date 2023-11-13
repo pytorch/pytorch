@@ -81,7 +81,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         super().capture_end()
 
     def replay(self):
-        r"""Replays the CUDA work captured by this graph."""
+        r"""Replay the CUDA work captured by this graph."""
         super().replay()
 
     def reset(self):
