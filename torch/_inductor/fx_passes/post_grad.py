@@ -18,7 +18,10 @@ from torch.fx.immutable_collections import immutable_dict
 from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
-from ..lowering import lowerings as L
+from ..lowering import (
+    inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
+    lowerings as L,
+)
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -624,6 +627,34 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
+inplaceable_ops = {
+    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
+}
+
+try:
+    c10d_functional = torch.ops._c10d_functional
+    inplaceable_collective_ops = {
+        c10d_functional.all_reduce.default: InplaceableOp(
+            c10d_functional.all_reduce_.default, 0
+        ),
+        c10d_functional.all_reduce_coalesced.default: InplaceableOp(
+            c10d_functional.all_reduce_coalesced_.default, 0
+        ),
+    }
+    inplaceable_ops.update(inplaceable_collective_ops)
+except AttributeError:
+    # _c10d_functional ops are only available when torch
+    # is built with USE_DISTRIBUTED=1.
+    pass
+
+inplaceable_foreach_ops = {}
+for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
+    inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
+
+
+inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+
 
 def reinplace_inplaceable_ops(graph):
     """
@@ -641,6 +672,7 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
+    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
@@ -657,11 +689,12 @@ def reinplace_inplaceable_ops(graph):
                     src.args[0].target == triton_kernel_wrapper_functional
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
-                or (src.args[0].target == aten._foreach_add.List)
+                or (src.args[0].target in inplaceable_foreach_ops)
             ):
                 src = src.args[0]
 
             copy_args_to_copy_nodes[(dst, src)] = node
+
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
@@ -707,53 +740,17 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
-    inplaceable_ops = {
-        aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-        aten._unsafe_index_put.default: InplaceableOp(
-            inductor_prims._unsafe_index_put_, 0
-        ),
-        aten._foreach_add.List: InplaceableOp(aten._foreach_add_.List, 0),
-    }
-
-    try:
-        c10d_functional = torch.ops._c10d_functional
-        inplaceable_collective_ops = {
-            c10d_functional.all_reduce.default: InplaceableOp(
-                c10d_functional.all_reduce_.default, 0
-            ),
-            c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-                c10d_functional.all_reduce_coalesced_.default, 0
-            ),
-        }
-        inplaceable_ops.update(inplaceable_collective_ops)
-    except AttributeError:
-        # _c10d_functional ops are only available when torch
-        # is built with USE_DISTRIBUTED=1.
-        pass
-
-    inplaceable_triton_ops = {triton_kernel_wrapper_functional}
-
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg):
-                if isinstance(mutated_arg, list):
-                    for arg in mutated_arg:
-                        copy_node = copy_args_to_copy_nodes.get((arg, node))
-                        if copy_node is not None:
-                            getitem = copy_node.args[1]
-                            graph.erase_node(copy_node)
-                            graph.erase_node(getitem)
-
-                    node.target = inplaceable_op.inplace_op
-                else:
-                    # TODO(yifu): this doesn't properly remove copy epilogues for
-                    # ops that mutate multiple inputs. Need to revise the copy
-                    # node tracking logic to support the case.
-                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-                    if copy_node is not None:
-                        graph.erase_node(copy_node)
-                    node.target = inplaceable_op.inplace_op
+                # TODO(yifu): this doesn't properly remove copy epilogues for
+                # ops that mutate multiple inputs. Need to revise the copy
+                # node tracking logic to support the case.
+                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                if copy_node is not None:
+                    graph.erase_node(copy_node)
+                node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
@@ -772,6 +769,20 @@ def reinplace_inplaceable_ops(graph):
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
+        elif (
+            inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
+        ) is not None:
+            mutated_args = node.args[inplaceable_op.mutated_arg]
+
+            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
+                continue
+
+            if can_inplace(node, mutated_args):
+                for arg in mutated_args:
+                    copy_node = copy_args_to_copy_nodes[(arg, node)]
+                    graph.erase_node(copy_node)
+
+                node.target = inplaceable_op.inplace_op
 
 
 @register_lowering_pattern(
