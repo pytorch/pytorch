@@ -66,80 +66,32 @@ Tensor layer_norm(
       "Vulkan layernorm expects input of 2d, 3d or 4d!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
-  const vTensor& v_input = convert(input);
-  const IntArrayRef v_input_sizes = v_input.sizes();
-
-  TORCH_CHECK(
-      input_arg.dim() == 2 || input_arg.dim() == 3 ||
-          v_input_sizes[Layout::Activation4D::batch] == 1,
-      "Vulkan layernorm expects batch dim == 1 when the input is 4-dimensional!");
-
-  TORCH_CHECK(
-      (normalized_shape.size() == 2 && input_arg.dim() == 2) ||
-          (normalized_shape.size() == 3 && input_arg.dim() >= 3),
-      "Vulkan layernorm expects normalized_shape and input dimensions match for 2d and 3d input; normalized_shape of 3d is expected for 4d input!");
 
   TORCH_CHECK(
       weight_opt->defined() && bias_opt->defined(),
       "Vulkan layernorm expects weight and bias arguments");
 
-  const auto volume =
-      c10::multiply_integers(v_input_sizes.cbegin(), v_input_sizes.end());
-
   const Tensor weight =
       weight_opt->is_vulkan() ? *weight_opt : weight_opt->vulkan();
-  const vTensor& v_weight = convert(weight);
 
   const Tensor bias = bias_opt->is_vulkan() ? *bias_opt : bias_opt->vulkan();
-  const vTensor& v_bias = convert(bias);
 
-  api::Context* const context = api::context();
+  std::vector<int64_t> dims_to_reduce;
+  for (const auto i : c10::irange(normalized_shape.size())) {
+    dims_to_reduce.push_back(input_arg.dim() - i - 1);
+  }
+  IntArrayRef dims_to_reduce_ref = IntArrayRef(dims_to_reduce);
 
-  vTensor v_output{
-      context,
-      v_input_sizes,
-      input_arg.scalar_type(),
-  };
-
-  const struct Block final {
-    uvec3 iextents;
-    int32_t volume;
-    int32_t last_texel_end_offset;
-    float epsilon;
-  } block{
-      v_input.extents(),
-      safe_downcast<int32_t>(volume),
-      safe_downcast<int32_t>(
-          input_arg.dim() >= 3 ? (v_input_sizes[input_arg.dim() - 3] - 1) % 4
-                               : 0),
-      safe_downcast<float>(eps)};
-
-  api::UniformParamsBuffer params(context, block);
-  api::PipelineBarrier pipeline_barrier{};
-
-  context->submit_compute_job(
-      // shader descriptor
-      VK_KERNEL(layernorm),
-      // pipeline barrier
-      pipeline_barrier,
-      // global work group size
-      v_input.extents(),
-      // local work group size
-      adaptive_work_group_size(v_input.extents()),
-      // fence handle
-      VK_NULL_HANDLE,
-      // shader arguments
-      v_output.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE,
-          api::MemoryAccessType::WRITE),
-      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      // params buffer
-      params.buffer());
-
-  return convert(v_output);
+  // use the formular in this page to compute the output:
+  // https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
+  // Note that the standard-deviation is calculated via the biased estimator,
+  // equivalent to torch.var(input, unbiased=False).
+  bool mean_keep_dim = true;
+  bool var_unbiasd = false;
+  bool var_keep_dim = true;
+  auto mean = input.mean(dims_to_reduce_ref, mean_keep_dim);
+  auto var = input.var(dims_to_reduce_ref, var_unbiasd, var_keep_dim);
+  return input.sub(mean).mul(var.add(eps).pow(-0.5f)).mul(weight).add(bias);
 }
 
 #ifdef USE_VULKAN_API

@@ -1003,7 +1003,7 @@ class MemoryProfileTimeline:
         """
         device = torch.device(device_str)
         times: List[int] = []
-        sizes: List[List[float]] = []
+        sizes: List[List[int]] = []
 
         def update(key, version, delta):
             category = (
@@ -1012,21 +1012,25 @@ class MemoryProfileTimeline:
                 else None
             )
             index = _CATEGORY_TO_INDEX[category] + 1
-            sizes[-1][index] += delta
+            sizes[-1][index] += int(delta)
 
         t_min = -1
         for t, action, (key, version), numbytes in self.timeline:
             if key.device != device:
                 continue
 
+            # Convert timestamps from ns to us, to match trace events.
+            if t != -1:
+                t = int(t / 1000)
+
             # Save the smallest timestamp to populate pre-existing allocs.
             if t_min == -1 or (t < t_min and t > 0):
                 t_min = t
 
             # Handle timestep
-            if not times:
+            if len(times) == 0:
                 times.append(t)
-                sizes.append([0.0] + [0.0 for _ in _CATEGORY_TO_INDEX])
+                sizes.append([0] + [0 for _ in _CATEGORY_TO_INDEX])
 
             elif t != times[-1]:
                 times.append(t)
@@ -1150,6 +1154,9 @@ class MemoryProfileTimeline:
 
         mt = self._coalesce_timeline(device)
         times, sizes = np.array(mt[0]), np.array(mt[1])
+        # For this timeline, start at 0 to match Chrome traces.
+        t_min = min(times)
+        times -= t_min
         stacked = np.cumsum(sizes, axis=1) / 1024**3
         max_memory_allocated = torch.cuda.max_memory_allocated()
         max_memory_reserved = torch.cuda.max_memory_reserved()
@@ -1163,7 +1170,8 @@ class MemoryProfileTimeline:
                 times / 1e3, stacked[:, i], stacked[:, i + 1], color=color, alpha=0.7
             )
         fig.legend(["Unknown" if i is None else i.name for i in _CATEGORY_TO_COLORS])
-        axes.set_xlabel("Time (us)")
+        # Usually training steps are in magnitude of ms.
+        axes.set_xlabel("Time (ms)")
         axes.set_ylabel("Memory (GB)")
         title = "\n\n".join(
             ([title] if title else [])
