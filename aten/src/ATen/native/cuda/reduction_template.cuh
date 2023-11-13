@@ -8,7 +8,8 @@ const std::string reduction_template_0 = R"ESCAPE(
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
-  #define CUDA_KERNEL_ASSERT(expr) (static_cast<void>(0))
+  // until ROCm support for kernel asserts is restored
+  #define assert(expr) (static_cast<void>(0))
   #endif
 
   template <typename T>
@@ -289,7 +290,7 @@ struct ReduceJitOp {
   template <int output_vec_size>
   C10_DEVICE Array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
     if (config.vectorize_input) {
-      CUDA_KERNEL_ASSERT(output_vec_size == 1);
+      assert(output_vec_size == 1);
       // reduce at the header of input_slice where memory is not aligned,
       // so that thread_reduce will have an aligned memory to work on.
       return {input_vectorized_thread_reduce_impl(data)};
@@ -529,13 +530,13 @@ struct ReduceJitOp {
   C10_DEVICE out_scalar_t get_accumulated_output(
     out_scalar_t* out, arg_t value
   ) const {
-    CUDA_KERNEL_ASSERT(!final_output);
+    assert(!final_output);
     return (out_scalar_t)value;
   }
 
   template<class T>
   C10_DEVICE void set_results(const T x, const uint32_t base_offset) const {
-    CUDA_KERNEL_ASSERT(noutputs == 1);
+    assert(noutputs == 1);
     auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
     *res = x;
   }
@@ -559,7 +560,7 @@ struct ReduceJitOp {
 
   template <int output_vec_size>
   C10_DEVICE void set_results_to_output(Array<arg_t, output_vec_size> value, Array<uint32_t, output_vec_size> base_offset) const {
-    CUDA_KERNEL_ASSERT(final_output);
+    assert(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       set_results(reducer::project(value[i]), base_offset[i]);

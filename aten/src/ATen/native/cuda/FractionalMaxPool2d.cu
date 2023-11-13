@@ -11,8 +11,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
