@@ -308,11 +308,8 @@ batch_norm_cpu_collect_stats_channels_last_impl(
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t sum = 0;
-        accscalar_t _var_sum = 0;
         for (const auto t : c10::irange(N)) {
-          const accscalar_t x = input_data[t * n_channel + c];
-          sum += x;
-          _var_sum += (x - (sum/N)) * (x - (sum/N));
+          sum += input_data[t * n_channel + c];
         }
         
         scalar_t mean = sum / N;
