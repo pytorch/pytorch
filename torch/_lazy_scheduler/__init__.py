@@ -422,6 +422,9 @@ that tags the FX node with segment_name via `fx_traceback.current_meta`
 
 This way we don't need to do any change to Dynamo internals.
 
+But, can we actually let Dynamo trace through the method hook, if the segment has graph break?
+Can we leverage allow_in_graph to do out-of-band table update? Is it worth doing?
+
 But, does this work for tagging BWD nodes?
 ```
 """
