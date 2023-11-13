@@ -126,7 +126,6 @@ BUILTIN_SKIPLIST = (
 THIRDPARTY_SKIPLIST = (
     "functorch",
     "fx2trt_oss",
-    "intel_extension_for_pytorch",
     "networkx",
     "numpy",
     "omegaconf",
