@@ -24,7 +24,6 @@ from torch import fx
 from torch._guards import (
     Checkpointable,
     GlobalContextCheckpointState,
-    Guard,
     GuardsCheckpointState,
     Source,
     TracingContext,
@@ -228,7 +227,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def __init__(
         self,
         code_options: Dict[str, Any],
-        compiler_fn: CompilerFn,
+        compiler_fn: Optional[CompilerFn],
         root_tx,
         export: bool,
         export_constraints,
@@ -308,7 +307,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
-        self.compiler_fn: CompilerFn = compiler_fn
+        self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
@@ -457,11 +456,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.tracing_context.fake_mode.shape_env
 
     @property
-    def guards(self) -> Set[Guard]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self.tracing_context.guards_context.dynamo_guards
 
     @property
-    def nn_modules(self) -> Dict[str, torch.nn.Module]:
+    def nn_modules(self) -> Dict[str, Any]:
         return self.tracing_context.module_context.nn_modules
 
     def save_global_state(self, out=None):
@@ -616,7 +615,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def get_submodule(self, keys):
         assert keys
-        obj = self.nn_modules
+        obj: Union[torch.nn.Module, Dict[str, torch.nn.Module]] = self.nn_modules
         for k in keys.split("."):
             if isinstance(obj, dict):
                 obj = obj[k]
@@ -1048,6 +1047,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        assert self.compiler_fn is not None
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
