@@ -1,12 +1,12 @@
-"""Gradient interface"""
+"""Gradient interface."""
 
 import torch
 from .modules.utils import _single, _pair, _triple
 
 
 def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv1d with respect to the input of the convolution.
+    r"""Compute the gradient of conv1d with respect to the input of the convolution.
+
     This is same as the 1D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
@@ -37,8 +37,7 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
 
 
 def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv1d with respect to the weight of the convolution.
+    r"""Compute the gradient of conv1d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
@@ -68,8 +67,8 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
 
 
 def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv2d with respect to the input of the convolution.
+    r"""Compute the gradient of conv2d with respect to the input of the convolution.
+
     This is same as the 2D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
@@ -100,8 +99,7 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
 
 
 def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv2d with respect to the weight of the convolution.
+    r"""Compute the gradient of conv2d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
@@ -131,8 +129,8 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
 
 
 def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv3d with respect to the input of the convolution.
+    r"""Compute the gradient of conv3d with respect to the input of the convolution.
+
     This is same as the 3D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
@@ -163,8 +161,7 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
 
 
 def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
-    r"""
-    Computes the gradient of conv3d with respect to the weight of the convolution.
+    r"""Compute the gradient of conv3d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
