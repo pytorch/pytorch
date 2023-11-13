@@ -935,9 +935,7 @@ def tuple_iterator_getitem(it, index):
 
 
 def dict_keys_getitem(d, n):
-    from itertools import islice
-
-    return next(islice(iter(d), n, n + 1))
+    return next(itertools.islice(iter(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -1000,16 +998,8 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def dict_param_key_ids(value):
-    return {
-        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
-
-
-def dict_const_keys(value):
-    return {
-        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
+def tensor_to_id(value):
+    return [id(k) if isinstance(k, torch.Tensor) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -1035,12 +1025,9 @@ def const_repr(x, *, local) -> str:
         return f"{x!r}"
 
 
-def dict_const_keys_repr(const_keys, *, local) -> str:
+def dict_keys_repr(const_keys, *, local) -> str:
     keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
-    if keys_str:
-        return "{" + keys_str + "}"
-    else:
-        return "set()"
+    return "[" + keys_str + "]"
 
 
 def global_key_name(key):

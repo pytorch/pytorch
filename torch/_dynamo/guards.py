@@ -57,15 +57,14 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_const_keys,
-    dict_const_keys_repr,
     dict_keys_getitem,
-    dict_param_key_ids,
+    dict_keys_repr,
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
+    tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -107,8 +106,7 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___dict_param_key_ids": dict_param_key_ids,
-    "___dict_const_keys": dict_const_keys,
+    "___tensor_to_id": tensor_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
     "___dict_keys_getitem": dict_keys_getitem,
@@ -506,22 +504,21 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        param_key_ids = set(dict_param_key_ids(value))
-        const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(
-            const_keys, local=is_from_local_source(guard.originating_source)
+        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
+        const_keys_repr = dict_keys_repr(
+            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
         )
-        if param_key_ids:
-            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
+        if any_tensor:
+            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys_repr}")
+            code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
