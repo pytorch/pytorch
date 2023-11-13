@@ -267,6 +267,9 @@ error_on_recompile = False
 # [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
 report_guard_failures = True
 
+# [@compile_ignored: debug] For each guard failure, whether to print all failed parts, or only the first one
+report_all_guard_failure_parts = False
+
 # [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 

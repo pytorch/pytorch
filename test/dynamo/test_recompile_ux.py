@@ -230,6 +230,57 @@ tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
 tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
         )
 
+    @torch._dynamo.config.patch("cache_size_limit", 32)
+    @torch._dynamo.config.patch("report_all_guard_failure_parts", True)
+    def test_multiple_guard_fails_report_all(self):
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure[0])
+
+        def f(x):
+            return torch.ones(len(x), x[-1])
+
+        opt_f = torch._dynamo.optimize(
+            backend="eager", guard_fail_fn=guard_fail_fn, dynamic=False
+        )(f)
+
+        opt_f([4, 5, 6])
+
+        def filter_reasons():
+            return "\n".join(
+                [
+                    line
+                    for line in "\n".join(failure_reasons).splitlines()
+                    if not line.startswith("___check_type_id")
+                ]
+            )
+
+        failure_reasons.clear()
+        opt_f([7, 8])
+        self.assertExpectedInline(
+            filter_reasons(),
+            """\
+len(L['x']) == 3
+L['x'][0] == 4
+L['x'][1] == 5
+L['x'][2] == 6""",
+        )
+
+        failure_reasons.clear()
+        opt_f([9])
+        self.assertExpectedInline(
+            filter_reasons(),
+            """\
+len(L['x']) == 2
+L['x'][0] == 7
+L['x'][1] == 8
+len(L['x']) == 3
+L['x'][0] == 4
+L['x'][1] == 5
+L['x'][2] == 6""",
+        )
+
 
 # TODO(jansel): these pass with pytest, but not with pytorch CI
 # if __name__ == "__main__":
