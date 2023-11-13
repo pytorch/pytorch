@@ -1217,6 +1217,7 @@ def gen_pyi(
     for c in (
         "DoubleTensor",
         "FloatTensor",
+        "BFloat16Tensor",
         "LongTensor",
         "IntTensor",
         "ShortTensor",

@@ -1292,14 +1292,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -1334,7 +1334,7 @@ def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor 
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
-    torch._dynamo.config.translation_validation = True
+    torch.fx.experimental._config.translation_validation = True
 
 # Some tests take too long when dynamic_shapes is combined with
 # translation_validation. Whenever that happens, we solve that by
@@ -1344,7 +1344,7 @@ def disable_translation_validation_if_dynamic_shapes(fn):
     def wrapper(*args, **kwargs):
         if torch._dynamo.config.dynamic_shapes:
             # Turning TV off due to high latency on dynamic shapes.
-            torch._dynamo.config.translation_validation = False
+            torch.fx.experimental._config.translation_validation = False
         return fn(*args, **kwargs)
     return wrapper
 
@@ -2631,7 +2631,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if compiled:
             supress_errors = not strict_mode
         else:
-            supress_errors = False
+            supress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
             if TEST_WITH_TORCHINDUCTOR:
                 super_run = torch._dynamo.optimize("inductor")(super_run)

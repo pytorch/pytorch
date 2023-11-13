@@ -1,44 +1,3 @@
-"""
- Copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
-
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions
- are met:
-  * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-  * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-  * Neither the name of NVIDIA CORPORATION, Lawrence Berkeley National
-    Laboratory, the U.S. Department of Energy, nor the names of their
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
- EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
- The U.S. Department of Energy funded the development of this software
- under subcontract 7078610 with Lawrence Berkeley National Laboratory.
-
-
-This code also includes files from the NVIDIA Tools Extension SDK project.
-
-See:
-
-   https://github.com/NVIDIA/NVTX
-
-for more information and license details.
-"""
-
 import math
 from enum import IntEnum
 
@@ -53,6 +12,45 @@ class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
+
+
+class NVIDIA_GPU_TYPE(IntEnum):
+    VOLTA = 0
+    AMPERE = 1
+    HOPPER = 2
+
+
+def get_gpu_type() -> NVIDIA_GPU_TYPE:
+    gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run)
+    if "V100" in gpu_info:
+        return NVIDIA_GPU_TYPE.VOLTA
+    elif "A100" in gpu_info:
+        return NVIDIA_GPU_TYPE.AMPERE
+    elif "H100" in gpu_info:
+        return NVIDIA_GPU_TYPE.HOPPER
+    else:
+        # for other gpu types, assume Ampere
+        return NVIDIA_GPU_TYPE.AMPERE
+
+
+def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:  # type: ignore[name-defined]
+    if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
+        return NCCL_COLL.ALL_REDUCE
+    elif isinstance(
+        snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)
+    ):
+        return NCCL_COLL.ALL_GATHER
+    elif isinstance(
+        snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)
+    ):
+        return NCCL_COLL.REDUCE_SCATTER
+    else:
+        raise Exception(f"Unsupported collective type: {snode.node}")
+
+
+####################################################################################################################
+# The following code and constants are adapted from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc #
+####################################################################################################################
 
 
 class NCCL_HW(IntEnum):
@@ -73,12 +71,6 @@ class NCCL_PROTO(IntEnum):
     LL = 0  # Low-latency
     # LL128 = 1   # Low-latency 128-byte
     # SIMPLE = 2
-
-
-class NVIDIA_GPU_TYPE(IntEnum):
-    VOLTA = 0
-    AMPERE = 1
-    HOPPER = 2
 
 
 # Latencies in us
@@ -142,34 +134,6 @@ llMaxBws = torch.tensor(
         ],
     ]
 )
-
-
-def get_gpu_type() -> NVIDIA_GPU_TYPE:
-    gpu_info = torch.utils.collect_env.get_gpu_info(torch.utils.collect_env.run)
-    if "V100" in gpu_info:
-        return NVIDIA_GPU_TYPE.VOLTA
-    elif "A100" in gpu_info:
-        return NVIDIA_GPU_TYPE.AMPERE
-    elif "H100" in gpu_info:
-        return NVIDIA_GPU_TYPE.HOPPER
-    else:
-        # for other gpu types, assume Ampere
-        return NVIDIA_GPU_TYPE.AMPERE
-
-
-def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:  # type: ignore[name-defined]
-    if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
-        return NCCL_COLL.ALL_REDUCE
-    elif isinstance(
-        snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)
-    ):
-        return NCCL_COLL.ALL_GATHER
-    elif isinstance(
-        snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)
-    ):
-        return NCCL_COLL.REDUCE_SCATTER
-    else:
-        raise Exception(f"Unsupported collective type: {snode.node}")
 
 
 def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # type: ignore[name-defined]
@@ -274,3 +238,8 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     # =============== final result ===============
     transport_ns = tensor_storage_size_GB / bandwidth_GB_per_ns
     return transport_ns + latency_ns
+
+
+################################################################################################################
+# The above code and constants are adapted from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc #
+################################################################################################################
