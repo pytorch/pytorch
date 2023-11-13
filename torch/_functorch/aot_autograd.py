@@ -41,7 +41,6 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompo
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
-from torch.utils.weak import WeakIdRef
 
 original_zip = zip
 
@@ -4434,17 +4433,12 @@ def create_aot_dispatcher_function(
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
                 static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                widr = WeakIdRef(x)
-                tc = torch._guards.TracingContext.get()
                 # See Note - [On fake tensor policy and fresh fake modes for backends]
-                if tc and widr in tc.weak_tensor_ref_to_fakification_policy and not static_shapes:
-                    policy = tc.weak_tensor_ref_to_fakification_policy[widr]
-                    out = fake_mode.from_tensor(x,
-                                                static_shapes=static_shapes,
-                                                ignore_subclass=policy.ignore_subclass,
-                                                dynamic_dims=policy.dynamic_dims,
-                                                constraint_dims=policy.constraint_dims,
-                                                source=policy.source)
+                if x in fake_mode.policy_cache:
+                    policy = fake_mode.policy_cache[x]
+                    ignore_subclass = policy.ignore_subclass
+                    source = policy.source
+                    out = fake_mode.from_tensor(x, static_shapes=static_shapes, ignore_subclass=ignore_subclass, source=source)
                 else:
                     out = fake_mode.from_tensor(x, static_shapes=static_shapes)
                 return out

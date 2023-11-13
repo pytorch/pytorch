@@ -1025,7 +1025,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if not self.export:
             prior_fake_mode = self.tracing_context.fake_mode
             self.tracing_context.fake_mode = FakeTensorMode(
-                shape_env=prior_fake_mode.shape_env
+                shape_env=prior_fake_mode.shape_env,
+                policy_cache=prior_fake_mode.policy_cache,
             )
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)

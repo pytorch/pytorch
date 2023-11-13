@@ -2204,6 +2204,10 @@ class ShapeEnv:
         positive: Optional[bool] = True,
         do_not_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
+        source_name = source.name() if source else None
+        if source_name and source_name in self.source_to_symint_node_cache:
+            return self.source_to_symint_node_cache[source_name]
+
         if do_not_specialize_zero_one:
             specialize_zero_one = False
         else:
@@ -2221,7 +2225,9 @@ class ShapeEnv:
             # We don't expect to ever reach here even the user specifies
             # dynamic=False, because automatic_dynamic skipped for
             # nested tensors.
-            return sympy.Integer(val)
+            out = sympy.Integer(val)
+            self.source_to_symint_node_cache[source_name] = out
+            return out
 
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
@@ -2298,6 +2304,7 @@ class ShapeEnv:
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
 
+        self.source_to_symint_node_cache[source_name] = r
         return r
 
     def debug_name(self, source):

@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 import torch
 
 from torch import SymInt
-from torch._guards import FakificationPolicy, GuardSource, TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -1723,17 +1723,11 @@ def wrap_to_fake_tensor_and_record(
 
         widr = WeakIdRef(e)
         dynamic_dims, constraint_dims = None, None
-        # See Note - [On fake tensor policy and fresh fake modes for backends]
-        if widr in TracingContext.get().weak_tensor_ref_to_fakification_policy:
-            policy = TracingContext.get().weak_tensor_ref_to_fakification_policy[widr]
-            dynamic_dims = policy.dynamic_dims
-            constraint_dims = policy.constraint_dims
-        else:
-            if not e.is_nested:
-                # TODO: We should probably support this for nested tensors too
-                dynamic_dims, constraint_dims = _automatic_dynamic(
-                    e, tx, source.name(), static_shapes
-                )
+        if not e.is_nested:
+            # TODO: We should probably support this for nested tensors too
+            dynamic_dims, constraint_dims = _automatic_dynamic(
+                e, tx, source.name(), static_shapes
+            )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
@@ -1753,13 +1747,6 @@ def wrap_to_fake_tensor_and_record(
             )
         )
         # See Note - [On fake tensor policy and fresh fake modes for backends]
-        policy = FakificationPolicy(
-            ignore_subclass, dynamic_dims, constraint_dims, source
-        )
-        TracingContext.get().weak_tensor_ref_to_fakification_policy[
-            WeakIdRef(e)
-        ] = policy
-
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
