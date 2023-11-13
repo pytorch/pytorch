@@ -120,6 +120,17 @@ class LogState:
         self.log_qname_to_level[log_qname] = log_level
 
     def get_log_level_pairs(self):
+        """Returns all qualified module names for which the user requested
+        explicit logging settings.
+
+        .. warning:
+
+            This function used to return all loggers, regardless of whether
+            or not the user specified them or not; it now only returns logs
+            which were explicitly mentioned by the user (and torch, which
+            always is implicitly requested when we initialize our logging
+            subsystem.)
+        """
         return self.log_qname_to_level.items()
 
     def clear(self):
@@ -145,7 +156,7 @@ DEFAULT_LOGGING = {
 
 def set_logs(
     *,
-    all: Optional[int] = None,
+    all: int = DEFAULT_LOG_LEVEL,
     dynamo: Optional[int] = None,
     aot: Optional[int] = None,
     dynamic: Optional[int] = None,
@@ -333,24 +344,9 @@ def set_logs(
     modules = modules or {}
 
     def _set_logs(**kwargs):
-        default_level = kwargs.pop("all", None)
-        if default_level:
-            if default_level not in logging._levelToName:
-                raise ValueError(
-                    f"Unrecognized log level for kwarg all: {default_level}, valid level values "
-                    f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
-                )
-
-            # add any missing aliases to kwargs
-            for alias in log_registry.log_alias_to_log_qname.keys():
-                if alias not in kwargs:
-                    kwargs[alias] = default_level
-        else:
-            default_level = DEFAULT_LOG_LEVEL
-
         for alias, val in itertools.chain(kwargs.items(), modules.items()):  # type: ignore[union-attr]
             if val is None:
-                val = default_level
+                continue
 
             if log_registry.is_artifact(alias):
                 if not isinstance(val, bool):
@@ -370,8 +366,6 @@ def set_logs(
                 log_state.enable_log(
                     log_registry.log_alias_to_log_qname.get(alias, alias), val
                 )
-            elif alias == "all":
-                continue
             else:
                 raise ValueError(
                     f"Unrecognized log or artifact name passed to set_logs: {alias}"
@@ -380,7 +374,7 @@ def set_logs(
         _init_logs()
 
     _set_logs(
-        all=all,
+        torch=all,
         dynamo=dynamo,
         aot=aot,
         inductor=inductor,
@@ -590,12 +584,9 @@ def _parse_log_settings(settings):
 
     for name in log_names:
         name, level = get_name_level_pair(name)
-        if name == "all":
-            for log_qname in log_registry.get_log_qnames():
-                log_state.enable_log(log_qname, level)
 
-    for name in log_names:
-        name, level = get_name_level_pair(name)
+        if name == "all":
+            name = "torch"
 
         if log_registry.is_log(name):
             assert level is not None
@@ -603,8 +594,6 @@ def _parse_log_settings(settings):
             log_state.enable_log(log_qname, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
-        elif name == "all":
-            continue
         elif _is_valid_module(name):
             if not _has_registered_parent(name):
                 log_registry.register_log(name, name)
@@ -757,11 +746,20 @@ def _init_logs(log_file_name=None):
     _reset_logs()
     _update_log_state_from_env()
 
+    # First, reset all known (registered) loggers to NOTSET, so that they
+    # respect their parent log level
+    for log_qname in log_registry.get_log_qnames():
+        log = logging.getLogger(log_qname)
+        log.setLevel(logging.NOTSET)
+
+    # Now, for all loggers which the user requested to have non-standard
+    # logging behavior (and torch, because we always toggle torch), modify
+    # their log levels
     for log_qname, level in log_state.get_log_level_pairs():
         log = logging.getLogger(log_qname)
         log.setLevel(level)
 
-    # setup handlers for all registered loggers
+    # Finally, setup handlers for all registered loggers
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
         _setup_handlers(
