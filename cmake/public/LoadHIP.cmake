@@ -21,13 +21,6 @@ if(NOT EXISTS ${HIP_PATH})
   return()
 endif()
 
-# HCC_PATH
-if(NOT DEFINED ENV{HCC_PATH})
-  set(HCC_PATH ${ROCM_PATH}/hcc)
-else()
-  set(HCC_PATH $ENV{HCC_PATH})
-endif()
-
 # HSA_PATH
 if(NOT DEFINED ENV{HSA_PATH})
   set(HSA_PATH ${ROCM_PATH}/hsa)
@@ -240,8 +233,8 @@ if(HIP_FOUND)
 
   message("\n***** Library versions from cmake find_package *****\n")
 
-  set(CMAKE_HCC_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
-  set(CMAKE_HCC_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
+  set(CMAKE_HIP_CLANG_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
+  set(CMAKE_HIP_CLANG_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
   # As of ROCm 5.1.x, all *.cmake files are under /opt/rocm/lib/cmake/<package>
@@ -303,18 +296,8 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
 
-  if(HIP_COMPILER STREQUAL clang)
-    set(hip_library_name amdhip64)
-  else()
-    set(hip_library_name hip_hcc)
-  endif()
-  message("HIP library name: ${hip_library_name}")
 
-  # TODO: hip_hcc has an interface include flag "-hc" which is only
-  # recognizable by hcc, but not gcc and clang. Right now in our
-  # setup, hcc is only used for linking, but it should be used to
-  # compile the *_hip.cc files as well.
-  find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
+  find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   if(TARGET ${miopen_LIBRARIES})
@@ -330,7 +313,7 @@ if(HIP_FOUND)
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   endif()
   # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB amdhip64 HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
 endif()

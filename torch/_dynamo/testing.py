@@ -8,9 +8,13 @@ import re
 import sys
 import types
 import unittest
-from typing import Sequence, Union
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from typing import List, Optional, Sequence, Union
+from unittest import mock
 from unittest.mock import patch
 
+np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -62,7 +66,7 @@ def named_buffers_for_optimized_module(mod):
     return mod._orig_mod.named_buffers
 
 
-def remove_optimized_module_prefix(name):
+def remove_optimized_module_prefix(name) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
 
 
@@ -140,21 +144,21 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
-def debug_dir():
+def debug_dir() -> str:
     path = os.path.join(os.path.dirname(__file__), "../debug")
     if not os.path.exists(path):
         os.mkdir(path)
     return path
 
 
-def debug_dump(name, code: types.CodeType, extra=""):
+def debug_dump(name, code: types.CodeType, extra="") -> None:
     with open(os.path.join(debug_dir(), name), "w") as fd:
         fd.write(
             f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _):
+def debug_insert_nops(frame, cache_size, hooks, _) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -187,7 +191,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -206,7 +210,7 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -223,21 +227,21 @@ class EagerAndRecordGraphs:
     def __init__(self):
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
         return gm
 
 
-def strip_comment(code):
+def strip_comment(code) -> str:
     code = str(code)
     return re.sub(r"(?m)^ *#.*\n?", "", code)
 
 
-def remove_trailing_space(code):
+def remove_trailing_space(code) -> str:
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
-def normalize_gm(gm_str):
+def normalize_gm(gm_str) -> str:
     # strip comments as comments have path to files which may differ from
     # system to system.
     return remove_trailing_space(strip_comment(gm_str))
@@ -248,16 +252,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
-    if expected_ops is None:
-        expected = CompileCounter()
-        try:
-            gm = torch.fx.symbolic_trace(fn)
-            expected(gm)
-            print("\nfx.symbolic_trace graph:")
-            gm.graph.print_tabular()
-            expected_ops = expected.op_count
-        except Exception:
-            pass  # Silently ignore FX errors (not our issue)
 
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
@@ -380,3 +374,28 @@ def reset_rng_state(use_xla=False):
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
+
+
+def load_test_module(from_test_file, wanted_module):
+    """
+    Import a module from pytorch/test/* in a robust way.
+
+    Args:
+        from_test_file: filename of the test calling this, used to file root path
+        wanted_module: module name to import
+
+    Returns:
+        a Python module
+    """
+    if wanted_module in sys.modules:
+        return sys.modules[wanted_module]
+
+    testdir = Path(from_test_file).absolute().parent
+    # go up at most 3 directories to find the test root
+    for _ in range(3):
+        target = testdir / f"{wanted_module.replace('.', '/')}.py"
+        if target.exists():
+            with mock.patch("sys.path", [str(testdir), *sys.path]):
+                return SourceFileLoader(wanted_module, str(target)).load_module()
+        testdir = testdir.parent
+    raise ImportError(f"failed to find {wanted_module} from {from_test_file}")

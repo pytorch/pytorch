@@ -29,7 +29,7 @@ def make_prim(
     )
 
 
-def eager_force_stride(input_tensor: Tensor, stride) -> tuple[int, ...]:
+def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(
@@ -80,4 +80,11 @@ masked_scatter_with_index = make_prim(
         input_tensor, mask, source
     ),
     doc="masked_scatter with precomputed indices",
+)
+_unsafe_index_put_ = make_prim(
+    "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
+    lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
+        self, indices, values, accumulate
+    ),
+    doc="Unsafe index_put_ (doesn't issue device asserts)",
 )

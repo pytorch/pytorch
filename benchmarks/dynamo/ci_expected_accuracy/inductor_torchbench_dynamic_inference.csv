@@ -38,11 +38,7 @@ basic_gnn_sage,pass,0
 
 
 
-clip,pass_due_to_skip,0
-
-
-
-cm3leon_generate,pass,5
+cm3leon_generate,pass,4
 
 
 
@@ -138,7 +134,7 @@ nvidia_deeprecommender,pass,0
 
 
 
-opacus_cifar10,pass,32
+opacus_cifar10,pass,0
 
 
 

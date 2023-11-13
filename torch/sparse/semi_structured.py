@@ -213,6 +213,37 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
         self.meta_tensor_cutlass = meta_tensor_cutlass
         self.transposed = transposed
+        self.original_shape = original_shape
+
+    def __tensor_flatten__(self):
+        if self.compressed_tensor_cusparselt is not None:
+            return ['compressed_tensor_cusparselt'], (self.original_shape, self.transposed)
+        else:
+            return ['sparse_tensor_cutlass', 'meta_tensor_cutlass'], (self.original_shape, self.transposed)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta):
+        original_shape, transposed = meta
+
+        if len(inner_tensors) == 2:
+            sparse_tensor_cutlass = inner_tensors['sparse_tensor_cutlass']
+            meta_tensor_cutlass = inner_tensors['meta_tensor_cutlass']
+            compressed_tensor_cusparselt = None
+        elif len(inner_tensors) == 1:
+            sparse_tensor_cutlass = None
+            meta_tensor_cutlass = None
+            compressed_tensor_cusparselt = inner_tensors['compressed_tensor_cusparselt']
+        else:
+            raise RuntimeError(f"Expected 1 or 2 inner tensors but got {len(inner_tensors)}")
+
+        return SparseSemiStructuredTensor(
+            None,
+            original_shape=original_shape,
+            compressed_tensor_cusparselt=compressed_tensor_cusparselt,
+            sparse_tensor_cutlass=sparse_tensor_cutlass,
+            meta_tensor_cutlass=meta_tensor_cutlass,
+            transposed=transposed,
+        )
 
     def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor

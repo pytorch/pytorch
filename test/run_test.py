@@ -15,13 +15,12 @@ import tempfile
 import time
 from contextlib import ExitStack
 from datetime import datetime
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import pkg_resources
 
 import torch
 import torch.distributed as dist
-from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -40,12 +39,19 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.export_test_times import TEST_TIMES_FILE
+from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
+    TEST_CLASS_TIMES_FILE,
+    TEST_TIMES_FILE,
+)
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
+    get_prediction_confidences,
     get_test_prioritizations,
 )
+
+from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
     get_test_case_configs,
@@ -479,7 +485,7 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
 
 
 def run_test(
-    test_module,
+    test_module: ShardedTest,
     test_directory,
     options,
     launcher_cmd=None,
@@ -488,13 +494,8 @@ def run_test(
 ) -> int:
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
-    test_file = test_module
+    test_file = test_module.name
     stepcurrent_key = test_file
-
-    use_sharded_test = False
-    if isinstance(test_file, ShardedTest):
-        test_file = test_module.name
-        use_sharded_test = True
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
@@ -507,17 +508,16 @@ def run_test(
         )
         return 0
 
-    if use_sharded_test:
-        if is_cpp_test:
-            stepcurrent_key = test_file
-        else:
-            unittest_args.extend(
-                [
-                    f"--shard-id={test_module.shard - 1}",
-                    f"--num-shards={test_module.num_shards}",
-                ]
-            )
-            stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+    if is_cpp_test:
+        stepcurrent_key = test_file
+    else:
+        unittest_args.extend(
+            [
+                f"--shard-id={test_module.shard - 1}",
+                f"--num-shards={test_module.num_shards}",
+            ]
+        )
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -541,6 +541,7 @@ def run_test(
                 is_distributed_test=is_distributed_test,
             )
         )
+        unittest_args.extend(test_module.get_pytest_args())
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
     # TODO: These features are not available for C++ test yet
@@ -706,7 +707,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
 
         assert install_directory, "install_directory must not be empty"
         os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
-        return run_test(test_module, test_directory, options)
+        return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
         os.environ["PYTHONPATH"] = python_path
         if os.path.exists(test_directory + "/" + test_module + ".py"):
@@ -1374,9 +1375,7 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and version.parse(
-        torch.version.cuda
-    ) >= version.parse("11.6"):
+    if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1424,12 +1423,14 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
-    # Download previous test times to make sharding decisions
+def load_test_times_from_file(
+    file: str,
+) -> Dict[str, Any]:
+    # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
         print_to_stderr(
-            "::warning:: Failed to find test times file. Using round robin sharding."
+            f"::warning:: Failed to find test times file `{path}`. Using round robin sharding."
         )
         return {}
 
@@ -1454,6 +1455,18 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
         return test_times_file["default"]["default"]
 
 
+def load_test_file_times(
+    file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
+) -> Dict[str, float]:
+    return cast(Dict[str, float], load_test_times_from_file(file))
+
+
+def load_test_class_times(
+    file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_CLASS_TIMES_FILE,
+) -> Dict[str, Dict[str, float]]:
+    return cast(Dict[str, Dict[str, float]], load_test_times_from_file(file))
+
+
 def get_sharding_opts(options) -> Tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
@@ -1469,8 +1482,9 @@ def get_sharding_opts(options) -> Tuple[int, int]:
 
 def do_sharding(
     options,
-    selected_tests: List[str],
+    selected_tests: Sequence[TestRun],
     test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
     sort_by_time: bool = True,
 ) -> List[ShardedTest]:
     which_shard, num_shards = get_sharding_opts(options)
@@ -1480,6 +1494,7 @@ def do_sharding(
         num_shards,
         selected_tests,
         test_file_times,
+        test_class_times=test_class_times,
         must_serial=must_serial,
         sort_by_time=sort_by_time,
     )
@@ -1490,16 +1505,16 @@ def do_sharding(
 
 
 class TestFailure(NamedTuple):
-    test: str
+    test: TestRun
     message: str
 
 
 def run_test_module(
-    test: Union[ShardedTest, str], test_directory: str, options
+    test: ShardedTest, test_directory: str, options
 ) -> Optional[TestFailure]:
     maybe_set_hip_visible_devies()
 
-    test_name = test.name if isinstance(test, ShardedTest) else test
+    test_name = test.name
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
@@ -1517,7 +1532,7 @@ def run_test_module(
         # return code -N, where N is the signal number.
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
-    return TestFailure(test_name, message)
+    return TestFailure(test.test, message)
 
 
 def run_tests(
@@ -1669,6 +1684,9 @@ def main():
             "cpp": options.cpp,
         }
 
+    test_file_times_dict = load_test_file_times()
+    test_class_times_dict = load_test_class_times()
+
     class TestBatch:
         """Defines a set of tests with similar priority that should be run together on the current shard"""
 
@@ -1676,11 +1694,17 @@ def main():
         sharded_tests: List[ShardedTest]
         failures: List[TestFailure]
 
-        def __init__(self, name: str, raw_tests: List[str], should_sort_shard: bool):
+        def __init__(
+            self, name: str, raw_tests: Sequence[TestRun], should_sort_shard: bool
+        ):
             self.name = name
             self.failures = []
             self.sharded_tests = do_sharding(
-                options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
+                options,
+                raw_tests,
+                test_file_times_dict,
+                test_class_times_dict,
+                sort_by_time=should_sort_shard,
             )
 
         def __str__(self):
@@ -1695,7 +1719,6 @@ def main():
             )
             return s.strip()
 
-    test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
     # Each batch will be run sequentially
@@ -1711,6 +1734,16 @@ def main():
         TestBatch(
             "unranked_relevance",
             test_prioritizations.get_unranked_relevance_tests(),
+            True,
+        ),
+        TestBatch(
+            "unlikely_relevance",
+            test_prioritizations.get_unlikely_relevance_tests(),
+            True,
+        ),
+        TestBatch(
+            "none_relevance",
+            test_prioritizations.get_none_relevance_tests(),
             True,
         ),
     ]
@@ -1747,7 +1780,7 @@ def main():
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
             metrics_dict[f"{test_batch.name}_failures"] = [
-                x.test for x in test_batch.failures
+                str(x.test) for x in test_batch.failures
             ]
 
     finally:
@@ -1774,7 +1807,17 @@ def main():
                 test_stats["num_total_tests"] = num_tests
 
                 print_to_stderr("Emiting td_test_failure_stats")
-                emit_metric("td_test_failure_stats", test_stats)
+                emit_metric(
+                    "td_test_failure_stats",
+                    {
+                        **test_stats,
+                        "confidence_ratings": get_prediction_confidences(
+                            selected_tests
+                        ),
+                        "failure": str(test),
+                        "tests": selected_tests,
+                    },
+                )
 
     if len(all_failures):
         for _, err in all_failures:

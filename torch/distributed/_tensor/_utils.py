@@ -143,7 +143,16 @@ def compute_global_tensor_info(
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
         if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
+            shard_placement = cast(Shard, placement)
+            if shard_placement.dim < 0:
+                # normalize shard dim to be positive
+                shard_placement.dim += len(tensor_shape)
+            shard_dim = shard_placement.dim
+
+            assert (
+                shard_dim < tensor.ndim
+            ), f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
+
             local_dim_size = tensor_shape[shard_dim]
             tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
 

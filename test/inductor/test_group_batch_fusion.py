@@ -1,13 +1,12 @@
 # Owner(s): ["module: inductor"]
 
-import functools
 import unittest
 
 import torch
 import torch._inductor
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import requires_cuda
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -16,9 +15,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
-
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):
@@ -210,6 +206,17 @@ class MyModule6(torch.nn.Module):
         tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
         tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
         return torch.cat(tanh_1, dim=1) + torch.cat(tanh_2, dim=1)
+
+
+class MyModule7(torch.nn.Module):
+    def __init__(self, device, has_bias=True):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = torch.unbind(x.to(self.device), dim=0)
+        relu = [torch.nn.functional.relu(inputs[i]) for i in range(len(inputs))]
+        return torch.stack(relu, dim=0)
 
 
 @requires_cuda()
@@ -408,6 +415,23 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    def test_batch_relu_pre_grad_fusion(self):
+        counters.clear()
+        module = MyModule7("cuda")
+        input = [torch.randn(20, 40, 60, requires_grad=True, device="cuda")]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 1)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()
