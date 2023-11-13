@@ -324,6 +324,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
   throw ::c10::err_type(               \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
+#define C10_BUILD_ERROR(err_type, msg) \
+  ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
+
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
 // https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
@@ -583,7 +586,8 @@ namespace detail {
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
-  TORCH_CHECK_WITH_MSG(ErrorAlwaysShowCppStacktrace, cond, "TYPE", __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(                                   \
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \

@@ -4,10 +4,10 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
+from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
 from . import external_utils
-
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -16,12 +16,13 @@ from . import external_utils
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
+# [@compile_ignored: debug]
 log_file_name = None
 
-# Verbose will print full stack traces on warnings and errors
+# [@compile_ignored: debug] Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
-# verify the correctness of optimized backend
+# [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
 # need this many ops to create an FX graph
@@ -35,8 +36,10 @@ dead_code_elimination = True
 # controls the maximum number of cache entries with a guard on same ID_MATCH'd
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
+# [@compile_ignored: runtime_behaviour]
 cache_size_limit = 8
-# controls the maximum number of entries for a code object.
+
+# [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
 accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
@@ -123,7 +126,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses = set()
+traceable_tensor_subclasses: Set[Type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -133,22 +136,20 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
+# @compile_ignored[debug]
 replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
 
-# Show a warning for every specialization
-print_specializations = False
-
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
-# Get a cprofile trace of Dynamo
+# [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist = {}
+skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -166,12 +167,15 @@ allowed_functions_module_string_ignorelist = {
 # None - Minifier is switched off
 # dynamo - Runs minifier on the TorchDynamo produced graphs, if compilation fails
 # aot - Runs minifier on the Aot Autograd produced graphs, if compilation fails
+# [@compile_ignored: debug]
 repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
+
 # Compiler compilation debug info
 # 1: Dumps the original graph out to repro.py if compilation fails
 # 2: Dumps a minifier_launcher.py if compilation fails.
 # 3: Always dumps a minifier_launcher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
+# [@compile_ignored: debug]
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
 # By default, we try to detect accuracy failure by running both forward
@@ -182,16 +186,19 @@ repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 # backwards step
 # TODO: Detect this situation automatically so the user doesn't need
 # to manually configure this
+# [@compile_ignored: debug]
 repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
 
 # The tolerance we should use when testing if a compiled graph
 # has diverged so that we should treat it as an accuracy failure
+# [@compile_ignored: debug]
 repro_tolerance = 1e-3
 
 # If True, when testing if two models are the same, we will test them against
 # a third fp64 reference and only report a problem if the RMSE relative to the
 # fp64 is greater.  However, this will use more memory; you may disable this
 # if memory usage is too high.
+# [@compile_ignored: runtime_behaviour]
 same_two_models_use_fp64 = True
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
@@ -254,39 +261,14 @@ allow_rnn = False
 
 # If true, error if we try to compile a function that has
 # been seen before.
+# [@compile_ignored: runtime_behaviour]
 error_on_recompile = False
 
-# reports why guards fail. Useful to identify the guards failing frequently and
-# causing recompilations.
-report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
+# [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
+report_guard_failures = True
 
-# Whether to report all guard failures or just the first one that fails
-report_all_guard_failures = False
-
-# root folder of the project
+# [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
-
-# Uses z3 for validating the guard optimizations transformations.
-translation_validation = (
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
-)
-# Timeout (in milliseconds) for z3 finding a solution.
-translation_validation_timeout = int(
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
-)
-# Disables bisection for translation validation.
-#
-# Translation validation bisection is enabled by default, if translation validation
-# is also enabled. This should help finding guard simplification issues. However,
-# since validation uses Z3 for bisecting, it might take a lot of time.
-#
-# Set this configuration option so as to avoid bisecting.
-translation_validation_no_bisect = (
-    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
-)
-# Checks whether replaying ShapeEnv events on a freshly constructed one yields
-# the a ShapeEnv with the same state. This should be used only in testing.
-check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
@@ -308,16 +290,22 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"  # [@compile_ignored: debug]
 
 if DEBUG_DIR_VAR_NAME in os.environ:
-    debug_dir_root = os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
+        os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug"
+    )
 elif is_fbcode():
-    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
+        tempfile.gettempdir(), "torch_compile_debug"
+    )
 else:
-    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
+        os.getcwd(), "torch_compile_debug"
+    )
 
-
+# [@compile_ignored: debug]
 _save_config_ignore = {
     "repro_after",
     "repro_level",
@@ -327,6 +315,12 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+# When True, only ops that have the torch.Tag.pt2_compliant tag
+# will be allowed into the graph; all other ops will be disallowed
+# and will fall back to eager-mode PyTorch. Useful to ensure
+# correctness of custom ops.
+only_allow_pt2_compliant_ops = False
+
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
@@ -335,11 +329,6 @@ capture_func_transforms = True
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
-
-# wraps (un)equalities with 'Not' class after recording the correct expression
-# in the FX graph. This should incorrectly construct the divisible and replacement
-# lists, and incorrectly issue guards.
-inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
@@ -358,6 +347,9 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
-from .config_utils import install_config_module
+if TYPE_CHECKING:
+    from .config_typing import *  # noqa: F401, F403
+
+from torch.utils._config_module import install_config_module
 
 install_config_module(sys.modules[__name__])
