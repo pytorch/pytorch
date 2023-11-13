@@ -116,7 +116,8 @@ def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
 ) -> Tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
     """
-    We have to load the right TP slice of the optimizer state.
+    Load the right TP slice of the optimizer state.
+
     This is not easy since the per-tensor slicing can't be inferred from checkpoint metadata.
     We take advantage of the model state_dict producing a sliced ST to figure out what we need to load.
     This is pretty fragile and it might be easier for FSDP to compute this info for us.
@@ -217,7 +218,8 @@ def load_sharded_optimizer_state_dict(
     planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict in conjunction with FSDP sharded optimizer state.
+    Load a state_dict in conjunction with FSDP sharded optimizer state.
+
     This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp

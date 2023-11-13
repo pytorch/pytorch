@@ -159,7 +159,7 @@ class SuperVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
 
-            newval = collections.OrderedDict(self.objvar.items)
+            newval = dict(self.objvar.items)
             newval[k] = args[1]
             return tx.replace_all(
                 self.objvar,
