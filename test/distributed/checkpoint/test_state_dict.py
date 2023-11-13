@@ -11,17 +11,19 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
+    get_model_state_dict,
     get_state_dict,
     PG,
+    set_model_state_dict,
     set_state_dict,
     STATE,
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -30,8 +32,12 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
+from torch.utils._pytree import tree_all, tree_all_only
 
 
 if not dist.is_available():
@@ -46,7 +52,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestStateDict(FSDPTest):
+class TestStateDict(DTensorTestBase):
     """Tests state_dict and load_state_dict"""
 
     @property
@@ -263,6 +269,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp(self) -> None:
         self.run_subtests(
@@ -288,6 +295,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_ddp(self) -> None:
         self.run_subtests(
@@ -335,6 +343,7 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim, test_frozen)
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ddp(self) -> None:
         self.run_subtests(
@@ -342,12 +351,14 @@ class TestStateDict(FSDPTest):
             self._test_fsdp_ddp,
         )
 
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_frozen_parameters(self) -> None:
         self._test_fsdp_ddp(use_composable=False, test_frozen=True)
 
     # TODO: enable use_dtensor once 2D device_mesh support is fully landed.
     """
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_use_dtensor(self) -> None:
         self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
@@ -357,6 +368,7 @@ class TestStateDict(FSDPTest):
     # Disable this test as it is broken after
     # https://github.com/pytorch/pytorch/pull/108298.
     """
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:
         self.run_subtests(
@@ -366,6 +378,7 @@ class TestStateDict(FSDPTest):
         )
     """
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_single_gpu(self) -> None:
         def init_model_optim():
@@ -378,34 +391,38 @@ class TestStateDict(FSDPTest):
 
         self._test_save_load(init_model_optim)
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_strict(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict, _ = get_state_dict(model)
+        model_state_dict = get_model_state_dict(model)
         key = next(iter(model_state_dict.keys()))
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
-        model_state_dict.pop("abc")
+            set_model_state_dict(model, model_state_dict=model_state_dict)
         model_state_dict.pop(key)
-        set_state_dict(
+        incompatible_keys = set_model_state_dict(
             model,
             model_state_dict=model_state_dict,
             options=StateDictOptions(strict=False),
         )
+        self.assertEqual(incompatible_keys.missing_keys, [key])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["abc"])
+        model_state_dict.pop("abc")
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
+            set_model_state_dict(model, model_state_dict=model_state_dict)
 
+    @with_comms
     @skip_if_lt_x_gpu(1)
     def test_partial(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict1, _ = get_state_dict(model)
+        model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
-        model_state_dict2, _ = get_state_dict(model, submodules={model.l})
+        model_state_dict2 = get_model_state_dict(model, submodules={model.l})
         model_state_dict2 = copy.deepcopy(model_state_dict2)
-        model_state_dict3, _ = get_state_dict(
+        model_state_dict3 = get_model_state_dict(
             model,
             submodules={model.l},
             options=StateDictOptions(keep_submodule_prefixes=False),
@@ -425,7 +442,7 @@ class TestStateDict(FSDPTest):
             k: torch.zeros_like(v) for k, v in model_state_dict1.items()
         }
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict=model_state_dict2,
             options=StateDictOptions(strict=False),
@@ -434,13 +451,83 @@ class TestStateDict(FSDPTest):
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict={model.l: model_state_dict3},
             options=StateDictOptions(strict=False),
         )
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_offload_full_state_dict(self) -> None:
+        orig_model = CompositeParamModel(device=torch.device("cuda"))
+        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+        copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        dist_model = FSDP(
+            copy.deepcopy(orig_model),
+            auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+            use_orig_params=True,
+            device_mesh=device_mesh,
+        )
+
+        dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+
+        mst, ost = get_state_dict(
+            dist_model,
+            dist_optim,
+            options=StateDictOptions(cpu_offload=True),
+        )
+
+        cpu_device = torch.device("cpu")
+
+        def is_cpu(v):
+            if isinstance(v, DTensor):
+                return v.device == cpu_device
+            elif isinstance(v, ShardedTensor):
+                shards = v.local_shards()
+                if not shards:
+                    return True
+                return shards[0].tensor.device == cpu_device
+            else:
+                return v.device == cpu_device
+
+        self.assertTrue(
+            tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, mst)
+        )
+        self.assertTrue(
+            tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, ost)
+        )
+
+        mst, ost = get_state_dict(
+            dist_model, dist_optim, options=StateDictOptions(full_state_dict=True)
+        )
+
+        self.assertTrue(
+            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), mst)
+        )
+        self.assertTrue(
+            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), ost)
+        )
+
+        mst, ost = get_state_dict(
+            dist_model,
+            dist_optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+
+        if self.rank == 0:
+            self.assertTrue(
+                tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, mst)
+            )
+            self.assertTrue(
+                tree_all_only((torch.Tensor, DTensor, ShardedTensor), is_cpu, ost)
+            )
+        else:
+            self.assertEqual(mst, {})
+            self.assertEqual(ost, {})
 
 
 if __name__ == "__main__":

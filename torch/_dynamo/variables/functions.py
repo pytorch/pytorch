@@ -9,39 +9,30 @@ import torch
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
-from ..source import (
-    AttrSource,
-    ConstantSource,
-    DefaultsSource,
-    GetItemSource,
-    GlobalSource,
-)
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
-def wrap_bound_arg(tx, val, options, source=None):
+def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
-    assert (
-        "source" not in options
-    ), "Source needs to be separate from options due to recursive calls for lists/dicts"
     if isinstance(val, VariableTracker):
         return val
     elif not source:
         from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val).add_options(options)
+        return SourcelessBuilder()(tx, val)
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source)(val).add_options(options)
+        return VariableBuilder(tx, source=source)(val)
 
 
-def wrap_args_kwargs(tx, result, options):
+def wrap_args_kwargs(tx, result):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
-            result[k] = wrap_bound_arg(tx, v, options)
+            result[k] = wrap_bound_arg(tx, v)
 
 
 def init_cellvars(parent, result, code):
@@ -139,9 +130,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def bind_args(self, parent, args, kwargs):
         assert not self.is_constant
-        options = VariableTracker.propagate([self])
         tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=tx, options=options)
+        wrap = functools.partial(wrap_bound_arg, tx=tx)
 
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
@@ -177,7 +167,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(tx, result, options)
+        wrap_args_kwargs(tx, result)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -240,9 +230,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 else:
                     from .builder import SourcelessBuilder
 
-                    result[name] = SourcelessBuilder()(
-                        tx, cell.cell_contents
-                    ).add_options(options)
+                    result[name] = SourcelessBuilder()(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -253,9 +241,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if self.is_constant:
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), options, args, kwargs
+                tx, self.fn, self.get_name(), args, kwargs
             )
 
         return super().call_function(tx, args, kwargs)
@@ -303,7 +290,7 @@ class UserMethodVariable(UserFunctionVariable):
             ):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-                ).add_options(self)
+                )
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
@@ -344,7 +331,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
+def invoke_and_store_as_constant(tx, fn, name, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
             return x.get_real_value()
@@ -357,7 +344,6 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
         res,
         name,
         source=ConstantSource(name),
-        **options,
     )
 
 
@@ -452,7 +438,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-        wrap_args_kwargs(parent.output.root_tx, result, VariableTracker.propagate(self))
+        wrap_args_kwargs(parent.output.root_tx, result)
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
@@ -536,7 +522,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 def _traceable_collective_remaps():
-    # We can't rely on importing from distributed, since its not always built
+    # We can't rely on importing from distributed, since it's not always built
     if torch.distributed.is_available():
         from torch.distributed._functional_collectives import (
             traceable_collective_remaps,
@@ -546,7 +532,7 @@ def _traceable_collective_remaps():
     return {}
 
 
-def _traceable_collectives_source(fn):
+def _traceable_collectives_source(tx, fn):
     assert torch.distributed.is_available(), "Illegal invocation."
     from torch.distributed._functional_collectives import (
         all_gather_tensor_inplace,
@@ -556,12 +542,7 @@ def _traceable_collectives_source(fn):
     valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
     assert fn in valid_values
     inner_name = fn.__name__
-    path_source = AttrSource(
-        base=AttrSource(
-            base=GlobalSource(global_name="__import_torch"), member="distributed"
-        ),
-        member="_functional_collectives",
-    )
+    path_source = tx.import_source("torch.distributed._functional_collectives")
     return AttrSource(path_source, inner_name)
 
 
@@ -576,13 +557,20 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, orig_fn, orig_source, **kwargs):
-        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
-        self.orig_fn = orig_fn
-        self.orig_source = orig_source
-
-        # remapped_fn gets stuffed in self.fn and used in super().call_function
+    def __init__(self, fn, *, replacement_var, **kwargs):
         super().__init__(fn, **kwargs)
+        assert isinstance(replacement_var, UserFunctionVariable)
+        self.replacement_var = replacement_var
+
+    @staticmethod
+    def create(tx, old_fn, source, **options):
+        new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
+        return CollectiveFunctionRewriteVariable(
+            old_fn,
+            replacement_var=UserFunctionVariable(new_fn, source=new_source, **options),
+            source=source,
+            **options,
+        )
 
     @staticmethod
     def can_rewrite(variable):
@@ -591,9 +579,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         )
 
     @staticmethod
-    def rewrite(fn):
+    def rewrite(tx, fn):
         new_fn = _traceable_collective_remaps()[fn]
-        return new_fn, _traceable_collectives_source(new_fn)
+        return new_fn, _traceable_collectives_source(tx, new_fn)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -602,13 +590,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         if kwargs.get("async_op", False):
-            # Put the old source back, this function will always graph break, but this ensures
-            # we produce the correct guards.
-            self.source = self.orig_source
             unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
-        return super().call_function(tx, args, kwargs)
+        return self.replacement_var.call_function(tx, args, kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -621,22 +606,12 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         self.original = original
 
-        self.guards.update(VariableTracker.propagate(func)["guards"])
-        for arg in args:
-            self.guards.update(VariableTracker.propagate(arg)["guards"])
-        for val in keywords.values():
-            self.guards.update(VariableTracker.propagate(val)["guards"])
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        options = VariableTracker.propagate([self])
         merged_args = self.args + args
         merged_kwargs = {**self.keywords, **kwargs}
-
-        return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
-            options
-        )
+        return self.func.call_function(tx, merged_args, merged_kwargs)
 
     def as_python_constant(self):
         if self.original:
@@ -658,9 +633,11 @@ class FunctoolsPartialVariable(VariableTracker):
 
 class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):
-        super().__init__(**kwargs)
+        from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        super().__init__(**kwargs)
 
         assert kernel is not None
 
@@ -671,34 +648,79 @@ class TritonKernelVariable(VariableTracker):
 
         self.grid = grid
 
+        if isinstance(kernel, Autotuner):
+            # We only support configs and keys arguments of triton.autotune
+            # Make sure other arguments are defaulted
+            defaults = inspect.signature(Autotuner).parameters
+            if (
+                ("warmup" in defaults and defaults["warmup"].default != kernel.warmup)
+                or ("rep" in defaults and defaults["rep"].default != kernel.rep)
+                or (
+                    "prune_configs_by" in defaults
+                    and defaults["prune_configs_by"].default
+                    != kernel.early_config_prune
+                )
+            ):
+                raise Unsupported(
+                    "Only configs and keys are supported for triton.autotune"
+                )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from triton.runtime.autotuner import Autotuner
+
+        from .constant import ConstantVariable
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
 
-        grid = self.grid
-
-        if grid is None:
+        if self.grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
 
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs normalized
         normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
-        meta = ConstDictVariable(normalized_args, dict)
 
-        # If the grid is a function, then lets execute it and convert it to
-        # a list
-        if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
-            # Populate the special "meta" argument to call the grid function
-            grid = grid.call_function(tx, [meta], {})
+        configs = (
+            [config.kwargs for config in self.kernel.configs]
+            if isinstance(self.kernel, Autotuner)
+            else [{}]
+        )
+        grids = []
+        for config_args in configs:
+            # If the grid is a function, then lets execute it and convert it to
+            # a list
+            grid = self.grid
+            if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
+                # Populate the special "meta" argument to call the grid function
+                config_args = {
+                    k: ConstantVariable.create(v) for k, v in config_args.items()
+                }
+                meta = ConstDictVariable({**normalized_args, **config_args}, dict)
+                grid = grid.call_function(tx, [meta], {})
 
-        # Now, the grid must be a list either originally or through above
-        # modification
-        if isinstance(grid, BaseListVariable):
-            grid = grid.as_proxy()
-        else:
-            unimplemented(f"grid for the triton kernel is {type(grid)}")
+            # Now, the grid must be a list either originally or through above
+            # modification
+            if isinstance(grid, BaseListVariable):
+                grids.append(grid.as_proxy())
+            else:
+                unimplemented(f"grid for the triton kernel is {type(grid)}")
+
+        for i in range(len(grids)):
+            if not isinstance(grids[i], tuple):
+                raise Unsupported("Only tuple grids are supported")
+            # inductor expects all grids to be 3-tuple so lets make it
+            if len(grids[i]) == 1:
+                grids[i] = (grids[i][0], 1, 1)
+            elif len(grids[i]) == 2:
+                grids[i] = (grids[i][0], grids[i][1], 1)
+            elif len(grids[i]) > 3:
+                raise Unsupported("Grid can have at most rank 3")
+
+        assert len(grids) != 0
+        if len(set(grids)) == 1:
+            # If there's only one unique grid, lets simplify
+            grids = [grids[0]]
 
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
@@ -707,20 +729,20 @@ class TritonKernelVariable(VariableTracker):
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
+        meta = ConstDictVariable(normalized_args, dict)
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
             {
                 "kernel_idx": self.kernel_idx,
-                "grid": grid,
+                "grid": grids,
                 "kwargs": meta.as_proxy(),
             },
         )
 
         return variables.ConstantVariable(
             None,
-            **VariableTracker.propagate(self, args, kwargs.values()),
         )
 
     def call_method(
@@ -742,8 +764,12 @@ class TritonKernelVariable(VariableTracker):
                 kernel=self.kernel,
                 kernel_idx=self.kernel_idx,
                 grid=args[0],
-                **VariableTracker.propagate(self),
             )
+        elif name == "run":
+            if "grid" not in kwargs:
+                raise Unsupported("Triton kernel requires to be called with a grid")
+            grid = kwargs.pop("grid")
+            return self.clone(grid=grid).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)

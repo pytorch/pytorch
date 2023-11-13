@@ -17,8 +17,9 @@ __all__ = ["RoutedDecoderIterDataPipe", ]
 @functional_datapipe('routed_decode')
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r"""
-    Decodes binary streams from input DataPipe, yields pathname and decoded data
-    in a tuple (functional name: ``routed_decode``).
+    Decodes binary streams from input DataPipe, yields pathname and decoded data in a tuple.
+
+    (functional name: ``routed_decode``)
 
     Args:
         datapipe: Iterable datapipe that provides pathname and binary stream in tuples

@@ -277,7 +277,7 @@ class TestDatasetRandomSplit(TestCase):
         subset1, subset2 = random_split(dataset, [4, 1])
         subset_of_subset1, subset_of_subset2 = random_split(subset1, [3, 1])
         idx = [subset1.indices[i] for i in subset_of_subset1.indices]
-        self.assertEqual(subset_of_subset1[:], dataset[idx[:]])
+        self.assertEqual(subset_of_subset1[:], dataset[idx.copy()])
         self.assertEqual(subset_of_subset1[0:2], dataset[idx[0:2]])
         self.assertEqual(subset_of_subset1[0:-1:2], dataset[idx[0:-1:2]])
 
