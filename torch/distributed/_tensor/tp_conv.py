@@ -135,9 +135,9 @@ def tp_convolution(
         )
 
         # step2 feed local input tensor to op_call
-        local_tensor_args = list(local_tensor_args)
-        local_tensor_args[0] = in_tensor
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        local_tensor_args_list = cast(List, local_tensor_args)
+        local_tensor_args_list[0] = in_tensor
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args_list)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
         # step3 remove extra ouputs from the results
@@ -205,10 +205,10 @@ def tp_convolution_backward(
             )
 
         # step3 feed local input tensor to op_call
-        local_tensor_args = list(local_tensor_args)
-        local_tensor_args[0] = grad_out_tensor
-        local_tensor_args[1] = in_tensor
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        local_tensor_args_list = cast(List, local_tensor_args)
+        local_tensor_args_list[0] = grad_out_tensor
+        local_tensor_args_list[1] = in_tensor
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args_list)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
         # step4 aggregate gradients for edge pixels
