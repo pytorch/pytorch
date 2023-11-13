@@ -889,6 +889,20 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+    def test_execute_model_with___call__(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        onnx_program = torch.onnx.dynamo_export(
+            Model(),
+            torch.randn(1, 1, 2, dtype=torch.float),
+        )
+
+        # The other tests use ONNXProgram.__call__ indirectly and check for output equality
+        # This test aims to ensure ONNXProgram.__call__ API runs successfully despite internal test infra code
+        _ = onnx_program(x)
+
     def test_exported_program_as_input(self):
         class Model(torch.nn.Module):
             def forward(self, x):

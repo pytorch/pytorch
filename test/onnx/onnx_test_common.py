@@ -324,6 +324,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             atol,
             rtol,
             has_mutation=has_mutation,
+            model_type=model_type,
         )
         # This confirms the exported mode accepts different input shapes
         # when dynamic shape is enabled.
@@ -347,6 +348,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     atol,
                     rtol,
                     has_mutation=has_mutation,
+                    model_type=model_type,
                 )
 
 
@@ -423,6 +425,7 @@ def _compare_pytorch_onnx_with_ort(
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
     has_mutation: bool = False,
+    model_type: str = None,
 ):
     if has_mutation:
         ref_model = _try_clone_model(model)
@@ -440,24 +443,19 @@ def _compare_pytorch_onnx_with_ort(
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
-    ort_outputs = run_ort(onnx_program, onnx_format_args)
 
-    # When model is a torch.export.ExportedProgram, the number of outputs in the ONNX model can be greater
-    # than the number of outputs in the original model. This is because the ONNX model may contain
-    # additional outputs for the exported program's mutated inputs and buffers.
-    # Therefore, we need to ignore the first few outputs from ort_outputs when comparing results length, type and shape.
-    len_ref_outputs = len(ref_outputs)
-    ort_outputs_offset = 0  # The first ort_outputs_offset outputs from ort_outputs must be ignore by the checks below
-    if isinstance(model, torch.export.ExportedProgram):
-        len_ref_outputs = len(model.graph_signature.output_specs)
-        ort_outputs_offset = len_ref_outputs - len(ref_outputs)
+    if model_type == "torch.export.ExportedProgram":
+        ort_outputs = onnx_program(*input_args, **input_kwargs)
+    else:
+        ort_outputs = run_ort(onnx_program, onnx_format_args)
+    ort_outputs = onnx_program.adapt_onnx_outputs_to_torch(ort_outputs)
 
-    if len_ref_outputs != len(ort_outputs):  # Ignore
+    if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
         )
 
-    for ref_output, ort_output in zip(ref_outputs, ort_outputs[ort_outputs_offset:]):
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )
