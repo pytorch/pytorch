@@ -1776,6 +1776,20 @@ def forward(self, x_1):
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
 
+    def test_defined_in_python(self):
+        self.assertFalse(torch.ops.aten.sin.default._defined_in_python)
+        self.assertFalse(torch.ops.aten.sum.dim_IntList._defined_in_python)
+
+        lib = self.lib()
+        torch.library.define("{self._test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+        ns = self.ns()
+        self.assertTrue(ns.foo.default._defined_in_python)
+
+        torch.library.define(
+            "{self._test_ns}::bar.overload", "(Tensor x) -> Tensor", lib=lib
+        )
+        self.assertTrue(ns.bar.overload._defined_in_python)
+
     def _test_impl_device(self, name, types, device):
         lib = self.lib()
         torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
