@@ -43,6 +43,7 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
+    rand_strided
 )
 
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
