@@ -143,25 +143,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     repo = "pytorch/pytorch"
+
     suites = {
-        "aot_eager_huggingface",
-        "aot_inductor_huggingface",
-        "dynamic_aot_eager_huggingface",
-        "dynamo_eager_huggingface",
-        "inductor_huggingface",
-        "dynamic_inductor_huggingface",
-        "aot_eager_timm",
-        "aot_inductor_timm",
-        "dynamic_aot_eager_timm",
-        "dynamo_eager_timm",
-        "inductor_timm",
-        "dynamic_inductor_timm",
-        "aot_eager_torchbench",
-        "aot_inductor_torchbench",
-        "dynamic_aot_eager_torchbench",
-        "dynamo_eager_torchbench",
-        "inductor_torchbench",
-        "dynamic_inductor_torchbench",
+        f"{a}_{b}"
+        for a, b in zip(
+            [
+                "aot_eager",
+                "aot_inductor",
+                "dynamic_aot_eager",
+                "dynamo_eager",
+                "inductor",
+                "dynamic_inductor",
+            ],
+            ["huggingface", "timm", "torchbench"],
+        )
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
