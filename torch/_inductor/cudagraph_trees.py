@@ -1693,10 +1693,8 @@ class CUDAGraphTreeManager:
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
 
-            self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
-
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
             with warnings.catch_warnings(record=True), torch.cuda.graph(

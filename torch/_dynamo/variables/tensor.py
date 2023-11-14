@@ -109,7 +109,6 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,7 +124,6 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -598,14 +596,6 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
-        elif name == "set_" and len(args) > 1:
-            # torch.Tensor.set_() has several overloads.
-            # aten::set_.source_Tensor(Tensor) gets special handling
-            # in AOTAutograd and functionalization, because it is the most common
-            # overload and is used by FSDP.
-            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
-            # unless we find that we need to make it work.
-            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
