@@ -1016,7 +1016,7 @@ class Module:
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
-    def to_empty(self: T, *, device: Union[str, device], recurse: bool = True) -> T:
+    def to_empty(self: T, *, device: Union[str, device, int], recurse: bool = True) -> T:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
