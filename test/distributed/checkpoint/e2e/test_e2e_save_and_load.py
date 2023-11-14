@@ -10,7 +10,7 @@ from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_di
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.testing._internal.common_state_dict import VerifyStateDictMixin
+from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
