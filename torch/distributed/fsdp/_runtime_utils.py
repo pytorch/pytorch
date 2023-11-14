@@ -57,7 +57,9 @@ def _get_fsdp_root_states_with_modules(
     module: nn.Module,
 ) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
-    Return a tuple with the following conditions.
+    Retrieve the root states along with the corresponding modules from a FSDP instance.
+
+    Returns a tuple containing:
 
     1. A list of the root ``_FSDPState`` instances in the module tree rooted at
     ``module`` without any duplicates and following the ``module.modules()``
