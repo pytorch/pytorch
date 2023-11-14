@@ -424,14 +424,22 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable.create(self.ndim)
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable.create(self.dtype.is_floating_point)
-        elif name == "is_contiguous" and self.is_contiguous is not None:
-            if "memory_format" in kwargs:
-                memory_format = kwargs.pop("memory_format").as_python_constant()
-            else:
-                memory_format = torch.contiguous_format
-            constant_result = ConstantVariable.create(
-                memory_format in self.is_contiguous
+        elif name == "is_contiguous":
+            memory_format = (
+                kwargs.pop("memory_format").as_python_constant()
+                if "memory_format" in kwargs
+                else torch.contiguous_format
             )
+            if self.is_contiguous is not None:
+                constant_result = ConstantVariable.create(
+                    memory_format in self.is_contiguous
+                )
+            elif (fake := self.proxy.node.meta.get("example_value")) is not None:
+                constant_result = ConstantVariable.create(
+                    fake.is_contiguous(memory_format=memory_format)
+                )
+            else:
+                constant_result = None
         elif (
             name == "type"
             and self.dtype is not None
