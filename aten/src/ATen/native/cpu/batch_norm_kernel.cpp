@@ -21,7 +21,7 @@
 #include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
-
+#include <iostream>
 namespace at::native {
 namespace {
 
@@ -244,11 +244,12 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  
+
   if (N > num_threads) {
+    std::cout << "=== N > num_threads ===" << std::endl;
     Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
     scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-    
+
     // compute mean per input
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
       int tid = at::get_thread_num();
@@ -265,7 +266,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
             n_channel);
       }
     });
-  
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t sum = 0;
@@ -276,7 +277,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         mean_data[c] = mean;
       }
     });
-    
+
     // compute variance per input, reuse the immediate buffer
     buffer.zero_();
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
@@ -294,7 +295,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
             n_channel);
       }
     });
-  
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t _var_sum = 0;
@@ -305,22 +306,27 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       }
     });
   } else {
+    std::cout << "=== N <= num_threads ===" << std::endl;
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t sum = 0;
+        accscalar_t _var_sum = 0;
         for (const auto t : c10::irange(N)) {
-          sum += input_data[t * n_channel + c];
+          const accscalar_t x = input_data[t * n_channel + c];
+          sum += x;
+          _var_sum += (x - (sum/N)) * (x - (sum/N));
         }
+
         scalar_t mean = sum / N;
         mean_data[c] = mean;
       }
     });
-    
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t _var_sum = 0;
         for (const auto t : c10::irange(N)) {
-          _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+          _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * ;
         }
         var_sum_data[c] = _var_sum;
       }
