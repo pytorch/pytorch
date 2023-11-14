@@ -187,7 +187,7 @@ class TestFSDPCheckpoint(FSDPTest):
         # Ensure replicate param names are as expected, i.e.
         # immediate parameters of model and parameters of model's non-UnitModule
         # submodules are replicated
-        param_names = replicate.state(model)._replicate_param_names
+        param_names = replicate.state(model)._param_names
         replicated_modules = [
             (name, mod)
             for (name, mod) in model.named_children()
