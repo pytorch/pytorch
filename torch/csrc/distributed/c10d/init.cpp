@@ -596,6 +596,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_check_reducer_finalized",
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_force_bucket_rebuild",
           [](::c10d::Reducer& reducer) {
