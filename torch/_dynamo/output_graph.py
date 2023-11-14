@@ -455,7 +455,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @property
     def fake_mode(self):
-        return self.root_tx.fake_mode
+        return self.tracing_context.fake_mode
 
     @property
     def shape_env(self):
@@ -1037,9 +1037,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # A fresh fake mode means fresh fake tensors, which, for backends ensures that
         # tensors match their original metadata at the start of trace, as opposed to their metadata
         # at the end of trace.
-        with self.restore_global_state(), self.tracing_context.with_fake_mode(
-            backend_fake_mode
-        ):
+        # TODO: Scope this instead of setting
+        self.tracing_context.fake_mode = backend_fake_mode
+        with self.restore_global_state(), backend_fake_mode:
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 

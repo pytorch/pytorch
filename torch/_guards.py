@@ -590,7 +590,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
-        self.fake_modes = [fake_mode]
+        self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -618,30 +618,6 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
-
-    def _push_fake_mode(self, fake_mode: FakeTensorMode):
-        self.fake_modes.append(fake_mode)
-
-    def _pop_fake_mode(self) -> FakeTensorMode:
-        if self.fake_modes:
-            return self.fake_modes.pop()
-        else:
-            raise RuntimeError("Violated invariant - no fake modes to pop?")
-
-    @contextmanager
-    def with_fake_mode(self, fake_mode: FakeTensorMode):
-        self._push_fake_mode(fake_mode)
-        try:
-            yield
-        finally:
-            self._pop_fake_mode()
-
-    @property
-    def fake_mode(self):
-        if self.fake_modes:
-            return self.fake_modes[-1]
-        else:
-            raise RuntimeError("Violated invariant - no fake modes on stack?")
 
     @staticmethod
     @contextmanager
