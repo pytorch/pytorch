@@ -231,6 +231,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
+_global_higher_order_ops = {}
 _higher_order_ops = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
@@ -244,19 +245,25 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 
 
 class HigherOrderOperator(OperatorBase):
-    # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
+    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
+    # (True) torch.ops.{name}
+    # (False) torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name):
+    def __init__(self, name, *, _deprecated_global_ns=False):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        _higher_order_ops[name] = self
-        self._ns = "higher_order"
+        if _deprecated_global_ns:
+            _global_higher_order_ops[name] = self
+            self._ns = None
+        else:
+            _higher_order_ops[name] = self
+            self._ns = "higher_order"
 
         # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
         # torch._ops.higher_order.
@@ -479,6 +486,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+
+        # If the OpOverload was constructed from a Library.def in Python.
+        self._defined_in_python = self.__qualname__ in torch.library._defs
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
@@ -861,6 +871,9 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
+        self._global_higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops", _global_higher_order_ops
+        )
         self._higher_order_op_namespace = _PyOpNamespace(
             "torch.ops.higher_order", _higher_order_ops
         )
@@ -868,6 +881,8 @@ class _Ops(types.ModuleType):
 
     def __getattr__(self, name):
         # Check if the name is a HigherOrderOperator
+        if name in self._global_higher_order_op_namespace._ops:
+            return getattr(self._global_higher_order_op_namespace, name)
         if name == "higher_order":
             return self._higher_order_op_namespace
 
