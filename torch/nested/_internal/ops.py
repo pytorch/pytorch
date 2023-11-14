@@ -1,4 +1,5 @@
 import functools
+import math
 
 import torch
 
@@ -65,7 +66,11 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
-        "jt": lambda x: isinstance(x, NestedTensor),
+        "jt": lambda x: isinstance(x, NestedTensor)
+        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        "jt_all": lambda x: isinstance(
+            x, NestedTensor
+        ),  # ops with "jt_all" can accept all kinds of JT
         "any": lambda x: True,
     }
     for i, named_arg_type in enumerate(named_arg_types):
@@ -297,7 +302,7 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.is_non_overlapping_and_dense.default:
@@ -310,23 +315,25 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func == torch.ops.aten.sym_numel.default:
+        if args[0]._lengths is not None:
+            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
 
     if func == torch.ops.aten.sym_stride.default:
         return args[0]._strides
 
     if func == torch.ops.aten.sym_storage_offset.default:
-        return 0
+        return args[0]._values.storage_offset()
 
 
-@register_jagged_func(torch.ops.prim.layout.default, "self: jt")
+@register_jagged_func(torch.ops.prim.layout.default, "self: jt_all")
 def prim_layout_default(func, *args, **kwargs):
     return torch.jagged
 
 
 @register_jagged_func(
     [torch.ops.aten.size.default],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
@@ -336,7 +343,7 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
         )
 
 
-@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
+@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt_all")
 def is_contiguous_general(func, *args, **kwargs):
     from torch._prims_common import is_contiguous_for_memory_format
 
@@ -344,16 +351,21 @@ def is_contiguous_general(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
+
+    # If created from narrow() check for lengths
+    if inp.lengths() is not None:
+        return False
+
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
     if new_kwargs["memory_format"] == torch.preserve_format:
         return True
-    return is_contiguous_for_memory_format(inp, **new_kwargs)
+    return is_contiguous_for_memory_format(inp.values(), **new_kwargs)
 
 
 register_jagged_func(
-    torch.ops.aten.is_contiguous.memory_format, "self: jt, memory_format: any?"
+    torch.ops.aten.is_contiguous.memory_format, "self: jt_all, memory_format: any?"
 )(is_contiguous_general)
 
 
@@ -508,7 +520,7 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
-@register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
+@register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
     _, new_kwargs = normalize_function(
@@ -520,10 +532,15 @@ def unbind_int(func, *args, **kwargs):
         raise RuntimeError("unbind(): only supported for NestedTensor on dim=0")
 
     inp = new_kwargs.pop("input")
-    values = inp._values
+    values = inp.values()
     offsets = inp.offsets()
+    lengths = inp.lengths()
 
-    return torch.split(values, offsets.diff().tolist())
+    if lengths is None:
+        return torch.split(values, offsets.diff().tolist())
+    return [
+        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
