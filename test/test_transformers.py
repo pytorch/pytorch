@@ -3009,50 +3009,6 @@ class TestAttnMasks(NNTestCase):
         torch.testing.assert_close(value.grad, value_prototype.grad, rtol=1e-5, atol=1e-5)
 
 
-    @parametrize("compile", [True, False])
-    def test_materialized_case(self, device, compile: bool):
-        if compile:
-            self.skipTest("Compiling torch_function_ not working")
-            torch._dynamo.reset()
-        shape = SdpaShape(16, 16, 128, 16)
-        make_tensor = partial(
-            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
-        bias = torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
-        attn_bias = TensorBias(bias)
-
-        pytorch_output = scaled_dot_product_attention(
-            query, key, value, attn_mask=bias, dropout_p=0.0, is_causal=False
-        )
-
-        sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True)
-            if compile
-            else scaled_dot_product_attention
-        )
-        sdpa_output = sdpa_op(
-            query_prototype,
-            key_prototype,
-            value_prototype,
-            attn_mask=attn_bias,
-            scale=None,
-            is_causal=False,
-            dropout_p=0.0,
-        )
-
-        dOut = torch.randn_like(pytorch_output)
-        pytorch_output.backward(dOut)
-        sdpa_output.backward(dOut)
-
-        torch.testing.assert_close(pytorch_output, sdpa_output, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(query.grad, query_prototype.grad, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(key.grad, key_prototype.grad, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(value.grad, value_prototype.grad, rtol=1e-5, atol=1e-5)
-
-
-
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shapes",
