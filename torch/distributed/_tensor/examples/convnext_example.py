@@ -1,3 +1,7 @@
+"""
+The following example demonstrates how to train a ConvNeXt model
+with intermediate activations sharded across mutliple GPUs via DTensor
+"""
 import os
 import time
 import warnings
@@ -238,10 +242,16 @@ def test_tp_convnext_train(rank, world_size):
         backward_time += t4 - t3
     torch.cuda.synchronize(device)
     end = time.time()
-    max_reserved_memory = torch.cuda.max_memory_reserved(device)
-    max_allocated_memory = torch.cuda.max_memory_allocated(device)
+    max_reserved = torch.cuda.max_memory_reserved(device)
+    max_allocated = torch.cuda.max_memory_allocated(device)
     print(
-        f"rank {rank}, {ITER_TIME} iterations, latency {(end - start)/ITER_TIME*1000:10.2f} ms, forward {forward_time/ITER_TIME*1000:10.2f} ms, backward {backward_time/ITER_TIME*1000:10.2f} ms, max reserved {max_reserved_memory/1024/1024/1024:8.2f} GiB, max allocated {max_allocated_memory/1024/1024/1024:8.2f} GiB"
+        f"rank {rank}, {ITER_TIME} iterations, average latency {(end - start)/ITER_TIME*1000:10.2f} ms"
+    )
+    print(
+        f"rank {rank}, forward {forward_time/ITER_TIME*1000:10.2f} ms, backward {backward_time/ITER_TIME*1000:10.2f} ms"
+    )
+    print(
+        f"rank {rank}, max reserved {max_reserved/1024/1024/1024:8.2f} GiB, max allocated {max_allocated/1024/1024/1024:8.2f} GiB"
     )
     dist.destroy_process_group()
 
