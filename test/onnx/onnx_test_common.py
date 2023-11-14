@@ -11,6 +11,7 @@ import logging
 import os
 import unittest
 import warnings
+from enum import Enum
 from typing import (
     Any,
     Callable,
@@ -61,6 +62,12 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
+
+
+class TorchModelType(Enum):
+    UNDEFINED = 0
+    TORCH_NN_MODULE = 1
+    TORCH_EXPORT_EXPORTEDPROGRAM = 2
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
@@ -255,7 +262,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if input_kwargs is None:
             input_kwargs = {}
 
-        if has_mutation:
+        if (
+            has_mutation
+            and self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
                 input_args, input_kwargs
@@ -264,6 +274,19 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_model = model
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
+
+        assert isinstance(ref_model, torch.nn.Module) or callable(
+            ref_model
+        ), "Model must be a torch.nn.Module or callable"
+        if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            if (
+                self.dynamic_shapes
+            ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
+                #       https://github.com/pytorch/pytorch/issues/113705
+                pytest.xfail(
+                    reason="torch.export.ExportedProgram does not support dynamic shapes"
+                )
 
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
@@ -308,7 +331,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             atol,
             rtol,
             has_mutation=has_mutation,
-            model_type=model_type,
+            model_type=self.model_type,
         )
         # This confirms the exported mode accepts different input shapes
         # when dynamic shape is enabled.
@@ -332,7 +355,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     atol,
                     rtol,
                     has_mutation=has_mutation,
-                    model_type=model_type,
+                    model_type=self.model_type,
                 )
 
 
@@ -409,7 +432,7 @@ def _compare_pytorch_onnx_with_ort(
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
     has_mutation: bool = False,
-    model_type: str = None,
+    model_type: TorchModelType = TorchModelType.UNDEFINED,
 ):
     if has_mutation:
         ref_model = _try_clone_model(model)
@@ -428,10 +451,12 @@ def _compare_pytorch_onnx_with_ort(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
 
-    if model_type == "torch.export.ExportedProgram":
+    if model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
         ort_outputs = onnx_program(*input_args, **input_kwargs)
-    else:
+    elif model_type == TorchModelType.TORCH_NN_MODULE:
         ort_outputs = run_ort(onnx_program, onnx_format_args)
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
 
     for output_format in (
         "pytorch",
