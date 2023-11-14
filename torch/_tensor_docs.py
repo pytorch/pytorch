@@ -4027,8 +4027,10 @@ add_docstr_all(
     r"""
 record_stream(stream)
 
-Ensures that the tensor memory is not reused for another tensor until all
-current work queued on :attr:`stream` are complete.
+Marks the tensor as having been used by this stream.  When the tensor
+is deallocated, ensure the tensor memory is not reused for another tensor
+until all work queued on :attr:`stream` at the time of deallocation is
+complete.
 
 .. note::
 

@@ -1,4 +1,4 @@
-"""Tracing
+"""Tracing.
 
 This module contains functionality to support the JIT's tracing frontend, notably:
     * torch.jit.trace
@@ -198,9 +198,10 @@ def _time(trace_name, name, time=True):
 
 def verify(model, args, loss_fn=torch.sum, devices=None):
     """
-    Verify that a JIT compiled model has the same behavior as its uncompiled
-    version along with its backwards pass.  If your model returns multiple
-    outputs, you must also specify a `loss_fn` to produce a loss for which
+    Verify that a JIT compiled model has the same behavior as its uncompiled version along with its backwards pass.
+
+    If your model returns multiple outputs,
+    you must also specify a `loss_fn` to produce a loss for which
     the backwards will be computed.
 
     This function has side-effects (e.g., it executes your model / saves and loads
@@ -636,10 +637,11 @@ def trace(
     example_kwarg_inputs=None,
     _store_inputs=True,
 ):
-    """
-    Trace a function and return an executable  or :class:`ScriptFunction`
-    that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\\s and lists, dictionaries, and
+    r"""
+    Trace a function and return an executable  or :class:`ScriptFunction` that will be optimized using just-in-time compilation.
+
+    Tracing is ideal for code that operates only on
+    ``Tensor``\\s and lists, dictionaries, and
     tuples of ``Tensor``\\s.
 
     Using `torch.jit.trace` and `torch.jit.trace_module`, you can turn an
@@ -929,8 +931,9 @@ def trace_module(
     _store_inputs=True,
 ):
     """
-    Trace a module and return an executable :class:`ScriptModule` that will be optimized
-    using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
+    Trace a module and return an executable :class:`ScriptModule` that will be optimized using just-in-time compilation.
+
+    When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
     method names to example inputs to trace (see the ``inputs``) argument below.
 
@@ -1114,9 +1117,10 @@ def trace_module(
 
 
 def is_tracing():
-    """
-    Returns ``True`` in tracing (if a function is called during the tracing of
-    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """Return a boolean value.
+
+    Returns ``True`` in tracing (if a function is called during the
+    tracing of code with ``torch.jit.trace``) and ``False`` otherwise.
     """
     if is_scripting():
         return False
@@ -1253,7 +1257,8 @@ def _get_trace_graph(
     return_inputs=False,
     _return_inputs_states=False,
 ):
-    """
+    """Return a tuple on tracing a function or model.
+
     .. warning::
         This function is internal-only and should only be used by the ONNX
         exporter. If you are trying to get a graph through tracing, please go
