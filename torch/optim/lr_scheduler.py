@@ -687,6 +687,7 @@ class SequentialLR(LRScheduler):
         _check_verbose_deprecated_warning(verbose)
         self._schedulers = schedulers
         self._milestones = milestones
+        self._milestones.insert(0, 0)
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
 
@@ -703,15 +704,12 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = schedulers[0].get_last_lr()
 
-    def step(self):
+    def step(self, epoch=None):
         self.last_epoch += 1
-        idx = bisect_right(self._milestones, self.last_epoch)
+        epoch = self.last_epoch if epoch is None else epoch
+        idx = bisect_right(self._milestones, epoch) - 1
         scheduler = self._schedulers[idx]
-        if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler.step(0)
-        else:
-            scheduler.step()
-
+        scheduler.step(epoch=epoch - self._milestones[idx])
         self._last_lr = scheduler.get_last_lr()
 
     def state_dict(self):
@@ -913,9 +911,9 @@ class ChainedScheduler(LRScheduler):
         self.optimizer = schedulers[0].optimizer
         self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
-    def step(self):
+    def step(self, epoch=None):
         for scheduler in self._schedulers:
-            scheduler.step()
+            scheduler.step(epoch=epoch)
         self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def state_dict(self):
