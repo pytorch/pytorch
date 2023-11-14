@@ -672,6 +672,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
+        elif isinstance(oldvar.mutable_local, side_effects.AttributeMutationExisting):
+            newvar = oldvar
         else:
             assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
             newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
@@ -1917,7 +1919,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     @property
     def fake_mode(self):
-        return self._fake_mode
+        return self.output.tracing_context.fake_mode
 
     def find_symbolic_locals_name(self, tensor_variable):
         for key, value in self.symbolic_locals.items():
@@ -1991,8 +1993,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-
-        self._fake_mode = output.tracing_context.fake_mode
 
         self.current_speculation = None
         self.random_calls = []

@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
@@ -1020,6 +1021,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
+        if not self.export:
+            prior_fake_mode = self.tracing_context.fake_mode
+            self.tracing_context.fake_mode = FakeTensorMode(
+                shape_env=prior_fake_mode.shape_env,
+                policy_cache=prior_fake_mode.policy_cache,
+            )
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
