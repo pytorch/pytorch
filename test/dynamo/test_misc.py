@@ -40,10 +40,10 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
-    rand_strided,
     same,
     skipIfNotPy311,
     unsupported,
+    rand_strided
 )
 
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
@@ -8267,6 +8267,22 @@ ShapeEnv not equal: field values don't match:
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
+
+    def test_inplace_unsqueeze(self):
+        def fn(a):
+            return a.unsqueeze_(0)
+
+        inp_shape = torch.Size([1, 1, 1, 1, 12, 11, 3])
+        inp_stride = (396, 396, 396, 396, 33, 3, 1)
+        x = rand_strided(inp_shape, inp_stride)
+        x2 = x.clone()
+
+        eager_x_out = fn(x)
+
+        fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        comp_x_out = fn(x2)
+
+        self.assertEqual(eager_x_out, comp_x_out)
 
     def test_funcname_cache(self):
         src = """\

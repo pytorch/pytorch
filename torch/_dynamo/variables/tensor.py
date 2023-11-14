@@ -252,18 +252,6 @@ class TensorVariable(VariableTracker):
         if result is not None and self.source is not None:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
-        # It's hard to get inplace view (metadata mutation) on graph input work properly across
-        # dynamo/aot/inductor, just fall back.
-        if self.source is not None and hasattr(torch.ops.aten, name):
-            fn = getattr(torch.ops.aten, name)
-            if (
-                hasattr(fn, "overloads")
-                and hasattr(fn, fn.overloads()[0])
-                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
-            ):
-                # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                return variables.misc.DelayGraphBreakVariable()
-
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
@@ -337,6 +325,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        breakpoint()
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal method invocation {name} in strict mode")
@@ -388,7 +377,6 @@ class TensorVariable(VariableTracker):
                     if not has_free_symbols(fake_r):
                         return ConstantVariable.create(int(fake_r))
 
-            # Oops, it's not constant.  Do the dynamic shapes path.
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -741,7 +729,27 @@ class TensorVariable(VariableTracker):
             "example_value"
         ].requires_grad != (args[0].value if len(args) > 0 else True):
             unimplemented("Tensor.requires_grad_")
-
+        elif name == "unsqueeze_":
+            # Remove the old reference in tracked fakes - if we don't do this
+            # new .data value size and shape differences will cause
+            # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
+            # coming out of set_() below will be a new one, and get
+            # installed in tracked fakes.
+            to_remove = []
+            for tf in tx.output.tracked_fakes:
+                if tf.source == self.source:
+                    to_remove.append(tf)
+            for tf in to_remove:
+                tx.output.tracked_fakes.remove(tf)
+            out = wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+            )
+            return tx.replace_all(self, out)
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
