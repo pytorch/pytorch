@@ -661,6 +661,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
+  // Check the dumpingDebugInfo flag and if it is true, return true
+  // and set the flag to be false; Otherwise, return false directly.
+  bool checkAndModifyCheckDumpingDebugInfo();
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -777,6 +781,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Mutex to Guard monitorWakeUpCV_
   std::mutex monitorMutex_;
+
+  bool dumpingDebugInfo_;
+
+  // Mutex to Guard the check of dumpingDebugInfo_
+  std::mutex checkDumpingDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
