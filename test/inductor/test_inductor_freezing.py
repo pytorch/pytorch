@@ -1,10 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
-import importlib
 import itertools
-import os
-import sys
 import unittest
 import weakref
 
@@ -16,37 +13,22 @@ from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-
 from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    copy_tests,
+    HAS_CPU,
+    HAS_CUDA,
+    requires_cuda,
+)
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 prims = torch.ops.prims
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class TestCase(TorchTestCase):
@@ -657,7 +639,6 @@ del OptimizeForInferenceTemplate
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU or HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests()
