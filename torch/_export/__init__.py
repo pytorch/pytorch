@@ -377,7 +377,7 @@ def capture_pre_autograd_graph(
         def _eval(self, mode: bool = True):
             raise NotImplementedError("Calling eval() is not supported yet.")
 
-        _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
         m.meta["inline_constraints"] = {
             k: v
