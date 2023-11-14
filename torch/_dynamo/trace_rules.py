@@ -155,11 +155,8 @@ def is_in_graph_function(obj):
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     ):
         return True
-    orig_obj = obj
-    if hasattr(obj, "__wrapped__"):
-        orig_obj = obj.__wrapped__
     if isinstance(
-        orig_obj,
+        obj,
         (
             types.FunctionType,
             types.MethodType,
@@ -182,10 +179,15 @@ E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManager
 def lookup(obj):
     if not hashable(obj):
         return None
+    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
     if id(obj) in _disallowed_function_ids:
         return None
+    if is_user_defined_allowed(obj):
+        return TorchInGraphFunctionVariable
+    if hasattr(obj, "__wrapped__"):
+        obj = obj.__wrapped__
     rule = get_torch_obj_rule_map().get(obj, None)
-    if rule is None and (is_in_graph_function(obj) or is_user_defined_allowed(obj)):
+    if rule is None and is_in_graph_function(obj):
         return TorchInGraphFunctionVariable
     else:
         return rule
