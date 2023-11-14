@@ -2931,6 +2931,9 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
+    # ROCM does not need the fallback since it does not use triton
+    if torch.version.hip and torch.cuda.is_available():
+        return False
     # tl.atomic_add does NOT support the following types
     return dtype in {torch.int64, torch.bool, torch.bfloat16}
 
