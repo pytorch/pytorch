@@ -86,6 +86,10 @@ auto_torch_name_rule_map = {
 
 torch_name_rule_map = {**manual_torch_name_rule_map, **auto_torch_name_rule_map}
 
+"""
+Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
+"""
+
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
@@ -104,17 +108,27 @@ def _load_obj_from_str(fully_qualified_name):
     return getattr(importlib.import_module(module), obj_name)
 
 
+"""
+Load string represented torch objects.
+"""
+
+
 def load_object(name):
     x = name.split("#")
     if len(x) == 2:
         obj = _load_obj_from_str(x[0])
         val = getattr(obj, x[1])
     else:
-        assert len(x) == 1
+        assert len(x) == 1, f"Invalid obj name {name}"
         val = _load_obj_from_str(x[0])
-    if hasattr(val, "__wrapped__") and val is not torch.ops:
+    if hasattr(val, "__wrapped__"):
         val = val.__wrapped__
     return val
+
+
+"""
+Get all torch.Tensor methods which are allowed to be in graph functions.
+"""
 
 
 @functools.lru_cache(None)
@@ -126,7 +140,13 @@ def get_tensor_method():
             method, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             s.add(method)
-    return s
+    return frozenset(s)
+
+
+"""
+Return if a torch object is in graph function during Dynamo tracing.
+Note: This is a temporary function, we will have the dumped list of all in graph functions later.
+"""
 
 
 def is_in_graph_function(obj):
@@ -135,8 +155,11 @@ def is_in_graph_function(obj):
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     ):
         return True
+    orig_obj = obj
+    if hasattr(obj, "__wrapped__"):
+        orig_obj = obj.__wrapped__
     if isinstance(
-        obj,
+        orig_obj,
         (
             types.FunctionType,
             types.MethodType,
@@ -150,13 +173,17 @@ def is_in_graph_function(obj):
         return False
 
 
+"""
+Main entry point for looking up the trace rule (the Dynamo variable) for a given object.
+E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManagerClassVariable`.
+"""
+
+
 def lookup(obj):
     if not hashable(obj):
         return None
     if id(obj) in _disallowed_function_ids:
         return None
-    if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-        obj = obj.__wrapped__
     rule = get_torch_obj_rule_map().get(obj, None)
     if rule is None and (is_in_graph_function(obj) or is_user_defined_allowed(obj)):
         return TorchInGraphFunctionVariable

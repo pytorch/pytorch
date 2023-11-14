@@ -49,6 +49,9 @@ ignored_torch_name_rule_set = {
     "torch.autograd.grad_mode._force_original_view_tracking",
     "torch.autograd.grad_mode._unsafe_preserve_version_counter",
     "torch.autograd.grad_mode.set_multithreading_enabled",
+    "torch.autograd.graph._CloneArgBeforeMutateMode",
+    "torch.autograd.graph._swap_with_cloned",
+    "torch.autograd.graph.save_on_cpu",
     "torch.autograd.graph.saved_tensors_hooks",
     "torch.backends.mkl.verbose",
     "torch.backends.mkldnn.verbose",
@@ -56,6 +59,7 @@ ignored_torch_name_rule_set = {
     "torch.cuda.StreamContext",
     "torch.cuda._DeviceGuard",
     "torch.cuda.device",
+    "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
     "torch.device",  # as constant folding function
     "torch.distributed.autograd.context",
@@ -89,7 +93,7 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
 # allowed objects include:
 # - Torch context manager classes.
 def generate_allowed_object_set():
-    return gen_allowed_objs_and_ids()[1]
+    return gen_allowed_objs_and_ids().objects
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):

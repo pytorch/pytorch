@@ -1,6 +1,7 @@
 import builtins
 import collections
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -11,7 +12,7 @@ import types
 import warnings
 
 from collections import defaultdict
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
 np: Optional[types.ModuleType] = None
 try:
@@ -151,12 +152,26 @@ def _disallowed_function_ids() -> Set[int]:
 # Helper function to dump the torch name rule map generated based on
 # the heuristic defined in gen_allowed_objs_and_ids.
 def dump_allowed_torch_name_rule_map() -> None:
-    m = gen_allowed_objs_and_ids()[2]
+    m = gen_allowed_objs_and_ids().name_rule_map
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
 
-def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any], Dict[str, Any]]:
+@dataclasses.dataclass
+class AllowedObjects:
+    """
+    Track the objects, object id - name pairs, and name - dynamo wrapping rule pairs
+    from the heuristic defined in `gen_allowed_objs_and_ids`.
+    TODO: Remove the overalp/duplication between these fields
+    after allowed_functions refactor is done.
+    """
+
+    object_ids: Dict[int, str]
+    objects: Set[Any]
+    name_rule_map: Dict[str, Any]
+
+
+def gen_allowed_objs_and_ids() -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
@@ -172,8 +187,8 @@ def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any], Dict[str, Any]
     def heuristic_record_if_ctx_manager(obj, module, name):
         if (
             issubclass(type(obj), type)
-            and "__enter__" in obj.__dict__
-            and "__exit__" in obj.__dict__
+            and hasattr(obj, "__enter__")
+            and hasattr(obj, "__exit__")
         ):
             torch_name_rule_map[
                 f"{module.__name__}.{name}"
@@ -342,12 +357,12 @@ def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any], Dict[str, Any]
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids, torch_objects, torch_name_rule_map
+    return AllowedObjects(torch_object_ids, torch_objects, torch_name_rule_map)
 
 
 @FunctionIdSet
 def _allowed_function_ids() -> Dict[int, str]:
-    return gen_allowed_objs_and_ids()[0]
+    return gen_allowed_objs_and_ids().object_ids
 
 
 @FunctionIdSet

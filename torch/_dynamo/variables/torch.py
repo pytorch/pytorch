@@ -167,6 +167,10 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def call_hasattr(self, tx, name):
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable.create(result)
+
     def can_constant_fold_through(self):
         if self.value in constant_fold_functions:
             return True
@@ -690,6 +694,10 @@ class TorchVariable(BaseTorchVariable):
         ):
             value = tensor_dunder_fns_remap[value]
 
+        assert not isinstance(
+            value, (torch.dtype, torch.device)
+        ), "should use ConstantVariable"
+
         super().__init__(value, **kwargs)
 
         # the remainder of this is just optional debug checks
@@ -697,6 +705,9 @@ class TorchVariable(BaseTorchVariable):
             self_should_be_none = getattr(self.value, "__self__", None)
         except RuntimeError as e:
             assert "No such operator" in str(e), str(e)
+            self_should_be_none = None
+        except AssertionError as e:
+            assert "Unknown attribute" in str(e), str(e)
             self_should_be_none = None
 
         # assert "_ntuple.<locals>.parse" not in str(value)
@@ -719,10 +730,6 @@ class TorchVariable(BaseTorchVariable):
 
     def __repr__(self):
         return f"TorchVariable({self.value})"
-
-    def call_hasattr(self, tx, name):
-        result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result)
 
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
