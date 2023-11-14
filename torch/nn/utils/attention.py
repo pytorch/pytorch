@@ -1,4 +1,5 @@
-""" Define Base class as well as some crowd favorites """
+""" Defines base class for attention bias abstraction as well as some crowd favorites """
+import math
 from abc import ABC, abstractmethod
 from enum import auto, IntEnum
 from typing import Optional, Union
@@ -13,7 +14,6 @@ from torch.backends.cuda import (
 from torch.nn.functional import scaled_dot_product_attention
 from torch.utils import _pytree as pytree
 
-
 __all__ = ["AttnBias", "TensorBias", "CausalVariant", "CausalBias"]
 
 
@@ -25,6 +25,7 @@ def _input_requires_grad(*tensors: torch.Tensor) -> bool:
 def _materialize_if_needed(
     bias: "AttnBias", device: Optional[torch.device] = None
 ) -> Union[torch.Tensor, "AttnBias"]:
+    """Materializes the bias if needed, otherwise returns the bias"""
     if bias.needs_materialization():
         return bias.materialize(device)
     return bias
@@ -46,6 +47,16 @@ def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int) -> torch.
     return inpt_tensor
 
 
+def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
+    """
+    For FlashAttention we pad the head dimension to be a multiple of 8 so we need to scale the output
+    by the original head size and not the padded.
+    """
+    if scale is not None:
+        return scale
+    return 1.0 / math.sqrt(head_dim_size)
+
+
 class AttnBias(ABC):
     """Abstract base class for attention biases"""
 
@@ -58,18 +69,18 @@ class AttnBias(ABC):
 
         This method must be implemented by any subclass of AttnBias, tailored to the specific bias representation.
 
-        Parameters:
-        - device: The device on which to materialize the tensor. Defaults to CPU if None is provided.
+        Args:
+            device: The device on which to materialize the tensor. Defaults to CPU if None is provided.
 
         Returns:
-        - torch.Tensor: The materialized bias as a tensor.
+            torch.Tensor: The materialized bias as a tensor.
 
         Raises:
         - NotImplementedError: If not implemented in a subclass.
 
         Note:
-        - Implementers should ensure that the returned tensor is compatible with the expected input format of the
-        scaled_dot_product_attention function, both in type and shape.
+            Implementers should ensure that the returned tensor is compatible with the expected input format of the
+            scaled_dot_product_attention function, both in type and shape.
         """
         raise NotImplementedError("This is an abstract base class")
 
@@ -82,10 +93,10 @@ class AttnBias(ABC):
         requires conversion (materialization) to a tensor form before being used in attention calculations.
 
         Returns:
-        - bool: True if the bias needs to be materialized into a tensor before use; False otherwise.
+            bool: True if the bias needs to be materialized into a tensor before use; False otherwise.
 
         Raises:
-        - NotImplementedError: If not implemented in a subclass.
+            NotImplementedError: If not implemented in a subclass.
         """
         raise NotImplementedError("This is an abstract base class")
 
@@ -100,20 +111,31 @@ class AttnBias(ABC):
         is_causal: bool,
         scale: Optional[float],
     ) -> torch.Tensor:
-        """
+        r"""
         Determine how to compute the scaled dot product attention when the attn_bias may not require materialization.
 
         This method should be implemented in subclasses to define the specific attention computation approach
         when the bias can be used directly without converting it into a tensor. This could involve custom attention
         mechanisms or modifications to the standard scaled dot product attention calculation.
 
-        Parameters: Mirror torch.nn.functional.scaled_dot_product_attention
+        Args:
+            query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+            key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+            value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+            attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+                A boolean mask where a value of True indicates that the element *should* take part in attention.
+                A float mask of the same type as query, key, value that is added to the attention score.
+            dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+            is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
+                are set.
+            scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+                to :math:`\frac{1}{\sqrt{E}}`.
 
         Returns:
-        - torch.Tensor: The result of the attention computation.
+            output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
 
         Raises:
-        - NotImplementedError: If not implemented in a subclass.
+            NotImplementedError: If not implemented in a subclass.
 
         """
         raise NotImplementedError("This is an abstract base class")
@@ -128,11 +150,12 @@ class AttnBias(ABC):
                 "AttnBias only supports scaled_dot_product_attention"
             )
         if _any_need_materialization(args) or _any_need_materialization(kwargs):
+            query_device = args[0].device if args else kwargs["query"].device
             args = pytree.tree_map_only(
-                AttnBias, lambda x: _materialize_if_needed(x), args
+                AttnBias, lambda x: _materialize_if_needed(x, query_device), args  # type: ignore[type-abstract]
             )
             kwargs = pytree.tree_map_only(
-                AttnBias, lambda x: _materialize_if_needed(x), kwargs
+                AttnBias, lambda x: _materialize_if_needed(x, query_device), kwargs  # type: ignore[type-abstract]
             )
             return func(*args, **kwargs)
         # Subclass is expected to have implemented a dispatch method
@@ -165,7 +188,7 @@ class TensorBias(AttnBias):
         to be used in attention calculations.
 
         Returns:
-        - bool: True, indicating the bias is already a tensor.
+            bool: True, indicating the bias is already a tensor.
         """
         return True
 
@@ -186,7 +209,7 @@ class TensorBias(AttnBias):
         any special dispatch logic for attention calculations. This method should never be called for TensorBias.
 
         Raises:
-        - NotImplementedError: Always raised to indicate this method should not be called.
+            NotImplementedError: Always raised to indicate this method should not be called.
         """
         raise NotImplementedError(
             "TensorBias requires materialization, so this should never be called!"
@@ -197,25 +220,28 @@ class TensorBias(AttnBias):
 
 
 class CausalVariant(IntEnum):
-    """
+    r"""
     Enum for causal variants used in attention mechanisms.
 
     Defines two types of causal biases:
 
-    - UPPER_LEFT: Represents upper-left triangular bias for standard causal attention.
-      Example:
-      ```
-      [[1, 0, 0, 0],
-       [1, 1, 0, 0],
-       [1, 1, 1, 0]]
-      ```
-    - LOWER_RIGHT: Represents lower-right triangular bias, typically used in specific attention scenarios.
-      Example:
-      ```
-      [[1, 1, 0, 0],
-       [1, 1, 1, 0],
-       [1, 1, 1, 1]]
-      ```
+    UPPER_LEFT: Represents upper-left triangular bias for standard causal attention.
+    Example::
+
+        [[1, 0, 0, 0],
+         [1, 1, 0, 0],
+         [1, 1, 1, 0]]
+
+
+    LOWER_RIGHT: Represents lower-right triangular bias, the include values are aligned to the lower
+    right corner of the matrix.
+    Example::
+
+        [[1, 1, 0, 0],
+         [1, 1, 1, 0],
+         [1, 1, 1, 1]]
+
+    Note that these variants are equivalent to each other when the sequence lengths of the query and key/value
     """
 
     UPPER_LEFT = auto()
@@ -230,12 +256,15 @@ class CausalBias(AttnBias):
     """
 
     def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
-        """Initializes the CausalBias with the specified variant and sequence lengths.
+        """
+        Initializes the CausalBias instance with a specified variant and sequence lengths.
 
-        Parameters:
-        - variant: The type of causal bias.
-        - seq_len_q: The sequence length of the query.
-        - seq_len_kv: The sequence length of the key/value.
+        Args:
+            variant (CausalVariant): The type of causal bias to use (either UPPER_LEFT or LOWER_RIGHT).
+            seq_len_q (int): The sequence length of the query tensor.
+            seq_len_kv (int): The sequence length of the key/value tensor.
+
+        Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
         assert isinstance(variant, CausalVariant)
         self.variant = variant
@@ -263,6 +292,18 @@ class CausalBias(AttnBias):
         )
 
     def materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
+        """
+        Materializes the causal bias into a tensor form.
+
+        Depending on the variant, this method generates either an upper-left or lower-right
+        triangular matrix to represent the causal bias.
+
+        Args:
+            device (Optional[torch.device]): The device on which to create the tensor. Defaults to CPU.
+
+        Returns:
+            torch.Tensor: The materialized bias tensor.
+        """
         if device is None:
             device = torch.device("cpu")
         if self.variant == CausalVariant.UPPER_LEFT:
@@ -271,6 +312,15 @@ class CausalBias(AttnBias):
             return self._lower_right(device)
 
     def needs_materialization(self) -> bool:
+        """
+        Indicates whether the bias needs materialization.
+
+        For CausalBias, this is always False as the bias is defined procedurally
+        and does not require explicit materialization into a tensor before use.
+
+        Returns:
+            bool: False, indicating no materialization is required.
+        """
         return False
 
     @staticmethod
@@ -283,6 +333,31 @@ class CausalBias(AttnBias):
         is_causal: bool,
         scale: Optional[float] = None,
     ) -> torch.Tensor:
+        r"""
+        Handles the logic for computing attention with the specified causal bias.
+
+        Depending on the configuration, this method either directly computes the attention
+
+        Args:
+            query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+            key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+            value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+            attn_mask (CausalBias): The type of causal attention to apply.
+                A boolean mask where a value of True indicates that the element *should* take part in attention.
+                A float mask of the same type as query, key, value that is added to the attention score.
+            dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+            is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
+                are set.
+            scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+                to :math:`\frac{1}{\sqrt{E}}`.
+
+        Returns:
+            output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
+
+        Raises:
+            ValueError: If the causal bias variant is not a CausalVariant type.
+
+        """
         if is_causal:
             raise ValueError("CausalBias should not be used with causal=True")
 
@@ -304,6 +379,7 @@ class CausalBias(AttnBias):
             if can_use_flash_attention(sdpa_params):
                 needs_padding = query.size(-1) % 8 != 0
                 og_head_size = query.size(-1)
+                og_scale = _calculate_scale(og_head_size, scale)
                 if needs_padding:
                     query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
                     key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
@@ -315,7 +391,7 @@ class CausalBias(AttnBias):
                     dropout_p,
                     is_causal=True,
                     return_debug_mask=False,
-                    scale=scale,
+                    scale=og_scale,
                 )[0]
                 return _postprocess_flash_output(out, og_head_size)
             if can_use_efficient_attention(sdpa_params):
