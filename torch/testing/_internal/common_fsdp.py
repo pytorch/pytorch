@@ -873,7 +873,7 @@ class FSDPTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return torch.cuda.device_count() if torch.cuda.is_available() else 4
+        return min(torch.cuda.device_count(), 8) if torch.cuda.is_available() else 4
 
     @property
     def process_group(self):
