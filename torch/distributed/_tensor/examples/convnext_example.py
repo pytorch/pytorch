@@ -4,7 +4,6 @@ with intermediate activations sharded across mutliple GPUs via DTensor
 """
 import os
 import time
-import warnings
 
 import torch
 import torch.distributed as dist
@@ -18,7 +17,6 @@ from torch.distributed._tensor import (
     Shard,
 )
 
-warnings.filterwarnings("ignore", category=UserWarning)
 
 WORLD_SIZE = 4
 ITER_TIME = 20
