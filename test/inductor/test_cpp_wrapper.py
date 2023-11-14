@@ -379,8 +379,8 @@ if RUN_CUDA:
         test_failures_cuda_wrapper,
     )
 
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
 
-    if RUN_CPU or RUN_CUDA:
-        run_tests(needs="filelock")
+if __name__ == "__main__":
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(skip_asan=True, skip_rocm=True, skip_mac=True)

@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import math
-import sys
-import unittest
 from functools import partial
 
 import torch
@@ -15,8 +13,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -35,15 +31,6 @@ from torch.testing._internal.inductor_utils import (
 CommonTemplate = load_test_module(
     __file__, "inductor.test_torchinductor"
 ).CommonTemplate
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
@@ -435,8 +422,7 @@ class TestInductorDynamic(TestCase):
 instantiate_device_type_tests(TestInductorDynamic, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
-        run_tests(needs="filelock")
+    run_inductor_tests(skip_asan=True)
