@@ -446,6 +446,7 @@ class Module:
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
     _compiled_call_impl : Optional[Callable] = None
+    ___needs_generation_tag_patch: bool  # Set by `install_generation_tagging_init`
 
     def __init__(self, *args, **kwargs) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""

@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 import functools
 import weakref
 
