@@ -40,10 +40,10 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
+    rand_strided,
     same,
     skipIfNotPy311,
     unsupported,
-    rand_strided
 )
 
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
