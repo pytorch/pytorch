@@ -3000,17 +3000,13 @@ def register_meta_foreach(ops):
         aten._foreach_minimum,
         aten._foreach_clamp_min,
         aten._foreach_clamp_max,
-        aten._foreach_addcdiv,
-        aten._foreach_addcmul,
         aten._foreach_lerp,
     ],
 )
 def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
     torch._check(
         isinstance(args[0], list),
-        lambda: (
-            f"The first argument must be List[Tensor], but got {type(self)}."
-        ),
+        lambda: (f"The first argument must be List[Tensor], but got {type(self)}."),
     )
     nelem = len(args[0])
 
@@ -3082,8 +3078,6 @@ def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
         aten._foreach_div_,
         aten._foreach_clamp_min_,
         aten._foreach_clamp_max_,
-        aten._foreach_addcdiv_,
-        aten._foreach_addcmul_,
         aten._foreach_lerp_,
     ]
 )
@@ -3121,6 +3115,67 @@ def _check_foreach_binop_tensor_lists(self, other):
 @register_meta([aten._foreach_copy_])
 def meta__foreach_copy_inplace(self, src, non_blocking=False):
     _check_foreach_binop_tensor_lists(self, src)
+
+
+@register_meta(
+    [
+        aten._foreach_addcdiv.Scalar,
+        aten._foreach_addcmul.Scalar,
+    ]
+)
+def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
+        lambda: (
+            "All arguments must be List[Tensor], "
+            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta([aten._foreach_addcdiv_.Tensor, aten._foreach_addcmul_.Tensor])
+def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2])
+        and isinstance(scalars, torch.Tensor),
+        lambda: (
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], tensor, "
+            f"but got: {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
+@register_meta(
+    [
+        aten._foreach_addcdiv_.Scalar,
+        aten._foreach_addcmul_.Scalar,
+    ]
+)
+def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
+        lambda: (
+            "All arguments of _foreach_addc*_ must be List[Tensor], "
+            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
 
 
 @register_meta([aten._fused_adam_.default])
