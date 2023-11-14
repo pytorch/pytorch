@@ -214,7 +214,7 @@ class PyCodegen:
         assert name in self.code_options["co_varnames"]
         return create_instruction("STORE_FAST", argval=name)
 
-    def create_load_global(self, name, push_null, add=False):
+    def create_load_global(self, name, push_null, add=False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
@@ -295,7 +295,7 @@ class PyCodegen:
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod, push_null):
+    def create_load_python_module(self, mod, push_null) -> Instruction:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
@@ -328,12 +328,13 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def load_import_from(self, module_name, object_name) -> None:
-        self.extend_output(
-            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
-            )
+    def create_load_import_from(self, module_name, object_name) -> List[Instruction]:
+        return AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
+            self
         )
+
+    def load_import_from(self, module_name, object_name) -> None:
+        self.extend_output(self.create_load_import_from(module_name, object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):
