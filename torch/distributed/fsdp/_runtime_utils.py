@@ -885,8 +885,7 @@ def _accumulate_sharded_grad(
     handle: FlatParamHandle,
     sharded_grad: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Accumulate the reduce-scattered sharded gradient with any existing sharded gradient if needed.
+    """Accumulate the reduce-scattered sharded gradient with any existing sharded gradient if needed.
 
     The method returns the gradient to offload (if CPU offloading is enabled).
     """
