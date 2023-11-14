@@ -774,18 +774,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
-  
-  // Reshape output to convert nnz to batch_size and seq_len
-  //attention =
-  //    attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
-  std::cout << "got attention shape and stride before: " << attention.sizes() << " " << attention.strides() << std::endl;
-  // attention = attention.transpose(0, 2);
-  // attention =
-  //  attention.reshape({batch_size, num_heads, max_seqlen_batch_q, head_dim}).transpose(1,2);
-  std::cout << "got attention shape and stride after: " << attention.sizes() << " " << attention.strides() << std::endl;
-  //// TODO(eqy): why does cuDNN return S, B, H, D layout?
-  //// We have B, H, S, D, want contiguous B, S, H, D
-  //attention = attention.transpose(1, 2).contiguous().transpose(1, 2); // thanks Gautam!
+
   return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
 

@@ -159,30 +159,10 @@ auto build_graph_and_tensors(int64_t b,
         .set_intermediate_data_type(fe::DataType_t::FLOAT)
         .set_compute_data_type(fe::DataType_t::FLOAT);
 
-    //std::vector<int64_t> q_dim;
-    //std::vector<int64_t> q_stride;
-    //std::vector<int64_t> k_dim;
-    //std::vector<int64_t> k_stride;
-    //std::vector<int64_t> v_dim;
-    //std::vector<int64_t> v_stride;
-    //q_dim.assign(q.sizes().data(), q.sizes().data() + q.sizes().size());
-    //q_stride.assign(q.strides().data(), q.strides().data() + q.strides().size());
-    //k_dim.assign(k.sizes().data(), k.sizes().data() + k.sizes().size());
-    //k_stride.assign(k.strides().data(), k.strides().data() + k.strides().size());
-    //v_dim.assign(v.sizes().data(), v.sizes().data() + v.sizes().size());
-    //v_stride.assign(v.strides().data(), v.strides().data() + v.strides().size());
-    //std::cout << q.sizes() << q.strides() << k.sizes() << k.strides() << v.sizes() << v.strides() << std::endl;
     auto Q = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("Q")
                                   .set_dim(std::vector<int64_t>(params.q_dim, params.q_dim+MAX_MHA_DIM))
                                   .set_stride(std::vector<int64_t>(params.q_stride, params.q_stride+MAX_MHA_DIM)));
-    //std::cout << "q stride: " << q.strides() << std::endl;
-    //for (auto it = q_stride.begin(); it != q_stride.end(); it++) std::cout << *it << std::endl;
-    //std::cout << "k stride: " << k.strides() << std::endl;
-    //for (auto it = k_stride.begin(); it != k_stride.end(); it++) std::cout << *it << std::endl;
-    //std::cout << "v stride: " << v.strides() << std::endl;
-    //for (auto it = v_stride.begin(); it != v_stride.end(); it++) std::cout << *it << std::endl;
-
     auto K = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("K")
                                   .set_dim(std::vector<int64_t>(params.k_dim, params.k_dim+MAX_MHA_DIM))
@@ -241,12 +221,6 @@ auto build_graph_and_tensors(int64_t b,
 
 
     auto [O, Stats] = mha_graph->scaled_dot_product_flash_attention(Q, K, V, scaled_dot_product_flash_attention_options);
-
-    //O->set_output(true).set_stride({h * d, d, b * h * d, 1});
-    // std::vector<int64_t> o_stride;
-    // o_stride.assign(o.strides().data(), o.strides().data() + o.strides().size());
-    // std::cout << "out stride set: " << h*d << " " << d << " " << b * h * d << " " << 1 << std::endl;
-    //std::cout << "tensor stride: " << o.strides() << std::endl;
     O->set_output(true).set_stride(std::vector<int64_t>(o.strides().data(), o.strides().data() + o.strides().size()));
 
     // Check that Stats tensor is real, which is only when its training step
@@ -284,22 +258,19 @@ run_cudnn_LLM_fprop(int64_t b,
                     Tensor& o,
                     Tensor& dropoutseed,
                     Tensor& dropoutoffset) {
-    std::cout << "running cuDNN" << std::endl;
     cudnnHandle_t handle = getCudnnHandle();
     o = at::empty_strided({b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());
     if (return_softmaxstats) {
       // TODO(eqy): fix strides
-      softmaxstats = at::empty({b, h, s_q}, q.options());
+      softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
     }
     
     auto key = MHACacheKeyWrapper(b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, return_softmaxstats);
     auto graph_and_tensors_ptr = mhagraphcache.find(key);
     graph_and_tensors graph_and_tensors_values;
     if (graph_and_tensors_ptr) {
-        std::cout << "cache hit" << std::endl;
         graph_and_tensors_values = *graph_and_tensors_ptr;
     } else {
-        std::cout << "cache miss" << std::endl;
         graph_and_tensors_values = build_graph_and_tensors(b,
                                  h,
                                  s_q,
