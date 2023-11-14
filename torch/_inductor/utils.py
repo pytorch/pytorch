@@ -233,7 +233,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
