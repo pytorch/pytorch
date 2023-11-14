@@ -409,18 +409,7 @@ or file a github issue."""
                     if isinstance(arg, torch.Tensor) and not isinstance(
                         arg, torch._subclasses.FakeTensor
                     ):
-                        # See Note - [On fake tensor policy and fresh fake modes for backends]
-                        if arg in fake_mode.policy_cache:
-                            policy = fake_mode.policy_cache[arg]
-                            new_args.append(
-                                fake_mode.from_tensor(
-                                    arg,
-                                    ignore_subclass=policy.ignore_subclass,
-                                    source=policy.source,
-                                )
-                            )
-                        else:
-                            new_args.append(fake_mode.from_tensor(arg))
+                        new_args.append(fake_mode.from_tensor(arg))
                     else:
                         new_args.append(arg)
 
