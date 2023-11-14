@@ -846,6 +846,8 @@ class DistributedTest:
                 new_backend = "nccl"
             elif BACKEND == "nccl":
                 new_backend = "gloo"
+            elif BACKEND == "ucc":
+                new_backend = "ucc"
             elif BACKEND in DistTestCases.backend_feature["plugin"]:
                 new_backend = "gloo"
 
