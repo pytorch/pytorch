@@ -2294,6 +2294,7 @@ Tensor binary_cross_entropy_double_backward_target(
   if (isDefined(weight)) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     res = isTensorSubclassLike(weight.value())
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         ? res.mul(weight.value())
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         : res.mul_(weight.value());
