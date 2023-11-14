@@ -2106,8 +2106,8 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
     P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
 
 .. note::
-  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`{1, 2, ...}`, whereas 
-  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success hence draws samples in :math:`{0, 1, ...}`.
+  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`, whereas 
+  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success hence draws samples in :math:`\{0, 1, \ldots\}`.
 """,
 )
 
