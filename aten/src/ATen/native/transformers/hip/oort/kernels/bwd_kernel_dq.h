@@ -5,7 +5,9 @@ namespace oort {
 
 template<int32_t BLOCK_M,
          int32_t BLOCK_DMODEL,
-         int32_t BLOCK_N>
+         int32_t BLOCK_N,
+         bool CAUSAL,
+         bool ENABLE_DROPOUT>
 struct bwd_kernel_dq {
 
  hipError_t operator()(dim3 grid, dim3 block, const __fp16* Q,
@@ -32,7 +34,10 @@ struct bwd_kernel_dq {
                        uint64_t Z,
                        uint64_t H,
                        uint64_t seqlen_q,
-                       uint64_t seqlen_k, hipStream_t stream);
+                       uint64_t seqlen_k,
+                       float dropout_p,
+                       uint64_t philox_seed,
+                       uint32_t philox_offset_base, hipStream_t stream);
 
  hipError_t operator()(dim3 grid, dim3 block, const __bf16* Q,
                        const __bf16* K,
@@ -58,14 +63,34 @@ struct bwd_kernel_dq {
                        uint64_t Z,
                        uint64_t H,
                        uint64_t seqlen_q,
-                       uint64_t seqlen_k, hipStream_t stream);
+                       uint64_t seqlen_k,
+                       float dropout_p,
+                       uint64_t philox_seed,
+                       uint32_t philox_offset_base, hipStream_t stream);
 
 };
 
 
-template struct bwd_kernel_dq<32 /* BLOCK_M */,
+template struct bwd_kernel_dq<16 /* BLOCK_M */,
                               16 /* BLOCK_DMODEL */,
-                              16 /* BLOCK_N */>;
+                              16 /* BLOCK_N */,
+                              true /* CAUSAL */,
+                              false /* ENABLE_DROPOUT */>;
+template struct bwd_kernel_dq<16 /* BLOCK_M */,
+                              16 /* BLOCK_DMODEL */,
+                              16 /* BLOCK_N */,
+                              false /* CAUSAL */,
+                              true /* ENABLE_DROPOUT */>;
+template struct bwd_kernel_dq<16 /* BLOCK_M */,
+                              16 /* BLOCK_DMODEL */,
+                              16 /* BLOCK_N */,
+                              false /* CAUSAL */,
+                              false /* ENABLE_DROPOUT */>;
+template struct bwd_kernel_dq<16 /* BLOCK_M */,
+                              16 /* BLOCK_DMODEL */,
+                              16 /* BLOCK_N */,
+                              true /* CAUSAL */,
+                              true /* ENABLE_DROPOUT */>;
 }; // namespace oort
 
 #endif
