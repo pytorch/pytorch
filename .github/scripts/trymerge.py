@@ -25,12 +25,17 @@ from warnings import warn
 
 import yaml
 from github_utils import (
+    gh_check_write_access,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+<<<<<<< HEAD
     gh_rerequest_pr_reviewers,
+=======
+    gh_request_pr_reviewers,
+>>>>>>> 389459ca82c (Rerequest reviewers on pr closing)
     gh_update_pr_state,
     GitHubComment,
 )
@@ -1806,7 +1811,15 @@ def try_revert(
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
         gh_update_pr_state(pr.org, pr.project, pr.pr_num)
+<<<<<<< HEAD
         gh_rerequest_pr_reviewers(pr.org, pr.project, pr.pr_num)
+=======
+        reviewers = pr.get_approved_by()
+        for author in pr.get_authors().keys():
+            if not gh_check_write_access(pr.org, pr.project, author):
+                gh_request_pr_reviewers(pr.org, pr.project, pr.pr_num, reviewers)
+                break
+>>>>>>> 389459ca82c (Rerequest reviewers on pr closing)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
