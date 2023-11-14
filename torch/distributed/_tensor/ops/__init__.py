@@ -7,4 +7,4 @@ from .pointwise_ops import *  # noqa: F403
 from .random_ops import *  # noqa: F403
 from .view_ops import *  # noqa: F403
 from .conv_ops import *  # noqa: F403
-from .other_ops import *  # noqa: F403
+from .experimental_ops import *  # noqa: F403
