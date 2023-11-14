@@ -1,19 +1,11 @@
 # Owner(s): ["module: inductor"]
-import functools
+import sys
 import unittest
 
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import (
-    IS_JETSON,
-    IS_MACOS,
-    skipIfRocm,
-    TEST_WITH_ASAN,
-)
-from torch.utils._triton import has_triton
-
-_HAS_TRITON = has_triton()
-requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
+from torch.testing._internal.common_utils import IS_JETSON, skipIfRocm
+from torch.testing._internal.inductor_utils import requires_cuda
 
 
 # These minifier tests are slow, because they must be run in separate
@@ -45,12 +37,10 @@ inner(torch.randn(2, 2).to("{device}"))
 
 
 if __name__ == "__main__":
-    import sys
-
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
     # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
     # also skip on Py 3.11+ since unhandled exceptions can cause segfaults
-    if not IS_MACOS and not TEST_WITH_ASAN and sys.version_info < (3, 11):
-        run_tests()
+    if sys.version_info < (3, 11):
+        run_inductor_tests(skip_mac=True, skip_asan=True)

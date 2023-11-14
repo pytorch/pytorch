@@ -37,14 +37,8 @@ install_conda_dependencies() {
 
 install_pip_dependencies() {
   pushd executorch/.ci/docker
-
   # Install all Python dependencies
   pip_install -r requirements-ci.txt
-  # NB: Just need to install the stable version of these domain libraries here
-  # so that we can install executorch.  They will need to be recompiled later
-  # together with torch
-  pip_install torchvision torchaudio
-
   popd
 }
 
@@ -54,7 +48,7 @@ setup_executorch() {
 
   install_flatc_from_source
   pip_install .
-  build_executorch_runner "buck2"
+  build_executorch_runner "cmake"
 
   # Make sure that all the newly generate files are owned by Jenkins
   chown -R jenkins .
