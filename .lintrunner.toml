@@ -48,6 +48,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.10.0',
     'pyflakes==3.0.1',
+    'torchfix==0.1.1',
 ]
 
 
