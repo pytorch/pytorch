@@ -387,16 +387,26 @@ def _do_annotate_conv_bn(
     gm.recompile()
 
     matches = []
-    for conv_fn, example_inputs in [
+    combinations = [
         (F.conv1d, _conv1d_bn_example_inputs),
         (F.conv2d, _conv2d_bn_example_inputs),
-    ]:
-        pattern = get_aten_graph_module(get_pattern(conv_fn), example_inputs)
+    ]
+
+    # Add cuda dimension
+    new_combinations = [(x, y, False) for (x, y) in combinations]
+    if torch.cuda.is_available():
+        new_combinations.extend([(x, y, True) for (x, y) in combinations])
+    combinations = new_combinations
+
+    # Match against all conv dimensions and cuda variants
+    for conv_fn, example_inputs, is_cuda in combinations:
+        pattern = get_aten_graph_module(get_pattern(conv_fn), example_inputs, is_cuda)
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
         matches.extend(matcher.match(gm.graph))
 
+    # Annotate nodes returned in the matches
     annotated_partitions = []
     for match in matches:
         name_node_map = match.name_node_map
