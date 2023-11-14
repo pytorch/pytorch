@@ -1254,21 +1254,20 @@ def get_guard_fail_reason(
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason : Any = False
+            fail_reason: Any = False
             try:
                 fail_reason = eval(part, global_scope, scope)
             except Exception as e:
-                if not config.report_all_guard_failure_parts:
+                if not config.report_all_guard_failure_checks:
                     raise
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
 
-        fail_reason_
         if isinstance(fail_reason, bool) and not fail_reason:
             fail_reason = part
         if isinstance(fail_reason, str):
             reasons.append(fail_reason)
-            if not config.report_all_guard_failure_parts:
+            if not config.report_all_guard_failure_checks:
                 break
 
     reason_str = "\n".join(reasons)
@@ -1313,7 +1312,7 @@ def get_and_maybe_log_recompilation_reason(
     )
 
     if do_recompiles_log or config.error_on_recompile:
-        if config.report_all_guard_failure_parts:
+        if config.report_all_guard_failure_checks:
             failures = "\n\n".join(
                 f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
                 for i, reason in enumerate(reasons)

@@ -231,7 +231,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
         )
 
     @torch._dynamo.config.patch("cache_size_limit", 32)
-    @torch._dynamo.config.patch("report_all_guard_failure_parts", True)
+    @torch._dynamo.config.patch("report_all_guard_failure_checks", True)
     def test_multiple_guard_fails_report_all(self):
         failure_reasons = []
 
