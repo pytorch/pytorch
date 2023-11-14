@@ -244,11 +244,11 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  
+
   if (N > num_threads) {
     Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
     scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-    
+
     // compute mean per input
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
       int tid = at::get_thread_num();
@@ -265,7 +265,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
             n_channel);
       }
     });
-  
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t sum = 0;
@@ -276,7 +276,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         mean_data[c] = mean;
       }
     });
-    
+
     // compute variance per input, reuse the immediate buffer
     buffer.zero_();
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
@@ -294,7 +294,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
             n_channel);
       }
     });
-  
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t _var_sum = 0;
@@ -315,7 +315,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         mean_data[c] = mean;
       }
     });
-    
+
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t _var_sum = 0;
