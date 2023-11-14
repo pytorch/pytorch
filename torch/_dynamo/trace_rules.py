@@ -121,8 +121,6 @@ def load_object(name):
     else:
         assert len(x) == 1, f"Invalid obj name {name}"
         val = _load_obj_from_str(x[0])
-    if hasattr(val, "__wrapped__") and val is not torch.ops:
-        val = val.__wrapped__
     return val
 
 
@@ -185,7 +183,9 @@ def lookup(obj):
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
     if hasattr(obj, "__wrapped__"):
-        obj = obj.__wrapped__
+        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
+        if not (hasattr(obj, "__qualname__") and obj.__qualname__.startswith("_VariableFunctionsClass")):
+            obj = obj.__wrapped__
     rule = get_torch_obj_rule_map().get(obj, None)
     if rule is None and is_in_graph_function(obj):
         return TorchInGraphFunctionVariable
