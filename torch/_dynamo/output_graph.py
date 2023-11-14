@@ -1031,6 +1031,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=parent_fake_mode.shape_env,
             parent=parent_fake_mode,
         )
+        # Dynamo maintains two fake modes - an immutable fake mode which acts as the "parent"
+        # fake mode and is the source of truth for initial memoizations. We can dynamically
+        # swap fake modes as needed, so that the fake mode use by backends is "fresh".
+        # A fresh fake mode means fresh fake tensors, which, for backends ensures that
+        # tensors match their original metadata at the start of trace, as opposed to their metadata
+        # at the end of trace.
         with self.restore_global_state(), self.tracing_context.with_fake_mode(
             backend_fake_mode
         ):
