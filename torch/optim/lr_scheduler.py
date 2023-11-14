@@ -1272,10 +1272,10 @@ class CyclicLR(LRScheduler):
                 raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
 
             self.use_beta1 = 'betas' in self.optimizer.defaults
-            base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
-            max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            self.base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
+            self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             if last_epoch == -1:
-                for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
+                for m_momentum, b_momentum, group in zip(self.max_momentums, self.base_momentums, optimizer.param_groups):
                     if self.use_beta1:
                         group['betas'] = (m_momentum, *group['betas'][1:])
                     else:
