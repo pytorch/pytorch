@@ -1,6 +1,7 @@
 import contextlib
 import os
 import pathlib
+import sys
 import time
 from subprocess import CalledProcessError
 
@@ -14,6 +15,11 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_X86,
+    IS_WINDOWS,
+    IS_CI,
+    TEST_WITH_ASAN,
+    TEST_CUDA_GRAPH,
+    TEST_WITH_ROCM,
 )
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
@@ -28,6 +34,9 @@ from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from typing import Tuple
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
+from torch._inductor.utils import is_big_gpu
+
 
 def test_cpu():
     try:
@@ -41,13 +50,25 @@ def test_cpu():
     ):
         return False
 
-HAS_CPU = LazyVal(test_cpu)
+def gpu_is_old():
+    if has_triton() and torch.cuda.is_available() and not TEST_WITH_ROCM:
+        device_props = torch.cuda.get_device_properties(0)
+        # some of our CI machines use M60's which can't run Triton
+        if device_props.major < 7:
+            return True
+    return False
 
-HAS_CUDA = has_triton()
+
+HAS_CPU = LazyVal(test_cpu)
+HAS_CUDA = has_triton() and not gpu_is_old()
+
+
+
 
 @register_backend
 def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -91,7 +112,11 @@ requires_multigpu = functools.partial(
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
+skip_if_mac = functools.partial(
+    unittest.skipIf, IS_MACOS, "Does not work on Mac"
+)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -99,8 +124,9 @@ class TestFailure:
     is_skip: bool = False
     __test__: bool = False
 
+
 def copy_tests(
-        my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
+    my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
 ):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
@@ -146,7 +172,6 @@ def clone_preserve_strides(x, device=None):
     return out
 
 
-
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
         args = pytree.arg_tree_leaves(*args, **kwargs)
@@ -171,22 +196,22 @@ def compute_grads(args, kwrags, results, grads):
 
 
 def check_model(
-        self: TestCase,
-        model,
-        example_inputs,
-        kwargs=None,
-        *,
-        atol=None,
-        rtol=None,
-        check_lowp=True,
-        exact_dtype=True,
-        nopython=True,
-        copy_to_cuda=True,
-        reference_in_float=True,
-        assert_equal=True,
-        check_gradient=False,
-        check_has_compiled=True,
-        output_process_fn_grad=lambda x: x,
+    self: TestCase,
+    model,
+    example_inputs,
+    kwargs=None,
+    *,
+    atol=None,
+    rtol=None,
+    check_lowp=True,
+    exact_dtype=True,
+    nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
+    check_gradient=False,
+    check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -201,7 +226,7 @@ def check_model(
         def upcast_fn(x):
             nonlocal has_lowp_args
             if isinstance(x, torch.Tensor) and (
-                    x.dtype == torch.float16 or x.dtype == torch.bfloat16
+                x.dtype == torch.float16 or x.dtype == torch.bfloat16
             ):
                 has_lowp_args = True
                 return x.float()
@@ -350,22 +375,22 @@ def check_model(
 
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_cuda(
-        self: TestCase,
-        model,
-        example_inputs,
-        kwargs=None,
-        *,
-        atol=None,
-        rtol=None,
-        check_lowp=True,
-        exact_dtype=True,
-        nopython=True,
-        copy_to_cuda=True,
-        reference_in_float=True,
-        assert_equal=True,
-        check_gradient=False,
-        check_has_compiled=True,
-        output_process_fn_grad=lambda x: x,
+    self: TestCase,
+    model,
+    example_inputs,
+    kwargs=None,
+    *,
+    atol=None,
+    rtol=None,
+    check_lowp=True,
+    exact_dtype=True,
+    nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
+    check_gradient=False,
+    check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -421,6 +446,8 @@ def check_model_cuda(
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
         )
+
+
 def run_and_get_cpp_code(fn, *args, **kwargs):
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
@@ -442,6 +469,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
     return result, s
+
 
 class TestCase(TorchTestCase):
     @classmethod
@@ -478,6 +506,8 @@ class TestCase(TorchTestCase):
         if os.environ.get("ERROR_ON_SLOW") == "1":
             elapsed = time.perf_counter() - self._start
             assert elapsed < 120
+
+
 class ToTuple(torch.nn.Module):
     def forward(self, x):
         return (x,)
@@ -494,3 +524,56 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
 def filesize(filename: pathlib.Path):
     assert filename.exists(), f"{filename} is missing"
     return os.stat(filename).st_size
+
+
+def run_inductor_tests(
+    *,
+    skip_rocm=False,
+    skip_asan=False,
+    nvcc=False,
+    cudagraphs=False,
+    mkl=False,
+    skip_fbcode=False,
+    skip_mac=False,
+    triton=False,
+    big_gpu=False,
+):
+    if IS_WINDOWS and IS_CI:
+        sys.stderr.write(
+            "Windows CI does not have necessary dependencies for inductor yet\n"
+        )
+        return
+    if not (HAS_CPU or HAS_CUDA):
+        sys.stderr.write("Missing both CPU compiler and Triton compiler\n")
+        return
+    if skip_rocm and TEST_WITH_ROCM:
+        sys.stderr.write("Skipping due to rocm\n")
+        return
+    if skip_asan and TEST_WITH_ASAN:
+        sys.stderr.write("Skipping due to asan\n")
+        return
+    if nvcc and not nvcc_exist():
+        sys.stderr.write("Skipping due to nvcc\n")
+        return
+    if cudagraphs and not TEST_CUDA_GRAPH:
+        sys.stderr.write("Skipping due to cudagraphs\n")
+        return
+    if mkl and not torch.backends.mkldnn.is_available():
+        sys.stderr.write("Skipping due to mkl\n")
+        return
+    if skip_fbcode and IS_FBCODE:
+        sys.stderr.write("Skipping due to fbcode\n")
+        return
+    if skip_mac and IS_MACOS:
+        sys.stderr.write("Skipping due to mac\n")
+        return
+    if (triton or big_gpu) and not HAS_CUDA:
+        sys.stderr.write("Skipping due to triton\n")
+        return
+    if big_gpu and not is_big_gpu(0):
+        sys.stderr.write("Skipping due to is_big_gpu\n")
+        return
+
+    from torch._dynamo.test_case import run_tests
+
+    return run_tests(("filelock", "sympy"))
