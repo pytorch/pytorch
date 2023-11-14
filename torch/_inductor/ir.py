@@ -70,7 +70,6 @@ from .utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
-    try_find_schema,
 )
 from .virtualized import ops, V
 
@@ -3379,14 +3378,6 @@ class ExternKernel(InputsKernel):
         _, schemas = get_signature_for_torch_op(kernel, return_schemas=True)
 
         schema = None
-        # For cpp wrapper, when kwargs is not empty, for OpOverloadPacket kernel, we need to
-        # know the exact overload schema to handle the kwargs properly when calling the cpp kernel.
-        if (
-            V.graph.cpp_wrapper
-            and kwargs
-            and isinstance(kernel, torch._ops.OpOverloadPacket)
-        ):
-            schema = try_find_schema(schemas, args, kwargs)
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
