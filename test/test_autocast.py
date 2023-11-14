@@ -4,6 +4,7 @@ import collections
 import unittest
 
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -224,6 +225,33 @@ class TestAutocastGPU(TestCase):
 
         finally:
             torch._C._set_cached_tensors_enabled(False)
+
+
+    def test_cache_disabled_on_no_grad(self):
+        class RecycledLinear(nn.Module):
+            def __init__(self, no_cycles):
+                super().__init__()
+
+                self.no_cycles = no_cycles
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, inp):
+                out = inp
+                # Run the model no_cycles times, enabling grad only on the last iteration
+                for i in range(self.no_cycles):
+                    with torch.set_grad_enabled(i == (self.no_cycles - 1)):
+                        out = self.linear(out)
+
+                return out
+
+        no_cycles = 2
+        x = torch.rand(10, 10, requires_grad=False).cuda()
+        model = RecycledLinear(no_cycles).cuda()
+
+        with torch.cuda.amp.autocast():
+            out = model(x)
+
+        self.assertTrue(out.requires_grad)
 
 
 class TestTorchAutocast(TestCase):

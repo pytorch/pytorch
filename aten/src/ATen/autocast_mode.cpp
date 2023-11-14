@@ -203,6 +203,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
+                         c10::GradMode::is_enabled() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled &&
                          !at::caching::is_cached_tensor(arg));
 
