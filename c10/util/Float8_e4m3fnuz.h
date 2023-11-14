@@ -49,12 +49,17 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+#if defined(__CUDA__) || defined(__HIP__)
 C10_HOST_DEVICE C10_API inline float fp8e4m3fnuz_to_fp32_value(uint8_t) {
-  assert(false); // e4m3fnuz is not supported by CUDA or HIP.
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+  // TORCH_INTERNAL_ASSERT is not supported on a device
+  assert(false);
+#else
+  TORCH_INTERNAL_ASSERT(false, "e4m3fnuz is not supported by CUDA or HIP");
+#endif
 }
 #else
-C10_HOST C10_API float fp8e4m3fnuz_to_fp32_value(uint8_t input);
+C10_API float fp8e4m3fnuz_to_fp32_value(uint8_t input);
 #endif
 
 /*
