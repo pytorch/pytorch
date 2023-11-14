@@ -65,7 +65,7 @@ class MultiKernelState:
     def call{idx}(need_clone_args=False):
         args = [{', '.join(get_kernel_argdefs(kernels[idx]))}]
         if need_clone_args:
-            args = multi_kernel_call.kernels[{idx}].clone_args(*args)
+            args, _ = multi_kernel_call.kernels[{idx}].clone_args(*args)
         multi_kernel_call.kernels[{idx}].run(*args, {', '.join(get_numel_argdefs(kernels[idx]))}, grid=grid, stream=stream)
         """.format(
                     idx

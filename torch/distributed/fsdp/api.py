@@ -274,43 +274,52 @@ class StateDictType(Enum):
 @dataclass
 class StateDictConfig:
     """
-    ``StateDictConfig`` is the base class for all state_dict configuration classes.
-    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
-    order to configure settings for the particular type of ``state_dict``
-    implementation FSDP will use.
+    ``StateDictConfig`` is the base class for all ``state_dict`` configuration
+    classes. Users should instantiate a child class (e.g.
+    ``FullStateDictConfig``) in order to configure settings for the
+    corresponding ``state_dict`` type supported by FSDP.
+
+    Attributes:
+        offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict
+            values to CPU, and if ``False``, then FSDP keeps them on GPU.
+            (Default: ``False``)
     """
 
     offload_to_cpu: bool = False
-    use_dtensor: bool = False
 
 
 @dataclass
 class FullStateDictConfig(StateDictConfig):
     """
     ``FullStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
-    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
-    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
-    rank 0 only. When used, it is recommended to enable both of these flags
-    together to optimize memory savings when taking checkpoints. Note that
-    this config class is meant for user via the :func:`state_dict_type`
-    context manager as follows:
+    ``StateDictType.FULL_STATE_DICT``. We recommend enabling both
+    ``offload_to_cpu=True`` and ``rank0_only=True`` when saving full state
+    dicts to save GPU memory and CPU memory, respectively. This config class
+    is meant to be used via the :func:`state_dict_type` context manager as
+    follows:
+
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> fsdp = FSDP(model, auto_wrap_policy=...)
         >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>> with FSDP.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
         >>>     state = fsdp.state_dict()
-        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>>     # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
         >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
         >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
         >>> if dist.get_rank() == 0:
         >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
         >>>     state_dict = torch.load("my_checkpoint.pt")
         >>>     model.load_state_dict(state_dict)
-        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
+        >>> # All ranks initialize FSDP module as usual. `sync_module_states` argument
         >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
+
+    Attributes:
+        rank0_only (bool): If ``True``, then only rank 0 saves the full state
+            dict, and nonzero ranks save an empty dict. If ``False``, then all
+            ranks save the full state dict. (Default: ``False``)
     """
 
     rank0_only: bool = False
@@ -323,25 +332,50 @@ class LocalStateDictConfig(StateDictConfig):
 
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
-    pass
+    """
+    ``ShardedStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.SHARDED_STATE_DICT``.
+
+    Attributes:
+        _use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
+
+    .. warning:: ``_use_dtensor`` is a private field of :class:`ShardedStateDictConfig`
+      and it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify ``_use_dtensor``.
+    """
+
+    _use_dtensor: bool = False
 
 
 @dataclass
 class OptimStateDictConfig:
     """
-    ``OptimStateDictConfig`` is the base class for all optimizer state_dict
-    configuration classes.  Users should instantiate a child version
-    (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
-    particular type of ``optim_state_dict`` implementation FSDP will use.
+    ``OptimStateDictConfig`` is the base class for all ``optim_state_dict``
+    configuration classes.  Users should instantiate a child class (e.g.
+    ``FullOptimStateDictConfig``) in order to configure settings for the
+    corresponding ``optim_state_dict`` type supported by FSDP.
+
+    Attributes:
+        offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict's
+            tensor values to CPU, and if ``False``, then FSDP keeps them on the
+            original device (which is GPU unless parameter CPU offloading is
+            enabled). (Default: ``True``)
     """
 
-    # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
-    use_dtensor: bool = False
 
 
 @dataclass
 class FullOptimStateDictConfig(OptimStateDictConfig):
+    """
+    Attributes:
+        rank0_only (bool): If ``True``, then only rank 0 saves the full state
+            dict, and nonzero ranks save an empty dict. If ``False``, then all
+            ranks save the full state dict. (Default: ``False``)
+    """
+
     rank0_only: bool = False
 
 
@@ -352,7 +386,21 @@ class LocalOptimStateDictConfig(OptimStateDictConfig):
 
 @dataclass
 class ShardedOptimStateDictConfig(OptimStateDictConfig):
-    pass
+    """
+    ``ShardedOptimStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.SHARDED_STATE_DICT``.
+
+    Attributes:
+        _use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
+
+    .. warning:: ``_use_dtensor`` is a private field of :class:`ShardedOptimStateDictConfig`
+      and it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify ``_use_dtensor``.
+    """
+
+    _use_dtensor: bool = False
 
 
 @dataclass

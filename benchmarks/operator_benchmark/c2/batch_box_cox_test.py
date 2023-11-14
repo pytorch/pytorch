@@ -1,7 +1,8 @@
 import benchmark_caffe2 as op_bench_c2
-import operator_benchmark as op_bench
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
 from caffe2.python import core
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for BatchBoxCox operator."""
@@ -33,7 +34,9 @@ class BatchBoxCoxBenchmark(op_bench_c2.Caffe2BenchmarkBase):
         self.set_module_name("batch_box_cox")
 
     def forward(self):
-        op = core.CreateOperator("BatchBoxCox", [self.data, self.lambda1, self.lambda2], self.output)
+        op = core.CreateOperator(
+            "BatchBoxCox", [self.data, self.lambda1, self.lambda2], self.output
+        )
         return op
 
 

@@ -120,15 +120,31 @@ IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     TypeResolver type_resolver,
     c10::ArrayRef<at::Tensor> tensor_table,
-    c10::TypePtr (*type_parser)(const std::string&)) {
+    c10::TypePtr (*type_parser)(const std::string&),
+    ObjLoader obj_loader) {
   Unpickler unpickler(
-      std::move(reader), std::move(type_resolver), tensor_table, type_parser);
+      std::move(reader),
+      std::move(type_resolver),
+      tensor_table,
+      std::move(obj_loader),
+      type_parser);
   return unpickler.parse_ivalue();
 }
 
 IValue unpickle(
     const char* data,
     size_t size,
+    TypeResolver type_resolver,
+    c10::ArrayRef<at::Tensor> tensor_table,
+    c10::TypePtr (*type_parser)(const std::string&)) {
+  return unpickle(
+      data, size, nullptr, std::move(type_resolver), tensor_table, type_parser);
+}
+
+IValue unpickle(
+    const char* data,
+    size_t size,
+    ObjLoader obj_loader,
     TypeResolver type_resolver,
     c10::ArrayRef<at::Tensor> tensor_table,
     c10::TypePtr (*type_parser)(const std::string&)) {
@@ -147,7 +163,8 @@ IValue unpickle(
       },
       std::move(type_resolver),
       tensor_table,
-      type_parser);
+      type_parser,
+      std::move(obj_loader));
 }
 
 } // namespace torch::jit

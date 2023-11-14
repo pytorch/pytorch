@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <torch/csrc/utils/memory.h>
-
 #include <c10/util/Optional.h>
 
 struct TestValue {
@@ -13,7 +11,7 @@ struct TestValue {
 };
 
 TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
-  auto ptr = torch::make_unique<TestValue>(123);
+  auto ptr = std::make_unique<TestValue>(123);
   ASSERT_FALSE(ptr->lvalue_.has_value());
   ASSERT_TRUE(ptr->rvalue_.has_value());
   ASSERT_EQ(*ptr->rvalue_, 123);
@@ -21,7 +19,7 @@ TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
 
 TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
   int x = 5;
-  auto ptr = torch::make_unique<TestValue>(x);
+  auto ptr = std::make_unique<TestValue>(x);
   ASSERT_TRUE(ptr->lvalue_.has_value());
   ASSERT_EQ(*ptr->lvalue_, 5);
   ASSERT_FALSE(ptr->rvalue_.has_value());
@@ -29,7 +27,7 @@ TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
 
 TEST(MakeUniqueTest, CanConstructUniquePtrOfArray) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  auto ptr = torch::make_unique<int[]>(3);
+  auto ptr = std::make_unique<int[]>(3);
   // Value initialization is required by the standard.
   ASSERT_EQ(ptr[0], 0);
   ASSERT_EQ(ptr[1], 0);

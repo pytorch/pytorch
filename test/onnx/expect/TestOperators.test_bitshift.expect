@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::BitShift_7"
-    name: "Constant_0"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,7 +19,7 @@ graph {
     input: "onnx::BitShift_0"
     input: "onnx::BitShift_7"
     output: "3"
-    name: "BitShift_1"
+    name: "BitShift_3"
     op_type: "BitShift"
     attribute {
       name: "direction"
@@ -29,7 +29,7 @@ graph {
   }
   node {
     output: "onnx::BitShift_8"
-    name: "Constant_2"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -44,7 +44,7 @@ graph {
     input: "onnx::BitShift_0"
     input: "onnx::BitShift_8"
     output: "6"
-    name: "BitShift_3"
+    name: "BitShift_5"
     op_type: "BitShift"
     attribute {
       name: "direction"
@@ -52,7 +52,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::BitShift_0"
     type {

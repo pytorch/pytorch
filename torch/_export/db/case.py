@@ -6,7 +6,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
-from torch._dynamo.eval_frame import Constraint
 
 _TAGS: Dict[str, Dict[str, Any]] = {
     "torch": {
@@ -14,6 +13,9 @@ _TAGS: Dict[str, Dict[str, Any]] = {
         "dynamic-shape": {},
         "escape-hatch": {},
         "map": {},
+        "dynamic-value": {},
+        "operator": {},
+        "mutation": {},
     },
     "python": {
         "assert": {},
@@ -23,6 +25,7 @@ _TAGS: Dict[str, Dict[str, Any]] = {
         "control-flow": {},
         "data-structure": {},
         "standard-library": {},
+        "object-model": {},
     },
 }
 
@@ -78,7 +81,7 @@ class ExportCase:
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
     tags: Set[str] = field(default_factory=lambda: set())
     support_level: SupportLevel = SupportLevel.SUPPORTED
-    constraints: List[Constraint] = field(default_factory=lambda: [])
+    dynamic_shapes: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         check_inputs_type(self.example_inputs)

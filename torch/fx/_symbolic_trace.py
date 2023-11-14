@@ -98,6 +98,10 @@ class ProxyableClassMeta(type):
     def __call__(cls, *args, **kwargs):
         instance = cls.__new__(cls)  # type: ignore[call-overload]
 
+        if not is_fx_tracing():
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
+            return instance
+
         found_proxies = []
 
         def check_proxy(a):
@@ -1004,7 +1008,7 @@ def _patch_wrapped_functions(patcher: _Patcher):
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    for (_, name), frame_dict in _wrapped_fns_to_patch.items():
+    for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:

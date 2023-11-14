@@ -65,7 +65,9 @@ class Decompose(_pass.Transform):
 
         # Apply decomposition table to the input graph.
         assert fake_mode is not None  # for mypy
-        with python_dispatch.enable_python_dispatcher(), fake_mode:
+        with proxy_tensor.maybe_disable_fake_tensor_mode(), python_dispatch.enable_python_dispatcher(), (
+            fake_mode
+        ):
             decomposed_module = proxy_tensor.make_fx(
                 module,
                 decomposition_table=self.decomposition_table,

@@ -142,6 +142,7 @@ import typing
 import unittest
 import warnings
 import zipfile
+import tracemalloc
 
 
 def canonical(graph):
@@ -5810,19 +5811,19 @@ a")
                 raise RuntimeError('Unknown dtype')
 
             if binary:
-                code = '''
+                code = f'''
                     graph(%3 : Tensor, %4 : Tensor):
-                        %2 : {dtype}(*, *) = aten::{op}(%3, %4)
-                        %1 : {dtype}(*, *) = aten::relu(%2)
+                        %2 : {dtype_str}(*, *) = aten::{op}(%3, %4)
+                        %1 : {dtype_str}(*, *) = aten::relu(%2)
                         return (%1)
-                '''.format(op=op, dtype=dtype_str)
+                '''
             else:
-                code = '''
+                code = f'''
                     graph(%3 : Tensor):
-                        %2 : {dtype}(*, *) = aten::{op}(%3)
-                        %1 : {dtype}(*, *) = aten::relu(%2)
+                        %2 : {dtype_str}(*, *) = aten::{op}(%3)
+                        %1 : {dtype_str}(*, *) = aten::relu(%2)
                         return (%1)
-                '''.format(op=op, dtype=dtype_str)
+                '''
 
             graph = parse_ir(code)
             inputs = (2 if binary else 1) * [torch.rand(26, 2048, dtype=dtype)]
@@ -12813,7 +12814,7 @@ dedent """
         x = torch.rand(3, 4)
         self.assertEqual(some_func(x), x)
 
-    def test_file_format_serialization(self):
+    def _make_filereader_test_file(self):
         filename = tempfile.mktemp()
         writer = torch._C.PyTorchFileWriter(filename)
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
@@ -12824,6 +12825,10 @@ dedent """
         serialized_offsets = pickle.dumps(offsets)
         writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
+        return filename, buffers, serialized_offsets
+
+    def test_file_format_serialization(self):
+        filename, buffers, serialized_offsets = self._make_filereader_test_file()
 
         reader = torch._C.PyTorchFileReader(filename)
         serialized_offsets_read = reader.get_record("meta")
@@ -12832,6 +12837,29 @@ dedent """
         for i, offset in enumerate(parsed_serialized_offsets):
             data = reader.get_record(str(offset))
             assert(data == buffers[i])
+
+    def test_file_reader_no_memory_leak(self):
+        num_iters = 10000
+        filename, _, _ = self._make_filereader_test_file()
+
+        # Load from filename
+        tracemalloc.start()
+        for i in range(num_iters):
+            torch._C.PyTorchFileReader(filename)
+        _, peak_from_string = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        # Load from stream
+        tracemalloc.start()
+        with open(filename, 'rb') as f:
+            for i in range(num_iters):
+                f.seek(0)
+                torch._C.PyTorchFileReader(f)
+        _, peak_from_file = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        # Check if the peak sizes at most differ by an empirically obtained factor
+        assert peak_from_file < peak_from_string * 500
 
     # for each type, the input type annotation and corresponding return type annotation
     def type_input_return_pairs(self):
@@ -14936,7 +14964,7 @@ dedent """
         value = torch.rand((src_l, bsz, embed_size))
 
         mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).to(torch.get_default_dtype())
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, 0.0).to(torch.get_default_dtype())
 
         jit_out = jit_multihead_attn_forward(query, key, value,
                                              embed_size, nhead,
@@ -15038,19 +15066,20 @@ dedent """
         seq_length = 5
         tgt_length = 3
 
-        src = torch.randn(seq_length, bsz, d_model)
-        tgt = torch.randn(tgt_length, bsz, d_model)
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
-                                     num_decoder_layers, dim_feedforward, dropout=0.0)
-        model = MyModule(transformer, tgt, src)
+        with torch.no_grad():
+            src = torch.randn(seq_length, bsz, d_model)
+            tgt = torch.randn(tgt_length, bsz, d_model)
+            transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
+                                         num_decoder_layers, dim_feedforward, dropout=0.0)
+            model = MyModule(transformer, tgt, src)
 
-        src = torch.randn(seq_length, bsz, d_model)
-        tgt = torch.randn(tgt_length, bsz, d_model)
-        jit_out = model(tgt, src)
-        py_out = transformer(tgt, src)
+            src = torch.randn(seq_length, bsz, d_model)
+            tgt = torch.randn(tgt_length, bsz, d_model)
+            jit_out = model(tgt, src)
+            py_out = transformer(tgt, src)
 
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+            # print(jit_out/py_out-1)
+            # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     def test_list_python_op(self):
@@ -16105,6 +16134,10 @@ def add_nn_module_test(*args, **kwargs):
         if not kwargs.get('check_jit', True):
             raise unittest.SkipTest('module test skipped on JIT')
 
+        default_dtype = torch.get_default_dtype()
+        if 'default_dtype' in kwargs and kwargs['default_dtype'] is not None:
+            default_dtype = kwargs['default_dtype']
+
         module_name = get_nn_module_name_from_kwargs(**kwargs)
 
         if 'constructor' in kwargs:
@@ -16115,89 +16148,96 @@ def add_nn_module_test(*args, **kwargs):
         if "FunctionalModule" in str(nn_module):
             return
 
-        if 'constructor_args_fn' in kwargs:
-            constructor_args = kwargs['constructor_args_fn']()
-        else:
-            constructor_args = kwargs.get('constructor_args', ())
+        with set_default_dtype(default_dtype):
+            if 'constructor_args_fn' in kwargs:
+                constructor_args = kwargs['constructor_args_fn']()
+            else:
+                constructor_args = kwargs.get('constructor_args', ())
 
-        def create_script_module(*args, **kwargs):
-            """Construct a script module that passes arguments through to self.submodule"""
-            formals, tensors, actuals = get_script_args(args)
+            def create_script_module(*args, **kwargs):
+                """Construct a script module that passes arguments through to self.submodule"""
+                formals, tensors, actuals = get_script_args(args)
 
-            method_args = ', '.join(['self'] + actuals)
-            call_args_str = ', '.join(actuals)
-            call = f"self.submodule({call_args_str})"
-            script = script_method_template.format(method_args, call)
+                method_args = ', '.join(['self'] + actuals)
+                call_args_str = ', '.join(actuals)
+                call = f"self.submodule({call_args_str})"
+                script = script_method_template.format(method_args, call)
 
-            submodule_constants = []
-            if kwargs.get('is_constant'):
-                submodule_constants = ['submodule']
+                submodule_constants = []
+                if kwargs.get('is_constant'):
+                    submodule_constants = ['submodule']
 
-            # Create module to use the script method
-            class TheModule(torch.jit.ScriptModule):
-                __constants__ = submodule_constants
+                # Create module to use the script method
+                class TheModule(torch.jit.ScriptModule):
+                    __constants__ = submodule_constants
 
-                def __init__(self):
-                    super().__init__()
-                    self.submodule = nn_module(*constructor_args)
+                    def __init__(self):
+                        super().__init__()
+                        self.submodule = nn_module(*constructor_args)
 
-            def make_module(script):
-                module = TheModule()
-                # check __repr__
-                str(module)
-                module.define(script)
-                return module
+                def make_module(script):
+                    module = TheModule()
+                    # check __repr__
+                    str(module)
+                    module.define(script)
+                    return module
 
-            module = make_module(script)
-            self.assertExportImportModule(module, tensors)
-            create_script_module.last_graph = module.graph
-            mod = module(*args)
-            return mod
+                module = make_module(script)
+                self.assertExportImportModule(module, tensors)
+                create_script_module.last_graph = module.graph
+                mod = module(*args)
+                return mod
 
-        # Construct a normal nn module to stay consistent with create_script_module
-        # and make use of a single global rng_state in module initialization
-        def create_nn_module(*args, **kwargs):
-            module = nn_module(*constructor_args)
-            return module(*args)
+            # Construct a normal nn module to stay consistent with create_script_module
+            # and make use of a single global rng_state in module initialization
+            def create_nn_module(*args, **kwargs):
+                module = nn_module(*constructor_args)
+                return module(*args)
 
-        # Set up inputs from tuple of sizes or constructor fn
-        dtype = torch.float
-        if 'input_fn' in kwargs:
-            input = kwargs['input_fn']()
-            if isinstance(input, Tensor):
-                input = (input,)
+            # Set up inputs from tuple of sizes or constructor fn
+            dtype = torch.get_default_dtype()
+            if 'input_fn' in kwargs:
+                input = kwargs['input_fn']()
+                if isinstance(input, Tensor):
+                    input = (input,)
 
-            if all(tensor.is_complex() for tensor in input):
-                dtype = torch.cfloat
-        else:
-            input = (kwargs['input_size'],)
+                if all(tensor.is_complex() for tensor in input):
+                    if dtype == torch.float:
+                        dtype = torch.cfloat
+                    elif dtype == torch.double:
+                        dtype = torch.cdouble
+                    else:
+                        raise AssertionError(f"default_dtype {default_dtype} is not supported")
 
-        if 'target_size' in kwargs:
-            input = input + (kwargs['target_size'],)
-        elif 'target_fn' in kwargs:
-            if torch.is_tensor(input):
-                input = (input,)
-            input = input + (kwargs['target_fn'](),)
-        elif 'target' in kwargs:
-            input = input + (kwargs['target'],)
+            else:
+                input = (kwargs['input_size'],)
 
-        # Extra parameters to forward()
-        if 'extra_args' in kwargs:
-            input = input + kwargs['extra_args']
+            if 'target_size' in kwargs:
+                input = input + (kwargs['target_size'],)
+            elif 'target_fn' in kwargs:
+                if torch.is_tensor(input):
+                    input = (input,)
+                input = input + (kwargs['target_fn'](),)
+            elif 'target' in kwargs:
+                input = input + (kwargs['target'],)
 
-        args_variable, kwargs_variable = create_input(input, dtype=dtype)
-        f_args_variable = deepcopy(unpack_variables(args_variable))
+            # Extra parameters to forward()
+            if 'extra_args' in kwargs:
+                input = input + kwargs['extra_args']
 
-        # TODO(issue#52052) Neither this nor no_grad should be required
-        # if check_against_reference() is updated to check gradients
-        # w.r.t. weights and then only check w.r.t. inputs if any
-        # inputs require it.
-        any_requires_grad = any(input.requires_grad for input in f_args_variable)
+            args_variable, kwargs_variable = create_input(input, dtype=dtype)
+            f_args_variable = deepcopy(unpack_variables(args_variable))
 
-        # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module,
-                                lambda x: x, f_args_variable,
-                                no_grad=no_grad or not any_requires_grad)
+            # TODO(issue#52052) Neither this nor no_grad should be required
+            # if check_against_reference() is updated to check gradients
+            # w.r.t. weights and then only check w.r.t. inputs if any
+            # inputs require it.
+            any_requires_grad = any(input.requires_grad for input in f_args_variable)
+
+            # Check against Python module as reference
+            check_against_reference(self, create_script_module, create_nn_module,
+                                    lambda x: x, f_args_variable,
+                                    no_grad=no_grad or not any_requires_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)
@@ -16247,6 +16287,7 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
     import jit.test_module_interface
     suite = unittest.findTestCases(jit.test_module_interface)

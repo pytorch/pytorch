@@ -22,7 +22,7 @@ struct C10_API SafePyObject {
   // Steals a reference to data
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : data_(data), pyinterpreter_(pyinterpreter) {}
-  SafePyObject(SafePyObject&& other)
+  SafePyObject(SafePyObject&& other) noexcept
       : data_(std::exchange(other.data_, nullptr)),
         pyinterpreter_(other.pyinterpreter_) {}
 
@@ -33,7 +33,7 @@ struct C10_API SafePyObject {
 
   ~SafePyObject() {
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
     }
   }
 

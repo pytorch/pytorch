@@ -182,6 +182,7 @@ static PyTypeObject metaclass = {
 };
 
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
   metaclass.tp_getset = metaclass_properties;
@@ -447,7 +448,6 @@ static bool PyTensorType_Check(PyObject* obj) {
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TORCH_WARN_ONCE(
       "torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
       "please use torch.set_default_dtype() and torch.set_default_device() as alternatives.")

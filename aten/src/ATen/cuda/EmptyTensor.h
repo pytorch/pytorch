@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/core/TensorBase.h>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 
 TORCH_CUDA_CPP_API TensorBase empty_cuda(
     IntArrayRef size,
@@ -42,4 +41,4 @@ TORCH_CUDA_CPP_API TensorBase empty_strided_cuda(
     const TensorOptions &options);
 
 
-}}  // namespace at::detail
+}  // namespace at::detail

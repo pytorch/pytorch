@@ -618,7 +618,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
+      RecordContext when) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
@@ -629,6 +629,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support attachOutOfMemoryObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachAllocatorTraceTracker. "
         "If you need it, please file an issue describing your use case.");
   }
 

@@ -1,9 +1,8 @@
 # Owner(s): ["module: inductor"]
-import random
 
-import numpy as np
 import torch
 from torch import nn
+from torch._dynamo.testing import reset_rng_state
 
 from torch._inductor import config
 from torch.nn import functional as F
@@ -12,12 +11,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 config.triton.multi_kernel = 1
 config.benchmark_kernel = True
-
-
-def reset_rng_state():
-    torch.manual_seed(1337)
-    random.seed(1337)
-    np.random.seed(1337)
+config.compile_threads = 1
 
 
 class TransformerSnippet(nn.Module):
@@ -44,10 +38,10 @@ class MultiKernelTest(TestCase):
         self.assertTrue(torch.allclose(ref, act))
 
     def test_layernorm(self):
-        lm = nn.LayerNorm(1024).cuda()
+        ln = nn.LayerNorm(1024).cuda()
         x = torch.rand(2, 1024).cuda()
-        ref = lm(x)
-        act = torch.compile(lm)(x)
+        ref = ln(x)
+        act = torch.compile(ln)(x)
         self.assertTrue(
             torch.allclose(ref, act, atol=1e-4, rtol=1e-4), f"ref:\n{ref}\nact:\n{act}"
         )

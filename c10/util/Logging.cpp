@@ -44,7 +44,7 @@ void ThrowEnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
-  throw e;
+  throw std::move(e);
 }
 
 void ThrowEnforceNotMet(
@@ -137,6 +137,16 @@ void SetPyTorchDDPUsageLogger(
     std::function<void(const DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
   *GetDDPUsageLogger() = std::move(logger);
+}
+
+static int64_t GLOBAL_RANK = -1;
+
+int64_t GetGlobalRank() {
+  return GLOBAL_RANK;
+}
+
+void SetGlobalRank(int64_t rank) {
+  GLOBAL_RANK = rank;
 }
 
 void LogAPIUsage(const std::string& event) try {
@@ -352,6 +362,9 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
+  if (GLOBAL_RANK != -1) {
+    stream_ << "[rank" << GLOBAL_RANK << "]:";
+  }
   stream_ << "["
           << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday

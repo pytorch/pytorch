@@ -10,6 +10,8 @@ _kernel_category_choices = [
     "pointwise",
     "reduction",
     "persistent_reduction",
+    "template",
+    "foreach",
 ]
 
 
@@ -28,7 +30,7 @@ def get_kernel_category_by_source_code(src_code):
 def get_kernel_category(kernel_mod):
     """
     Given the module defining a triton kernel, return the category of the kernel.
-    Cateogry can be one of:
+    Category can be one of:
     - pointwise
     - reduction
     - persistent_reduction
@@ -96,7 +98,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
             )
 
-        bench_result = []
         kernel_desc = (
             f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
         )

@@ -9,21 +9,33 @@
 #else
 #include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_prelu_kernel_backward_native.h>
+#include <ATen/ops/_prelu_kernel_native.h>
 #include <ATen/ops/elu_backward_native.h>
 #include <ATen/ops/elu_native.h>
 #include <ATen/ops/gelu_backward_native.h>
 #include <ATen/ops/gelu_native.h>
+#include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/glu_native.h>
 #include <ATen/ops/hardsigmoid_backward_native.h>
 #include <ATen/ops/hardsigmoid_native.h>
+#include <ATen/ops/hardswish_backward_native.h>
+#include <ATen/ops/hardswish_native.h>
 #include <ATen/ops/hardtanh_backward_native.h>
 #include <ATen/ops/leaky_relu_backward_native.h>
 #include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/log_sigmoid_backward_native.h>
+#include <ATen/ops/log_sigmoid_forward_native.h>
+#include <ATen/ops/mish_backward_native.h>
+#include <ATen/ops/mish_native.h>
+#include <ATen/ops/relu_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/silu_backward_native.h>
 #include <ATen/ops/silu_native.h>
 #include <ATen/ops/softplus_backward_native.h>
 #include <ATen/ops/softplus_native.h>
+#include <ATen/ops/softshrink_backward_native.h>
+#include <ATen/ops/softshrink_native.h>
 #include <ATen/ops/tanh_backward_native.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
@@ -664,7 +676,7 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)
   }
 }
 
-MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+static MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   // (1.0f + erf(x*SQRT1_2)) * 0.5f * x;
   auto dataType = [inputTensor dataType];
   const float SQRT1_2 = 0.707106781186547524400844362104849039f;
@@ -680,7 +692,7 @@ MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   return erfTensor;
 }
 
-MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+static MPSGraphTensor* tanh(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   // 0.5 * x * (1 + text{Tanh}(sqrt(2 / pi) * (x + 0.044715 * x^3)))
   auto dataType = [inputTensor dataType];
   constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
@@ -840,12 +852,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   }
 }
 
-void elu_variants_out_mps(const Tensor& self,
-                          const Scalar& alpha,
-                          const Scalar& scale,
-                          const Scalar& input_scale,
-                          const Tensor& result,
-                          string func_name) {
+static void elu_variants_out_mps(const Tensor& self,
+                                 const Scalar& alpha,
+                                 const Scalar& scale,
+                                 const Scalar& input_scale,
+                                 const Tensor& result,
+                                 string func_name) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
@@ -1327,6 +1339,264 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
         @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+}
+
+TORCH_IMPL_FUNC(mish_out_mps)
+(const Tensor& self, const Tensor& result) {
+  using namespace mps;
+  TORCH_CHECK(self.is_mps());
+
+  if (result.numel() == 0)
+    return;
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "mish_out_mps:" + getTensorsStringKey({self});
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+
+      MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
+      MPSGraphTensor* softplusTensor = at::native::mps::log1p(mpsGraph, expTensor);
+      MPSGraphTensor* tanhTensor = [mpsGraph tanhWithTensor:softplusTensor name:nil];
+      MPSGraphTensor* outputTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                               secondaryTensor:tanhTensor
+                                                                          name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
+Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
+  using namespace mps;
+  TORCH_CHECK(self.is_mps());
+
+  Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
+  if (grad_input.numel() == 0)
+    return grad_input;
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* gradOutputTensor_ = nil;
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* gradInputTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "mish_backward_out_mps:" + getTensorsStringKey({grad_output, self});
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+
+      // grad_input = grad_output * (tanh(softplus(x)) + input * sigmoid(x) * (1 - tanh(softplus(x)) ^ 2)
+
+      MPSGraphTensor* sigmoidTensor = [mpsGraph sigmoidWithTensor:inputTensor name:nil];
+
+      MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
+      MPSGraphTensor* softplusTensor = at::native::mps::log1p(mpsGraph, expTensor);
+      MPSGraphTensor* tanhSPTensor = [mpsGraph tanhWithTensor:softplusTensor name:nil];
+
+      MPSGraphTensor* tanhSPSquaredTensor = [mpsGraph multiplicationWithPrimaryTensor:tanhSPTensor
+                                                                      secondaryTensor:tanhSPTensor
+                                                                                 name:nil];
+      MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
+      MPSGraphTensor* oneMinusTanhSPSquaredTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
+                                                                           secondaryTensor:tanhSPSquaredTensor
+                                                                                      name:nil];
+      MPSGraphTensor* xSigmoidTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                                 secondaryTensor:sigmoidTensor
+                                                                            name:nil];
+      MPSGraphTensor* partialResultTensor = [mpsGraph multiplicationWithPrimaryTensor:xSigmoidTensor
+                                                                      secondaryTensor:oneMinusTanhSPSquaredTensor
+                                                                                 name:nil];
+      MPSGraphTensor* mishGradTensor = [mpsGraph additionWithPrimaryTensor:partialResultTensor
+                                                           secondaryTensor:tanhSPTensor
+                                                                      name:nil];
+      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
+                                                                  secondaryTensor:mishGradTensor
+                                                                             name:nil];
+      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->gradInputTensor_ = gradInputTensor;
+    });
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    return grad_input;
+  }
+}
+
+TORCH_IMPL_FUNC(softshrink_out_mps)
+(const Tensor& self, const Scalar& lambd, const Tensor& result) {
+  using namespace mps;
+  TORCH_CHECK(self.is_mps());
+
+  if (result.numel() == 0)
+    return;
+
+  MPSScalar lambd_scalar = getMPSScalar(lambd, self.scalar_type());
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+    MPSGraphTensor* lambdTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "softshrink_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(lambd.to<double>());
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      MPSGraphTensor* lambdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
+
+      MPSGraphTensor* negativeLambdTensor = [mpsGraph negativeWithTensor:lambdTensor name:nil];
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
+      MPSGraphTensor* positiveLambdPredicateTensor = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:inputTensor
+                                                                                     secondaryTensor:lambdTensor
+                                                                                                name:nil];
+      MPSGraphTensor* negativeLambdPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                                         secondaryTensor:negativeLambdTensor
+                                                                                    name:nil];
+      MPSGraphTensor* outputTensor =
+          [mpsGraph selectWithPredicateTensor:positiveLambdPredicateTensor
+                          truePredicateTensor:[mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                                                     secondaryTensor:lambdTensor
+                                                                                name:nil]
+                         falsePredicateTensor:zeroTensor
+                                         name:nil];
+      outputTensor = [mpsGraph selectWithPredicateTensor:negativeLambdPredicateTensor
+                                     truePredicateTensor:[mpsGraph additionWithPrimaryTensor:inputTensor
+                                                                             secondaryTensor:lambdTensor
+                                                                                        name:nil]
+                                    falsePredicateTensor:outputTensor
+                                                    name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->lambdTensor_ = lambdTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      cachedGraph->lambdTensor_ : getMPSGraphTensorFromScalar(stream, lambd_scalar),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
+static void shrink_backward_out_mps(const Tensor& grad_output,
+                                    const Tensor& self,
+                                    const Scalar& lambd,
+                                    const Tensor& grad_input,
+                                    std::string op_name) {
+  using namespace mps;
+  TORCH_CHECK(self.is_mps());
+
+  if (grad_input.numel() == 0)
+    return;
+
+  MPSScalar lambd_scalar = getMPSScalar(lambd, self.scalar_type());
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* gradOutputTensor_ = nil;
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* gradInputTensor_ = nil;
+    MPSGraphTensor* lambdTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = op_name + ":" + getTensorsStringKey({self}) + ":" + std::to_string(lambd.to<double>());
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      MPSGraphTensor* lambdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
+
+      MPSGraphTensor* negativeLambdTensor = [mpsGraph negativeWithTensor:lambdTensor name:nil];
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
+      MPSGraphTensor* positiveLambdPredicateTensor = [mpsGraph greaterThanOrEqualToWithPrimaryTensor:inputTensor
+                                                                                     secondaryTensor:lambdTensor
+                                                                                                name:nil];
+      MPSGraphTensor* negativeLambdPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                                         secondaryTensor:negativeLambdTensor
+                                                                                    name:nil];
+      MPSGraphTensor* gradInputTensor = [mpsGraph selectWithPredicateTensor:positiveLambdPredicateTensor
+                                                        truePredicateTensor:gradOutputTensor
+                                                       falsePredicateTensor:zeroTensor
+                                                                       name:nil];
+      gradInputTensor = [mpsGraph selectWithPredicateTensor:negativeLambdPredicateTensor
+                                        truePredicateTensor:gradOutputTensor
+                                       falsePredicateTensor:gradInputTensor
+                                                       name:nil];
+
+      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->gradInputTensor_ = gradInputTensor;
+      newCachedGraph->lambdTensor_ = lambdTensor;
+    });
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      cachedGraph->lambdTensor_ : getMPSGraphTensorFromScalar(stream, lambd_scalar),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    return;
+  }
+}
+
+TORCH_IMPL_FUNC(softshrink_backward_out_mps)
+(const Tensor& grad_output, const Tensor& self, const Scalar& lambd, const Tensor& grad_input) {
+  return shrink_backward_out_mps(grad_output, self, lambd, grad_input, "softshrink_backward_out_mps");
 }
 
 Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {

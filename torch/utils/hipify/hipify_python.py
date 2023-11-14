@@ -502,7 +502,7 @@ def hip_header_magic(input_string):
 
     # Check if one of the following headers is already included.
     headers = ["hip/hip_runtime.h", "hip/hip_runtime_api.h"]
-    if any(re.search(r'#include ("{0}"|<{0}>)'.format(ext), output_string) for ext in headers):
+    if any(re.search(fr'#include ("{ext}"|<{ext}>)', output_string) for ext in headers):
         return output_string
 
     # Rough logic to detect if we're inside device code
@@ -643,7 +643,12 @@ def is_cusparse_file(rel_filepath):
 
 def is_special_file(rel_filepath):
     if is_pytorch_file(rel_filepath):
-        return ("sparse" in rel_filepath.lower()) or ("linalg" in rel_filepath.lower())
+        if "sparse" in rel_filepath.lower():
+            return True
+        elif "linalg" in rel_filepath.lower():
+            if "batchlinearalgebralibblas" in rel_filepath.lower():
+                return False  # don't use "special" mappings for this specific linalg cublas file
+            return True
     return False
 
 def is_caffe2_gpu_file(rel_filepath):
@@ -745,7 +750,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
                 PYTORCH_SPECIAL_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
-        if constants.API_PYTORCH not in meta_data:
+        if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())

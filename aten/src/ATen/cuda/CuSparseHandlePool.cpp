@@ -1,7 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 namespace {
 
 void createCusparseHandle(cusparseHandle_t *handle) {
@@ -43,4 +43,4 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace at::cuda

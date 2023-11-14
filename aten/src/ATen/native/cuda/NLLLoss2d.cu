@@ -7,9 +7,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <c10/cuda/CUDADeviceAssertion.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
@@ -75,7 +75,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_forward_kernel(
   scalar_t* output,
@@ -86,26 +86,25 @@ __global__ void nll_loss2d_forward_kernel(
   int n_classes,
   int map_nelem,
   int blocks_per_sample,
-  int64_t ignore_index,
-  TORCH_DSA_KERNEL_ARGS) {
+  int64_t ignore_index) {
 
   scalar_t cur_weight;
   accscalar_t input_sum = 0;
   accscalar_t acc_weight = 0;
 
-  int sample = blockIdx.x / blocks_per_sample;
-  int toffset = sample * map_nelem;
-  int ioffset = sample * map_nelem * n_classes;
+  index_t sample = blockIdx.x / blocks_per_sample;
+  index_t toffset = sample * map_nelem;
+  index_t ioffset = sample * map_nelem * n_classes;
   int step = blockDim.x * blocks_per_sample;
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int64_t t = target[toffset + i];
+    index_t t = target[toffset + i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT2(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weight != nullptr ? weight[t] : static_cast<scalar_t>(1);
       const auto input_index = ioffset + i + map_nelem * t;
-      CUDA_KERNEL_ASSERT2(input_index >= 0);
+      CUDA_KERNEL_ASSERT(input_index >= 0);
       input_sum -= input[input_index] * cur_weight;
       acc_weight += cur_weight;
     }
@@ -172,8 +171,7 @@ __global__ void nll_loss2d_backward_kernel(
   int n_classes,
   int map_nelem,
   int blocks_per_sample,
-  int64_t ignore_index,
-  TORCH_DSA_KERNEL_ARGS
+  int64_t ignore_index
 ) {
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
@@ -192,9 +190,9 @@ __global__ void nll_loss2d_backward_kernel(
        i += step) {
     const int64_t t = target_thread[i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT2(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       const auto grad_input_index = i + map_nelem * t;
-      CUDA_KERNEL_ASSERT2(grad_input_index >= 0);
+      CUDA_KERNEL_ASSERT(grad_input_index >= 0);
       grad_input_thread[i + map_nelem * t] = weights != nullptr ? weights[t] * grad
                                                                 : grad;
     }
@@ -321,29 +319,33 @@ void nll_loss2d_forward_out_cuda_template(
       "nll_loss2d_forward_kernel",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-        TORCH_DSA_KERNEL_LAUNCH(
-              (nll_loss2d_forward_kernel<scalar_t, accscalar_t>),
-              total_blocks,
-              CUDA_NUM_THREADS,
-              0,
-              at::cuda::getCurrentCUDAStream(),
-              output.mutable_data_ptr<scalar_t>(),
-              total_weight.mutable_data_ptr<scalar_t>(),
-              input_.const_data_ptr<scalar_t>(),
-              target_.const_data_ptr<int64_t>(),
-              optional_data<scalar_t>(weight_),
-              input_.size(1),
-              input_.size(2) * input_.size(3),
-              blocks_per_sample,
-              ignore_index);
-        // Divide by total_weight
-        if (reduction == at::Reduction::Mean) {
-          nll_loss2d_forward_size_average_kernel<scalar_t>
-              <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  output.mutable_data_ptr<scalar_t>(),
-                  total_weight.const_data_ptr<scalar_t>());
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
+    AT_DISPATCH_INDEX_TYPES(
+        at::native::canUse32BitIndexMath(input_, INT_MAX) ? ScalarType::Int : ScalarType::Long,
+        "nll_loss2d_forward_launcher", [&] {
+            nll_loss2d_forward_kernel<scalar_t, accscalar_t, index_t>
+                <<<total_blocks,
+                  CUDA_NUM_THREADS,
+                  0,
+                  at::cuda::getCurrentCUDAStream()>>>(
+                    output.mutable_data_ptr<scalar_t>(),
+                    total_weight.mutable_data_ptr<scalar_t>(),
+                    input_.const_data_ptr<scalar_t>(),
+                    target_.const_data_ptr<int64_t>(),
+                    optional_data<scalar_t>(weight_),
+                    input_.size(1),
+                    input_.size(2) * input_.size(3),
+                    blocks_per_sample,
+                    ignore_index);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            // Divide by total_weight
+            if (reduction == at::Reduction::Mean) {
+              nll_loss2d_forward_size_average_kernel<scalar_t>
+                  <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      output.mutable_data_ptr<scalar_t>(),
+                      total_weight.const_data_ptr<scalar_t>());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+    });
       });
 }
 
@@ -439,22 +441,22 @@ void nll_loss2d_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss2d_backward_kernel",
         [&] {
-          TORCH_DSA_KERNEL_LAUNCH(
-                nll_loss2d_backward_kernel<scalar_t>,
-                total_blocks,
+          nll_loss2d_backward_kernel<scalar_t>
+              <<<total_blocks,
                 CUDA_NUM_THREADS,
                 0,
-                at::cuda::getCurrentCUDAStream(),
-                grad_input.mutable_data_ptr<scalar_t>(),
-                grad_output.const_data_ptr<scalar_t>(),
-                target_.const_data_ptr<int64_t>(),
-                optional_data<scalar_t>(weight_),
-                total_weight.const_data_ptr<scalar_t>(),
-                reduction == at::Reduction::Mean,
-                input.size(1),
-                map_nelem,
-                blocks_per_sample,
-                ignore_index);
+                at::cuda::getCurrentCUDAStream()>>>(
+                  grad_input.mutable_data_ptr<scalar_t>(),
+                  grad_output.const_data_ptr<scalar_t>(),
+                  target_.const_data_ptr<int64_t>(),
+                  optional_data<scalar_t>(weight_),
+                  total_weight.const_data_ptr<scalar_t>(),
+                  reduction == at::Reduction::Mean,
+                  input.size(1),
+                  map_nelem,
+                  blocks_per_sample,
+                  ignore_index);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   }
 }

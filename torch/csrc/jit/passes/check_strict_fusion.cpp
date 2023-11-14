@@ -80,7 +80,7 @@ static void checkForUnfusedOps(Node* enter_node) {
     throw ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str();
   }
 
-  // NVFuser/autodiff/nnc all insert a number of guards, see
+  // autodiff/nnc both insert a number of guards, see
   // `CudaFusionViewGuard Example Graph`
   // to check for unfused nodes, look at node's whose outputs
   // are not depended on by the fusion guard

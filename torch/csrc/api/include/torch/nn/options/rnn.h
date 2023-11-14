@@ -12,7 +12,7 @@ namespace detail {
 
 /// Common options for RNN, LSTM and GRU modules.
 struct TORCH_API RNNOptionsBase {
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kLSTM,
       enumtype::kGRU,
       enumtype::kRNN_TANH,
@@ -57,7 +57,7 @@ struct TORCH_API RNNOptionsBase {
 /// 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
 /// ```
 struct TORCH_API RNNOptions {
-  typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
+  typedef std::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
 
   RNNOptions(int64_t input_size, int64_t hidden_size);
 
@@ -164,8 +164,6 @@ struct TORCH_API RNNCellOptionsBase {
       int64_t hidden_size,
       bool bias,
       int64_t num_chunks);
-  virtual ~RNNCellOptionsBase() = default;
-
   TORCH_ARG(int64_t, input_size);
   TORCH_ARG(int64_t, hidden_size);
   TORCH_ARG(bool, bias);
@@ -182,7 +180,7 @@ struct TORCH_API RNNCellOptionsBase {
 /// 10).bias(false).nonlinearity(torch::kReLU));
 /// ```
 struct TORCH_API RNNCellOptions {
-  typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
+  typedef std::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
 
   RNNCellOptions(int64_t input_size, int64_t hidden_size);
 

@@ -124,9 +124,7 @@ ncclRedOp_t to_nccl_red_op(int var) {
   return (ncclRedOp_t)(var);
 }
 
-namespace torch {
-namespace cuda {
-namespace nccl {
+namespace torch::cuda::nccl {
 
 using namespace at;
 
@@ -479,6 +477,14 @@ std::uint64_t version() {
   return ((uint64_t)1) << 32;
 #else
   return 0;
+#endif
+}
+
+const char* version_suffix() {
+#if defined(NCCL_SUFFIX)
+  return NCCL_SUFFIX;
+#else
+  return "";
 #endif
 }
 
@@ -1118,6 +1124,4 @@ void scatter(
 #endif
 }
 
-} // namespace nccl
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::nccl

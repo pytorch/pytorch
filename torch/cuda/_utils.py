@@ -1,11 +1,14 @@
-import torch
 from typing import Any
+
+import torch
+
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
 
-def _get_device_index(device: Any, optional: bool = False,
-                      allow_cpu: bool = False) -> int:
+def _get_device_index(
+    device: Any, optional: bool = False, allow_cpu: bool = False
+) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -26,10 +29,10 @@ def _get_device_index(device: Any, optional: bool = False,
         device = torch.device(device)
     if isinstance(device, torch.device):
         if allow_cpu:
-            if device.type not in ['cuda', 'cpu']:
-                raise ValueError(f'Expected a cuda or cpu device, but got: {device}')
-        elif device.type != 'cuda':
-            raise ValueError(f'Expected a cuda device, but got: {device}')
+            if device.type not in ["cuda", "cpu"]:
+                raise ValueError(f"Expected a cuda or cpu device, but got: {device}")
+        elif device.type != "cuda":
+            raise ValueError(f"Expected a cuda device, but got: {device}")
     if not torch.jit.is_scripting():
         if isinstance(device, torch.cuda.device):
             return device.idx
@@ -43,7 +46,10 @@ def _dummy_type(name: str) -> type:
                 class_name = obj.__class__.__name__
             else:
                 class_name = obj.__name__
-            raise RuntimeError(
-                f"Tried to instantiate dummy base class {class_name}")
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
         return err_fn
-    return type(name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)})
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )

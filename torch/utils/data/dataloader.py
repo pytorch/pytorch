@@ -1,4 +1,4 @@
-r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter
+r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
@@ -81,6 +81,7 @@ class _DatasetKind:
 
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
+
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
     """
 
@@ -122,8 +123,7 @@ def _share_dist_seed(generator, pg):
 
 class DataLoader(Generic[T_co]):
     r"""
-    Data loader. Combines a dataset and a sampler, and provides an iterable over
-    the given dataset.
+    Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
     The :class:`~torch.utils.data.DataLoader` supports both map-style and
     iterable-style datasets with single- or multi-process loading, customizing
@@ -210,6 +210,7 @@ class DataLoader(Generic[T_co]):
     .. _multiprocessing context:
         https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
+
     dataset: Dataset[T_co]
     batch_size: Optional[int]
     num_workers: int
@@ -315,7 +316,7 @@ class DataLoader(Generic[T_co]):
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
-                    "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
+                    f"batch_sampler option, but got batch_sampler={batch_sampler}")
         else:
             shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
@@ -397,19 +398,19 @@ class DataLoader(Generic[T_co]):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(
-                            ('multiprocessing_context option '
-                             'should specify a valid start method in {!r}, but got '
-                             'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
+                            'multiprocessing_context option '
+                            f'should specify a valid start method in {valid_start_methods!r}, but got '
+                            f'multiprocessing_context={multiprocessing_context!r}')
                     multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
-                    raise TypeError(('multiprocessing_context option should be a valid context '
-                                     'object or a string specifying the start method, but got '
-                                     'multiprocessing_context={}').format(multiprocessing_context))
+                    raise TypeError('multiprocessing_context option should be a valid context '
+                                    'object or a string specifying the start method, but got '
+                                    f'multiprocessing_context={multiprocessing_context}')
             else:
-                raise ValueError(('multiprocessing_context can only be used with '
-                                  'multi-process loading (num_workers > 0), but got '
-                                  'num_workers={}').format(self.num_workers))
+                raise ValueError('multiprocessing_context can only be used with '
+                                 'multi-process loading (num_workers > 0), but got '
+                                 f'num_workers={self.num_workers}')
 
         self.__multiprocessing_context = multiprocessing_context
 
@@ -678,7 +679,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
-    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
     #
@@ -941,7 +942,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   # No need to check main thread. If this thread is alive, the main loader
     #   # thread must be alive, because this thread is set as daemonic.
     #   While `pin_memory_thread_done_event` is not set:
-    #     Get from `index_queue`.
+    #     Get from `worker_result_queue`.
     #       If timed out, continue to get in the next iteration.
     #       Otherwise, process data.
     #       While `pin_memory_thread_done_event` is not set:

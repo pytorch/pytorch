@@ -2,7 +2,7 @@
 
 #include <cuda_runtime.h>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 /**
    Computes ceil(a / b)
@@ -43,5 +43,5 @@ inline dim3 getApplyBlock(int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK) 
   return dim3(max_threads_per_block);
 }
 
-}
-}}  // namespace at::cuda
+} // anonymous namespace
+} // namespace at::cuda

@@ -678,10 +678,13 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
+        self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
+        self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
 
     @float_double_default_dtype
     def test_promote_self(self, device):
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool,
+                                               torch.float8_e5m2, torch.float8_e4m3fn):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
     @expectedFailureMeta
@@ -1161,6 +1164,19 @@ class TestTypePromotion(TestCase):
                 if inp.dtype in floating_types() or exp_type == inp.dtype:
                     actual = torch.clamp_max_(inp, val)
                     self.assertEqual(actual, expected, exact_dtype=False)
+
+    @onlyNativeDeviceTypes
+    def test_ternary_out_promotion(self, device):
+        for op in [torch.addcdiv, torch.addcmul]:
+            for dtype in [torch.float32, torch.cfloat]:
+                prom_dtype = torch.float64 if dtype is torch.float32 else torch.cdouble if dtype is torch.cfloat else dtype
+                x = torch.rand(3, device=device, dtype=dtype)
+                y = torch.empty(3, device=device, dtype=dtype)
+                y_promo = torch.empty(3, device=device, dtype=prom_dtype)
+                op(x, x, x, out=y)
+                op(x, x, x, out=y_promo)
+                self.assertEqual(y, y_promo.to(dtype=dtype))
+
 
 
 

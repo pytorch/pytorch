@@ -7,6 +7,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_adaptive_avg_pool2d_backward_native.h>
+#include <ATen/ops/_adaptive_avg_pool2d_native.h>
 #include <ATen/ops/adaptive_avg_pool2d.h>
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
@@ -20,15 +22,15 @@
 #endif
 namespace at::native {
 namespace mps {
-void set_kernel_params(int64_t isizeH,
-                       int64_t isizeW,
-                       int64_t osizeH,
-                       int64_t osizeW,
-                       int64_t& strideH,
-                       int64_t& strideW,
-                       int64_t& kernel_sizeH,
-                       int64_t& kernel_sizeW,
-                       bool check_avg_pooling = false) {
+static void set_kernel_params(int64_t isizeH,
+                              int64_t isizeW,
+                              int64_t osizeH,
+                              int64_t osizeW,
+                              int64_t& strideH,
+                              int64_t& strideW,
+                              int64_t& kernel_sizeH,
+                              int64_t& kernel_sizeW,
+                              bool check_avg_pooling = false) {
   TORCH_CHECK((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW),
               "Adaptive pool MPS: Input height and width must both be greater than, "
               "or equal to, or lesser than output height and width")

@@ -168,9 +168,9 @@ class TestBinaryUfuncs(TestCase):
             if _numel(l) <= 100 and _numel(r) <= 100:
                 msg = (
                     "Failed to produce expected results! Input lhs tensor was"
-                    " {}, rhs tensor was {}, torch result is {}, and reference result is"
-                    " {}."
-                ).format(l, r, actual, expected)
+                    f" {l}, rhs tensor was {r}, torch result is {actual}, and reference result is"
+                    f" {expected}."
+                )
             else:
                 msg = None
 
@@ -985,8 +985,7 @@ class TestBinaryUfuncs(TestCase):
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
         for mode, np_ref in ((None, np.true_divide), ("floor", np.floor_divide)):
-            with np.errstate(all="ignore"):
-                expect = np_ref(an, bn)
+            expect = np_ref(an, bn)
             kwargs = dict(rounding_mode=mode) if mode is not None else {}
             with set_default_dtype(torch.double):
                 actual = torch.divide(a, b, **kwargs)
@@ -1063,8 +1062,7 @@ class TestBinaryUfuncs(TestCase):
             ("floor", np.floor_divide),
             ("trunc", lambda a, b: np.trunc(np.true_divide(a, b)).astype(a.dtype)),
         ):
-            with np.errstate(all="ignore"):
-                expect = torch.from_numpy(np_ref(an, bn))
+            expect = torch.from_numpy(np_ref(an, bn))
 
             kwargs = dict(rounding_mode=mode) if mode is not None else {}
             # Contiguous (likely vectorized)
@@ -2803,7 +2801,7 @@ class TestBinaryUfuncs(TestCase):
                         abs(c[0] - d[0]) == abs(b[0])
                     )  # differ by one divisor
 
-    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfCPU(torch.bfloat16, torch.half, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     def test_hypot(self, device, dtype):
         inputs = [
@@ -2826,7 +2824,7 @@ class TestBinaryUfuncs(TestCase):
         ]
         for input in inputs:
             actual = torch.hypot(input[0], input[1])
-            if dtype == torch.bfloat16:
+            if dtype in [torch.bfloat16, torch.half]:
                 expected = torch.sqrt(input[0] * input[0] + input[1] * input[1])
             else:
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
@@ -2875,6 +2873,7 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
     def test_nextafter(self, device, dtype):
         # Test special cases
@@ -3488,6 +3487,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
+    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
@@ -3805,12 +3805,19 @@ class TestBinaryUfuncs(TestCase):
             )
             self.assertEqual(expected, actual.view(-1), rtol=0, atol=0.02)
 
-            # bfloat16
-            a_bf16 = a.bfloat16()
-            b_bf16 = b.bfloat16()
-            actual_bf16 = a_bf16.atan2(b_bf16)
-            self.assertEqual(actual_bf16, actual.bfloat16())
-            self.assertEqual(expected, actual_bf16.view(-1), exact_dtype=False, rtol=0, atol=0.02)
+            # bfloat16/float16
+            for lowp_dtype in [torch.bfloat16, torch.float16]:
+                if lowp_dtype == torch.bfloat16:
+                    rtol = 0
+                    atol = 0.02
+                else:
+                    rtol = 0
+                    atol = 0.001
+                a_16 = a.to(dtype=lowp_dtype)
+                b_16 = b.to(dtype=lowp_dtype)
+                actual_16 = a_16.atan2(b_16)
+                self.assertEqual(actual_16, actual.to(dtype=lowp_dtype))
+                self.assertEqual(expected, actual_16.view(-1), exact_dtype=False, rtol=rtol, atol=atol)
 
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)

@@ -16,6 +16,10 @@ namespace autograd {
 
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   at::TensorOptions src_options;
 };
@@ -159,8 +163,16 @@ struct TORCH_API CopySlices : public Node {
       std::function<at::Tensor(const at::Tensor&)> view_fn_,
       std::shared_ptr<Node> fn_);
 
+  // common code between apply/apply_with_saved
+  template <typename T>
+  variable_list apply_impl(variable_list&& inputs, const T& call_fn);
+
   variable_list apply(variable_list&& inputs) override;
   void release_variables() override;
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   at::TensorGeometry base;
   // view and view_fn are redundant and view_fn will be used if available.

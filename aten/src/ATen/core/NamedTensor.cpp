@@ -2,7 +2,6 @@
 #include <ATen/core/NamedTensor.h>
 
 #include <ATen/core/TensorBase.h>
-#include <c10/util/C++17.h>
 
 namespace at {
 
