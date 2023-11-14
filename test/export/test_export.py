@@ -1186,31 +1186,20 @@ class TestExport(TestCase):
 
         self.assertTrue(torch.allclose(exported(inp), reexported(inp)))
 
-        inp = torch.ones(5, 5)
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         reexported = torch.export.export(exported, (inp,))
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1\.shape\[0\] is specialized at 5"):
+            reexported(torch.ones(7, 5))
 
-        self.assertTrue(
-            torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5)))
-        )
+        reexported = torch.export.export(exported, (inp,), dynamic_shapes=({0: dim0_x},))
+        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
-        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
-        # This seems fine because the exported program is generalized to work for dynamic shapes.
-        reexported = torch.export.export(exported, (inp,))
-        self.assertTrue(
-            torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5)))
-        )
-
-        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Cannot provide constraints for already exported program.",
-        ):
-            _ = torch.export.export(exported, (inp,), dynamic_shapes={"x": {0: dim0_x}})
-        # Reexported program should still work for dynamic shapes.
-        reexported = torch.export.export(exported, (inp,))
-        self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
+        # can't retrace with invalid inputs with respect to the original ExportedProgram
+        dim0_x_v2 = torch.export.Dim("dim0_x_v2", min=3)
+        exported_v2 = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}})
+        with self.assertRaisesRegex(RuntimeError, "Input arg2_1"):
+            torch.export.export(exported_v2, (torch.randn(2, 2),))
 
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -1228,14 +1217,14 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,))
-        self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
+        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]) == 1)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
         )
 
         re_exported_v2 = torch._export.export(exported, (inp,))
-        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
+        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
         )
@@ -1533,6 +1522,31 @@ def forward(self, arg0_1):
         inputs = {'x': torch.randn(3, 3), 'y': torch.randn(3, 3)}
         self.assertEqual(ep(**inputs), m(**inputs))
 
+    def test_retrace_pre_autograd(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 4))
+
+            def forward(self, x):
+                self.buffer.add_(4)
+                return x.sum() + self.buffer.sum()
+
+        inp = torch.randn(4, 4)
+        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
+
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+            gm(torch.randn(2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+            torch.export.export(gm, (torch.randn(2, 2),))
+
+        ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
+
+        test_inp = torch.ones(8, 4)
+        # This is actually correct because how make_fx modifies the buffer since
+        # there is no functionalization.
+        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
 
 
 if __name__ == '__main__':
