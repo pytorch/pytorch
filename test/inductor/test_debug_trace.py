@@ -145,8 +145,6 @@ buf2.node.kernel = extern_kernels.mm""",
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU:
-        run_tests(needs="filelock")
+    run_inductor_tests()
