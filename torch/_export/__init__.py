@@ -563,7 +563,7 @@ def export(
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
-def disable_prexisiting_fake_mode(fn):
+def _disable_prexisiting_fake_mode(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -573,7 +573,7 @@ def disable_prexisiting_fake_mode(fn):
     return wrapper
 
 
-@disable_prexisiting_fake_mode
+@_disable_prexisiting_fake_mode
 def _export(
     f: Callable,
     args: Tuple[Any, ...],
