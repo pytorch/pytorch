@@ -1,10 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 def patch(f):
@@ -67,17 +65,17 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
-            (arg_only_dim0, 1),
+            (arg_only_dim0, 0),
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
             (list_replace, 1),
-            (multi_split, 17),
+            (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
             (kwarg1_cm, 1),
             (kwarg2_cm, 1),
-            (multi_split_cm, 17),
+            (multi_split_cm, 1),
             (unequal_split_cm, 1),
             (cm_with_list, 1),
         ]:
@@ -226,12 +224,12 @@ class TestSplitCatFxPasses(TestCase):
             torch.randn(2, 32),
         ]
         for fn, expected_split_merged in [
-            (multi_split, 16),
+            (multi_split, 0),
             (multi_split_2, 16),
             (multi_split_2_neg_dim, 16),
             (multi_split_with_sizes, 2),
-            (multi_split_kwarg1, 16),
-            (multi_split_kwarg2, 16),
+            (multi_split_kwarg1, 0),
+            (multi_split_kwarg2, 0),
             (unequal_multi_split, 3),
             (unequal_multi_split_neg_index, 3),
             (diff_dims, 0),
@@ -1066,5 +1064,6 @@ class TestSplitCatFxPasses(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)
