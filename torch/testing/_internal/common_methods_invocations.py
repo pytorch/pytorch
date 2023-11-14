@@ -11178,7 +11178,7 @@ op_db: List[OpInfo] = [
                         # Test doesn't account for complex's type promotion semantics
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
-                    )),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
@@ -12635,6 +12635,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # PyTorch's heaviside does not appear to propagate NaNs
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
@@ -12671,6 +12672,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values'),
@@ -15998,6 +16000,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # GradcheckError: Jacobian computed with forward mode mismatch for output 0 with respect to input 0
                         # Numerical:
                         #  tensor([[0.]], dtype=torch.float64)
@@ -20783,6 +20786,8 @@ python_ref_db = [
         skips=(
             # RuntimeError: Expected divisor (b) to be on the same device (cuda:0) as dividend (a), but it is found on cpu!
             DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+            # FIXME output 0: meta disagrees with real impl
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20899,6 +20904,8 @@ python_ref_db = [
                          dtypes=(torch.float16,)),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
                          'TestBinaryUfuncs', 'test_reference_numerics'),
+            # FIXME output 0: meta disagrees with real impl
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20983,6 +20990,7 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestBinaryUfuncs',
                          'test_reference_numerics_extremal_values'),
@@ -21321,8 +21329,9 @@ python_ref_db = [
         torch_opinfo_name="complex",
         error_inputs_func=partial(error_inputs_complex, is_ref=True),
         skips=(
-            # Test doesn't account for complex's type promotion semantics
+            # Tests doesn't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -21331,6 +21340,7 @@ python_ref_db = [
         skips=(
             # Test doesn't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
