@@ -267,8 +267,9 @@ error_on_recompile = False
 # [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
 report_guard_failures = True
 
-# [@compile_ignored: debug] For each guard failure, whether to print all failed checks, or only the first one
+# For each guard failure, whether to print all failed checks, or only the first one
 # (note: dynamo at runtime does not run past the first failed check)
+# [@compile_ignored: debug]
 report_all_guard_failure_checks = False
 
 # [@compile_ignored: debug] root folder of the project
