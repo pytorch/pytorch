@@ -1,5 +1,24 @@
 set(PYTORCH_FOUND_HIP FALSE)
 
+if(NOT DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH /opt/rocm)
+else()
+  set(ROCM_PATH $ENV{ROCM_PATH})
+endif()
+if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
+  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
+else()
+  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
+endif()
+
+# MAGMA_HOME
+if(NOT DEFINED ENV{MAGMA_HOME})
+  set(MAGMA_HOME ${ROCM_PATH}/magma)
+  set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
+else()
+  set(MAGMA_HOME $ENV{MAGMA_HOME})
+endif()
+
 torch_hip_get_arch_list(PYTORCH_ROCM_ARCH)
 if(PYTORCH_ROCM_ARCH STREQUAL "")
   message(FATAL_ERROR "No GPU arch specified for ROCm build. Please use PYTORCH_ROCM_ARCH environment variable to specify GPU archs to build for.")
