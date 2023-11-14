@@ -6169,9 +6169,7 @@ class CommonTemplate:
                     mod = make_fx(fo)(*inps0)
                     _ = compile_fx_inner(mod, inps0)
 
-            pass_ops = [
-                fn for fn in [aten.sum, aten.prod, aten.any, aten.all]
-            ]
+            pass_ops = [fn for fn in [aten.sum, aten.prod, aten.any, aten.all]]
             for po in pass_ops:
                 compiled = torch._dynamo.optimize("inductor")(po)
                 expected = po(*inps0)
