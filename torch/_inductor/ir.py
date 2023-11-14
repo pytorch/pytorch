@@ -4012,6 +4012,14 @@ class ScatterFallback(ExternKernel):
     """
 
     def codegen(self, wrapper):
+        if V.graph.cpp_wrapper:
+            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+            get_operator_enum = {"add": "sum", "multiply": "prod"}
+            reduce = self.kwargs["reduce"]
+            if reduce in get_operator_enum:
+                reduce = get_operator_enum[reduce]
+            self.cpp_kernel = self.get_cpp_kernel(self.fn, reduce)
+
         if self.src_is_tensor:
             (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
@@ -4067,12 +4075,6 @@ class ScatterFallback(ExternKernel):
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
-
-        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
-        get_operator_enum = {"add": "sum", "multiply": "prod"}
-        if reduce in get_operator_enum:
-            reduce = get_operator_enum[reduce]
-        self.cpp_kernel = self.get_cpp_kernel(fn, reduce)
         self.kernel = fn
         self.fn = fn
 
@@ -4269,7 +4271,6 @@ class FallbackKernel(ExternKernelAlloc):
             is_not_write(x) for x in kernel._schema.returns
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
-        self.kernel = kernel._schema.name
         self.cpp_kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
