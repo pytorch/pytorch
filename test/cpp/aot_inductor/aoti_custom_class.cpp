@@ -30,10 +30,10 @@ MyAOTIClass::MyAOTIClass(
     const std::string& device)
     : lib_path_(model_path), device_(device) {
   if (device_ == "cuda") {
-    runner_ = std::make_unique<torch::inductor::AOTIModelRunnerCuda>(
+    runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
         model_path.c_str());
   } else if (device_ == "cpu") {
-    runner_ = std::make_unique<torch::inductor::AOTIModelRunnerCpu>(
+    runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
         model_path.c_str());
   } else {
     throw std::runtime_error("invalid device: " + device);
