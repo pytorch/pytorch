@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any, Dict, List
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
@@ -16,7 +17,9 @@ def get_kernel_argdefs(kernel):
 
 def get_all_kernel_argdefs(kernels):
     argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
-    all_argdefs = {}  # use a dict rather than set to maintain insertion order
+    all_argdefs: Dict[
+        Any, None
+    ] = {}  # use a dict rather than set to maintain insertion order
     for argdefs in argdefs_list:
         all_argdefs.update({arg: None for arg in argdefs})
 
@@ -135,15 +138,19 @@ class MultiKernel:
         for the multi-kernel.
         """
         call_args_list = [kernel.get_call_args() for kernel in self.kernels]
-        all_call_args = {}  # use a dict rather than set to maintain insertion order
+        all_call_args: Dict[
+            Any, None
+        ] = {}  # use a dict rather than set to maintain insertion order
         for call_args in call_args_list:
             all_call_args.update({arg: None for arg in call_args})
 
         all_call_args = list(all_call_args.keys())
-        grid = []
+        grid: List[Any] = []
 
         # numels for all subkernels should be the same. Use kernels[0] here
-        self.kernels[0].add_numel_to_call_args_and_grid(all_call_args, grid)
+        self.kernels[0].add_numel_to_call_args_and_grid(
+            self.kernel_name, all_call_args, grid
+        )
 
         V.graph.wrapper_code.generate_kernel_call(
             self.kernel_name,

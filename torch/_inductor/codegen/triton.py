@@ -860,6 +860,7 @@ class TritonKernel(Kernel):
             return index
 
         self.simplify_indexing = simplify_indexing
+        self.code_hash = None
 
     def should_use_persistent_reduction(self):
         """
@@ -2072,13 +2073,13 @@ class TritonKernel(Kernel):
 
         return f"[{', '.join(sizes)}]"
 
-    def add_numel_to_call_args_and_grid(self, call_args, grid):
+    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
-                expr = wrapper.generate_numel_expr(name, tree)
+                expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
@@ -2097,8 +2098,8 @@ class TritonKernel(Kernel):
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
         call_args = self.get_call_args()
-        grid = []
-        self.add_numel_to_call_args_and_grid(call_args, grid)
+        grid: List[Any] = []
+        self.add_numel_to_call_args_and_grid(name, call_args, grid)
         grid = wrapper.generate_default_grid(name, grid)
         wrapper.generate_kernel_call(
             name,
@@ -2552,16 +2553,13 @@ class TritonScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
             src_code = kernel.codegen_kernel()
 
-            for node in node_schedule:
-                if node not in (EnableReduction, DisableReduction):
-                    node.mark_run()
-
         kernel_name = self.define_kernel(src_code, node_schedule)
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
+        multi_kernel = None
         if kernel.persistent_reduction and config.triton.multi_kernel:
             # V.graph.restore_state()
             kernel2 = TritonKernel(
@@ -2577,10 +2575,15 @@ class TritonScheduling(BaseScheduling):
             kernel2.code_hash = code_hash(src_code2)
 
             multi_kernel = MultiKernel([kernel, kernel2])
-            multi_kernel.call_kernel()
 
+        with V.set_kernel_handler(kernel):
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
+
+        if multi_kernel:
+            multi_kernel.call_kernel()
         else:
-            # V.graph.drop_state()
             kernel.call_kernel(kernel_name)
             kernel.codegen_nan_check()
 
