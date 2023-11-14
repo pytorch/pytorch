@@ -35,11 +35,14 @@ class Cache {
   // removed from the cache.
   TypePtr Add(K key, TypePtr object) {
     std::lock_guard<std::mutex> slock(lock_);
+
+    if (!max_size_) {
+      return object;
+    }
+
     element_list_.emplace_front(Element(std::move(key), std::move(object)));
     auto it = element_list_.begin();
     auto emplace_result = element_map_.emplace(&it->first, it);
-    // Cache iterator's value to avoid invalid iterator below if cache size is 0
-    TypePtr ret_object = emplace_result.first->second->second;
     if (!emplace_result.second) {
       element_list_.erase(it);
       DoLRU(emplace_result.first->second);
@@ -48,7 +51,7 @@ class Cache {
       element_map_.erase(&last->first);
       element_list_.pop_back();
     }
-    return ret_object;
+    return emplace_result.first->second->second;
   }
 
   // Retrieves the existing object if it exists. If it does, its position in
