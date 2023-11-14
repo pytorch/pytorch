@@ -115,7 +115,7 @@ jobs:
   # TODO: Figure out how to migrate this job to M1 runner
   ios-build-test:
     name: ios-build-test
-    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6'
+    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6' || github.event.schedule == '29 8 * * *'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       trigger-event: ${{ github.event_name }}
@@ -158,7 +158,8 @@ jobs:
 
   macos-12-py3-x86-64-build:
     name: macos-12-py3-x86-64
-    if: github.event_name != 'schedule' || github.event.schedule == '45 4,12,20 * * 1-5' || github.event.schedule == '45 12 * * 0,6'
+    if: github.event_name != 'schedule' || github.event.schedule == '45 4,12,20 * * 1-5' || github.event.schedule == '45 12 * * 0,6' || github.event.schedule == '29 8 * * *'
+
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-x86-64
