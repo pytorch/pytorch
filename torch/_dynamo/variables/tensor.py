@@ -325,7 +325,6 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        breakpoint()
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal method invocation {name} in strict mode")
