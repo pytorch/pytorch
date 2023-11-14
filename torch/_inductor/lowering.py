@@ -1968,21 +1968,21 @@ def bucketize(
 
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
     )
     return args, kwargs
 
@@ -3089,6 +3089,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
+            and src.get_device().type == torch.device("cuda").type
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
@@ -5034,7 +5035,6 @@ register_inplace(aten.__ixor__, aten.__xor__)
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min, max):
     tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
 
