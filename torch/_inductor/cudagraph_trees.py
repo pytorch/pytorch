@@ -488,7 +488,7 @@ def is_live(weak_ref: Optional[StorageWeakRefWrapper]) -> bool:
 
 def maybe_deref(
     weak_ref: Optional[StorageWeakRefWrapper],
-) -> Optional[Tuple[UntypedStorage, int]]:
+) -> Optional[Tuple[StorageWeakRefPointer, int]]:
     if weak_ref is None:
         return None
     r = weak_ref()
@@ -559,7 +559,7 @@ class CUDAWarmupNode:
         wrapped_function: WrappedFunction,
         parent,
         cuda_graphs_pool: Tuple[int, int],
-        existing_cuda_graph: torch.cuda.Graph,
+        existing_cuda_graph: Optional[torch.cuda.CUDAGraph],
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
@@ -784,7 +784,7 @@ class CUDAGraphNode:
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
-        self.static_input_data_ptrs: InputList[int] = [
+        self.static_input_data_ptrs: InputList[Optional[int]] = [
             (
                 inputs[i].data_ptr()
                 if isinstance(inputs[i], torch.Tensor) and i in self.static_input_idxs
@@ -840,7 +840,7 @@ class CUDAGraphNode:
         del inputs
 
         # graph used for recording model invocation
-        self.graph = torch.cuda.CUDAGraph()
+        self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -848,7 +848,7 @@ class CUDAGraphNode:
         # we reconstruct tensors at the correct data pointers of our inputs which are
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
-        self.reconstructed_inputs: InputList[Tensor] = [
+        self.reconstructed_inputs: InputList[Union[Tensor, int]] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)
             else x
@@ -969,7 +969,7 @@ class CUDAGraphNode:
         if not self.cached_tensor_outputs:
             self._initialize_cached_tensors()
 
-        outputs: List[torch.Tensor] = []
+        outputs: List[Any] = []
 
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
@@ -1046,6 +1046,7 @@ class CUDAGraphNode:
         return output_storages
 
     def run_graph(self):
+        assert self.graph is not None
         self.graph.replay()
 
     def all_outputs_are_dead(self):
@@ -1477,7 +1478,7 @@ class CUDAGraphNode:
 
         torch.cuda.synchronize()
         self.stream.wait_stream(torch.cuda.current_stream())
-        recording_inputs = []
+        recording_inputs: List[Union[Tensor, int]] = []
 
         with warnings.catch_warnings(record=True), torch.cuda.device(
             self.device
@@ -1522,7 +1523,7 @@ class CUDAGraphNode:
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
         for idx in self.cudagraph_managed_idxs:
-            inputs[idx] = None
+            inputs[idx] = None  # type: ignore[call-overload]
 
         torch._check(
             self._check_liveness(
@@ -1695,7 +1696,7 @@ class CUDAGraphTreeManager:
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
-            self.graph = torch.cuda.CUDAGraph()
+            self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
