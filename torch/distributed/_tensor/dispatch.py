@@ -20,10 +20,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, Te
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.distributed._tensor.tp_conv import (
-    tp_convolution,
-    tp_convolution_backward,
-)
+from torch.distributed._tensor.tp_conv import tp_convolution, tp_convolution_backward
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -38,7 +35,6 @@ def decompose_handler(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-<<<<<<< HEAD
     """
     Decomposes a op to core ATen op, this handler is mostly here
     for inference mode usage where the ops are not core aten ops.
@@ -48,18 +44,6 @@ def decompose_handler(
         return r
     else:
         raise RuntimeError("Decomposition failed")
-=======
-    # Redistribute grad_output tensor to the same placement as input tensor
-    args = list(args)
-    if op_call == torch.ops.aten.convolution_backward.default:
-        assert isinstance(args[0], dtensor.DTensor) and isinstance(
-            args[1], dtensor.DTensor
-        )
-        args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
-    args = tuple(args)
-    out, _, _ = _operator_dispatch(op_call, args, kwargs, sharding_propagator)
-    return out
->>>>>>> fix linter errors 2
 
 
 def is_same_size_handler(
@@ -90,6 +74,8 @@ class OpDispatcher:
             aten.randint_like.low_dtype,
             aten.randint_like.low_dtype_out,
             aten.uniform_.default,
+            aten.bernoulli.default,
+            aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
@@ -105,6 +91,14 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
+        # Redistribute grad_output tensor to the same placement as input tensor
+        args = list(args)
+        if op_call == torch.ops.aten.convolution_backward.default:
+            assert isinstance(args[0], dtensor.DTensor) and isinstance(
+                args[1], dtensor.DTensor
+            )
+            args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
+        args = tuple(args)
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
@@ -193,7 +187,17 @@ class OpDispatcher:
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec
                 ):
+<<<<<<< HEAD
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+=======
+                    local_results = op_call(*local_tensor_args, **local_kwargs)
+            elif op_call == torch.ops.aten.convolution.default:
+                local_results = tp_convolution(op_call, local_tensor_args, local_kwargs)
+            elif op_call == torch.ops.aten.convolution_backward.default:
+                local_results = tp_convolution_backward(
+                    op_call, local_tensor_args, local_kwargs
+                )
+>>>>>>> resovle rebase conflicts
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
@@ -396,31 +400,7 @@ class OpDispatcher:
                 else:
                     res_list.append(None)  # type: ignore[arg-type]
 
-<<<<<<< HEAD
             return tuple(res_list) if isinstance(res, tuple) else res_list
-=======
-        # run local op computation with potentially modified args/kwargs
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        if op_call in _random_ops and is_rng_supported_mesh(mesh):
-            if not random._rng_tracker:
-                raise RuntimeError(
-                    "A CudaRNGStateTracker instance must be instantiated "
-                    "before executing a random op over a DTensor. "
-                    "Try calling random.manual_seed() or distribute_tensor() "
-                    "before executing a DTensor random op."
-                )
-            # For DTensor random operator, run it within a distribute region
-            with random._rng_tracker._distribute_region(
-                cast(DTensorSpec, args_schema[0])
-            ):
-                local_results = op_call(*local_tensor_args, **local_kwargs)
-        elif op_call == torch.ops.aten.convolution.default:
-            local_results = tp_convolution(op_call, local_tensor_args, local_kwargs)
-        elif op_call == torch.ops.aten.convolution_backward.default:
-            local_results = tp_convolution_backward(
-                op_call, local_tensor_args, local_kwargs
-            )
->>>>>>> fix linter errors 3
         else:
             # if the res contains only non tensor values, we simply return it without rewrapping
             return res
