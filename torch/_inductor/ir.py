@@ -4012,10 +4012,10 @@ class ScatterFallback(ExternKernel):
     """
 
     def codegen(self, wrapper):
+        reduce = self.kwargs["reduce"]
         if V.graph.cpp_wrapper:
             # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
             get_operator_enum = {"add": "sum", "multiply": "prod"}
-            reduce = self.kwargs["reduce"]
             if reduce in get_operator_enum:
                 reduce = get_operator_enum[reduce]
             self.cpp_kernel = self.get_cpp_kernel(self.fn, reduce)
@@ -4031,7 +4031,7 @@ class ScatterFallback(ExternKernel):
             self.cpp_kernel if V.graph.cpp_wrapper else self.kernel,
             self.fn,
             self.src_is_tensor,
-            self.kwargs["reduce"],
+            reduce,
             self.codegen_kwargs(),
         )
 
@@ -4274,7 +4274,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
-            f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
@@ -4283,7 +4283,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
     def is_legacy_abi_kernel(self):
-        return "_scaled_dot_product_flash_attention" in str(self.kernel)
+        return "_scaled_dot_product_flash_attention" in str(self.cpp_kernel)
 
     def get_arg_default_value(self, pos):
         assert hasattr(
