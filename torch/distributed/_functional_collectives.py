@@ -192,6 +192,9 @@ def all_gather_tensor(
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
+        # torch.cat access the data so we already need to wait here, first do wait
+        # and then chunk + cat avoid us going through ACT dispatching logic again
+        res = res.wait()  # type: ignore[attr-defined]
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -402,12 +405,24 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def wait(self) -> torch.Tensor:
+        wait_tensor(self.elem)
+        return self.elem
+
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
         return self.elem
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func == torch.ops.aten.view.default:
+            # Fast handle aten.view as a lot of view related op goes to aten.view
+            # eventually, this avoids pytree slowdown
+            res = func(args[0].elem, args[1])
+            wrapper_res = AsyncCollectiveTensor(res)
+            _register_tensor_wrapper(wrapper_res)
+            return wrapper_res
+
         is_view_op = _is_view_op(func)
 
         def unwrap(e: AsyncCollectiveTensor):
@@ -435,6 +450,8 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def numpy(self):
+        return self.wait().numpy()
 
 """
 Utils and infrastructure for tracing support
