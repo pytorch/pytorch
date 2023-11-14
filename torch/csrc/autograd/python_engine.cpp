@@ -392,8 +392,21 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   engine.queue_callback([callback]() {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
-    if (!result)
-      throw python_error();
+    if (!result) {
+      // Throw a python_error with the PyErr state persisted so that we don't
+      // lose the error state when returning to the cpu thread. Ordinarily, if
+      // we were calling into python during backward, e.g. executing a hook
+      // or custom autograd Function, we would be able to directly use
+      // `throw python_error()`. This is because (1) the engine has logic around
+      // evaluate_function that catches and persists errors, and (2) we init the
+      // PyThreadState on the creation of the thread so we aren't actually
+      // creating a separate PyThreadState everytime we call gil_scoped_acquire.
+      // Errors raised by queue_callback won't be caught by that however, so we
+      // need to replicate the persisting logic here.
+      python_error err;
+      err.persist();
+      throw std::move(err);
+    }
   });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

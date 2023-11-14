@@ -53,27 +53,6 @@ PyObject* THPGradientEdgeClass = nullptr;
     throw python_error();                  \
   }
 
-// Anonymous namespace for helpful functions used in this file
-namespace {
-
-// Throw a python_error with the PyErr state persisted, so that we
-// don't lose the error state if the GIL is released when we don't
-// have a PyThreadState created beforehand, this is made so that
-// even for pure C++ thread without a pre-created PyThreadState could
-// also capture the correct error message.
-// TODO: This is a temporary approach to allow C++ thread to correctly
-// capture Python Error in autograd, remove this when c10 thread pool
-// allow to do one time initialization.
-// see discussion in https://github.com/pytorch/pytorch/pull/34845
-// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  throw std::move(err);
-}
-
-} // namespace
-
 namespace torch {
 namespace autograd {
 
@@ -89,7 +68,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
   if (!pyInputs)
-    throw_python_error();
+    throw python_error();
   auto& output_info = py_fn->output_info;
   for (const auto i : c10::irange(num_inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -108,16 +87,16 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
           THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
     }
     if (!input)
-      throw_python_error();
+      throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
   THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
   if (!apply_fn)
-    throw_python_error();
+    throw python_error();
   THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
   if (!r)
-    throw_python_error();
+    throw python_error();
   ensure_tuple(r);
 
   auto& is_variable_input = py_fn->is_variable_input;
@@ -134,7 +113,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       num_outputs = num_forward_inputs;
       r = PyTuple_GetSlice(r.get(), 0, num_forward_inputs);
       if (!r)
-        throw_python_error();
+        throw python_error();
     }
   }
 
@@ -183,11 +162,11 @@ auto PyNode::is_traceable() -> bool {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr forward_class{PyObject_GetAttrString(obj, "_forward_cls")};
   if (!forward_class)
-    throw_python_error();
+    throw python_error();
   THPObjectPtr traceable_py_bool{
       PyObject_GetAttrString(forward_class, "is_traceable")};
   if (!traceable_py_bool)
-    throw_python_error();
+    throw python_error();
   return traceable_py_bool == Py_True;
 }
 
@@ -216,7 +195,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
   if (!pykey)
-    throw_python_error();
+    throw python_error();
   TORCH_CHECK(
       PyTuple_CheckExact(pykey.get()),
       "_compiled_autograd_key shoud return tuple of ints");
@@ -226,7 +205,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
   if (C10_UNLIKELY(key < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
-    throw_python_error();
+    throw python_error();
   }
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(size);
@@ -237,7 +216,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   for (const auto i : c10::irange(1, size)) {
     auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
     if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
-      throw_python_error();
+      throw python_error();
     f->compiled_autograd_symints.emplace_back(val);
   }
 
@@ -452,7 +431,7 @@ static void _wrap_outputs(
     auto num_inputs = self->is_variable_input.size();
     THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
     if (!pyInputs)
-      throw_python_error();
+      throw python_error();
     int64_t variable_idx = 0;
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = nullptr;
@@ -464,7 +443,7 @@ static void _wrap_outputs(
           input = THPVariable_Wrap(at::zeros_like(inputs[variable_idx]));
         }
         if (!input) {
-          throw_python_error();
+          throw python_error();
         }
         variable_idx++;
       } else {
@@ -477,10 +456,10 @@ static void _wrap_outputs(
     THPObjectPtr apply_jvp_fn(
         PyObject_GetAttrString((PyObject*)self, "apply_jvp"));
     if (!apply_jvp_fn)
-      throw_python_error();
+      throw python_error();
     THPObjectPtr r(PyObject_CallObject(apply_jvp_fn, pyInputs.get()));
     if (!r)
-      throw_python_error();
+      throw python_error();
     ensure_tuple(r);
 
     // Massage the Python results tuple back into a C++ variable_list
