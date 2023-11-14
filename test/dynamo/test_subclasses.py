@@ -14,7 +14,11 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import DifferentiableValues, jagged_from_list
+from torch.nested._internal.nested_tensor import (
+    DifferentiableValues,
+    jagged_from_list,
+    jagged_from_tensor_and_lengths,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -761,6 +765,31 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_support_bases(self):
+        import abc
+
+        import torch.fx._symbolic_trace
+
+        class Meta(abc.ABCMeta, torch.fx._symbolic_trace.ProxyableClassMeta):
+            def __new__(cls, name, bases, dct):
+                x = super().__new__(cls, name, bases, dct)
+                x.attr = 100
+                return x
+
+        class Multistreamable(abc.ABC):  # noqa: B024
+            pass
+
+        class Foo(Multistreamable, metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            typ = type(Foo())
+            typ.__bases__
+            return typ.__bases__
+
+        self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
@@ -773,6 +802,19 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
             )
         return jagged_from_list(out, offsets)
+
+    def _get_nc_jagged_tensor(self, inner_dim, starts, lengths, requires_grad=True):
+        # Makes a jagged tensor with N constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        max_dim = (starts + lengths).max()
+        values_tensor = torch.randn(
+            starts.shape[0],
+            max_dim.item(),
+            inner_dim,
+            requires_grad=requires_grad,
+            dtype=torch.float64,
+        )
+        return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
         compile_count = [0]
