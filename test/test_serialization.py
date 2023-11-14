@@ -801,7 +801,7 @@ class TestBothSerialization(TestCase):
             x_old_load = torch.load(f_old, weights_only=weights_only)
             self.assertEqual(x_old_load, x_new_load)
 
-        with AlwaysWarnTypedStorageRemoval(True),warnings.catch_warnings(record=True) as w:
+        with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
