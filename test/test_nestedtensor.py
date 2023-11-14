@@ -2979,7 +2979,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3035,6 +3035,28 @@ class TestNestedTensorSubclass(NestedTestCase):
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
     @torch._dynamo.config.patch(suppress_errors=True)
+    def test_split(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        nt, _ = jagged_from_list([a, b, c], None)
+        out = torch.split(nt, 2, -1)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(
+            out[0], jagged_from_list([a[:, 0:2], b[:, 0:2], c[:, 0:2]], None)[0]
+        )
+        self.assertEqual(
+            out[1], jagged_from_list([a[:, 2:], b[:, 2:], c[:, 2:]], None)[0]
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"split\(\): not supported for NestedTensor on dim=0 or dim=1",
+        ):
+            torch.split(nt, 2, 1)
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3051,7 +3073,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): only supported for NestedTensor on dim = -1 for now",
+            r"split_with_sizes\(\): not supported for NestedTensor on dim=0 or dim=1",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -3130,6 +3152,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         out_ref = torch.sum(nt.values(), dim=(0,))
         self.assertNotIsInstance(out, NestedTensor)
         self.assertTrue(torch.allclose(out, out_ref))
+
 
 
     @dtypes(torch.float, torch.double, torch.half)
@@ -3278,6 +3301,89 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_layer_norm_2(self, device):
+        test_tensor_list = self._get_list_for_jagged_tensor(
+            ((2, 3, 4), 3), device=device, requires_grad=True
+        )
+        bias = torch.randn(3, requires_grad=False, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, bias):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = torch.nn.functional.layer_norm(nt, (nt.shape[-1],), bias=bias)
+            return buffer_from_jagged(out)
+
+        gradcheck(
+            grad_test_func, inputs=(*test_tensor_list, bias), check_batched_grad=False
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"layer_norm\(\): normalizing over ragged dim not supported for nested tensors",
+        ):
+            nt, _ = jagged_from_list(test_tensor_list, None)
+            _ = torch.nn.functional.layer_norm(nt, (nt.shape[-2], nt.shape[-1]))
+
+    def test_narrow(self, device):
+        starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        nt = torch.nested.narrow(
+            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone().detach(),
+            1,
+            starts,
+            lengths,
+            layout=torch.jagged
+        )
+
+        # TODO: Use this approach when unbind is functional
+        # unbinded_nt = nt.unbind()
+        # for i in range(starts.shape[0]):
+        #     self.assertEqual(torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64), unbinded_nt[i])
+        for i in range(starts.shape[0]):
+            self.assertEqual(
+                torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64),
+                nt.values()[nt.offsets()[i]:(nt.offsets()[i] + nt.lengths()[i])]
+            )
+
+    def test_is_contiguous(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt_contiguous, _ = jagged_from_list([a, b, c], None)
+
+        starts_nc = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths_nc = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        narrow_base = torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone()
+        nt_noncontiguous = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_nc,
+            lengths_nc,
+            layout=torch.jagged
+        )
+
+        starts_c = torch.tensor([1, 0, 0, 0, 0], device=device, dtype=torch.int64)
+        lengths_c = torch.tensor([9, 10, 10, 10, 8], device=device, dtype=torch.int64)
+        nt_contiguous_narrow = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_c,
+            lengths_c,
+            layout=torch.jagged
+        )
+
+        # Test contiguous case
+        assert nt_contiguous.is_contiguous()
+
+        # Test narrow case
+        assert not nt_noncontiguous.is_contiguous()
+        assert nt_contiguous_narrow.is_contiguous()
+
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
 
 instantiate_parametrized_tests(TestNestedTensor)

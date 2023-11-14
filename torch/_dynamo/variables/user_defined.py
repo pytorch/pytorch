@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import sys
 import threading
 import types
 from typing import Dict, List
@@ -32,7 +33,6 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -382,8 +382,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
-                # TODO(jansel): BUG? passing self.source here is a bit suss, expect None to be better
-                return build_checkpoint_variable(source=self.source).call_function(
+                return build_checkpoint_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchVariable(self.value.func).call_function(
@@ -565,10 +564,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
+        from .dicts import is_hashable
+
+        # TODO this should probably be merged with the dict handling
 
         index = (
             key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            if is_hashable(key) and key.source is not None
             else key.as_python_constant()
         )
 
@@ -581,12 +583,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
-        try:
-            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
-        except (ImportError, AttributeError):
-            return False
-        else:
-            return type(obj) is KeyedJaggedTensor
+        mod = sys.modules.get("torchrec.sparse.jagged_tensor")
+        return mod is not None and type(obj) is mod.KeyedJaggedTensor
 
     def __init__(self, value, **kwargs):
         from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
