@@ -4478,7 +4478,7 @@ def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
@@ -4518,7 +4518,7 @@ def empty_permuted(
     physical_layout,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
 ) -> TensorLikeType:

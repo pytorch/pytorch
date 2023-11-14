@@ -14,6 +14,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx import GraphModule
+from .utils import _check_input_constraints_pre_hook
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -55,6 +56,9 @@ class _UnflattenedModule(torch.fx.GraphModule):
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
+
+        self.range_constraints = export_module.range_constraints
+        self.equality_constraints = export_module.equality_constraints
 
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
@@ -110,7 +114,9 @@ def unflatten(module: ExportedProgram) -> _UnflattenedModule:
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module.
     """
-    return _UnflattenedModule(module)
+    module = _UnflattenedModule(module)
+    module.register_forward_pre_hook(_check_input_constraints_pre_hook)
+    return module
 
 
 def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
