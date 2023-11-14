@@ -4723,7 +4723,7 @@ def empty_like(
     a: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: Optional[torch.layout] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,

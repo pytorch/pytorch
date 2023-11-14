@@ -52,7 +52,7 @@ IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
-DeviceLikeType = Union[str, torch.device]
+DeviceLikeType = Union[str, torch.device, int]
 Tensor = torch.Tensor
 
 
