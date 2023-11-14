@@ -401,8 +401,8 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
       // evaluate_function that catches and persists errors, and (2) we init the
       // PyThreadState on the creation of the thread so we aren't actually
       // creating a separate PyThreadState everytime we call gil_scoped_acquire.
-      // Errors raised by queue_callback won't be caught by that however, so we
-      // need to replicate the persisting logic here.
+      // Errors raised by queue_callback won't be caught by the try-catch around
+      // evaluate_function, so we need to replicate the persisting logic here.
       python_error err;
       err.persist();
       throw std::move(err);
