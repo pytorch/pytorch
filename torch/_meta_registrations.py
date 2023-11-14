@@ -1880,7 +1880,8 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta([aten.mm.default])
+@register_meta(aten.mm)
+@out_wrapper()
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
@@ -2161,7 +2162,8 @@ if torch._C._has_mkldnn:
         post_op_algorithm,
     ):
         output_shape = list(x.shape)
-        output_shape[-1] = w.shape[0]
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
         assert output_dtype in [torch.float32, torch.bfloat16]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
@@ -3334,7 +3336,7 @@ def meta_cdist_backward(grad, x1, x2, p, cdist):
     batch_tensor1 = x1.shape[:-2]
     batch_tensor2 = x2.shape[:-2]
     expand_batch_portion = list(torch.broadcast_shapes(batch_tensor1, batch_tensor2))
-    tensor1_expand_size = expand_batch_portion[:]
+    tensor1_expand_size = expand_batch_portion.copy()
     tensor1_expand_size.extend([r1, c1])
     batch_product = math.prod(expand_batch_portion)
     if r1 == 0 or r2 == 0 or c1 == 0 or batch_product == 0:
@@ -3673,6 +3675,11 @@ def meta_masked_scatter(self, mask, source):
     self, mask = _maybe_broadcast(self, mask)
     output = torch.empty_like(self, memory_format=torch.contiguous_format)
     return meta_masked_scatter_(output, mask, source)
+
+
+@register_meta(aten.masked_scatter_backward)
+def meta_masked_scatter_backward(self, mask, sizes):
+    return self.new_empty(sizes)
 
 
 @register_meta(aten.index_put_.default)
@@ -5179,6 +5186,90 @@ def meta__scaled_dot_product_efficient_backward(
         )
 
     return grad_q, grad_k, grad_v, grad_bias
+
+
+@register_meta(
+    [
+        aten._efficient_attention_forward,
+    ]
+)
+def meta__efficient_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: Optional[int],
+    dropout_p: float,
+    custom_mask_type: int,
+    compute_log_sumexp: bool = False,
+    scale: Optional[float] = None,
+    causal_diagonal: Optional[Tensor] = None,
+    seqlen_k: Optional[Tensor] = None,
+):
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (B, num_heads, logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return res, logsum_exp, seed, offset, M, N
+
+
+@register_meta(
+    [
+        aten._efficient_attention_backward,
+    ]
+)
+def meta__efficient_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    logsumexp: Tensor,
+    dropout_p: float,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    custom_mask_type: int,
+    bias_requires_grad: bool,
+    scale: Optional[float] = None,
+    num_splits_key: Optional[int] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    if bias is not None:
+        assert bias is not None
+        lastDim = bias.size(-1)
+        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        new_sizes = list(bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+    else:
+        grad_bias = torch.empty((), device=query.device)
+
+    return grad_query, grad_key, grad_value, grad_bias
 
 
 @register_meta([aten._scaled_mm.default])

@@ -21,7 +21,7 @@ try:
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
         _get_previously_failing_tests,
     )
-    from tools.testing.test_run import TestRun
+    from tools.testing.test_run import TestRun, TestRuns
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
@@ -376,6 +376,44 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
         self.assertEqual(statsExclusive["heuristics"][1]["order_overall"], 5)
         self.assertEqual(statsExclusive["heuristics"][1]["relevance_group"], "UNRANKED")
         self.assertEqual(statsExclusive["aggregated"]["order_overall"], 5)
+
+    def test_merging_file_heuristic_after_class_heuristic_with_same_probability(
+        self,
+    ) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2::TestFooClass"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test3", "test2"],
+        )
+
+        expected_aggregated_high_relevance: TestRuns = tuple()
+        expected_aggregated_probable_relevance = (
+            TestRun("test2::TestFooClass"),
+            TestRun("test3"),
+            TestRun("test2", excluded=["TestFooClass"]),
+        )
+        expected_aggregated_unranked_relevance = (
+            TestRun("test1"),
+            TestRun("test4"),
+            TestRun("test5"),
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        aggregated_pris = aggregator.get_aggregated_priorities()
+
+        self.assertHeuristicsMatch(
+            aggregated_pris,
+            expected_high_tests=expected_aggregated_high_relevance,
+            expected_probable_tests=expected_aggregated_probable_relevance,
+            expected_unranked_tests=expected_aggregated_unranked_relevance,
+        )
 
 
 if __name__ == "__main__":
