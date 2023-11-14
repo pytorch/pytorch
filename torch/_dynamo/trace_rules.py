@@ -121,7 +121,7 @@ def load_object(name):
     else:
         assert len(x) == 1, f"Invalid obj name {name}"
         val = _load_obj_from_str(x[0])
-    if hasattr(val, "__wrapped__"):
+    if hasattr(val, "__wrapped__") and obj is not torch.ops:
         val = val.__wrapped__
     return val
 
