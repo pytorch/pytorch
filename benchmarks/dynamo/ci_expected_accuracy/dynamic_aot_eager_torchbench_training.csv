@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,8
+torchrec_dlrm,infra_error,0
 
 
 
@@ -82,7 +82,7 @@ hf_Bart,pass,7
 
 
 
-hf_BigBird,pass,7
+hf_BigBird,fail_to_run,4
 
 
 
@@ -102,7 +102,7 @@ hf_Reformer,pass,27
 
 
 
-hf_T5_base,OOM,4
+hf_T5_base,OOM,7
 
 
 
@@ -190,7 +190,7 @@ soft_actor_critic,pass,7
 
 
 
-speech_transformer,pass,18
+speech_transformer,infra_error,0
 
 
 
@@ -238,7 +238,7 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,pass,37
 
 
 

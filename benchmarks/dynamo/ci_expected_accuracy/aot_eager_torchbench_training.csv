@@ -102,7 +102,7 @@ hf_Reformer,pass,27
 
 
 
-hf_T5_base,OOM,4
+hf_T5_base,OOM,7
 
 
 
@@ -238,7 +238,7 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,pass,37
 
 
 
