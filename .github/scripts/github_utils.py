@@ -180,10 +180,11 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
     gh_fetch_url(url, method="PATCH", data={"state": state})
 
-<<<<<<< HEAD
+
 def get_pr_reviews(org: str, repo: str, pr_num: int) -> List[Dict[str, Any]]:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/reviews"
     return gh_fetch_json_list(url)
+
 
 def gh_check_write_access(org: str, repo: str, user: str) -> bool:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/collaborators/{user}/permission"
@@ -192,6 +193,7 @@ def gh_check_write_access(org: str, repo: str, user: str) -> bool:
     has_write = perm == "admin" or perm == "write"
 
     return has_write
+
 
 def gh_request_pr_reviewers(
     org: str, repo: str, pr_num: int, reviewers: List[str]
