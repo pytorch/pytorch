@@ -11,7 +11,6 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 import sympy
 
@@ -29,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -1031,7 +1031,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             shape_env=parent_fake_mode.shape_env,
             parent=parent_fake_mode,
         )
-        with self.restore_global_state(), self.tracing_context.with_fake_mode(backend_fake_mode):
+        with self.restore_global_state(), self.tracing_context.with_fake_mode(
+            backend_fake_mode
+        ):
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
