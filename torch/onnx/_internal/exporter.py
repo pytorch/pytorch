@@ -633,7 +633,9 @@ class ONNXProgram:
         self._fake_context = fake_context
         self._export_exception = export_exception
 
-    def __call__(self, *args: Any, options=None, **kwargs: Any) -> Any:
+    def __call__(
+        self, *args: Any, options=None, **kwargs: Any
+    ) -> Sequence[Union[numpy.ndarray, torch.Tensor, int, float, bool]]:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
@@ -652,15 +654,9 @@ class ONNXProgram:
         onnx_model = self.model_proto.SerializeToString()
         ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
 
-        def to_numpy(tensor):
-            return (
-                tensor.detach().cpu().numpy()
-                if tensor.requires_grad
-                else tensor.cpu().numpy()
-            )
-
         onnxruntime_input = {
-            k.name: to_numpy(v) for k, v in zip(ort_session.get_inputs(), onnx_input)
+            k.name: torch.Tensor.numpy(v, force=True)
+            for k, v in zip(ort_session.get_inputs(), onnx_input)
         }
 
         return ort_session.run(None, onnxruntime_input)
