@@ -741,7 +741,7 @@ def torchscript(model, example_inputs, verbose=False):
 def getfile(obj):
     try:
         return inspect.getfile(obj)
-    except TypeError:
+    except (TypeError, OSError):
         return None
 
 
