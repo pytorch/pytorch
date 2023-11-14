@@ -2293,9 +2293,10 @@ Tensor binary_cross_entropy_double_backward_target(
 
   if (isDefined(weight)) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    res = isTensorSubclassLike(weight.value()) ? res.mul(weight.value())
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-                                               : res.mul_(weight.value());
+    res = isTensorSubclassLike(weight.value())
+        ? res.mul(weight.value())
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        : res.mul_(weight.value());
   }
 
   auto neg_self = 1 - self;
@@ -4856,6 +4857,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     gG = first_bwd_fn_grad_input(
         ggI_expanded, at::ones({}, sigma2_eps_neg_1_2.options()));
     gG = (gO * gG).sum(0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     gG = gG.reshape_as(*gamma);
   }
 
