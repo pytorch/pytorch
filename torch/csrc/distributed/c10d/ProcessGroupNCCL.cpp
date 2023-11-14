@@ -1394,9 +1394,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
-  // we mark the thread detach so the dump of debug info becomes "best effort".
-  // Or the process exit normally, we don't really care about dumping the debug
-  // info.
+  // or the thread has finished. Because we don't want to block the monitor
+  // thread, so We mark the thread detach and the dump of debug info becomes
+  // "best effort". If the process exit normally, marking it detach also makes
+  // sense because we don't really care about dumping the debug info.
   debugInfoStoreThread.detach();
 
   if (!terminateHeartbeatMonitorThread_.load()) {
