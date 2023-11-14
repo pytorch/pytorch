@@ -986,7 +986,7 @@ class TestCommon(TestCase):
             try:
                 if with_out:
                     out = torch.empty(0, dtype=torch.int32, device=device)
-                    op_to_test(inputs, out=out, *args, **kwargs)
+                    op_to_test(inputs, *args, out=out, **kwargs)
                 else:
                     out = op_to_test(inputs, *args, **kwargs)
                 self.assertFalse(expectFail)
@@ -2114,7 +2114,7 @@ class TestFakeTensor(TestCase):
 
                 if torch.Tag.pointwise in func.tags:
                     shapes = []
-                    for inp in pytree.tree_leaves((args, kwargs)):
+                    for inp in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(inp, torch.Tensor):
                             shapes.append(inp.shape)
 

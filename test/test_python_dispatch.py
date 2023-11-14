@@ -592,7 +592,6 @@ class TestPythonDispatch(TestCase):
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
 $2: f32[1] = input('grad_y')
-True = torch._ops.aten.is_same_size.default($1, $2)
 $3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
@@ -852,7 +851,6 @@ $0: f32[1] = input('x')
 $1: f32[1] = input('x.grad')
 $2: f32[1] = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3: f32[1] = input('grad_output')
-True = torch._ops.aten.is_same_size.default($2, $3)
 $4: f32[1] = torch._ops.aten.mul.Tensor($3, 2)
 $5: f32[1] = torch._ops.aten.mul.Tensor($4, $0)
 $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
@@ -2096,9 +2094,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
-    return ((sym_size, sym_size_1), (sym_size, sym_size_1))""")
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
+    return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""")
 
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
@@ -2112,7 +2110,7 @@ def forward(self, x_1):
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func.overloadpacket == torch.ops.aten.dim:
                     return data.dim()
-                if func.overloadpacket == torch.ops.aten.sym_numel:
+                if func.overloadpacket == torch.ops.aten.numel:
                     numel_called[0] = True
                     return None
                 return NotImplemented
@@ -2196,7 +2194,7 @@ class TestWrapperSubclassAliasing(TestCase):
 
         result_test = op(*args_subclass, **kwargs_subclass)
 
-        args_ref_flat = pytree.tree_leaves((args, kwargs))
+        args_ref_flat = pytree.arg_tree_leaves(*args, **kwargs)
         args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
 
         args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))

@@ -16,7 +16,11 @@ Known limitations:
 """
 
 import argparse
+import json
 import os
+import pathlib
+import subprocess
+import sys
 import urllib
 from io import BytesIO
 from urllib.request import urlopen
@@ -28,6 +32,10 @@ import requests
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
 ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
+CSV_LINTER = str(
+    pathlib.Path(__file__).absolute().parent.parent.parent.parent
+    / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
+)
 
 
 def query_job_sha(repo, sha):
@@ -111,6 +119,16 @@ def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
+        apply_lints(out_fn)
+
+
+def apply_lints(filename):
+    patch = json.loads(subprocess.check_output([sys.executable, CSV_LINTER, filename]))
+    if patch.get("replacement"):
+        with open(filename) as fd:
+            data = fd.read().replace(patch["original"], patch["replacement"])
+        with open(filename, "w") as fd:
+            fd.write(data)
 
 
 if __name__ == "__main__":

@@ -951,21 +951,23 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt')
+        >>> torch.load('tensors.pt', weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'))
+        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'})
+        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
         # Load tensor from io.BytesIO object
+        # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open('tensor.pt', 'rb') as f:
         ...     buffer = io.BytesIO(f.read())
-        >>> torch.load(buffer)
+        >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
-        >>> torch.load('module.pt', encoding='ascii')
+        # Loading from a module setting weights_only=False, warning this can be unsafe
+        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
