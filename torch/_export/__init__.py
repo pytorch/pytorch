@@ -22,7 +22,7 @@ import torch
 import torch._dynamo
 import torch.fx
 import torch.fx._pytree as fx_pytree
-
+from torch._export.passes.fake_tensor_prop import FakeTensorProp
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
@@ -535,6 +535,9 @@ def _export_to_torch_ir(
             )
 
     gm_torch_level.meta["module_call_specs"] = module_call_specs
+
+    FakeTensorProp(gm_torch_level).run()
+
     return gm_torch_level
 
 
