@@ -38,6 +38,17 @@ namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
+std::vector<std::string> ENABLE_NCCL_HEALTH_CHECK = { "ENABLE_NCCL_HEALTH_CHECK" };
+std::vector<std::string> NCCL_BLOCKING_WAIT = { "NCCL_BLOCKING_WAIT" };
+std::vector<std::string> NCCL_ASYNC_ERROR_HANDLING = { "NCCL_ASYNC_ERROR_HANDLING" };
+std::vector<std::string> NCCL_DESYNC_DEBUG = { "NCCL_DESYNC_DEBUG" };
+std::vector<std::string> NCCL_ENABLE_TIMING = { "NCCL_ENABLE_TIMING" };
+std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = { "TORCH_NCCL_ENABLE_MONITORING" };
+std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = { "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC" };
+std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = { "TORCH_NCCL_AVOID_RECORD_STREAMS" };
+std::vector<std::string> NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK = {
+  "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK" };
+
 namespace {
 
 #if defined(NCCL_MAJOR) && \
@@ -375,7 +386,7 @@ struct NCCLTraceBuffer {
     return instance;
   }
   NCCLTraceBuffer() {
-    max_entries_ = parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0);
+    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     enabled_ = max_entries_ > 0;
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
@@ -928,24 +939,24 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
+  blockingWait_ = getCvarBool(NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
+      getCvarInt(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
+  desyncDebug_ = getCvarBool(NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
-  heartbeatTimeoutInSec_ = parseEnvVarIntDefault(
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  heartbeatTimeoutInSec_ = getCvarInt(
       TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
-      parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
+      getCvarBool(NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
-  avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
+  avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
-      parseEnvVarFlag(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK);
+      getCvarBool(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
   if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
@@ -974,7 +985,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+  if (getCvarBool(ENABLE_NCCL_HEALTH_CHECK, false)) {
     // Perform health check by initializing dummy communicators and destroying
     // them. This will help indicate any NCCL-related issues prior to the first
     // collective.
@@ -990,9 +1001,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   init();
   const std::string OFF = "OFF";
-  const char* torch_distributed_debug =
-      parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
-  const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
+  std::string torch_distributed_debug =
+      getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
+  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO)
       << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options: "
       << "NCCL version: " << getNcclVersion()
@@ -1002,14 +1013,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       << ", NCCL_BLOCKING_WAIT: " << blockingWait_
       << ", TIMEOUT(ms): " << options_->timeout.count()
       << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
-      << ", TORCH_DISTRIBUTED_DEBUG: " << std::string(torch_distributed_debug)
+      << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
       << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
       << useTensorRegisterAllocatorHook_
 #endif
       << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
       << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", NCCL_DEBUG: " << std::string(nccl_debug)
+      << ", NCCL_DEBUG: " << nccl_debug
       << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
@@ -1279,7 +1290,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 void dump_debugging_info() {
   LOG(ERROR)
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
-  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
+  if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0) {
     // TODO: Find the right and proper way to dump the debug info.
     // We cannot print out debugging info directly.
     LOG(ERROR) << "nccl_trace: " << dump_nccl_trace();
@@ -1850,7 +1861,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
   if (getRank() == 0) {
-    LOG(INFO) << "NCCL_DEBUG: " << parse_env("NCCL_DEBUG");
+    LOG(INFO) << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
   }
 
   // See [Group Start/End Note]

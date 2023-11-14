@@ -259,7 +259,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "0", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
   }
 
   std::vector<at::Tensor> tensors_;
@@ -271,7 +271,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
     return;
   }
 
-  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(1000);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
@@ -299,7 +299,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
     return;
   }
 
-  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1, options);
@@ -353,11 +353,11 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
 
   int heartBeatIntervalInSec = 2;
   std::string timeInterval = std::to_string(heartBeatIntervalInSec);
-  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);
   ASSERT_TRUE(
-      setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
+      setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC[0].c_str(), timeInterval.c_str(), 1) ==
       0);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.
@@ -389,17 +389,17 @@ class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
   void SetUp() override {
     ProcessGroupNCCLErrorsTest::SetUp();
     std::string timeInterval = std::to_string(heartBeatIntervalInSec);
-    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);
     ASSERT_TRUE(
         setenv(
-            c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
+            c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC[0].c_str(), timeInterval.c_str(), 1) ==
         0);
-    ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
-    ASSERT_TRUE(setenv(c10d::NCCL_DESYNC_DEBUG, "1", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING[0].c_str(), "1", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::NCCL_DESYNC_DEBUG[0].c_str(), "1", 1) == 0);
     // We cannot capture the exception thrown in watchdog thread without making
     // lots of changes to the code. So we don't let the watchdog throw
     // exception.
-    ASSERT_TRUE(setenv(c10d::NCCL_ASYNC_ERROR_HANDLING, "0", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "0", 1) == 0);
     options_ = c10d::ProcessGroupNCCL::Options::create();
     // Set a super short watchdog timeout.
     options_->timeout = std::chrono::milliseconds(100);
