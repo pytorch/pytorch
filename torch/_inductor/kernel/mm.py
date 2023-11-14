@@ -300,6 +300,6 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             layout=layout,
             **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
             suffix_args=1,
-            epilogue_fn=lambda acc, mat3: V.ops.mul(acc, mat3),
+            epilogue_fn=V.ops.mul,
         )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)

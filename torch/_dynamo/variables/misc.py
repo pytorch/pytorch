@@ -149,22 +149,12 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif (
-            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
-            and isinstance(self.objvar, variables.CustomizedDictVariable)
-            and args
-            and variables.ConstDictVariable.is_valid_key(args[0])
-            and self.objvar.mutable_local
-        ):
+        elif inner_fn in (
+            collections.OrderedDict.__setitem__,
+            object.__setattr__,
+        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
-
-            newval = collections.OrderedDict(self.objvar.items)
-            newval[k] = args[1]
-            return tx.replace_all(
-                self.objvar,
-                self.objvar.modifed(newval),
-            )
+            return self.objvar.call_method(tx, "__setitem__", args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -422,7 +412,10 @@ class AutogradFunctionVariable(VariableTracker):
                 fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
-        source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        else:
+            source = None
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
@@ -440,8 +433,7 @@ class AutogradFunctionVariable(VariableTracker):
             )
 
     def call_function(self, tx, args, kwargs):
-        # TODO(jansel): BUG! the source here seems wrong, I believe it should just be None
-        return AutogradFunctionVariable(self.fn_cls, source=self.source)
+        return AutogradFunctionVariable(self.fn_cls)
 
     def call_method(
         self,

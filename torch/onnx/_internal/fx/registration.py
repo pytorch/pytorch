@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import types
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch._ops
@@ -67,6 +68,26 @@ class OpName:
     @_beartype.beartype
     def from_op_overload(cls, op_overload: torch._ops.OpOverload) -> OpName:
         return cls.from_qualified_name(op_overload.name())
+
+    @classmethod
+    @_beartype.beartype
+    def from_builtin_function(
+        cls, builtin_function: types.BuiltinFunctionType
+    ) -> OpName:
+        """From a builtin function, e.g. operator.add, math.ceil, etc, get the OpName.
+
+        FX graph uses built-in functions to caculate sympy expression. This function
+        is used to get the OpName from a builtin function.
+
+        Args:
+            builtin_function (types.BuiltinFunctionType): operator.add, math.ceil, etc.
+
+        Returns:
+            OpName: _description_
+        """
+        op = builtin_function.__name__  # add, sub, etc.
+        module = builtin_function.__module__  # _operators or math
+        return cls.from_qualified_name(module + "::" + op)
 
     @_beartype.beartype
     def qualified_name(self) -> str:
