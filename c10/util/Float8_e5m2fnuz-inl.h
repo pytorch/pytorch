@@ -28,10 +28,6 @@ C10_HOST_DEVICE inline bool Float8_e5m2fnuz::isnan() const {
   return x == 0b10000000;
 }
 
-C10_HOST_DEVICE inline bool Float8_e5m2fnuz::isinf() const {
-  return false;
-}
-
 } // namespace c10
 
 namespace std {

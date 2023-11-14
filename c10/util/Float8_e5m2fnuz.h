@@ -135,17 +135,17 @@ struct alignas(1) Float8_e5m2fnuz {
   uint8_t x;
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits() {
+  static constexpr C10_HOST_DEVICE from_bits_t from_bits() {
     return from_bits_t();
   }
 
   Float8_e5m2fnuz() = default;
 
-  constexpr Float8_e5m2fnuz(uint8_t bits, from_bits_t) : x(bits){};
-  inline Float8_e5m2fnuz(float value);
-  inline operator float() const;
-  inline bool isnan() const;
-  inline bool isinf() const;
+  constexpr C10_HOST_DEVICE Float8_e5m2fnuz(uint8_t bits, from_bits_t)
+      : x(bits){};
+  inline C10_HOST_DEVICE Float8_e5m2fnuz(float value);
+  inline C10_HOST_DEVICE operator float() const;
+  inline C10_HOST_DEVICE bool isnan() const;
 };
 
 C10_API std::ostream& operator<<(
