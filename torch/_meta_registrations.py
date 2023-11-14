@@ -3008,16 +3008,21 @@ def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
         isinstance(args[0], list),
         lambda: (f"The first argument must be List[Tensor], but got {type(self)}."),
     )
+
     nelem = len(args[0])
+    torch._check(
+        nelem > 0,
+        lambda: (f"Tensor list must have at least one tensor."),
+    )
 
     nlists = 0
-    for iarg, arg in enumerate(args):
+    for iarg, arg in enumerate(args[1:]):
         if isinstance(arg, list):
             nlists += 1
             torch._check(
-                nelem > 0 and len(arg) == nelem,
+                len(arg) == nelem,
                 lambda: (
-                    f"self and argument-{iarg+1} must be non-empty and match in length, "
+                    f"self and argument-{iarg+2} must match in length, "
                     f"but got {nlem} and {len(arg)}."
                 ),
             )
