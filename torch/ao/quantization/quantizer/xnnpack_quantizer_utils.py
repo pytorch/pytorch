@@ -7,6 +7,10 @@ import torch
 import torch.nn.functional as F
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
+from torch.ao.quantization.pt2e.utils import (
+    _conv2d_bn_example_inputs,
+    get_aten_graph_module,
+)
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -19,6 +23,9 @@ from torch.ao.quantization.quantizer.utils import (
     _annotate_output_qspec,
 )
 from torch.fx import Node
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
+    SubgraphMatcherWithNameNodeMap,
+)
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 
@@ -318,129 +325,114 @@ def _annotate_conv_relu(
     return annotated_partitions
 
 
-@register_annotator("conv2d_bn")
-def _annotate_conv2d_bn(
+@register_annotator("conv_bn")
+def _annotate_conv_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     """
-    Find Conv2d + batchnorm parititions
+    Find conv + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-    fused_partitions = find_sequential_partitions(
-        gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d], filter_fn
-    )
-    annotated_partitions = []
-    for fused_partition in fused_partitions:
-        conv_partition, bn_partition = fused_partition
-        annotated_partitions.append(conv_partition.nodes + bn_partition.nodes)
-        if len(conv_partition.output_nodes) > 1:
-            raise ValueError("conv partition has more than one output node")
-        conv_node = conv_partition.output_nodes[0]
-        conv_node_users = list(conv_node.users.keys())
-        if len(conv_node_users) > 1:
-            raise ValueError(
-                "Conv node must be consumed by BN only for it to be fusable."
-            )
-        if len(bn_partition.output_nodes) > 1:
-            raise ValueError("BatchNorm partition has more than one output node")
-        bn_output_node = bn_partition.output_nodes[0]
 
-        if _is_annotated([bn_output_node, conv_node]):
-            continue
+    def _get_pattern(conv_fn: Callable):
+        def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
+            conv = conv_fn(x, conv_weight, conv_bias)
+            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
+            return bn, {"input": x, "conv": conv, "weight": conv_weight, "bias": conv_bias, "output": bn}
+        return _conv_bn
 
-        input_qspec_map = {}
-        input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
-
-        weight = conv_node.args[1]
-        assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
-
-        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
-        if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
-
-        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map, _annotated=True
-        )
-
-        bn_output_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-            _annotated=True,
-        )
-        nodes_to_mark_annotated = list(conv_partition.nodes)
-        nodes_to_mark_annotated.extend(list(bn_partition.nodes))
-        _mark_nodes_as_annotated(nodes_to_mark_annotated)
-    return annotated_partitions
+    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, _get_pattern)
 
 
-@register_annotator("conv2d_bn_relu")
-def _annotate_conv2d_bn_relu(
+@register_annotator("conv_bn_relu")
+def _annotate_conv_bn_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     """
-    Find Conv2d + batchnorm + relu parititions
+    Find conv + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-    fused_partitions = find_sequential_partitions(
-        gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU], filter_fn
-    )
-    annotated_partitions = []
-    for fused_partition in fused_partitions:
-        conv_partition, bn_partition, relu_partition = fused_partition
-        annotated_partitions.append(
-            conv_partition.nodes + bn_partition.nodes + relu_partition.nodes
-        )
-        if len(relu_partition.output_nodes) > 1:
-            raise ValueError("Relu partition has more than one output node")
-        relu_node = relu_partition.output_nodes[0]
-        if len(conv_partition.output_nodes) > 1:
-            raise ValueError("conv partition has more than one output node")
-        conv_node = conv_partition.output_nodes[0]
-        conv_node_users = list(conv_node.users.keys())
-        if len(conv_node_users) > 1:
-            raise ValueError(
-                "Conv node must be consumed by BN only for it to be fusable."
-            )
-        if len(bn_partition.output_nodes) > 1:
-            raise ValueError("BatchNorm partition has more than one output node")
-        bn_output_node = bn_partition.output_nodes[0]
+    def _get_pattern(conv_fn: Callable):
+        def _conv_bn_relu(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
+            conv = conv_fn(x, conv_weight, conv_bias)
+            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
+            relu = F.relu(bn)
+            return relu, {"input": x, "conv": conv, "weight": conv_weight, "bias": conv_bias, "output": relu}
+        return _conv_bn_relu
 
-        if _is_annotated([relu_node, bn_output_node, conv_node]):
-            continue
+    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, _get_pattern)
+
+
+def _do_annotate_conv_bn(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]],
+    get_pattern: Callable,
+) -> List[List[Node]]:
+    """
+    Given a function that takes in a `conv_fn` and returns a conv-bn[-relu] pattern,
+    return a list of annotated partitions.
+
+    The output of the pattern must include a dictionary from string name to node
+    for the following names: "input", "conv", "weight", "bias", and "output".
+    """
+    # Needed for matching, otherwise the matches gets filtered out due to unused
+    # nodes returned by batch norm
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+
+    matches = []
+    for conv_fn, example_inputs in [
+        (F.conv2d, _conv2d_bn_example_inputs),
+    ]:
+        pattern = get_aten_graph_module(get_pattern(conv_fn), example_inputs)
+        pattern.graph.eliminate_dead_code()
+        pattern.recompile()
+        matcher = SubgraphMatcherWithNameNodeMap(pattern)
+        matches.extend(matcher.match(gm.graph))
+
+    annotated_partitions = []
+    for match in matches:
+        name_node_map = match.name_node_map
+        input_node = name_node_map["input"]
+        conv_node = name_node_map["conv"]
+        weight_node = name_node_map["weight"]
+        bias_node = name_node_map["bias"]
+        output_node = name_node_map["output"]
 
         input_qspec_map = {}
-        input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
+        input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
-        weight = conv_node.args[1]
-        assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
+        # adding weight node to the partition as well
+        partition = [conv_node, weight_node]
 
-        bias = conv_node.args[2] if len(conv_node.args) > 2 else None
-        if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+        if bias_node is not None:
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+            partition.append(bias_node)
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
+            continue
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map, _annotated=True
+            input_qspec_map=input_qspec_map,
+            _annotated=True,
         )
-
-        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+        output_node.meta["quantization_annotation"] = QuantizationAnnotation(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
-        nodes_to_mark_annotated = list(conv_partition.nodes)
-        nodes_to_mark_annotated.extend(list(bn_partition.nodes))
-        nodes_to_mark_annotated.extend(list(relu_partition.nodes))
-        _mark_nodes_as_annotated(nodes_to_mark_annotated)
-    return annotated_partitions
 
+        _mark_nodes_as_annotated(partition)
+        annotated_partitions.append(partition)
+    return annotated_partitions
 
 @register_annotator("gru_io_only")
 def _annotate_gru_io_only(
