@@ -1186,12 +1186,14 @@ def unfold(x, dimension, size, step):
     if ndim == 0:
         return slice_(unsqueeze(x, 0), end=size)
 
+    dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_leq(size, dim_size)
     sizevars.guard_lt(0, step)
 
-    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
-    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+    new_dim_size = FloorDiv(dim_size - size, step) + 1
+    if sizevars.size_hint(dim_size) > 0:
+        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -2080,7 +2082,8 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-
+make_fallback(torch.ops.aten._efficient_attention_forward.default)
+make_fallback(torch.ops.aten._efficient_attention_backward.default)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -4494,7 +4497,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = denom - correction
+        denom = sympy.Max(denom - correction, 0)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -4553,7 +4556,8 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     def scale_fn(data):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
-        return data / (N - c)
+        zero = ops.constant(0, dtype)
+        return data / ops.maximum(zero, N - c)
 
     var = make_pointwise(scale_fn)(m2)
 
@@ -5030,19 +5034,33 @@ register_inplace(aten.__ixor__, aten.__xor__)
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min, max):
     tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
 
 
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
-    return a.get_size()[dim]
+    val = V.graph.current_node.meta["val"]
+    # Note [Can val be an int?]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # In principle, someone could construct an FX graph where
+    # a call to size/stride has a val that is a plain int (not
+    # SymInt).  However, we will maintain the invariant that
+    # this is not possible: if you are constructing an FX graph
+    # where there is a call to size/stride that returns an
+    # int, but you KNOW that int must always be a constant,
+    # then you do not need trace that call at all (and just
+    # constant propagate the integer as is.)
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
-    return a.get_stride()[dim]
+    val = V.graph.current_node.meta["val"]
+    # See Note [Can val be an int?]
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_numel)
@@ -5096,6 +5114,10 @@ try:
     @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(c10d_functional.broadcast)
+    def broadcast(input, src, tag, ranks, group_size):
+        return ir.Broadcast.create(input, src, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
