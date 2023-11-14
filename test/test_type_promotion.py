@@ -892,22 +892,26 @@ class TestTypePromotion(TestCase):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Fake tensor bug - https://github.com/pytorch/pytorch/issues/113589")
     def test_sparse_add(self, device):
         self._run_all_tests_for_sparse_op('add', device,
                                           dtypes=get_all_math_dtypes(device))
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Fake tensor bug - https://github.com/pytorch/pytorch/issues/113589")
     def test_sparse_mul(self, device):
         self._run_all_tests_for_sparse_op('mul', device,
                                           dtypes=get_all_math_dtypes(device))
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Fake tensor bug - https://github.com/pytorch/pytorch/issues/113589")
     def test_sparse_div(self, device):
         self._run_all_tests_for_sparse_op('div', device,
                                           dtypes=(torch.float32, torch.float64,
                                                   torch.complex64, torch.complex128))
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Fake tensor bug - https://github.com/pytorch/pytorch/issues/113589")
     def test_sparse_sub(self, device):
         self._run_all_tests_for_sparse_op('sub', device,
                                           dtypes=get_all_math_dtypes(device))
