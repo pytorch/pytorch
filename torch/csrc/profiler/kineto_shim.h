@@ -61,7 +61,7 @@ struct activity_t;
 #endif // USE_KINETO
 
 void addMetadata(
-    const activity_t* activity,
+    activity_t* activity,
     const std::string& key,
     const std::string& value);
 

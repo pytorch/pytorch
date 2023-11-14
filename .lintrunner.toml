@@ -48,6 +48,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.10.0',
     'pyflakes==3.0.1',
+    'torchfix==0.1.1',
 ]
 
 
@@ -266,7 +267,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
     'torch/csrc/onnx/init.cpp',
-    'torch/csrc/profiler/**/*',
     'torch/csrc/quantized/**/*',
     'torch/csrc/mps/**/*',
 ]
@@ -2648,7 +2648,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.4',
+    'ruff==0.1.5',
 ]
 is_formatter = true
 

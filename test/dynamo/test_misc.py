@@ -217,6 +217,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, inplace1, 2, expected_ops=3)
 
+    def test_inplace_desugaring(self):
+        def inplace_on_literals(y):
+            x0 = 1
+            x0 += y
+            x1 = 1
+            x1 -= y
+            return x0, x1
+
+        torch._dynamo.testing.standard_test(
+            self, inplace_on_literals, 1, expected_ops=2
+        )
+
     def test_unpack4(self):
         def unpack4(a, b):
             a = a[:5, :]
