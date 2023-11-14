@@ -113,6 +113,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
+        "linalg.vector_norm",
         "logit",
         "mean",
         "native_batch_norm",
@@ -145,11 +146,12 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
-        "linalg.vector_norm",
+        "rsub",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
+        "sub",
         "sum",
         "unflatten",
         "var_mean",
