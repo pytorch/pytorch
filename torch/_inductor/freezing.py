@@ -77,7 +77,7 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if torch._guards.TracingContext.get():
+    if torch._guards.TracingContext.try_get():
         fw_metadata = torch._guards.TracingContext.get().fw_metadata
         params_flat = torch._guards.TracingContext.get().params_flat
         assert fw_metadata is not None and params_flat is not None
