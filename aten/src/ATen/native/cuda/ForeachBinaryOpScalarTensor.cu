@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 
 #include <ATen/ops/empty_like_native.h>
@@ -187,4 +188,11 @@ FOREACH_BINARY_OP_SCALAR_TENSOR(
     mul,
     std::multiplies,
     /* div_op */ false);
+
+FOREACH_BINARY_OP_SCALAR_TENSOR(
+    all_types_complex_bool_half_bfloat16,
+    div,
+    std::divides,
+    /* div_op */ true);
+
 } // namespace at::native
