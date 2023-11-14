@@ -574,6 +574,7 @@ class BaseTestQuantizePT2EQAT_ConvBn(PT2EQATTestCase):
         """
         Test whether `source_fn_stack` is preserved after QAT fusion.
         """
+
         class M(torch.nn.Module):
             def __init__(self, conv_class, bn_class, backbone):
                 super().__init__()
