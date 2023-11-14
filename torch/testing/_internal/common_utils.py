@@ -1313,6 +1313,28 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
     return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
 
+def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT executor"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+
+    return decorator
+
+
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
