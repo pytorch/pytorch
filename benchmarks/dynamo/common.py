@@ -946,25 +946,7 @@ def speedup_experiment_onnx(
         iobinding, outputs = onnx_model.create_iobinding(pt_inputs, example_outputs)
 
         def onnxrt_model_iter_fn(model, inputs, collect_outputs=True):
-            if onnx_model.is_cpu():
-                # Fallback already happened, run without iobinding since session is on cpu.
-                return onnx_model.run(inputs)
-            try:
-                onnx_model.run_with_iobinding(iobinding, outputs)
-            except Exception as e:
-                err_msg = str(e)
-                oom_msgs = (
-                    "out of memory",
-                    "CUDNN_STATUS_NOT_INITIALIZED",
-                    "CUBLAS_STATUS_ALLOC_FAILED",
-                    "CUBLAS",
-                    "CUDNN",
-                )
-                if any(msg in err_msg for msg in oom_msgs):
-                    # Fallback to CPU
-                    print(f"{err_msg}\nFalling back to CPUProvider`!")
-                    return onnx_model.cpu().run(inputs)
-                raise
+            onnx_model.run_with_iobinding(iobinding, outputs)
             if collect_outputs:
                 return outputs
 
@@ -1265,6 +1247,18 @@ def download_retry_decorator(download_fn):
 
 
 class OnnxModel(abc.ABC):
+    TORCH_TO_NUMPY_DTYPE = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
+
     _COMPILER_NAME: str
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
@@ -1436,18 +1430,6 @@ class OnnxModelFromTorchScript(OnnxModel):
           cuda:1, however ORT perf drop significantly.
           For now running everything with batch_size 1 set in launch script.
     """
-
-    TORCH_TO_NUMPY_DTYPE = {
-        torch.float16: np.float16,
-        torch.float32: np.float32,
-        torch.float64: np.float64,
-        torch.uint8: np.uint8,
-        torch.int8: np.int8,
-        torch.int16: np.int16,
-        torch.int32: np.int32,
-        torch.int64: np.longlong,
-        torch.bool: np.bool_,
-    }
 
     _COMPILER_NAME = "torchscript"
 
@@ -1764,28 +1746,14 @@ def optimize_onnx_ctx(
                 )
 
             for _ in range(n):
-                try:
-                    nonlocal test_data_dumped
-                    if not test_data_dumped:
-                        # Serializes inputs and outputs to .pb files for further offline analysis.
-                        # Due to this, this function is not and should not be used for perf measurement.
-                        outputs = onnx_model.run_and_serialize_inputs_outputs(inputs)
-                        test_data_dumped = True
-                    else:
-                        outputs = onnx_model.run(inputs)
-                except Exception as e:
-                    err_msg = str(e)
-                    oom_msgs = (
-                        "out of memory",
-                        "CUDNN_STATUS_NOT_INITIALIZED",
-                        "CUBLAS_STATUS_ALLOC_FAILED",
-                    )
-                    if any(msg in err_msg for msg in oom_msgs):
-                        # Fallback to CPU
-                        print(f"{err_msg}\nFalling back to CPUProvider`!")
-                        outputs = onnx_model.cpu().run(inputs)
-                    else:
-                        raise
+                nonlocal test_data_dumped
+                if not test_data_dumped:
+                    # Serializes inputs and outputs to .pb files for further offline analysis.
+                    # Due to this, this function is not and should not be used for perf measurement.
+                    outputs = onnx_model.run_and_serialize_inputs_outputs(inputs)
+                    test_data_dumped = True
+                else:
+                    outputs = onnx_model.run(inputs)
             return outputs
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
