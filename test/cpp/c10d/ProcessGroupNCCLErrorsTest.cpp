@@ -346,6 +346,54 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
+// Extend the nested class outside the parent class
+class TestDebugInfoCallbackStorer
+    : public c10d::ProcessGroupNCCL::DebugInfoCallbackStorer {
+ public:
+  TestDebugInfoCallbackStorer() : DebugInfoCallbackStorer("") {
+    temp_ = std::tmpfile();
+    TORCH_CHECK(temp_ != nullptr, "Failed to open temporary file");
+  }
+
+  ~TestDebugInfoCallbackStorer() override {
+    std::fclose(temp_);
+  }
+
+  void storeTraceInfoStorer(int rank, const std::string& ncclTrace) override {
+    tracesToStorer_.assign(ncclTrace.begin(), ncclTrace.end());
+    std::fputs(ncclTrace.data(), temp_);
+    std::fflush(temp_);
+    // Reset to the beginning of the file.
+    std::rewind(temp_);
+    char buffer[256];
+    if (std::fgets(buffer, ncclTrace.size(), temp_) != nullptr) {
+      tracesFromStorer_.assign(buffer, buffer + ncclTrace.size());
+      // One thing which can not be explained is that, without this line of log,
+      // the last element of `tracesFromStorer_` will be different from
+      // `tracesToStorer_`. Since using TmpFile is just for testing purpose,
+      // this is probably not a big deal.
+      LOG(INFO) << "Read back traces and stored it at a different vector";
+    }
+  }
+
+  std::vector<uint8_t>& getTracesToStorer() {
+    return tracesToStorer_;
+  }
+
+  std::vector<uint8_t>& getTracesFromStorer() {
+    return tracesFromStorer_;
+  }
+
+  std::FILE* getTempFile() {
+    return temp_;
+  }
+
+ private:
+  std::vector<uint8_t> tracesToStorer_;
+  std::vector<uint8_t> tracesFromStorer_;
+  std::FILE* temp_;
+};
+
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   if (skipTest()) {
     return;
@@ -358,11 +406,21 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
       0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  // Enable nccl flight recorder.
+  ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options);
+  // The storer here is very similar to the fallback storer.
+  // The only difference is that we are storing traces at std::tmpfile.
+  std::unique_ptr<TestDebugInfoCallbackStorer> storerForTestPtr =
+      std::make_unique<TestDebugInfoCallbackStorer>();
+  std::vector<uint8_t>& tracesToStorer = storerForTestPtr->getTracesToStorer();
+  std::vector<uint8_t>& tracesFromStorer =
+      storerForTestPtr->getTracesFromStorer();
+  pg.registerDebugInfoCallbackStorer(std::move(storerForTestPtr));
 
   // Normal collective case.
   auto work = pg.allreduce(tensors_);
@@ -382,6 +440,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());
+  EXPECT_TRUE(tracesToStorer.size() > 0);
+  EXPECT_TRUE(tracesToStorer == tracesFromStorer);
 }
 
 class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
