@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._pytree.api.cxx import tree_map_only
+    from torch.utils._cxx_pytree import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -128,6 +128,20 @@ def wait_tensor(tensor):
     return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
+def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Broadcasts the tensor to all processes in the given process group.
+
+    Args:
+        src (int): Source rank
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    return _maybe_wrap_tensor(tensor)
+
+
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -178,6 +192,9 @@ def all_gather_tensor(
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
+        # torch.cat access the data so we already need to wait here, first do wait
+        # and then chunk + cat avoid us going through ACT dispatching logic again
+        res = res.wait()  # type: ignore[attr-defined]
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -388,12 +405,24 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def wait(self) -> torch.Tensor:
+        wait_tensor(self.elem)
+        return self.elem
+
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
         return self.elem
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func == torch.ops.aten.view.default:
+            # Fast handle aten.view as a lot of view related op goes to aten.view
+            # eventually, this avoids pytree slowdown
+            res = func(args[0].elem, args[1])
+            wrapper_res = AsyncCollectiveTensor(res)
+            _register_tensor_wrapper(wrapper_res)
+            return wrapper_res
+
         is_view_op = _is_view_op(func)
 
         def unwrap(e: AsyncCollectiveTensor):
@@ -421,6 +450,8 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def numpy(self):
+        return self.wait().numpy()
 
 """
 Utils and infrastructure for tracing support
@@ -523,6 +554,9 @@ def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
     return [mk_out_tensor(t) for t in self]
 
 # We now register meta kernels to deal with tracing
+def _broadcast_meta(self, *args):
+    return torch.empty_like(self)
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
 
@@ -596,6 +630,7 @@ def _reduce_scatter_tensor_coalesced_native_meta(inputs, reduce_op, group_size, 
 
 def _register_ops():
     ops_defs = [
+        "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
