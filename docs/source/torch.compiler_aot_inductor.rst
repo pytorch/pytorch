@@ -85,7 +85,7 @@ previous step, enabling us to conduct model predictions directly within a C++ en
     The following code snippet assumes your system has a CUDA-enabled device and your model was
     compiled to run on CUDA as shown previously.
     In the absence of a GPU, it's necessary to make these adjustments in order to run it on a CPU:
-    1. Modify ``aoti_model_runner_cuda.h`` to ``aoti_model_runner.h``
+    1. Modify ``aoti_model_container_runner_cuda.h`` to ``aoti_model_container_runner.h``
     2. Change ``AOTIModelRunnerCuda`` to ``AOTIModelRunner``
     3. Change ``at::kCUDA`` to ``at::kCPU``
 
@@ -95,7 +95,7 @@ previous step, enabling us to conduct model predictions directly within a C++ en
     #include <vector>
 
     #include <torch/torch.h>
-    #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
+    #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
 
     int main() {
         c10::InferenceMode mode;

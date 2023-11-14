@@ -59,7 +59,7 @@ class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
   }
 
   std::vector<const char*> get_call_spec() {
-    return AOTIModelContainerRunner::get_call_spec();
+    return AOTIModelRunner::get_call_spec();
   }
 };
 
