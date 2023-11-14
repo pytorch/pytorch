@@ -93,6 +93,9 @@ class Verifier(metaclass=_VerifierMeta):
             operator.ne,
             operator.floordiv,
             operator.mod,
+            operator.and_,
+            operator.or_,
+            operator.not_,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:

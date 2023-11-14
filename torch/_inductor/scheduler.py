@@ -107,7 +107,7 @@ class BaseSchedulerNode:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
-            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",

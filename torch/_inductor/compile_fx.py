@@ -236,7 +236,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(  # type: ignore[attr-defined]
+            with config.patch(
                 {
                     "triton.store_cubin": True,
                 }
@@ -262,8 +262,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                         assert not isinstance(x, FakeTensor)
                         return x
 
-                tracing_context = torch._guards.TracingContext.get()
-                if tracing_context:
+                if tracing_context := torch._guards.TracingContext.try_get():
                     if tracing_context.output_strides:
                         tracing_context.output_strides.clear()
 
@@ -345,6 +344,10 @@ def compile_fx_inner(
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -394,7 +397,7 @@ def compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # Return the output strides to the caller via TracingContext
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         context.output_strides.extend(compiled_graph.output_strides)
@@ -469,6 +472,7 @@ def compile_fx_inner(
                 stack_traces=stack_traces,
                 is_backward=is_backward,
                 is_inference=is_inference,
+                constants=tuple(compiled_graph.constants.values()),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -694,6 +698,7 @@ def cudagraphify(
     stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -707,6 +712,7 @@ def cudagraphify(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
+            constants=constants,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -963,7 +969,7 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    tracing_context = torch._guards.TracingContext.get()
+    tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
         params_flat = tracing_context.params_flat
         assert params_flat is not None
@@ -1008,17 +1014,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):  # type: ignore[attr-defined]
+        with config.patch(config_patches):
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
+                inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(  # type: ignore[attr-defined]
+        with config.patch(
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -1113,10 +1119,12 @@ def compile_fx(
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
-            context = torch._guards.TracingContext.get()
+            context = torch._guards.TracingContext.try_get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
-                original_output_start_index = context.fw_metadata.num_mutated_inputs
+                original_output_start_index = (
+                    context.fw_metadata.num_mutated_inp_runtime_indices
+                )
             else:
                 original_output_start_index = 0
 
@@ -1209,7 +1217,8 @@ def compile_fx(
         allow_non_fake_inputs=True
     )
     tracing_context = (
-        torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
+        torch._guards.TracingContext.try_get()
+        or torch._guards.TracingContext(fake_mode)
     )
 
     if V.aot_compilation is True:
@@ -1235,8 +1244,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):  # type: ignore[attr-defined]
-        return config.get_config_copy()  # type: ignore[attr-defined]
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
