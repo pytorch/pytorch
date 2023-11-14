@@ -694,7 +694,6 @@ class ONNXProgram:
             the last 2 inputs are user inputs (namely x and b).
             The first output is a buffer mutation (namely my_buffer2) and the last output is the actual model output.
 
-            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
             >>> class CustomModule(torch.nn.Module):
             ...     def __init__(self):
             ...         super().__init__()
