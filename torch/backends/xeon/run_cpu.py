@@ -311,6 +311,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 env=os.environ,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                check=False,
             )
             if r.returncode == 0:
                 numactl_available = True
