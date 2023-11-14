@@ -537,6 +537,7 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 class CompileContext:
     @staticmethod
     def get() -> CompileContext:
+        assert _TLS.compile_context is not None
         return _TLS.compile_context
 
     @staticmethod
