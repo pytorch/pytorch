@@ -7,8 +7,8 @@
  */
 #pragma once
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
+#include <c10/util/Exception.h>
 
 #include <curand_kernel.h>
 #include <cmath>
