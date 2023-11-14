@@ -49,9 +49,9 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
-    GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
     NumpyTensorSource,
@@ -64,7 +64,6 @@ from ..utils import (
     clone_input,
     get_fake_value,
     get_static_address_type,
-    global_key_name,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -87,6 +86,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    is_hashable_python_var,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -402,23 +402,18 @@ class VariableBuilder:
             # under the assumption that the values themselves don't change.
             self.install_guards(GuardBuilder.DICT_VERSION)
             result = {
-                k: UserDefinedObjectVariable(
-                    value[k],
+                ConstantVariable.create(k): UserDefinedObjectVariable(
+                    v,
                     source=GetItemSource(self.get_source(), k),
                 )
-                for k in value.keys()
+                for k, v in value.items()
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(
-            ConstantVariable.is_literal(k)
-            or self.tensor_can_be_dict_key(k)
-            or isinstance(k, enum.Enum)
-            for k in value.keys()
-        ):
+        ) and all(is_hashable_python_var(k) for k in value.keys()):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -431,30 +426,30 @@ class VariableBuilder:
             else:
                 self.install_guards(GuardBuilder.DICT_KEYS)
 
-            # store key variables in global location for reconstruction
-            for key in value.keys():
-                if self.tensor_can_be_dict_key(key):
-                    self.tx.store_global_weakref(global_key_name(key), key)
+            idx = 0
 
-            def index_source(key):
-                if self.tensor_can_be_dict_key(key):
-                    return GlobalWeakRefSource(global_key_name(key))
+            def build_key_value(k, v):
+                nonlocal idx
+                if ConstantVariable.is_literal(k):
+                    key = ConstantVariable.create(k)
+                    source_key = k
                 else:
-                    return key
+                    source_key = ConstDictKeySource(self.get_source(), idx)
+                    key = VariableBuilder(self.tx, source_key)(k)
 
-            result = {
-                k: LazyVariableTracker.create(
-                    value[k],
-                    source=GetItemSource(self.get_source(), index_source(k)),
-                )
-                for k in value.keys()
-            }
+                source_value = GetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                idx += 1
+                return key, value
+
+            result = dict(build_key_value(k, v) for k, v in value.items())
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    self._wrap(value.default_factory),
+                    default_factory=self._wrap(value.default_factory),
                 )
             else:
                 result = ConstDictVariable(result, type(value))
@@ -771,15 +766,6 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-
-    def tensor_can_be_dict_key(self, value):
-        # only allow Parameter and another specific Tensor can be used as dict key
-        return (
-            isinstance(value, torch.nn.Parameter)
-            or isinstance(self.source, AttrSource)
-            and self.source.member == "state"
-            and isinstance(self.source.base, LocalSource)
-        )
 
     def tensor_should_specialize(self):
         return (
@@ -1789,11 +1775,8 @@ class SourcelessBuilder:
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
-            return ConstDictVariable(
-                {k: self(tx, v) for k, v in value.items()},
-                dict,
-                mutable_local=MutableLocal(),
-            )
+            items = {self(tx, k): self(tx, v) for k, v in value.items()}
+            return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
