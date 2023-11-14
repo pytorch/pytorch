@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
+import unittest
 import numpy as np
 import torch
 import torch.cuda
@@ -7713,6 +7714,7 @@ class DistributedTest:
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
         @with_dist_debug_levels(levels=["DETAIL"])
+        @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
         def test_broadcast_object_list(self):
             return self._test_broadcast_object_list()
 
@@ -9204,6 +9206,7 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
+        @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/pull/113620")
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -9702,6 +9705,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
+        @unittest.skip("Test is failing, tracking issue at https://github.com/pytorch/pytorch/issues/102751")
         def test_ddp_has_finalized(self):
 
             @dataclass
