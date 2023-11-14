@@ -48,7 +48,7 @@ class ForeachFuncWrapper:
         # Some foreach functions don't have in-place implementations.
         self.is_inplace = False if func is None else func.__name__.endswith('_')
 
-    def __call__(self, inputs, is_cuda, is_fastpath, **kwargs):
+    def __call__(self, inputs, is_cuda, expect_fastpath, **kwargs):
         actual = None
         zero_size = kwargs.pop("zero_size", False)
         if (
@@ -60,9 +60,7 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            print(any("multi_tensor_apply_kernel" in k for k in keys))
-            print((is_fastpath and (not zero_size)))
-            assert mta_called == (is_fastpath and (not zero_size))
+            assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
@@ -152,7 +150,9 @@ class TestForeach(TestCase):
         for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
             ref_kwargs = sample.kwargs
             kwargs = ref_kwargs.copy()
-            expect_fastpath = not (noncontiguous or sample.disable_fastpath)
+            # div promotes ints to floats, so we cannot go on the fastpath there
+            div_slowpath = dtype in integral_types_and(torch.bool) and op.name == '_foreach_div'
+            expect_fastpath = not (noncontiguous or sample.disable_fastpath or div_slowpath)
             if op in foreach_pointwise_op_db:
                 values = kwargs.pop("values", None)
                 if values is not None:
