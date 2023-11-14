@@ -392,7 +392,7 @@ def _do_annotate_conv_bn(
         pattern = get_aten_graph_module(get_pattern(conv_fn), example_inputs)
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
-        matcher = SubgraphMatcherWithNameNodeMap(pattern)
+        matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
         matches.extend(matcher.match(gm.graph))
 
     annotated_partitions = []
