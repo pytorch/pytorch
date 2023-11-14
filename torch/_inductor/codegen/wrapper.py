@@ -1322,13 +1322,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
         self.header.splice(
             f"""
-            static int64_t align(int64_t nbytes) {{
+            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
             """
