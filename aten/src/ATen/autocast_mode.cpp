@@ -203,7 +203,6 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
-                         c10::GradMode::is_enabled() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled &&
                          !at::caching::is_cached_tensor(arg));
 
@@ -211,7 +210,30 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
       const std::lock_guard<std::mutex> lock(cached_casts_mutex);
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
-        return std::get<1>(it->second);
+        auto cand_casted_arg = std::get<1>(it->second);
+        // This is a bit tricky.  In some circumstances, we may have a tensor
+        // in the cache that doesn't track gradients (e.g., you triggered an
+        // autocast inside of a no_grad region), but our subsequent cache test
+        // is in a situation where we *would* require gradients, e.g.,
+        // GradMode::is_enabled().  In this case, the old cast entry is no
+        // good; it doesn't have needed gradient history, so we need to redo
+        // it with gradient history.
+        //
+        // Now, you might ask, why don't we test if
+        // c10::GradMode::is_enabled() before asking if we can_try_cache?
+        // Sometimes we are doing autocasting in a context where we will
+        // eventually attach a grad_fn to it later (e.g., custom autograd
+        // function).  In this case, the autocast will occur in a context
+        // where grad is disabled... but eventually everything will work out
+        // (the cached entry will requires_grad.)  This case is explicitly
+        // tested for, so I decided to go this more circuitous route.
+        if (!cand_casted_arg.requires_grad() && c10::GradMode::is_enabled()) {
+          auto casted_arg = arg.to(to_type);
+          cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
+          return casted_arg;
+        } else {
+          return cand_casted_arg;
+        }
       } else {
         auto casted_arg = arg.to(to_type);
         cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
