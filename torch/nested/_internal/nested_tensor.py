@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
+from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
@@ -21,6 +22,7 @@ def get_tensor_id(tensor, *, coeff=1):
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
+    _lengths: Optional[torch.Tensor]
     # NOTE [ Singleton ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
@@ -46,6 +48,7 @@ class NestedTensor(torch.Tensor):
         values,
         offsets,
         *,
+        lengths=None,
         ragged_size=None,
         **kwargs,
     ):
@@ -69,7 +72,7 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, ragged_size=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, ragged_size=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -82,7 +85,10 @@ class NestedTensor(torch.Tensor):
             # we perform operations on fake nested tensors.
             # Calling get_tensor_id won't work in those cases because we want
             # the existing symbolic ragged_size to be propagated.
-            ragged_size = get_tensor_id(offsets, coeff=1)
+            if lengths is None:
+                ragged_size = get_tensor_id(offsets, coeff=1)
+            else:
+                ragged_size = get_tensor_id(lengths, coeff=1)
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
@@ -97,12 +103,16 @@ class NestedTensor(torch.Tensor):
             )
         self._values = values
         self._offsets = offsets
+        self._lengths = lengths
 
     def values(self):
         return self._values
 
     def offsets(self):
         return self._offsets
+
+    def lengths(self):
+        return self._lengths
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -111,7 +121,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str})"
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
@@ -131,13 +141,20 @@ class NestedTensor(torch.Tensor):
             "requires_grad": self.requires_grad,
             "ragged_size": self._size[self._ragged_idx],
         }
-        return ["_values", "_offsets"], ctx
+        inner_tensors = ["_values", "_offsets"]
+        if self._lengths is not None:
+            inner_tensors.append("_lengths")
+        return inner_tensors, ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):
-        assert len(inner_tensors) == 2
+        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
+        if "_lengths" in inner_tensors and inner_tensors["_lengths"] is not None:
+            lengths = inner_tensors["_lengths"]
+        else:
+            lengths = None
 
         # NOTE [ Storing symbolic values as plain attributes on subclasses ]
         #
@@ -173,6 +190,7 @@ class NestedTensor(torch.Tensor):
         return NestedTensor(
             values,
             offsets=offsets,
+            lengths=lengths,
             ragged_size=meta["ragged_size"],
             requires_grad=meta["requires_grad"],
         )
@@ -232,6 +250,18 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         return gO.values(), None, None
 
 
+# Not actually a view!
+# NOTE: @jbschlosser is working on making it a view
+class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
+        return NestedTensor(values.detach(), offsets=offsets, lengths=lengths)
+
+    @staticmethod
+    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
+        return gO.values(), None, None
+
+
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
     tensors: List[torch.Tensor],
@@ -283,6 +313,66 @@ def jagged_from_list(
         )
 
     return ViewNestedFromBuffer.apply(values, offsets), offsets  # type: ignore[call-overload]
+
+
+def jagged_from_tensor_and_lengths(
+    tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
+) -> Tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
+    """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
+    batch_size = tensor.shape[0]
+    if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(
+        lengths.shape, (batch_size,)
+    ):
+        start_list = starts.expand(batch_size)
+        length_list = lengths.expand(batch_size)
+    else:
+        raise RuntimeError(
+            "When constructing a jagged nested tensor using narrow(), "
+            "your start and length must be Tensors that broadcast to input.shape[0]"
+        )
+
+    # Calculate jagged offsets
+    assert (
+        len(tensor.shape) >= 2
+    ), "tensor must at least be 2D for the nested narrow op to work"
+    max_seq_len = tensor.shape[1]
+    offset_lengths = max_seq_len * torch.arange(
+        0, batch_size, dtype=torch.int64, device=tensor.device
+    )
+    # Jagged layout specifies that offsets are stored as int64 on the same device as values.
+    offsets = torch.cat(
+        [
+            start_list + offset_lengths,
+            (start_list[-1] + offset_lengths[-1] + length_list[-1]).unsqueeze(0),
+        ]
+    )
+
+    # Reshape buffer to flatten the 1st and 2nd dimension (view used to enforce non-copy)
+    if len(tensor.shape) > 2:
+        values = tensor.view(-1, *tensor.shape[2:])
+    else:
+        values = tensor.view(-1)
+
+    # Check if offsets and lengths make it possibly contiguous and return a regular NT
+    is_contiguous = True
+    orig_dim = tensor.shape[1]
+    if torch.any(length_list[1:-1].ne(orig_dim)):
+        is_contiguous = False
+    if torch.any(offsets[1:-2].diff().ne(orig_dim)):
+        is_contiguous = False
+    if offsets[0] + length_list[0] != orig_dim:
+        is_contiguous = False
+
+    if is_contiguous:
+        return (
+            ViewNestedFromBuffer.apply(
+                values[offsets[0] : offsets[-1]], offsets - offsets[0]
+            ),
+            offsets,
+            None,
+        )
+
+    return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
 
 
 def buffer_from_jagged(jagged):

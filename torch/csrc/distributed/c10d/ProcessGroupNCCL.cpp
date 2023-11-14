@@ -908,6 +908,31 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
   return true;
 }
 
+ProcessGroupNCCL::DebugInfoCallbackStorer::DebugInfoCallbackStorer(
+    std::string fileName)
+    : fileName_(fileName) {}
+
+ProcessGroupNCCL::DebugInfoCallbackStorer::~DebugInfoCallbackStorer() = default;
+
+void ProcessGroupNCCL::DebugInfoCallbackStorer::storeTraceInfoStorer(
+    int rank,
+    const std::string& ncclTrace) {
+  auto filename = c10::str(std::string(fileName_), rank);
+
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+}
+
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -1277,30 +1302,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void storeTraceInfoToLocalDisk(int rank, const std::string& ncclTrace) {
-  const char* fileName = parseEnvVarString(
-      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
-  auto filename = c10::str(std::string(fileName), rank);
-
-  // Open a file for writing. The ios::binary flag is used to write data as
-  // binary.
-  std::ofstream file(filename, std::ios::binary);
-
-  // Check if the file was opened successfully.
-  if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: " << filename;
-    return;
-  }
-
-  // Write the size of the string followed by the string itself.
-  // This can help in retrieving the strings back if needed.
-  size_t size = ncclTrace.size();
-  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-  file.write(ncclTrace.data(), size);
-}
-
 void ProcessGroupNCCL::registerDebugInfoCallbackStorer(
-    std::function<void(int, const std::string&)>&& callbackStorer) {
+    std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer> callbackStorer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      debugInfoCallbackStorer_ == nullptr,
+      "ProcessGroupNCCL DebugInfoCallbackStorer already registered");
   debugInfoCallbackStorer_ = std::move(callbackStorer);
 }
 
@@ -1311,12 +1318,17 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their own storer via `registerDebugInfoCallbackStorer`.
     auto ncclTrace = dump_nccl_trace();
-    if (debugInfoCallbackStorer_ != nullptr) {
-      debugInfoCallbackStorer_(rank_, ncclTrace);
-    } else {
+    if (debugInfoCallbackStorer_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
-      storeTraceInfoToLocalDisk(rank_, ncclTrace);
+      const char* fileName = parseEnvVarString(
+          "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
+      std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer>
+          storeTraceInfoToLocalDiskPtr =
+              std::make_unique<ProcessGroupNCCL::DebugInfoCallbackStorer>(
+                  std::string(fileName));
+      registerDebugInfoCallbackStorer(std::move(storeTraceInfoToLocalDiskPtr));
     }
+    debugInfoCallbackStorer_->storeTraceInfoStorer(rank_, ncclTrace);
   }
 }
 
@@ -1353,7 +1365,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
 
   // Store debug info to storage. (By default to local disk)
-  dumpDebuggingInfo();
+  std::thread debugInfoStoreThread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1373,12 +1385,19 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       !debugInfoStoreThread.joinable()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
   }
+
+  // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
+  // we mark the thread detach so the dump of debug info becomes "best effort".
+  // Or the process exit normally, we don't really care about dumping the debug
+  // info.
+  debugInfoStoreThread.detach();
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(

@@ -65,10 +65,10 @@ def dynamo_enable_grad(tx):
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, True)
+        GradModeVariable.create(tx, True, initialized=True)
         yield
     finally:
-        GradModeVariable.create(tx, org_value)
+        GradModeVariable.create(tx, org_value, initialized=True)
 
 
 def only_consist_of(var, types):
@@ -418,18 +418,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
-        if not all(
-            isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
-        ):
+        if not only_consist_of(args[3], (TensorVariable,)):
             unimplemented(
-                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
-                    actual_args=[
-                        str(operand.python_type())
-                        if isinstance(operand, VariableTracker)
-                        else str(type(operand))
-                        for operand in operands
-                    ],
-                ),
+                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # branches

@@ -262,8 +262,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                         assert not isinstance(x, FakeTensor)
                         return x
 
-                tracing_context = torch._guards.TracingContext.get()
-                if tracing_context:
+                if tracing_context := torch._guards.TracingContext.try_get():
                     if tracing_context.output_strides:
                         tracing_context.output_strides.clear()
 
@@ -345,6 +344,10 @@ def compile_fx_inner(
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -394,7 +397,7 @@ def compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # Return the output strides to the caller via TracingContext
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         context.output_strides.extend(compiled_graph.output_strides)
@@ -469,6 +472,7 @@ def compile_fx_inner(
                 stack_traces=stack_traces,
                 is_backward=is_backward,
                 is_inference=is_inference,
+                constants=tuple(compiled_graph.constants.values()),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -694,6 +698,7 @@ def cudagraphify(
     stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -707,6 +712,7 @@ def cudagraphify(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
+            constants=constants,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -963,7 +969,7 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    tracing_context = torch._guards.TracingContext.get()
+    tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
         params_flat = tracing_context.params_flat
         assert params_flat is not None
@@ -1113,7 +1119,7 @@ def compile_fx(
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
-            context = torch._guards.TracingContext.get()
+            context = torch._guards.TracingContext.try_get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = (
@@ -1211,7 +1217,8 @@ def compile_fx(
         allow_non_fake_inputs=True
     )
     tracing_context = (
-        torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
+        torch._guards.TracingContext.try_get()
+        or torch._guards.TracingContext(fake_mode)
     )
 
     if V.aot_compilation is True:
