@@ -2,21 +2,17 @@
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 
 import torch.distributed._functional_collectives as funcol
+import torch.nn as nn
 
 from torch.distributed._tensor.debug.comm_mode import CommDebugMode
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    MLPModule,
-)
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
 
 c10d_functional = torch.ops.c10d_functional
+
 
 class TestCommMode(TestCase):
     def tearDown(self):
@@ -26,14 +22,13 @@ class TestCommMode(TestCase):
     def setUp(self):
         super().setUp()
         store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=1, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.world_pg = dist.distributed_c10d._get_default_group()
 
     def test_comm_mode(self):
         world_pg = self.world_pg
+
         class WrapperModel(nn.Module):
             def __init__(self, device):
                 super().__init__()
