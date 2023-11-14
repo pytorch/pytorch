@@ -3110,6 +3110,10 @@ class TestAttnMasks(NNTestCase):
         torch.testing.assert_close(key.grad, key_prototype.grad, atol=grad_atol, rtol=grad_rtol)
         torch.testing.assert_close(value.grad, value_prototype.grad, atol=grad_atol, rtol=grad_rtol)
 
+    def test_attn_bias_invalid_func(self, device):
+        bias = TensorBias(torch.rand(16, 16, 128, dtype=torch.float16, device=device))
+        with self.assertRaisesRegex(RuntimeError, "AttnBias only supports scaled_dot_product_attention"):
+            torch.add(bias, torch.rand_like(bias.bias))
 
 if NOTEST_CPU:
     device_types = ("cuda", )

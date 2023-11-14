@@ -1,6 +1,6 @@
 """ Define Base class as well as some crowd favorites """
 from abc import ABC, abstractmethod
-from enum import IntEnum
+from enum import auto, IntEnum
 from typing import Optional, Union
 from warnings import warn
 
@@ -201,20 +201,25 @@ class CausalVariant(IntEnum):
     Enum for causal variants used in attention mechanisms.
 
     Defines two types of causal biases:
+
     - UPPER_LEFT: Represents upper-left triangular bias for standard causal attention.
-    - Example:
-        [[1, 0, 0, 0],
-         [1, 1, 0, 0],
-         [1, 1, 1, 0]]
+      Example:
+      ```
+      [[1, 0, 0, 0],
+       [1, 1, 0, 0],
+       [1, 1, 1, 0]]
+      ```
     - LOWER_RIGHT: Represents lower-right triangular bias, typically used in specific attention scenarios.
-    - Example:
-        [[1, 1, 0, 0],
-         [1, 1, 1, 0],
-         [1, 1, 1, 1]]
+      Example:
+      ```
+      [[1, 1, 0, 0],
+       [1, 1, 1, 0],
+       [1, 1, 1, 1]]
+      ```
     """
 
-    UPPER_LEFT = 1
-    LOWER_RIGHT = 2
+    UPPER_LEFT = auto()
+    LOWER_RIGHT = auto()
 
 
 class CausalBias(AttnBias):
