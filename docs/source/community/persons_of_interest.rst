@@ -226,8 +226,9 @@ C10 utils and operator dispatch
 
 ONNX exporter
 ~~~~~~~~~~~~~
--  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 -  Aaron Bockover (`abock <https://github.com/abock>`__)
+-  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
+-  Thiago Crepaldi (`thiagocrepaldi <https://github.com/thiagocrepaldi>`__)
 -  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
 -  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
