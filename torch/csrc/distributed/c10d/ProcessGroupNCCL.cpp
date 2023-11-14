@@ -1560,7 +1560,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
             debugInfoStoreThread.detach();
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
-                        << " Please file an issue. Error: " << e.what();
+                       << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
                 << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
