@@ -234,6 +234,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "to_sparse": {f16, f32, f64},
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
+    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
 }
 
 

@@ -1461,10 +1461,6 @@ class FlatParamHandle:
             self._use_unsharded_grad_views()
             return
 
-        padded_unsharded_grad = torch.empty(
-            flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
-            device=self.device,
-        )
         if flat_param.grad is None:
             # In the case that only some ranks have `None` gradient, we use
             # zeros to approximate as a best effort attempt
@@ -1480,6 +1476,12 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+
+        padded_unsharded_grad = torch.empty(
+            flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
+            device=self.device,
+            dtype=sharded_grad.dtype,
+        )
         dist.all_gather_into_tensor(
             padded_unsharded_grad, sharded_grad, self.process_group
         )
