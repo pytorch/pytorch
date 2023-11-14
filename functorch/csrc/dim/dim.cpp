@@ -11,9 +11,9 @@
 #if IS_PYTHON_3_12_PLUS
 
 // Re-enable this some day
-int Dim_init() {
+PyObject* Dim_init() {
     PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
-    return -1;
+    return nullptr;
 }
 
 #else
