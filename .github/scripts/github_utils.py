@@ -179,3 +179,15 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
 def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
     gh_fetch_url(url, method="PATCH", data={"state": state})
+
+def gh_rerequest_pr_reviewers(org: str, repo: str, pr_num: int) -> None:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/requested_reviewers"
+    reviewers = gh_fetch_json_dict(url, method="GET")
+    users = [user.login for user in reviewers["users"]]
+    teams = [team.slug for team in reviewers["teams"]]
+    print(reviewers)
+    print(teams)
+    gh_fetch_url(url, method="POST", data={"reviewers": users, "team_reviewers": teams})
+
+if __name__ == "__main__":
+    gh_rerequest_pr_reviewers("", "ompi", 1)
