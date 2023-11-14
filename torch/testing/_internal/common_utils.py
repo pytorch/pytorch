@@ -1008,8 +1008,8 @@ def run_tests(argv=UNITTEST_ARGS):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
-                len(failed_tests), '\n\t'.join(failed_tests))
+        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+            len(failed_tests), '\n\t'.join(failed_tests))
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
