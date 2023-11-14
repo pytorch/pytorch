@@ -190,7 +190,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
             onnx.ModelProto(),
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
-            io_adapter.OutputAdapter(),
             diagnostics.DiagnosticContext("test", "1.0"),
             fake_context=None,
         )
