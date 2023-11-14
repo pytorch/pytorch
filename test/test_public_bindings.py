@@ -257,6 +257,7 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.fx.op_validation",
             "torch.onnx._internal.fx.passes",
             "torch.onnx._internal.fx.type_utils",
+            "torch.testing._internal.common_state_dict",
             "torch.testing._internal.common_distributed",
             "torch.testing._internal.common_fsdp",
             "torch.testing._internal.dist_utils",
