@@ -40,6 +40,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
+    rand_strided,
     same,
     skipIfNotPy311,
     unsupported,

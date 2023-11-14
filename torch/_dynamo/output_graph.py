@@ -28,9 +28,10 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -244,7 +245,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
         self.cleanup_hooks: List[Callable[[], Any]] = []
 
         # TODO: maybe should just pass the entire f_code in here?  Not
@@ -278,12 +279,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
+        self.immutable_fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=shape_env,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.mutable_fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True if self.export else False,
+            parent=self.immutable_fake_mode,
+        )
+        self.tracing_context: TracingContext = TracingContext(self.mutable_fake_mode)
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -1020,7 +1026,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
-        with self.restore_global_state():
+        parent_fake_mode = self.immutable_fake_mode
+        backend_fake_mode = FakeTensorMode(
+            shape_env=parent_fake_mode.shape_env,
+            parent=parent_fake_mode,
+        )
+        with self.restore_global_state(), self.tracing_context.with_fake_mode(
+            backend_fake_mode
+        ):
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
