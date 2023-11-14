@@ -2868,12 +2868,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
-            'mse_loss': lambda x, y: F.mse_loss(x, y),
-            'l1_loss': lambda x, y: F.l1_loss(x, y),
-            'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
-            'huber_loss': lambda x, y: F.huber_loss(x, y),
-            'kl_div': lambda x, y: F.kl_div(x, y),
-            'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
+            'mse_loss': F.mse_loss,
+            'l1_loss': F.l1_loss,
+            'smooth_l1_loss': F.smooth_l1_loss,
+            'huber_loss': F.huber_loss,
+            'kl_div': F.kl_div,
+            'poisson_nll_loss': F.poisson_nll_loss,
         }
 
         input = cast(torch.randn(3, 5))
@@ -5321,7 +5321,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
-        self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
+        self.assertTrue(gradcheck(F.pairwise_distance, (input1, input2)))
 
     # TODO: Create an OpInfo for pdist
     def test_pdist(self):
@@ -5503,8 +5503,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input1 = torch.randn(5, 10, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(5, 10, requires_grad=True, dtype=torch.double)
         input3 = torch.randn(5, 10, requires_grad=True, dtype=torch.double)
-        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
-            x1, x2, x3), (input1, input2, input3)))
+        self.assertTrue(gradcheck(F.triplet_margin_loss, (input1, input2, input3)))
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3))
 
@@ -9242,7 +9241,7 @@ class TestNNDeviceType(NNTestCase):
         for reduction in ['none', 'invalid']:
             def v(fn):
                 if reduction == 'invalid':
-                    self.assertRaises(ValueError, lambda: fn())
+                    self.assertRaises(ValueError, fn)
                 else:
                     fn()
 
@@ -12236,7 +12235,7 @@ class TestNNDeviceType(NNTestCase):
             # Test backward
             self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
                 a, p, n, **kwargs), (anchor, positive, negative)))
-            self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
+            self.assertTrue(gradcheck(loss_op,
                             (anchor, positive, negative)))
 
     @onlyNativeDeviceTypes
@@ -12268,11 +12267,9 @@ class TestNNDeviceType(NNTestCase):
                 (anchor, positive, negative)))
             loss_op = nn.TripletMarginWithDistanceLoss(distance_function=distance_fn,
                                                        reduction=reduction, margin=margin, swap=swap)
-            self.assertTrue(gradcheck(lambda a, p, n: loss_op(
-                a, p, n), (anchor, positive, negative)))
+            self.assertTrue(gradcheck(loss_op, (anchor, positive, negative)))
             traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
-            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
-                a, p, n), (anchor, positive, negative)))
+            self.assertTrue(gradcheck(traced_loss_op, (anchor, positive, negative)))
 
             # Test forward parity
             functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,

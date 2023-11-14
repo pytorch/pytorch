@@ -46,7 +46,7 @@ class MyModule(torch.nn.Module):
             if user_function():
                 _variable += 1
         elif self.mode == 3:
-            lambda_f = lambda: torch._utils.is_compiling()  # noqa: E731
+            lambda_f = torch._utils.is_compiling  # noqa: E731
             if lambda_f():
                 _variable += 1
         elif self.mode == 4:

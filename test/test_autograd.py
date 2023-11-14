@@ -3371,7 +3371,7 @@ class TestAutograd(TestCase):
 
         # in-place detach on a view raises an exception
         view = x.narrow(0, 1, 4)
-        self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
+        self.assertRaisesRegex(RuntimeError, 'view', view.detach_)
 
     def test_detach_base(self):
         "detaching base does not detach view"
@@ -3563,7 +3563,7 @@ class TestAutograd(TestCase):
         with torch.no_grad():
             x *= 2
         self.assertRaisesRegex(RuntimeError, 'modified by an inplace operation',
-                               lambda: z.backward())
+                               z.backward)
 
     def test_increment_version(self):
         a = torch.rand(5, requires_grad=True)
@@ -9632,7 +9632,7 @@ class TestAutogradDeviceType(TestCase):
             test_nonzero(f, -inf, bool(-inf))
 
 
-        _test_pyscalar_conversions(lambda x: x.to(device), lambda x: int(x))
+        _test_pyscalar_conversions(lambda x: x.to(device), int)
 
     @dtypesIfMPS(torch.float32)
     @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)

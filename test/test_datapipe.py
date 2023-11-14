@@ -504,7 +504,7 @@ class TestIterableDataPipeBasic(TestCase):
         # tuple
         _helper(datapipe2)
         # list
-        datapipe3 = datapipe2.map(lambda x: list(x))
+        datapipe3 = datapipe2.map(list)
         _helper(datapipe3)
 
 

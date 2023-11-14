@@ -750,7 +750,7 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         # return some virtual storage that is safe to work with
         x = LoggingTensor(torch.ones(1))
         storage = x.untyped_storage()
-        self.assertRaises(RuntimeError, lambda: storage.data_ptr())
+        self.assertRaises(RuntimeError, storage.data_ptr)
 
     def test_make_wrapper_subclass_noalloc(self) -> None:
         # This is ludicrously big (8TB) and this should pass because wrapper
@@ -1230,7 +1230,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
                 if kwargs is None:
                     kwargs = {}
                 r = func(*args, **kwargs)
-                tree_map_only(torch.Tensor, lambda t: seen.add(t), r)
+                tree_map_only(torch.Tensor, seen.add, r)
                 return r
 
         with TestMode():

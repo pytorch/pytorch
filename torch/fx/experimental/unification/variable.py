@@ -34,7 +34,7 @@ class Var:
 
 
 def var():
-    return lambda *args: Var(*args)
+    return Var
 
 
 def vars():

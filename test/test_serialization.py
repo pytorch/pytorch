@@ -585,7 +585,7 @@ class SerializationMixin:
         # The Python io docs suggests that these attributes should really exist
         # and throw io.UnsupportedOperation, but that isn't always the case.
         mocks = [
-            ('no readinto', lambda x: FilelikeMock(x)),
+            ('no readinto', FilelikeMock),
             ('has readinto', lambda x: FilelikeMock(x, has_readinto=True)),
             ('no fileno', lambda x: FilelikeMock(x, has_fileno=False)),
         ]

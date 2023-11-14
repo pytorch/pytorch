@@ -965,14 +965,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
-        return lambda x: bool(x)
+        return bool
     if dtype in _integer_dtypes:
         return sym_int
     if dtype.is_floating_point:
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
-        return lambda x: complex(x)  # type: ignore[arg-type]
+        return complex  # type: ignore[arg-type]
 
     raise ValueError("Invalid dtype!")
 

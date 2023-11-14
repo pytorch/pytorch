@@ -3105,8 +3105,8 @@ aten::mm""")
         )
         optimizer = torch.optim.Adam(model.parameters())
         cases = (
-            (0, lambda: optimizer.zero_grad()),
-            (0, lambda: model.zero_grad()),
+            (0, optimizer.zero_grad),
+            (0, model.zero_grad),
             (1, lambda: optimizer.zero_grad(set_to_none=False)),
             (1, lambda: model.zero_grad(set_to_none=False))
         )

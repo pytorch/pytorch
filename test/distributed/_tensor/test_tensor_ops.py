@@ -19,7 +19,7 @@ class DistTensorOpsTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         self._test_op(
             mesh,
-            lambda x: torch.ops.aten.contiguous(x),
+            torch.ops.aten.contiguous,
             torch.randn(16, 32),
         )
 

@@ -1327,7 +1327,7 @@ class TestTEFuser(JitTestCase):
 
     def test_gelu(self):
         def apply(fn):
-            return lambda x, approximate: fn(x, approximate)
+            return fn
 
         unary_ops = [
             F.gelu,
@@ -1359,7 +1359,7 @@ class TestTEFuser(JitTestCase):
     def test_unary_ops(self):
         with torch._jit_internal._disable_emit_hooks():
             def apply(fn):
-                return lambda x: fn(x)
+                return fn
 
             unary_ops = [
                 torch.lgamma,
@@ -1441,7 +1441,7 @@ class TestTEFuser(JitTestCase):
 
     def test_binary_ops(self):
         def apply(fn):
-            return lambda x, y: fn(x, y)
+            return fn
 
         binary_ops = [
             operator.__and__,
@@ -1494,7 +1494,7 @@ class TestTEFuser(JitTestCase):
 
     def test_binary_scalar_ops(self):
         def apply(fn):
-            return lambda x, y: fn(x, y)
+            return fn
         ir_template = """
         graph(%x : {dtype_x}, %y : {dtype_y}):
           %z = {op}(%x, %y)
@@ -1720,7 +1720,7 @@ class TestTEFuser(JitTestCase):
 
     def test_ternary_ops(self):
         def apply(fn):
-            return lambda x, y, z: fn(x, y, z)
+            return fn
 
         ternary_ops = [
             torch.lerp,
@@ -1752,7 +1752,7 @@ class TestTEFuser(JitTestCase):
 
     def test_ternary_norm_ops(self):
         def apply(fn):
-            return lambda x, y, z: fn(x, y, z)
+            return fn
 
         ternary_ops = [
             F.batch_norm,
@@ -1816,7 +1816,7 @@ class TestTEFuser(JitTestCase):
 
     def test_where_ops(self):
         def apply(fn):
-            return lambda cond, x, y: fn(cond, x, y)
+            return fn
 
         ops = [
             torch.where,

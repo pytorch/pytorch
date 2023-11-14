@@ -794,7 +794,7 @@ class TestAssertClose(TestCase):
         globs = dict(torch=torch)
         doctests = finder.find(torch.testing.assert_close, globs=globs)[0]
         failures = []
-        runner.run(doctests, out=lambda report: failures.append(report))
+        runner.run(doctests, out=failures.append)
         if failures:
             raise AssertionError(f"Doctest found {len(failures)} failures:\n\n" + "\n".join(failures))
 

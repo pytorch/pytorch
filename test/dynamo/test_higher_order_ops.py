@@ -201,7 +201,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
     def test_no_freevars(self):
         def f(x):
-            return wrap(lambda x: torch.sin(x), x)
+            return wrap(torch.sin, x)
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 2)
@@ -1692,7 +1692,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
-            return wrap(lambda x: mod(x), x)
+            return wrap(mod, x)
 
         result = f(x)
 
@@ -1962,7 +1962,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager")
         def fn(x):
-            return wrap(lambda x: model(x), x)
+            return wrap(model, x)
 
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace

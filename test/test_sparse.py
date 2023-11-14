@@ -3302,7 +3302,7 @@ class TestSparse(TestSparseBase):
     @onlyCPU
     def test_sparse_to_numpy(self, device):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
-        self.assertRaises(TypeError, lambda: t.numpy())
+        self.assertRaises(TypeError, t.numpy)
 
     @coalescedonoff
     @dtypes(torch.double)

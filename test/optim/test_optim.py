@@ -564,7 +564,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -576,7 +576,7 @@ class TestOptim(TestCase):
             [
                 lambda opt: StepLR(opt, gamma=0.99, step_size=10),
                 lambda opt: ExponentialLR(opt, gamma=0.99),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -1125,7 +1125,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -1140,7 +1140,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -1316,7 +1316,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -1464,7 +1464,7 @@ class TestOptim(TestCase):
                 maximize=maximize,
                 foreach=foreach,
             ),
-            [lambda opt: ReduceLROnPlateau(opt)],
+            [ReduceLROnPlateau],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
@@ -1476,7 +1476,7 @@ class TestOptim(TestCase):
                 foreach=foreach,
             ),
             [
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
                 lambda opt: ExponentialLR(opt, gamma=0.99),
             ],
             constructor_accepts_maximize=True,
@@ -1575,7 +1575,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_foreach=True,
         )
@@ -1592,7 +1592,7 @@ class TestOptim(TestCase):
             ),
             [
                 lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
+                ReduceLROnPlateau,
             ],
             constructor_accepts_foreach=True,
         )

@@ -760,14 +760,14 @@ class TestTensorCreation(TestCase):
             self.assertEqual(te.size(), tl.size())
 
         like_fns = [
-            lambda t, **kwargs: torch.zeros_like(t, **kwargs),
-            lambda t, **kwargs: torch.ones_like(t, **kwargs),
+            torch.zeros_like,
+            torch.ones_like,
             lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
             lambda t, **kwargs: torch.randint_like(t, 100, **kwargs),
-            lambda t, **kwargs: torch.randn_like(t, **kwargs),
-            lambda t, **kwargs: torch.rand_like(t, **kwargs),
+            torch.randn_like,
+            torch.rand_like,
             lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
-            lambda t, **kwargs: torch.empty_like(t, **kwargs)]
+            torch.empty_like]
 
         # dense non-overlapping tensor,
         # non-dense non-overlapping sliced tensor

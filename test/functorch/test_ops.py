@@ -259,7 +259,7 @@ def get_jvp_variant(f, sample):
     # be used to wrap vmap
     fn, primals = normalize_op_input_output(f, sample, requires_grad=False)
     tangents = _as_tuple(
-        tree_map(lambda x: torch.randn_like(x), primals))
+        tree_map(torch.randn_like, primals))
 
     @functools.wraps(f)
     def wrapped(*args):
@@ -281,7 +281,7 @@ def get_jvp_variant_primals_tangents2(f, args, kwargs, output_process_fn_grad=No
     fn, primals = normalize_op_input_output2(f, args, kwargs, output_process_fn_grad,
                                              requires_grad)
     tangents = _as_tuple(
-        tree_map(lambda x: torch.randn_like(x), primals))
+        tree_map(torch.randn_like, primals))
     return _get_jvp_variant(fn, primals, tangents)
 
 
@@ -290,7 +290,7 @@ def get_jvp_variant_primals_tangents(f, sample):
     # be used to wrap vmap
     fn, primals = normalize_op_input_output(f, sample, requires_grad=False)
     tangents = _as_tuple(
-        tree_map(lambda x: torch.randn_like(x), primals))
+        tree_map(torch.randn_like, primals))
     return _get_jvp_variant(fn, primals, tangents)
 
 
@@ -556,7 +556,7 @@ class TestOperators(TestCase):
         contig_fn, primals = normalize_op_input_output2(
             fn, args, kwargs, output_process_fn, requires_grad=True)
         orig_primals = tree_map(lambda x: x.detach(), primals)
-        orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+        orig_tangents = tree_map(torch.randn_like, primals)
 
         noncontig_sample = sample.noncontiguous()
         noncontig_args = (noncontig_sample.input,) + noncontig_sample.args
@@ -565,7 +565,7 @@ class TestOperators(TestCase):
             fn, noncontig_args, noncontig_kwargs,
             output_process_fn, requires_grad=True)
         noncontig_primals = tree_map(lambda x: x.detach(), primals)
-        noncontig_tangents = tree_map(lambda x: noncontiguous_like(x), orig_tangents)
+        noncontig_tangents = tree_map(noncontiguous_like, orig_tangents)
 
         def maybe_clone_inputs():
             if clone_inputs:
@@ -646,10 +646,10 @@ class TestOperators(TestCase):
                     continue
                 fn, primals = normalize_op_input_output(_op, sample)
                 result = fn(*primals)
-                cotangents = tree_map(lambda x: torch.randn_like(x), result)
+                cotangents = tree_map(torch.randn_like, result)
 
                 noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
-                noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
+                noncontig_cotangents = tree_map(noncontiguous_like, cotangents)
 
                 out, vjp_fn = vjp(fn, *primals)
                 self.assertEqual(out, result)
@@ -720,7 +720,7 @@ class TestOperators(TestCase):
                     continue
                 fn, args = get_vjpfull_variant(_op, sample)
                 result = fn(*args)
-                cotangents = tree_map(lambda x: torch.randn_like(x), result)
+                cotangents = tree_map(torch.randn_like, result)
 
                 # Compute vjp of vjp
                 _, vjp_fn = vjp(fn, *args)
@@ -857,7 +857,7 @@ class TestOperators(TestCase):
         for sample in samples:
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
-            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+            cotangents = tree_map(torch.randn_like, result)
             cotangents = pytree.tree_leaves(cotangents)
             num_args = len(args)
 
@@ -1333,7 +1333,7 @@ class TestOperators(TestCase):
                 fn, primals = normalize_op_input_output2(vmapped_op, batched_args, kwargs,
                                                          sample.output_process_fn_grad)
                 result = fn(*primals)
-                cotangents = tree_map(lambda x: torch.randn_like(x), result)
+                cotangents = tree_map(torch.randn_like, result)
 
                 _, vjp_fn = vjp(fn, *primals)
                 result_vjps = vjp_fn(cotangents)
@@ -1424,10 +1424,10 @@ class TestOperators(TestCase):
         for sample in samples:
             fn, primals = normalize_op_input_output(op, sample)
             result = fn(*primals)
-            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+            cotangents = tree_map(torch.randn_like, result)
 
-            primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
-            cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
+            primals_tangents = tree_map(torch.randn_like, primals)
+            cotangents_tangents = tree_map(torch.randn_like, cotangents)
 
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
@@ -1590,10 +1590,10 @@ class TestOperators(TestCase):
         for sample in samples:
             fn, primals = normalize_op_input_output(op, sample)
             result = fn(*primals)
-            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+            cotangents = tree_map(torch.randn_like, result)
 
-            primals_tangents = tree_map(lambda x: torch.randn_like(x), primals)
-            cotangents_tangents = tree_map(lambda x: torch.randn_like(x), cotangents)
+            primals_tangents = tree_map(torch.randn_like, primals)
+            cotangents_tangents = tree_map(torch.randn_like, cotangents)
 
             def push_vjp(primals, cotangents):
                 _, vjp_fn = vjp(fn, *primals)
@@ -1964,7 +1964,7 @@ class TestOperators(TestCase):
                 inner_mapped_fn, _ = normalize_op_input_output2(
                     inner_mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
                 result = inner_mapped_fn(*primals)
-                cotangents = tree_map(lambda x: torch.rand_like(x), result)
+                cotangents = tree_map(torch.rand_like, result)
 
                 def apply_vjp(fn):
                     def inner(primals, cotangents):
@@ -2013,7 +2013,7 @@ class TestOperators(TestCase):
                         mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
 
                     result = mapped_fn(*primals)
-                    cotangents = tree_map(lambda x: torch.rand_like(x), result)
+                    cotangents = tree_map(torch.rand_like, result)
 
                     _, vjp_fn = vjp(mapped_fn, *primals)
                     expected_vjps = vjp_fn(cotangents)

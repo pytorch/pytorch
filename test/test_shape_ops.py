@@ -477,7 +477,7 @@ class TestShapeOps(TestCase):
         # not allow flip on the same dim more than once
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
         # not allow empty list as input
-        self.assertRaises(TypeError, lambda: data.flip())
+        self.assertRaises(TypeError, data.flip)
 
         # not allow dim > max dim
         self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))

@@ -13339,7 +13339,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(
         "align_corners",
         (True, False),
-        name_fn=lambda align_corners: str(align_corners),
+        name_fn=str,
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
@@ -13433,7 +13433,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         (IfNoneOutput, IfNoneInput, LoopNoneOutput, LoopNoneInput),
         name_fn=lambda module_class: module_class.__name__,
     )
-    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
+    @common_utils.parametrize("x_size", (0, 1), name_fn=str)
     @skipTraceTest()
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):

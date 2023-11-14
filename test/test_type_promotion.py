@@ -549,37 +549,37 @@ class TestTypePromotion(TestCase):
             dict(
                 name="lt",
                 out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.lt(x, y),
+                ret_op=torch.lt,
                 compare_op=lambda x, y: x < y,
             ),
             dict(
                 name="le",
                 out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.le(x, y),
+                ret_op=torch.le,
                 compare_op=lambda x, y: x <= y,
             ),
             dict(
                 name="gt",
                 out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.gt(x, y),
+                ret_op=torch.gt,
                 compare_op=lambda x, y: x > y,
             ),
             dict(
                 name="ge",
                 out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.ge(x, y),
+                ret_op=torch.ge,
                 compare_op=lambda x, y: x >= y,
             ),
             dict(
                 name="eq",
                 out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.eq(x, y),
+                ret_op=torch.eq,
                 compare_op=lambda x, y: x == y,
             ),
             dict(
                 name="ne",
                 out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
-                ret_op=lambda x, y: torch.ne(x, y),
+                ret_op=torch.ne,
                 compare_op=lambda x, y: x != y,
             ),
         ]

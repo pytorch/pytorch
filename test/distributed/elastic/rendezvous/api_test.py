@@ -236,7 +236,7 @@ class RendezvousHandlerRegistryTest(TestCase):
     def test_register_raises_error_if_called_twice_with_different_creators(self) -> None:
         self._registry.register("dummy_backend", self._create_handler)
 
-        other_create_handler = lambda p: _DummyRendezvousHandler(p)  # noqa: E731
+        other_create_handler = _DummyRendezvousHandler  # noqa: E731
 
         with self.assertRaisesRegex(
             ValueError,
