@@ -1047,7 +1047,7 @@ def forward(self, arg0_1):
                         c += int(schema.is_mutable)
             return c
         self.assertEqual(count_mutable(fgm), 0)
-        # One for forward, one for recompuation logic in backward
+        # One for forward, one for recomputation logic in backward
         self.assertEqual(count_mutable(gm), 2)
 
     def test_map_functionalized(self):
@@ -1250,13 +1250,13 @@ def forward(self, arg0_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
-        # The symbols in make_fx's shape_env should not be speciliazed.
+        # The symbols in make_fx's shape_env should not be specialized.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 4;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
@@ -1494,9 +1494,15 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.ones(3, 4)
         exp_out = inp.sin()
         iter_n = torch._dynamo.config.cache_size_limit + 1
+
+        # Need this because Dynamo checks lambda code ID not object itself.
+        def make_dummy_fn(op):
+            exec(f"temp = lambda x: x.{op}()")
+            return locals()["temp"]
+
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
-            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+            self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
@@ -1515,8 +1521,8 @@ def forward(self, arg0_1, arg1_1):
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
             self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 4;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None

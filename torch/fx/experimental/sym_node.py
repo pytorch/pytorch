@@ -132,19 +132,21 @@ class SymNode:
             self._update_hint()
         return self._hint is not None
 
-    def require_hint(self):
+    def require_hint(self, fallback=None):
         if self._hint is None:
             self._update_hint()
         if self._hint is None:
+            if fallback is not None:
+                return fallback
             # NB: we expect this to raise
             return self.shape_env.size_hint(self.expr)
         return self._hint
 
     def maybe_as_int(self):
-        if self.expr.free_symbols:
-            return None
-        else:
+        if self.expr.is_number:
             return int(self.expr)
+        else:
+            return None
 
     def is_int(self):
         return self.pytype is int

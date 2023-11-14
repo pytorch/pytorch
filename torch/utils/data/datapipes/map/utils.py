@@ -29,6 +29,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
         >>> dp['a']
         100
     """
+
     def __init__(self, sequence, deepcopy=True):
         if deepcopy:
             try:
