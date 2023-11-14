@@ -2011,9 +2011,7 @@ class ShapeEnv:
 
         # TODO: make this configurable from outside policy; we made a policy
         # decision here where if all sizes are static, we are going to
-        # specialize all of the inner strides/offset too. We don't have to
-        # do this, and arguably we should ALWAYS allow for dynamic offset,
-        # this is cheap.
+        # specialize all of the inner stridest too.
         # TODO: This should be DYNAMIC, using DUCK for BC
         dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
 
@@ -2073,7 +2071,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_strides_offset,
+            dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
