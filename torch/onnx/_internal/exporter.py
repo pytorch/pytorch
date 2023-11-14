@@ -29,6 +29,8 @@ from typing import (
     Union,
 )
 
+import numpy
+
 from typing_extensions import Self
 
 import torch

@@ -9,6 +9,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
+import onnx_test_common
 import packaging.version
 
 import torch
@@ -203,6 +204,60 @@ def skip_dynamic_fx_test(reason: str):
             if self.dynamic_shapes:
                 raise unittest.SkipTest(
                     f"Skip verify dynamic shapes test for FX. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_model_type_is_exported_program_test(reason: str):
+    """Skip test with models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for skipping the ONNX export test.
+
+    Returns:
+        A decorator for skipping tests.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                raise unittest.SkipTest(
+                    f"Skip model_type==torch.export.ExportedProgram test. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_model_type_is_not_exported_program_test(reason: str):
+    """Skip test without models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for skipping the ONNX export test.
+
+    Returns:
+        A decorator for skipping tests.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                != onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                raise unittest.SkipTest(
+                    f"Skip model_type==torch.export.ExportedProgram test. {reason}"
                 )
             return func(self, *args, **kwargs)
 
