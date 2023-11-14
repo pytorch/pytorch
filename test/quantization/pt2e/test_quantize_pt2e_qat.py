@@ -7,6 +7,7 @@ from typing import Any, Optional, Tuple
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
+    default_fake_quant,
     FusedMovingAvgObsFakeQuantize,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -23,6 +24,12 @@ from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
     prepare_qat_pt2e,
+)
+from torch.ao.quantization.quantizer import (
+    DerivedQuantizationSpec,
+    QuantizationAnnotation,
+    QuantizationSpec,
+    Quantizer,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -607,6 +614,201 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self.assertTrue("backbone" not in get_source_fn(first_relu))
         self.assertTrue("backbone" in get_source_fn(second_conv))
         self.assertTrue("backbone" in get_source_fn(second_relu))
+
+    def test_qat_conv_bn_bias_derived_qspec(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=False)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = ConvBnDerivedBiasQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
+        # Assert that both weight and bias are quantized
+        (conv_node, _, _) = _get_conv_bn_getitem_nodes(m)
+        weight_dq = conv_node.args[1]
+        bias_dq = conv_node.args[2]
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        weight_q = weight_dq.args[0]
+        bias_q = bias_dq.args[0]
+        self.assertEqual(
+            weight_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
+
+        # Assert that bias scale = weight scale * input scale
+        input_dq = conv_node.args[0]
+        input_scale = input_dq.args[1]
+        bias_scale = bias_dq.args[1]
+        weight_scale = weight_dq.args[1]
+        self.assertEqual(bias_scale, input_scale * weight_scale)
+
+        # Assert that args for the bias' quantize and dequantize ops
+        # are copied correctly after subgraph rewriting
+        (bias_qmin, bias_qmax, bias_dtype) = bias_dq.args[3:]
+        self.assertEqual(bias_qmin, -(2**31))
+        self.assertEqual(bias_qmax, 2**31 - 1)
+        self.assertEqual(bias_dtype, torch.int32)
+
+    def test_qat_per_channel_weight_custom_dtype(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=False)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = ConvBnInt32WeightQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
+        # Assert that conv weight is quantized per channel
+        (conv_node, _, _) = _get_conv_bn_getitem_nodes(m)
+        weight_dq = conv_node.args[1]
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+        )
+        weight_q = weight_dq.args[0]
+        self.assertEqual(
+            weight_q.target,
+            torch.ops.quantized_decomposed.quantize_per_channel.default,
+        )
+
+        # Assert that args for the weight's quantize and dequantize ops
+        # are copied correctly after subgraph rewriting
+        (q_axis, q_qmin, q_qmax, q_dtype) = weight_q.args[3:]
+        (dq_axis, dq_qmin, dq_qmax, dq_dtype) = weight_dq.args[3:]
+        self.assertEqual(q_axis, 0)
+        self.assertEqual(dq_axis, 0)
+        self.assertEqual(q_qmin, 0)
+        self.assertEqual(dq_qmin, 0)
+        self.assertEqual(q_qmax, 2**31 - 1)
+        self.assertEqual(dq_qmax, 2**31 - 1)
+        self.assertEqual(q_dtype, torch.int32)
+        self.assertEqual(dq_dtype, torch.int32)
+
+
+def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
+    """
+    Return a 3-tuple of (conv, bn, getitem) nodes from the graph.
+    """
+    model.graph.eliminate_dead_code()
+    model.recompile()
+    conv_node = None
+    bn_node = None
+    getitem_node = None
+    for n in model.graph.nodes:
+        if n.target == torch.ops.aten.conv2d.default:
+            conv_node = n
+        if n.target == torch.ops.aten._native_batch_norm_legit.default:
+            bn_node = n
+        if n.target == operator.getitem:
+            getitem_node = n
+    assert conv_node is not None, "bad test setup"
+    return (conv_node, bn_node, getitem_node)
+
+
+class ConvBnInt32WeightQuantizer(Quantizer):
+    """
+    Dummy quantizer that annotates conv bn in such a way that the weights
+    are quantized per channel to int32.
+    """
+
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        act_qspec = QuantizationSpec(
+            dtype=torch.uint8,
+            quant_min=0,
+            quant_max=255,
+            qscheme=torch.per_tensor_affine,
+            observer_or_fake_quant_ctr=default_fake_quant,
+        )
+        weight_qspec = QuantizationSpec(
+            dtype=torch.int32,
+            quant_min=0,
+            quant_max=2**31 - 1,
+            qscheme=torch.per_channel_affine,
+            observer_or_fake_quant_ctr=FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAveragePerChannelMinMaxObserver,
+            ),
+        )
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                conv_node.args[0]: act_qspec,
+                conv_node.args[1]: weight_qspec,
+            },
+            _annotated=True,
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=act_qspec,
+            _annotated=True,
+        )
+        return model
+
+    def validate(self, model: torch.fx.GraphModule):
+        pass
+
+
+class ConvBnDerivedBiasQuantizer(Quantizer):
+    """
+    Dummy quantizer that annotates conv bn in such a way that the bias qparams are
+    derived from the conv input activation and weight qparams.
+    """
+
+    def _derive_bias_qparams_from_act_and_weight_qparams(self, obs_or_fqs):
+        act_scale, _ = obs_or_fqs[0].calculate_qparams()
+        weight_scale, _ = obs_or_fqs[1].calculate_qparams()
+        bias_scale = torch.tensor([act_scale * weight_scale], dtype=torch.float32)
+        bias_zero_point = torch.tensor([0], dtype=torch.int32)
+        return bias_scale, bias_zero_point
+
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        act_and_weight_qspec = QuantizationSpec(
+            dtype=torch.uint8,
+            quant_min=0,
+            quant_max=255,
+            qscheme=torch.per_tensor_affine,
+            observer_or_fake_quant_ctr=default_fake_quant,
+        )
+        bias_qspec = DerivedQuantizationSpec(
+            derived_from=[
+                (conv_node.args[0], conv_node),
+                (conv_node.args[1], conv_node),
+            ],
+            derive_qparams_fn=self._derive_bias_qparams_from_act_and_weight_qparams,
+            dtype=torch.int32,
+            quant_min=-(2**31),
+            quant_max=2**31 - 1,
+            qscheme=torch.per_tensor_affine,
+        )
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                conv_node.args[0]: act_and_weight_qspec,
+                conv_node.args[1]: act_and_weight_qspec,
+                conv_node.args[2]: bias_qspec,
+            },
+            _annotated=True,
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=act_and_weight_qspec,
+            _annotated=True,
+        )
+        return model
+
+    def validate(self, model: torch.fx.GraphModule):
+        pass
 
 
 @skipIfNoQNNPACK

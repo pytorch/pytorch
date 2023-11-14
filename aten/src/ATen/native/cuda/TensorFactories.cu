@@ -54,7 +54,7 @@ Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
 Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   Tensor result = at::detail::empty_cuda(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -80,7 +80,7 @@ Tensor _efficientzerotensor_cuda(IntArrayRef size,
 Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cuda(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;

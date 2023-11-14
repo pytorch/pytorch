@@ -195,8 +195,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == "output":
             false_outs.extend(node.args)
 
-    flat_true_outs = pytree.tree_leaves(true_outs)
-    flat_false_outs = pytree.tree_leaves(false_outs)
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"

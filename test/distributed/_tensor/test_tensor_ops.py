@@ -185,8 +185,11 @@ class DistTensorOpsTest(DTensorTestBase):
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
         assert dist_tensor.shape == (4, 8)
 
-        torch.fill_(dist_tensor, 42)
-        fill_expected = torch.full(dist_tensor.shape, 42, dtype=input_tensor.dtype)
+        # inplace partial sum should keep partial
+        torch.fill_(dist_tensor, 8)
+        fill_expected = torch.full(
+            dist_tensor.shape, 8 * self.world_size, dtype=input_tensor.dtype
+        )
         self.assertEqual(fill_expected, dist_tensor.full_tensor())
 
     @with_comms
@@ -250,6 +253,22 @@ class DistTensorOpsTest(DTensorTestBase):
         eq_result = dist_tensor_1.equal(dist_tensor_2)
         # equal op all reduces each shard's local result
         self.assertFalse(eq_result)
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_2))
+
+        # test if sharding are different
+        replica_spec = [Replicate()]
+        global_input = torch.ones(4 * self.world_size, 4)
+        dist_tensor_3 = DTensor.from_local(
+            global_input, device_mesh, replica_spec, run_check=False
+        )
+
+        self.assertTrue(dist_tensor_1.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
+
+        # test sharding difference with only some shards content difference
+        self.assertFalse(dist_tensor_2.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
+        self.assertFalse(input_tensor_2.is_same_size(dist_tensor_3))
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
