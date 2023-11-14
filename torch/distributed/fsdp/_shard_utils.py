@@ -31,8 +31,7 @@ def _create_chunk_sharded_tensor(
     pg: dist.ProcessGroup,
     device: Optional[torch.device] = None,
 ) -> ShardedTensor:
-    """
-    Shard a tensor to chunks along the first dimension.
+    """Shard a tensor to chunks along the first dimension.
 
     The local rank will gets its corresponding chunk as the local shard
     to create a ShardedTensor.
@@ -88,8 +87,7 @@ def _create_chunk_dtensor(
     rank: int,
     device_mesh: DeviceMesh,
 ) -> DTensor:
-    """
-    Shard a tensor to chunks along the first dimension.
+    """Shard a tensor to chunks along the first dimension.
 
     The local rank will gets its corresponding chunk as
     the local tensor to create a DTensor.

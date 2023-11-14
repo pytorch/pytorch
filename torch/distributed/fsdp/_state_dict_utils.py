@@ -99,8 +99,7 @@ def _enter_unshard_params_ctx(
     offload_to_cpu: bool = False,
     with_grads: bool = False,
 ) -> None:
-    """
-    Enter the context for `_unshard_fsdp_state_params`.
+    """Enter the context for `_unshard_fsdp_state_params`.
 
     state_dict hooks cannot use the pure context call as the checkpoint flow
     requires to enter the context in the pre-hook but leave the context in the
@@ -147,8 +146,7 @@ def _common_unshard_pre_state_dict_hook(
     offload_to_cpu: bool,
     rank0_only: bool,
 ) -> None:
-    """
-    Perform the pre-state_dict tasks shared by all state_dict types that require ``_unshard_fsdp_state_params()``.
+    """Perform the pre-state_dict tasks shared by all state_dict types that require ``_unshard_fsdp_state_params()``.
 
     FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
@@ -175,8 +173,7 @@ def _common_unshard_post_state_dict_hook(
     prefix: str,
     param_hook: Callable,
 ) -> Dict[str, Any]:
-    """
-    Share post-state_dict flow to all state_dict types that require ``_unshard_fsdp_state_params()``.
+    """Share post-state_dict flow to all state_dict types that require ``_unshard_fsdp_state_params()``.
 
     FULL_STATE_DICT and SHARDED_STATE_DICT use this
     hook.
@@ -287,8 +284,7 @@ def _full_pre_state_dict_hook(
     *args,
     **kwargs,
 ) -> None:
-    """
-    Run before model.state_dict() is called.
+    """Run before model.state_dict() is called.
 
     pre-state_dict hook is
     not actually supported by ``nn.Module``. As a result, this API is called
@@ -320,8 +316,7 @@ def _full_post_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> Dict[str, Any]:
-    """
-    Run after model.state_dict() is called and before returning result to user.
+    """Run after model.state_dict() is called and before returning result to user.
 
     For FSDP, we may have to clone the tensors in state_dict as params go
     back to sharded version after _unshard_fsdp_state_params ends, and also remove
@@ -395,8 +390,7 @@ def _local_pre_state_dict_hook(
     *args,
     **kwargs,
 ) -> None:
-    """
-    Run before model.state_dict() is called.
+    """Run before model.state_dict() is called.
 
     Right now, pre-state_dict hook is not supported by the PyTorch core.
     So this API is called from `_local_post_state_dict_hook()` to simulate the case.
@@ -419,8 +413,7 @@ def _local_post_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> Dict[str, Any]:
-    r"""
-    Create a ``ShardedTensor`` from the local flat_param.
+    r"""Create a ``ShardedTensor`` from the local flat_param.
 
     Then, method replaces the state_dict[f"{prefix}{FLAT_PARAM}] with the ``ShardedTensor``.
     No copy will happen. The underlying storage is the same.
@@ -474,8 +467,7 @@ def _local_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
-    r"""
-    Find the local flat_param for this FSDP module from the state_dict.
+    r"""Find the local flat_param for this FSDP module from the state_dict.
 
     The flat_param should be a ``ShardedTensor``. This hook converts the ``ShardedTensor``
     to a tensor. No copy happen unless padding is required.
@@ -523,8 +515,7 @@ def _sharded_pre_state_dict_hook(
     *args,
     **kwargs,
 ) -> None:
-    r"""
-    Run before model.state_dict() is called.
+    r"""Run before model.state_dict() is called.
 
     Check ``_full_pre_load_state_dict_hook`` for the detail.
     """
@@ -554,8 +545,7 @@ def _sharded_post_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> Dict[str, Any]:
-    """
-    Replace the unshared parameters to sharded parameters.
+    """Replace the unshared parameters to sharded parameters.
 
     The hook replaces the unflattened, unsharded parameter in the
     state_dict with a unflattened, sharded parameter (a ShardedTensor).
@@ -604,8 +594,7 @@ def _sharded_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
-    """
-    Combine the unflattened, sharded parameters (ShardedTensor) to a new FlatParameter.
+    """Combine the unflattened, sharded parameters (ShardedTensor) to a new FlatParameter.
 
     The method also shards the new FlatParameter to the local chunk.
     """
@@ -718,8 +707,7 @@ def _post_state_dict_hook(
     prefix: str,
     *args: Any,
 ) -> Dict[str, Any]:
-    r"""
-    Call after the state_dict() of this FSDP module is executed.
+    r"""Call after the state_dict() of this FSDP module is executed.
 
     ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
@@ -776,8 +764,7 @@ def _pre_state_dict_hook(
     *args,
     **kwargs,
 ) -> None:
-    """
-    Call before the core state dict saving logic of ``module``.
+    """Call before the core state dict saving logic of ``module``.
 
     ``fsdp_state._state_dict_type`` is used to decide what
     postprocessing will be done.
@@ -826,8 +813,7 @@ def _pre_load_state_dict_hook(
     prefix: str,
     *args: Any,
 ) -> None:
-    """
-    Call before ``module._load_from_state_dict()``.
+    """Call before ``module._load_from_state_dict()``.
 
     ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
     be done.
@@ -917,7 +903,7 @@ def _register_state_dict_hooks_base(
     hook: Callable,
     hook_registration_fn_kwargs: Dict[str, Any],
 ) -> None:
-    """Register ``hook``(s) using ``hook_registration_fn``."""
+    """Register ``hook`` using ``hook_registration_fn``."""
     if not _is_composable(state):
         getattr(state, hook_registration_fn_name)(hook, **hook_registration_fn_kwargs)
     else:

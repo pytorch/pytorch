@@ -56,8 +56,7 @@ class _PrefetchMode(Enum):
 def _get_fsdp_root_states_with_modules(
     module: nn.Module,
 ) -> Tuple[List[_FSDPState], List[nn.Module]]:
-    """
-    Retrieve the root states along with the corresponding modules from a FSDP instance.
+    """Retrieve the root states along with the corresponding modules from a FSDP instance.
 
     Returns a tuple containing:
 
@@ -95,8 +94,7 @@ def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
 
 
 def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
-    """
-    Return if ``state`` corresponds to that of an FSDP root.
+    """Return if ``state`` corresponds to that of an FSDP root.
 
     For the wrapper code path, ``state`` and ``module`` should be the same. For
     the non-wrapper code path, ``state`` should be ``module`` 's state.
@@ -144,8 +142,7 @@ def _lazy_init(
     state: _FSDPState,
     root_module: nn.Module,
 ) -> _FSDPState:
-    """
-    Perform initialization lazily, typically right before the first forward pass.
+    """Perform initialization lazily, typically right before the first forward pass.
 
     The laziness is needed to ensure that the parameter device/dtype and
     the FSDP hierarchy have finalized. This method's actual logic only runs on
@@ -176,8 +173,7 @@ def _lazy_init(
 
 
 def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
-    """
-    Check if all ``FlatParameter`` are on the expected device.
+    """Check if all ``FlatParameter`` are on the expected device.
 
     Checks that all ``FlatParameter``s in ``module`` 's tree managed by
     ``state`` are on the expected device for *lazy initialization*.
@@ -206,8 +202,7 @@ def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
     root_module: nn.Module,
 ) -> None:
-    """
-    Share data structure state from the ``root_state`` to all FSDP states in ``root_module`` 's module tree.
+    """Share data structure state from the ``root_state`` to all FSDP states in ``root_module`` 's module tree.
 
     The method also initializes handle attributes. These are done together to require a single
     loop over the states.
@@ -276,8 +271,7 @@ def _share_state_and_init_handle_attrs(
 def _init_streams(
     state: _FSDPState,
 ) -> None:
-    """
-    Initialize CUDA streams for overlapping communication, computation, and data transfers.
+    """Initialize CUDA streams for overlapping communication, computation, and data transfers.
 
     The streams should be shared across FSDP instances.
     """
@@ -314,8 +308,7 @@ def _unshard(
     unshard_stream: torch.Stream,
     pre_unshard_stream: torch.Stream,
 ) -> None:
-    """
-    Unshard the handles in ``handles``.
+    """Unshard the handles in ``handles``.
 
     If the handles are in :meth:`summon_full_params` and are
     using mixed precision, then they are forced to full precision.
@@ -347,8 +340,7 @@ def _reshard(
     handle: FlatParamHandle,
     free_unsharded_flat_param: bool,
 ):
-    """
-    Reshards the handle.
+    """Reshards the handle.
 
     ``free_unsharded_flat_param`` indicates whether to free the handle's padded unsharded flat parameter.
     """
@@ -393,8 +385,7 @@ def _pre_forward(
     Run the pre-forward logic.
 
     This includes an opportunity to unshard currently sharded parameters
-    such as those for the current forward and
-    registering post-backward
+    such as those for the current forward and registering post-backward
     hooks for these current parameters. This function also converts forward
     ``args`` and ``kwargs`` to the given precision.
 
@@ -475,11 +466,9 @@ def _post_forward(
     input: Any,
     output: Any,
 ) -> Any:
-    """
-    Run the post-forward logic.
+    """Run the post-forward logic.
 
-    This includes an opportunity to reshard
-    currently unsharded parameters
+    This includes an opportunity to reshard currently unsharded parameters
     such as those used in the current forward and registering pre-backward
     hooks on the forward outputs.
 
@@ -542,8 +531,7 @@ def _root_pre_forward(
     args,
     kwargs,
 ) -> None:
-    """
-    Run pre-forward logic specific to the root FSDP instance.
+    """Run pre-forward logic specific to the root FSDP instance.
 
     The method should run before any individual module's pre-forward. This starts with
     an attempt at lazy initialization (which only runs non-vacuously once).
@@ -662,8 +650,7 @@ def _pre_backward_hook(
     handle: FlatParamHandle,
     *unused: Any,
 ) -> Any:
-    """
-    Prepare ``_handle`` 's ``FlatParameter`` s for gradient computation.
+    """Prepare ``_handle`` 's ``FlatParameter`` s for gradient computation.
 
     Args:
         module (nn.Module): Fully sharded module (see [Note: Fully Sharded
@@ -920,8 +907,7 @@ def _accumulate_sharded_grad(
 
 @no_type_check
 def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
-    """
-    For no-shard, this runs gradient reduction and the post-reduction callback.
+    """For no-shard, this runs gradient reduction and the post-reduction callback.
 
     This method directly covers any gradient accumulation implicitly.
     """
@@ -947,8 +933,7 @@ def _post_reduce_grad_callback(
     # Additional arguments needed for the callback logic
     grad_to_offload: torch.Tensor,
 ):
-    """
-    Callback captures any logic to run after the gradient reduction
+    """Callback captures any logic to run after the gradient reduction
     finishes.
 
     Currently, this offloads the gradient to CPU if
@@ -1026,8 +1011,7 @@ def _cast_grad_to_param_dtype(
     sharded_grad: torch.Tensor,
     param: FlatParameter,
 ):
-    """
-    Cast ``sharded_grad`` back to the full parameter dtype.
+    """Cast ``sharded_grad`` back to the full parameter dtype.
 
     The method is applied so that the optimizer step runs with that dtype.
     This performs an actual cast if
@@ -1081,8 +1065,7 @@ def _post_backward_final_callback(
     state: _FSDPState,
     module: nn.Module,
 ):
-    """
-    Wait for the post-backward to finish and perform some final cleanup.
+    """Wait for the post-backward to finish and perform some final cleanup.
 
     This runs at the end of the entire backward pass and should only be called
     on the root FSDP instance.
@@ -1127,8 +1110,7 @@ def _post_backward_final_callback(
 def _catch_all_reshard(
     state: _FSDPState,
 ) -> None:
-    """
-    Reshard the parameters that may not have been resharded in the post-backward hook.
+    """Reshard the parameters that may not have been resharded in the post-backward hook.
 
     This can happen when a module's output is used in the
     forward pass, meaning that its pre-backward hook runs (unsharding the
@@ -1202,8 +1184,7 @@ def _prefetch_handle(
     current_handle: Optional[FlatParamHandle],
     prefetch_mode: _PrefetchMode,
 ) -> None:
-    """
-    Prefetche the next handles if needed (without synchronization).
+    """Prefetche the next handles if needed (without synchronization).
 
     An empty handles key cannot prefetch.
     """
@@ -1233,13 +1214,11 @@ def _get_handle_to_prefetch(
     state: _FSDPState,
     current_handle: FlatParamHandle,
 ) -> FlatParamHandle:
-    r"""
-    Return a :class:`list` of the handles keys to prefetch for the next module(s).
+    r"""Return a :class:`list` of the handles keys to prefetch for the next module(s).
 
-    Here ``current_handle`` represents the current module. "Prefetching"
-    refers to running the unshard logic early (withoutcsynchronization),
-    and the "next" modules depend on the recorded execution order and
-    the current training state.
+    Here ``current_handle`` represents the current module. "Prefetching"refers
+    to running the unshard logic early (withoutcsynchronization),and the "next"
+    modules depend on the recorded execution order and the current training state.
     """
     training_state = _get_training_state(current_handle)
     valid_training_states = (
@@ -1315,8 +1294,7 @@ def _register_post_forward_hook(
     state: _FSDPState,
     module: nn.Module,
 ) -> None:
-    """
-    Register a post-forward hook on ``module``.
+    """Register a post-forward hook on ``module``.
 
     Even if the module has no handles, we should register the hook
     since it will register the module's pre-backward hook.
@@ -1339,8 +1317,7 @@ def _register_root_pre_forward_hook(
     state: _FSDPState,
     module: nn.Module,
 ):
-    """
-    Register root pre-forward hook on ``module``, which should be the local FSDP root.
+    """Register root pre-forward hook on ``module``, which should be the local FSDP root.
 
     NOTE: For the current composable FSDP design, we have each application of
     ``fully_shard()`` to a module to indicate that that module is the local
@@ -1364,8 +1341,7 @@ def _register_pre_backward_hooks(
     outputs: Any,
     handle: FlatParamHandle,
 ) -> None:
-    """
-    Register pre-backward hooks on the tensors.
+    """Register pre-backward hooks on the tensors.
 
     The hooks are registered on tensors that require gradients in the
     forward pass outputs ``outputs``, which were computed using the
@@ -1408,8 +1384,7 @@ def _register_post_backward_hook(
     state: _FSDPState,
     handle: Optional[FlatParamHandle],
 ) -> None:
-    """
-    Register post-backward hooks on the ``FlatParameter`` s' ``AccumulateGrad`` objects.
+    """Register post-backward hooks on the ``FlatParameter`` s' ``AccumulateGrad`` objects.
 
     The hooks are required to reshard and to reduce-scatter gradients.
     The ``AccumulateGrad`` object represents the last function that finalizes
@@ -1457,8 +1432,7 @@ def _register_post_backward_reshard_only_hook(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> None:
-    """
-    Register post-backward hooks to reshard flat parameters that do not require gradient.
+    """Register post-backward hooks to reshard flat parameters that do not require gradient.
 
     We register these using multi-post-grad hooks on the input activations
     to ensure that all gradients that may depend on the parameters have been
@@ -1517,8 +1491,7 @@ def _wait_for_computation_stream(
     unshard_stream: torch.Stream,
     pre_unshard_stream: torch.Stream,
 ):
-    """
-    Make the unshard and pre-unshard streams wait for the computation stream.
+    """Make the unshard and pre-unshard streams wait for the computation stream.
 
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
@@ -1533,8 +1506,7 @@ def _wait_for_computation_stream(
 def _reset_flat_param_grad_info_if_needed(
     handles: List[FlatParamHandle],
 ):
-    """
-    Clear the original parameters' gradients if needed.
+    """Clear the original parameters' gradients if needed.
 
     This method's CPU overhead is minimal, so we may call it throughout FSDP
     methods, which serve as callsites to free the gradient memory earlier.
@@ -1551,8 +1523,7 @@ def _get_buffers_and_dtypes_for_computation(
     state: _FSDPState,
     root_module: nn.Module,
 ) -> Tuple[List[torch.Tensor], List[Optional[torch.dtype]]]:
-    """
-    Return all buffers in the module tree rooted at ``root_module``.
+    """Return all buffers in the module tree rooted at ``root_module``.
 
     The method also returns a corresponding list of the buffer dtypes for
     computation. Each buffer dtype is either ``None`` if buffer mixed
@@ -1603,8 +1574,7 @@ def _cast_buffers_to_dtype_and_device(
     buffer_dtypes: List[Optional[torch.dtype]],
     device: torch.device,
 ) -> None:
-    """
-    Cast ``buffers`` to the dtypes given by ``buffer_dtypes`` and moves themto ``device``.
+    """Cast ``buffers`` to the dtypes given by ``buffer_dtypes`` and moves themto ``device``.
 
     If an element in ``buffer_dtypes`` is ``None``, then the
     corresponding buffer is only moved to ``device``.
