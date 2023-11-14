@@ -1045,6 +1045,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @onlyCPU
     @dtypes(torch.double)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/113589")
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [dj, di], dtype, device, coalesced)

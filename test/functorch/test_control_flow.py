@@ -553,6 +553,7 @@ class TestControlFlowTraced(TestCase):
             make_fx(f_wrapper(f))(example_input_func)
 
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "RuntimeError...multiple layers of mode-style functionalization")
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
