@@ -3,24 +3,20 @@
 import copy
 import sys
 from itertools import chain
-from typing import Any, Callable, Dict
+from typing import Callable
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
     get_state_dict,
-    PG,
     set_model_state_dict,
     set_state_dict,
-    STATE,
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -32,14 +28,12 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.distributed._sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
+from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 from torch.utils._pytree import tree_all, tree_all_only
 
 

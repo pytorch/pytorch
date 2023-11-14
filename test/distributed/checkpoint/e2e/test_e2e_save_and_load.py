@@ -24,6 +24,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
+
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
@@ -46,7 +47,8 @@ class ModelType(Enum):
     FSDP = auto()
     HSDP = auto()
     FSDP_TP = auto()
-    NONE = auto() # no parallelization
+    NONE = auto()  # no parallelization
+
 
 def _train(model, optim, train_steps=1):
     torch.manual_seed(0)
@@ -58,6 +60,7 @@ def _train(model, optim, train_steps=1):
         optim.zero_grad()
 
     return loss
+
 
 class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     def _create_model(self, compile, model_type, train_steps=2):
@@ -145,11 +148,9 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(
-            model,
-            optim,
-            torch.optim.Adam(model.parameters(), lr=0.1),
-            optim_sd
+            model, optim, torch.optim.Adam(model.parameters(), lr=0.1), optim_sd
         )
+
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
 if __name__ == "__main__":
