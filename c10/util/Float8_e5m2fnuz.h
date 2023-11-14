@@ -23,31 +23,20 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
-#include <type_traits>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
-#include <cmath>
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
 #include <stdint.h>
 #endif
 
-#ifdef _MSC_VER
-#include <intrin.h>
-#endif
-
-#include <climits>
-#include <cstdint>
-#include <cstring>
 #include <iosfwd>
-#include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
+#include <ostream>
 
-#include <typeinfo> // operator typeid
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+#include <cassert>
+#endif
 
 namespace c10 {
 
@@ -61,18 +50,18 @@ namespace detail {
  * @note The implementation doesn't use any floating-point operations.
  */
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
-C10_API inline float fp8e5m2fnuz_to_fp32_value(uint8_t) {
+C10_HOST_DEVICE C10_API inline float fp8e5m2fnuz_to_fp32_value(uint8_t) {
   assert(false); // e5m2fnuz is not supported by CUDA or HIP.
 }
 #else
-C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
+C10_HOST C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
 #endif
 
 /*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
  * 8-bit floating-point number in fp8 E5M2 format, in bit representation.
  */
-inline uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
+C10_HOST_DEVICE inline uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 65536.0f, which is the first value not
    * representable (i.e. the first value which would overflow in to the sign

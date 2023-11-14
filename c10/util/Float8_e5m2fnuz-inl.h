@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <cstring>
 #include <limits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -9,31 +8,27 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-#define EXP_WIDTH_FP8 5
-#define MAN_WIDTH_FP8 2
-#define EXP_BIAS_FP8 15
-
 namespace c10 {
 
 /// Constructors
 
-inline Float8_e5m2fnuz::Float8_e5m2fnuz(float value) {
+C10_HOST_DEVICE inline Float8_e5m2fnuz::Float8_e5m2fnuz(float value) {
   x = detail::fp8e5m2fnuz_from_fp32_value(value);
 }
 
 /// Implicit conversions
 
-inline Float8_e5m2fnuz::operator float() const {
+C10_HOST_DEVICE inline Float8_e5m2fnuz::operator float() const {
   return detail::fp8e5m2fnuz_to_fp32_value(x);
 }
 
 /// Special values helpers
 
-inline bool Float8_e5m2fnuz::isnan() const {
+C10_HOST_DEVICE inline bool Float8_e5m2fnuz::isnan() const {
   return x == 0b10000000;
 }
 
-inline bool Float8_e5m2fnuz::isinf() const {
+C10_HOST_DEVICE inline bool Float8_e5m2fnuz::isinf() const {
   return false;
 }
 
