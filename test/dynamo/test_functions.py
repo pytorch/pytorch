@@ -1876,7 +1876,7 @@ def forward(self, x_1, output_1):
             torch.compile(call_triton, dynamic=dynamic), t1, t2, o2
         )
         if not grad:
-            self.assertEqual(metrics.generated_kernel_count, 2)
+            self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertEqual(torch_add, test)
         # These two asserts are not optimal since it requires original aten
         # to be in the metadata, so there might be false negatives
