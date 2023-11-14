@@ -57,7 +57,7 @@
       func<gloo::float16>(__VA_ARGS__);          \
       break;                                     \
     case ::at::ScalarType::BFloat16:             \
-      func<c10::BFloat16>(args);                 \
+      func<c10::BFloat16>(__VA_ARGS__);          \
       break;                                     \
     case ::at::ScalarType::Char:                 \
       func<int8_t>(__VA_ARGS__);                 \
