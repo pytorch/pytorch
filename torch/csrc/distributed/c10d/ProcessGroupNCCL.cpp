@@ -910,7 +910,7 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
 
 ProcessGroupNCCL::DebugInfoCallbackStorer::DebugInfoCallbackStorer(
     std::string fileName)
-    : fileName_(fileName) {}
+    : fileName_(std::move(fileName)) {}
 
 ProcessGroupNCCL::DebugInfoCallbackStorer::~DebugInfoCallbackStorer() = default;
 

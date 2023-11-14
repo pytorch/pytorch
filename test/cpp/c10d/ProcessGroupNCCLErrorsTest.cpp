@@ -365,9 +365,10 @@ class TestDebugInfoCallbackStorer
     std::fflush(temp_);
     // Reset to the beginning of the file.
     std::rewind(temp_);
-    char buffer[256];
-    if (std::fgets(buffer, ncclTrace.size(), temp_) != nullptr) {
-      tracesFromStorer_.assign(buffer, buffer + ncclTrace.size());
+    std::array<char, 256> buffer;
+    if (std::fgets(buffer.data(), ncclTrace.size(), temp_) != nullptr) {
+      tracesFromStorer_.assign(
+          buffer.begin(), buffer.begin() + ncclTrace.size());
       // One thing which can not be explained is that, without this line of log,
       // the last element of `tracesFromStorer_` will be different from
       // `tracesToStorer_`. Since using TmpFile is just for testing purpose,
