@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     # from run-time to resolve circular dependency.
     from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-class PlacementSpec(ABC):
+class PlacementSpec(ABC):  # noqa: B024
     """
     Base class representing the placement of an entity. Subclasses of this
     class can be used to specify customized placements which might not be

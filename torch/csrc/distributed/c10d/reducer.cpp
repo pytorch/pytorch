@@ -20,7 +20,6 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
@@ -185,7 +184,7 @@ Reducer::Reducer(
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
           grad_accumulator->add_post_hook(
-              torch::make_unique<torch::autograd::utils::LambdaPostHook>(
+              std::make_unique<torch::autograd::utils::LambdaPostHook>(
                   [=](const torch::autograd::variable_list& outputs,
                       const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
@@ -292,8 +291,11 @@ void Reducer::initialize_local_used_map() {
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
-  // work if we always put it on CPU.
-  options = options.device(params_[0].device());
+  // work if we always put it on CPU. The dist backend for MTIA doesn't support
+  // int32 allreduce for now, so it has to be placed on CPU.
+  options = options.device(
+      (params_[0].is_mtia()) ? c10::Device(c10::DeviceType::CPU)
+                             : params_[0].device());
   local_used_map_dev_ = at::empty({static_cast<long>(variable_count)}, options);
 }
 
@@ -759,6 +761,18 @@ void Reducer::all_reduce_local_used_map() {
     TORCH_INTERNAL_ASSERT(local_used_map_tmp.is_pinned());
     TORCH_INTERNAL_ASSERT(
         local_used_map_tmp.data_ptr() != local_used_map_.data_ptr());
+    local_used_map_tmp.copy_(local_used_map_);
+    local_used_map_dev_.copy_(local_used_map_tmp, true);
+  } else if (local_used_map_dev_.is_mtia()) {
+    // MTIA probably will have special logic in the future, following code might
+    // be changed drastically. Therefore, a new if case is created for MTIA, for
+    // now, the implementation is similar to the CUDA one, except for
+    // the pin memory step.
+    auto local_used_map_tmp = at::native::empty_like(
+        local_used_map_,
+        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        local_used_map_.options().layout_opt(),
+        local_used_map_.options().device_opt());
     local_used_map_tmp.copy_(local_used_map_);
     local_used_map_dev_.copy_(local_used_map_tmp, true);
   } else {

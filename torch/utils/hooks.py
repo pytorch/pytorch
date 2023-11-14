@@ -83,10 +83,10 @@ def warn_if_has_hooks(tensor):
         for k in tensor._backward_hooks:
             hook = tensor._backward_hooks[k]
             if not hasattr(k, "__torch_unserializable__"):
-                warnings.warn("backward hook {} on tensor will not be "
+                warnings.warn(f"backward hook {repr(hook)} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
-                              "to suppress this warning".format(repr(hook)))
+                              "to suppress this warning")
 
 class BackwardHook:
     """
@@ -140,7 +140,7 @@ class BackwardHook:
 
                 if len(out) != len(res):
                     raise RuntimeError("Backward hook returned an invalid number of grad_input, "
-                                       "got {}, but expected {}".format(len(out), len(res)))
+                                       f"got {len(out)}, but expected {len(res)}")
 
                 res = out
 
@@ -181,7 +181,11 @@ class BackwardHook:
         for idx, val in zip(tensors_idx, new_tensors):
             arg_list[idx] = val
 
-        return tuple(arg_list), tensors_idx
+        if type(args) is tuple:
+            out = tuple(arg_list)
+        else:
+            out = type(args)(*arg_list)
+        return out, tensors_idx
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
@@ -209,7 +213,7 @@ class BackwardHook:
                         actual_len = len(hook_grad_outputs)
                         if actual_len != expected_len:
                             raise RuntimeError("Backward pre hook returned an invalid number of grad_output, "
-                                               "got {}, but expected {}".format(actual_len, expected_len))
+                                               f"got {actual_len}, but expected {expected_len}")
                         self.grad_outputs = hook_grad_outputs
 
                 # Special case if no input required gradients, this hook should call the user

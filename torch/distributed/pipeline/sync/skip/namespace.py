@@ -39,7 +39,7 @@ class Namespace(metaclass=abc.ABCMeta):
             return self.id < other.id
         return False
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Namespace):
             return self.id == other.id
         return False

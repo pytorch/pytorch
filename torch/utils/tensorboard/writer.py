@@ -3,9 +3,12 @@ consumed by TensorBoard for visualization."""
 
 import os
 import time
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 from tensorboard.compat import tf
 from tensorboard.compat.proto import event_pb2
 from tensorboard.compat.proto.event_pb2 import Event, SessionLog
@@ -293,7 +296,7 @@ class SummaryWriter:
         return self.log_dir
 
     def add_hparams(
-        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None
+        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None, global_step=None
     ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
@@ -311,6 +314,7 @@ class SummaryWriter:
               contains names of the hyperparameters and all discrete values they can hold
             run_name (str): Name of the run, to be included as part of the logdir.
               If unspecified, will use current timestamp.
+            global_step (int): Global step value to record
 
         Examples::
 
@@ -335,11 +339,11 @@ class SummaryWriter:
             run_name = str(time.time())
         logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
-            w_hp.file_writer.add_summary(exp)
-            w_hp.file_writer.add_summary(ssi)
-            w_hp.file_writer.add_summary(sei)
+            w_hp.file_writer.add_summary(exp, global_step)
+            w_hp.file_writer.add_summary(ssi, global_step)
+            w_hp.file_writer.add_summary(sei, global_step)
             for k, v in metric_dict.items():
-                w_hp.add_scalar(k, v)
+                w_hp.add_scalar(k, v, global_step)
 
     def add_scalar(
         self,
@@ -754,17 +758,24 @@ class SummaryWriter:
             walltime,
         )
 
-    def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
+    def add_figure(
+        self,
+        tag: str,
+        figure: Union["Figure", List["Figure"]],
+        global_step: Optional[int] = None,
+        close: bool = True,
+        walltime: Optional[float] = None
+    ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 
         Note that this requires the ``matplotlib`` package.
 
         Args:
-            tag (str): Data identifier
-            figure (matplotlib.pyplot.figure) or list of figures: Figure or a list of figures
-            global_step (int): Global step value to record
-            close (bool): Flag to automatically close the figure
-            walltime (float): Optional override default walltime (time.time())
+            tag: Data identifier
+            figure: Figure or a list of figures
+            global_step: Global step value to record
+            close: Flag to automatically close the figure
+            walltime: Optional override default walltime (time.time())
               seconds after epoch of event
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_figure")

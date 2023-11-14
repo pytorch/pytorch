@@ -7,20 +7,19 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
-from torch._inductor.autotune_process import BenchmarkRequest
+from torch._inductor.autotune_process import TritonBenchmarkRequest
 
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import skipIfRocm
 
 aten = torch.ops.aten
 
 
 def patches(fn):
     def skip_cache(self, choices, name, key, generate):
-        return {choice: generate(choice) for choice in choices}
+        return generate(choices)
 
     for patcher in [
         dynamo_config.patch(verbose=True),
@@ -327,7 +326,7 @@ class TestSelectAlgorithm(TestCase):
         Make sure str(TritonTemplateCaller) does not raise exceptions.
         """
         module_path = "abc.py"
-        bmreq = BenchmarkRequest(
+        bmreq = TritonBenchmarkRequest(
             module_path=module_path,
             module_cache_key=None,
             kernel_name=None,
@@ -335,8 +334,8 @@ class TestSelectAlgorithm(TestCase):
             extra_args=None,
             num_stages=None,
             num_warps=None,
-            input_tensors=None,
-            output_tensor=None,
+            input_tensor_meta=None,
+            output_tensor_meta=None,
         )
         caller = select_algorithm.TritonTemplateCaller(
             None, None, None, None, "extra", bmreq
@@ -346,7 +345,6 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
-        run_tests()
+    run_inductor_tests(triton=True, big_gpu=True)

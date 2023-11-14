@@ -43,7 +43,7 @@ with open(filename) as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 4,
+    "cait_m36_384": 8,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
@@ -178,6 +178,10 @@ class TimmRunner(BenchmarkRunner):
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
+    @property
+    def force_fp16_for_bf16_models(self):
+        return set()
+
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -202,6 +206,7 @@ class TimmRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
         if self.args.enable_activation_checkpointing:
             raise NotImplementedError(

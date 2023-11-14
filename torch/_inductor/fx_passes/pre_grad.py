@@ -30,24 +30,28 @@ normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
+    merge_getitem_cat_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
+    efficient_conv_bn_eval_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
-    from . import split_cat  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from .fb import split_cat as split_cat_fb  # noqa: F401
+        from .fb import split_cat as split_cat_fb  # type: ignore[import]  # noqa: F401
 
 
-def pre_grad_passes(gm, example_inputs):
+def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -71,10 +75,18 @@ def pre_grad_passes(gm, example_inputs):
     gm.graph.lint()
     gm.recompile()
 
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(
+            "Print graph after recompile in pre grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
+
     return gm
 
 
-def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     is_cpu = is_cpu_device(example_inputs)
 
     fake_mode = detect_fake_mode(example_inputs)
@@ -89,12 +101,11 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
+    if torch.is_grad_enabled() or not is_cpu:
         return gm
-    if not is_cpu:
-        return gm
-    gm = remove_identity(gm)
-    gm = fuse_conv_bn(gm)
+    if config.freezing:
+        gm = remove_identity(gm)
+        gm = fuse_conv_bn(gm)
     return gm
 
 
@@ -110,7 +121,7 @@ def fetch_attr(target: str, mod):
     return attr_itr
 
 
-def remove_identity(gm: torch.fx.GraphModule):
+def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
     """
@@ -126,7 +137,7 @@ def remove_identity(gm: torch.fx.GraphModule):
     return IdentityRemover(gm).transform()
 
 
-def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
+def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:
     """
     Fuses Convolution/BN layers for inference purposes.
     """
@@ -245,7 +256,7 @@ class NormalizedMatmulNode:
             return self.node.kwargs["other"]
 
 
-def check_permute(node: torch.fx.Node):
+def check_permute(node: torch.fx.Node) -> bool:
     ranks = len(node.meta["tensor_meta"].shape)
     if len(node.args) > 3:
         permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]
@@ -452,7 +463,9 @@ def transpose_linear(
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 
-def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool):
+def transpose_matmul(
+    A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool
+) -> torch.Tensor:
     if Atrans:
         A = A.transpose(-1, -2)
     if Btrans:

@@ -1,8 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/BinaryKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -10,6 +13,9 @@
 #else
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
+#include <ATen/ops/nextafter_native.h>
+#include <ATen/ops/polar_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -125,6 +131,96 @@ REGISTER_COPYSIGN_INTEGRAL_OP(char);
 REGISTER_COPYSIGN_INTEGRAL_OP(uchar);
 REGISTER_COPYSIGN_INTEGRAL_OP(bool);
 
+template<typename T>
+kernel void polar(constant void  * abs_         [[buffer(0)]],
+                  constant void  * angle_       [[buffer(1)]],
+                  device   void  * out_         [[buffer(2)]],
+                  constant uint3 * offsets      [[buffer(3)]],
+                  uint tid [[thread_position_in_grid]]) {
+  device   T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* angle = (constant T*)((constant uint8_t*)angle_ + offsets[tid].z);
+  constant T* abs = (constant T*)((constant uint8_t*)abs_ + offsets[tid].y);
+  out[0] = abs[0] * cos(angle[0]);
+  out[1] = abs[0] * sin(angle[0]);
+}
+
+#define REGISTER_POLAR_OP(DTYPE)       \
+template                               \
+[[host_name("polar_" #DTYPE)]]         \
+kernel void polar<DTYPE>(              \
+  constant void    * abs,              \
+  constant void    * angle,            \
+  device   void    * out,              \
+  constant uint3   * offsets,          \
+  uint tid)
+
+REGISTER_POLAR_OP(float);
+REGISTER_POLAR_OP(half);
+
+template<typename T>
+kernel void complex_mul(constant void  * input_       [[buffer(0)]],
+                        constant void  * other_       [[buffer(1)]],
+                        device   void  * out_         [[buffer(2)]],
+                        constant uint3 * offsets      [[buffer(3)]],
+                        uint tid [[thread_position_in_grid]]) {
+  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  out[0] = input[0]*other[0] - input[1]*other[1];
+  out[1] = input[0]*other[1] + input[1]*other[0];
+}
+
+#define REGISTER_COMPLEX_MUL_OP(DTYPE)       \
+template                                     \
+[[host_name("complex_mul_" #DTYPE)]]         \
+kernel void complex_mul<DTYPE>(              \
+  constant void    * input,                  \
+  constant void    * other,                  \
+  device   void    * out,                    \
+  constant uint3   * offsets,                \
+  uint tid)
+
+REGISTER_COMPLEX_MUL_OP(float);
+REGISTER_COMPLEX_MUL_OP(half);
+
+template<typename T, typename U>
+kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
+                      constant void  * other_       [[buffer(1)]],
+                      device   void  * out_         [[buffer(2)]],
+                      constant uint3 * offsets      [[buffer(3)]],
+                      uint tid [[thread_position_in_grid]]) {
+  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  if (*input == *other)
+  {
+    *out = *other;
+  }
+  else if (isnan(*input) || isnan(*other))
+  {
+    *out = NAN;
+  }
+  else
+  {
+    U bits = as_type<U>(*input);
+    bits = bits + ((*other > *input) ? 1 : -1);
+    *out = as_type<T>(bits);
+  }
+}
+
+#define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
+template                                     \
+[[host_name("nextafter_kernel_" #DTYPE)]]    \
+kernel void nextafter_kernel<DTYPE, UTYPE>(  \
+  constant void    * input,                  \
+  constant void    * other,                  \
+  device   void    * out,                    \
+  constant uint3   * offsets,                \
+  uint tid)
+
+REGISTER_NEXTAFTER_OP(float, uint);
+REGISTER_NEXTAFTER_OP(half, ushort);
 )BINARY_METAL";
 
 using namespace mps;
@@ -163,7 +259,7 @@ static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, con
   return pso;
 }
 
-void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
+static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
   Tensor input = iter.input(0);
@@ -239,16 +335,36 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
     }
   });
 }
+
+void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
+  auto input_as_real = at::view_as_real(input).select(input.dim(), 0);
+  auto other_as_real = at::view_as_real(other).select(other.dim(), 0);
+  auto iter =
+      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+
+  mps::binary_mps_impl(iter, "complex_mul");
+}
+
 } // namespace mps
 
-void fmax_mps_kernel(TensorIteratorBase& iter) {
+static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     mps::binary_mps_impl(iter, "fmax");
   } else {
     at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
-void fmin_mps_kernel(TensorIteratorBase& iter) {
+static void fmin_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     mps::binary_mps_impl(iter, "fmin");
   } else {
@@ -256,12 +372,33 @@ void fmin_mps_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void copysign_mps_kernel(TensorIteratorBase& iter) {
+static void copysign_mps_kernel(TensorIteratorBase& iter) {
   mps::binary_mps_impl(iter, "copysign");
+}
+
+static void nextafter_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
+  mps::binary_mps_impl(iter, "nextafter_kernel");
 }
 
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel);
 
+Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
+  auto new_size = at::infer_size(abs.sizes(), angle.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return output;
+  }
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
+  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
+
+  mps::binary_mps_impl(iter, "polar");
+  return output;
+}
 } // namespace at::native

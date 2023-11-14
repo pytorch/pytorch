@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -45,13 +46,11 @@ Notes:
   - We require non-hook autograd nodes to be tracable.
 */
 
-namespace torch {
-namespace dynamo {
-using namespace torch::autograd;
+namespace torch::dynamo::autograd {
 using c10::SymInt;
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
-  PyObject* pyinput = PyTuple_New(inputs.size());
+  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
   }
@@ -60,7 +59,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
 
 static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
-  PyObject* pyinput = PyTuple_New(inputs.size());
+  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
   }
@@ -110,7 +109,7 @@ struct CacheNode {
   }
 
   bool is_empty() const {
-    return next.size() == 0 && !compiled_fn;
+    return next.empty() && !compiled_fn;
   }
 
   CacheNode() : compiled_fn(nullptr) {}
@@ -174,7 +173,7 @@ struct CacheNode {
         ++dynamic_count;
       }
     }
-    PyObject* pyinput = PyTuple_New(dynamic_count);
+    PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(dynamic_count));
     for (const auto& i : expected_sizes) {
       if (i.dyn_type == SizeInput::DYNAMIC) {
         PyTuple_SET_ITEM(pyinput, idx++, PyLong_FromSsize_t(i.value));
@@ -204,10 +203,10 @@ struct CacheNode {
     return result;
   }
 
-  // TODO(jansel): benchmark map vs unordered_map
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
+
   THPObjectPtr compiled_fn;
 };
 
@@ -225,22 +224,26 @@ static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   CacheNode::root()->clear();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS;
 }
 
 static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   if (CacheNode::root()->is_empty()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS;
 }
 
 static PyMethodDef _methods[] = {
-    {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, NULL},
-    {"clear_cache", clear_cache, METH_NOARGS, NULL},
-    {"is_cache_empty", is_cache_empty, METH_NOARGS, NULL},
-    {NULL, NULL, 0, NULL}};
+    {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
+    {"clear_cache", clear_cache, METH_NOARGS, nullptr},
+    {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
@@ -255,18 +258,24 @@ static TraceState call_begin_capture(
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
-      self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
+      self, method_name, pyinput.get(), pysizeinput.get(), nullptr)));
 
-  PyObject *fake_inputs, *fake_sizes;
+  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr};
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
-  return TraceState(
-      THPVariable_UnpackList(fake_inputs),
-      cache.unwrap_dynamic_inputs(fake_sizes),
-      compiler_call.accumulate_grad,
-      num_outputs);
+
+  variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
+  TORCH_INTERNAL_ASSERT(
+      proxy_inputs.size() == compiler_call.tensor_args.inputs.size());
+  for (const auto i : c10::irange(proxy_inputs.size())) {
+    TensorArg& arg =
+        compiler_call.tensor_args.lookup(compiler_call.tensor_args.inputs[i]);
+    arg.proxy_tensor = proxy_inputs[i];
+  }
+
+  return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
@@ -278,8 +287,15 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
   ~ClosingTHPObjectPtr() {
+    if (PyErr_Occurred()) {
+      // do nothing, do not attempt to close
+      return;
+    }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    check(PyObject_CallMethodNoArgs(get(), method_name));
+    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+      PyErr_WriteUnraisable(get());
+      PyErr_Clear();
+    }
   }
 };
 
@@ -291,12 +307,17 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
       "specifying inputs= with .backward() not yet implemented for compiled autograd")
+  TORCH_CHECK(
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+      "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
+  at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call(accumulate_grad);
+  AutogradCompilerCall compiler_call;
+
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
@@ -366,7 +387,7 @@ variable_list compiled_autograd(
 
       variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
 
-      if (call.tensor_pre_hooks.size() > 0) {
+      if (!call.tensor_pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
@@ -390,7 +411,7 @@ variable_list compiled_autograd(
       if (!call.needed) {
         continue;
       }
-      if (call.pre_hooks.size() > 0) {
+      if (!call.pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto hook : call.pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
@@ -399,8 +420,10 @@ variable_list compiled_autograd(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      SwapSavedVariables saved(compiler_call, state, call.node);
+      SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+
+      saved.debug_asserts();
       saved.before(call.node->next_edges());
       validate_outputs(
           call.node->next_edges(), outputs, [&](const std::string& msg) {
@@ -410,8 +433,9 @@ variable_list compiled_autograd(
             return ss.str();
           });
       saved.after(call.node->next_edges());
+      saved.debug_asserts();
 
-      if (call.post_hooks.size() > 0) {
+      if (!call.post_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
@@ -438,38 +462,29 @@ variable_list compiled_autograd(
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
     state.debug_asserts();
-  }
+  } // End cache miss region
 
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
-  for (auto& call : calls) {
-    call->node->release_variables();
+  if (!graph_task.keep_graph_) {
+    for (auto& call : calls) {
+      call->node->release_variables();
+    }
   }
 
-  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
-  if (accumulate_grad) {
-    TORCH_INTERNAL_ASSERT(
-        outputs.size() == compiler_call.set_grad_targets.size());
-    for (const auto i : c10::irange(outputs.size())) {
-      // TODO(jansel): does this one need to be an inplace copy?  if so it
-      // should go in the graph
-      at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
-      grad = outputs[i];
-    }
-    return variable_list();
-  } else {
-    TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-    return outputs;
-  }
+  TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  return outputs;
 }
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
   PyObject* obj;
   if (!PyArg_ParseTuple(args, "O", &obj)) {
     return nullptr;
@@ -490,11 +505,11 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   } else {
     return prior;
   }
+  END_HANDLE_TH_ERRORS;
 }
 
 PyObject* torch_c_dynamo_compiled_autograd_init() {
   return PyModule_Create(&_module);
 }
 
-} // namespace dynamo
-} // namespace torch
+} // namespace torch::dynamo::autograd

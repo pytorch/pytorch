@@ -82,9 +82,7 @@ class _DistWrapper:
         return 1
 
     def broadcast_object(self, object: Optional[T]) -> T:
-        """
-        Same as c10d::broadcast_object_list but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
         object_list = [object]
         if self.use_dist:
             dist.broadcast_object_list(
@@ -95,9 +93,7 @@ class _DistWrapper:
         return cast(T, object_list[0])
 
     def gather_object(self, object: T) -> Optional[List[T]]:
-        """
-        Same as c10d::gather_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
                 cast(List[T], [None] * dist.get_world_size(self.group))
@@ -117,9 +113,7 @@ class _DistWrapper:
         return result
 
     def all_gather_object(self, object: T) -> List[T]:
-        """
-        Same as c10d::all_gather_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::all_gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = cast(
                 List[T], [None] * dist.get_world_size(self.group)
@@ -133,9 +127,7 @@ class _DistWrapper:
         return gather_objs
 
     def scatter_object(self, object_list: Optional[List[T]]) -> T:
-        """
-        Same as c10d::scatter_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
             gather_result = cast(List[T], [None])
             dist.scatter_object_list(
@@ -355,6 +347,7 @@ def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
 def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
     return [i_a - i_b for i_a, i_b in zip(a, b)]
 
+
 class _ReaderView(io.IOBase):
     def __init__(self, base_stream: io.IOBase, offset: int, len: int):
         super().__init__()
@@ -386,6 +379,14 @@ class _ReaderView(io.IOBase):
     def read(self, size=-1):
         return self.base_stream.read(size)
 
+
 def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
     # FIXME (kumpera) torch.load fails if we wrap with io.BufferedReader
     return _ReaderView(file, offset, length)
+
+
+def _normalize_device_info(device_type: str, device_id: int) -> str:
+    """Device info normalization."""
+    if device_type == "cpu":
+        return "cpu"
+    return f"{device_type}:{device_id}"

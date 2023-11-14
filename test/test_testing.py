@@ -19,10 +19,10 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
@@ -412,6 +412,28 @@ if __name__ == '__main__':
 
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
+
+    @onlyCPU
+    @ops(
+        [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("cuda")
+                )
+            )
+            > 0
+        ][:1],
+        dtypes=OpDTypes.none,
+    )
+    def test_supported_dtypes(self, device, op):
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual(
+            op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
+        )
 
 instantiate_device_type_tests(TestTesting, globals())
 
@@ -2001,13 +2023,19 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, op, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.int16)
+            @ops(op_db)
+            def test_three(self, device, dtype, op):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
         device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
@@ -2048,13 +2076,40 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, module_info, training, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.float64)
+            @modules(module_db)
+            def test_three(self, device, dtype, module_info):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
         device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('float64')))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
+    def test_param_specific_decoration(self, device):
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @decorateIf(test_dec, lambda params: params["x"] == 1 and params["y"])
+            @parametrize("x", range(5))
+            @parametrize("y", [False, True])
+            def test_param(self, x, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = ('test_param_x_1_y_True' in name)
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_dtypes_composition_valid(self, device):
@@ -2159,6 +2214,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
                            "torch._inductor.triton_helpers",  # depends on triton
+                           "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
@@ -2205,6 +2261,17 @@ class TestImports(TestCase):
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
+
+    def test_not_import_sympy(self) -> None:
+        out = self._check_python_output("import torch;import sys;print('sympy' not in sys.modules)")
+        self.assertEqual(out.strip(), "True",
+                         "PyTorch should not depend on SymPy at import time as importing SymPy is *very* slow.\n"
+                         "See the beginning of the following blog post for how to profile and find which file is importing sympy:\n"
+                         "https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589\n\n"
+                         "If you hit this error, you may want to:\n"
+                         "  - Refactor your code to avoid depending on sympy files you may not need to depend\n"
+                         "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
+                         "  - Import things that depend on SymPy locally")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])

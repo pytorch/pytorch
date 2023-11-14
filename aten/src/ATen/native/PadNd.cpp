@@ -108,26 +108,39 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
 
 Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   const auto in_shape = self.sym_sizes();
-  const auto ndim = static_cast<int64_t>(in_shape.size()) - 2;
-  TORCH_CHECK(padding.size() + 4 == in_shape.size() * 2,
-              "Invalid padding size, expected ", ndim * 2, " but got ", padding.size());
+  const auto self_ndim = static_cast<int64_t>(in_shape.size());
+
+  // number of dimensions that are padded
+  const auto ndim_padded = padding.size() / 2;
+  // number of preceding non_padded dimensions (1 for no_batch_dim case or 2)
+  const auto ndim_nonpadded = self_ndim - ndim_padded;
+
+  TORCH_CHECK(ndim_nonpadded == 1 || ndim_nonpadded == 2,
+              "Invalid padding size, expected 1 or 2 non-padded dimensions, ",
+              "which would be equivalent to padding of length ",
+              (self_ndim - 1) * 2,
+              " or ",
+              (self_ndim - 2) * 2,
+              " respectively but got ",
+              padding.size());
 
   c10::SymDimVector out_shape(in_shape.size());
-  out_shape[0] = in_shape[0];
-  out_shape[1] = in_shape[1];
+  for (const auto i: c10::irange(ndim_nonpadded)) {
+    out_shape[i] = in_shape[i];
+  }
 
   // Get shape of padded tensor
-  for (const auto i : c10::irange(ndim)) {
-    const auto& pad_l = padding[2 * (ndim - i - 1) + 0];
-    const auto& pad_r = padding[2 * (ndim - i - 1) + 1];
-    const auto& size = in_shape[2 + i];
-    out_shape[2 + i] = size + pad_l + pad_r;
+  for (const auto i : c10::irange(ndim_padded)) {
+    const auto& pad_l = padding[2 * (ndim_padded - i - 1) + 0];
+    const auto& pad_r = padding[2 * (ndim_padded - i - 1) + 1];
+    const auto& size = in_shape[ndim_nonpadded + i];
+    out_shape[ndim_nonpadded + i] = size + pad_l + pad_r;
 
     TORCH_CHECK(
         pad_l <= size && pad_r <= size,
         "Padding value causes wrapping around more than once.");
     TORCH_CHECK(
-        out_shape[2 + i] >= 0,
+        out_shape[ndim_nonpadded + i] >= 0,
         "Negative padding value is resulting in an empty dimension");
   }
 
@@ -137,8 +150,8 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   Tensor out_slice = out;
   Tensor in_slice = self;
   const SymInt zero = 0;
-  for (const auto i : c10::irange(ndim)) {
-    const auto dim = ndim - i + 1;
+  for (const auto i : c10::irange(ndim_padded)) {
+    const auto dim = ndim_padded - i + ndim_nonpadded - 1;
     const auto& pad_l = padding[2*i + 0];
     const auto& pad_r = padding[2*i + 1];
     out_slice = out_slice.slice_symint(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
@@ -148,12 +161,12 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
 
   // The following steps first pad the beginning of the tensor (left side),
   // and then pad the end of the tensor (right side).
-  // Note: Corners will be written more than once when ndim > 1.
+  // Note: Corners will be written more than once when ndim_padded > 1.
   //
   // Only in cases where padding values are > 0 are when additional copying
   // is required.
-  for (const auto i : c10::irange(ndim)) {
-    const auto dim = ndim - i + 1;
+  for (const auto i : c10::irange(ndim_padded)) {
+    const auto dim = ndim_padded - i + ndim_nonpadded - 1;
     const auto& pad_l = padding[2*i + 0];
     const auto& pad_r = padding[2*i + 1];
 

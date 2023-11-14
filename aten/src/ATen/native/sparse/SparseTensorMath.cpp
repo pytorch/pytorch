@@ -1222,6 +1222,10 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     int64_t row = indices_accessor[0][i];
     int64_t col = indices_accessor[1][i];
     if (col >= 0 && col < dim_j && row >= 0 && row < dim_i) {
+      // AXPY call is no-op over an empty vector
+      if (dim_k == 0) {
+        continue;
+      }
       at::native::cpublas::axpy<scalar_t>(dim_k,
             cast_alpha * val,
             dense_ptr + col * dense_stride0, dense_stride1,
@@ -1708,7 +1712,8 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options());
+    bool is_coalesced = false;  // TODO: can we use input.is_coalesced()?
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options(), is_coalesced);
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
@@ -1810,7 +1815,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone(at::MemoryFormat::Contiguous);
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, input.options().dtype(grad_.dtype())); // convert to grad dtype
+    bool grad_is_coalesced = input.is_coalesced();
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, input.options().dtype(grad_.dtype()), grad_is_coalesced); // convert to grad dtype
   }
   else {
     TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
@@ -1886,7 +1892,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     else {
       grad_input_values = grad_values_expand;
     }
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
+    bool grad_is_coalesced = input.is_coalesced();
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options(), grad_is_coalesced);
   }
 }
 

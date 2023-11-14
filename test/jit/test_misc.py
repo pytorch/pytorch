@@ -433,3 +433,26 @@ class TestMisc(JitTestCase):
             res = script_fn(x)
 
         self.assertEqual(ref, res)
+
+    def test_jit_get_operation_order(self):
+        # See https://github.com/pytorch/pytorch/pull/107138.
+        # Depending on order of operator registration, you can get different
+        # order of overloads in the JIT operator registry.
+        # This is to verify that the order of operators returned by
+        # _jit_get_operation always puts aten ops first (i.e. by sorting
+        # to put them first)
+
+        # Make sure that this chooses a "scalar" overload not a "complex" overload
+        ret = torch.ops.aten.add(4, 3.3)
+        self.assertFalse("complex" in str(ret.dtype))
+
+        # "Scalar" overload is a normal aten op; "complex" is added by torchscript.
+        # We want "Scalar" to come before "complex".
+        op, override_names = torch._C._jit_get_operation("aten::add")
+        print(override_names)
+        complex_indices = [i for i, name in enumerate(override_names) if name == "complex"]
+        Scalar_indices = [i for i, name in enumerate(override_names) if name == "Scalar"]
+
+        self.assertTrue(len(complex_indices) > 0)
+        self.assertTrue(len(Scalar_indices) > 0)
+        self.assertTrue(complex_indices[0] > Scalar_indices[0])

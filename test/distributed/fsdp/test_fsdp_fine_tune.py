@@ -101,11 +101,36 @@ class TestFSDPFineTune(FSDPTest):
             post_backward_reshard_count += 1
             return orig_post_backward_reshard(*args, **kwargs)
 
+        def _assert_post_backward_requires_grad(seq):
+            if step_idx == num_steps - 1 and unfreeze_params:
+                self.assertTrue(
+                    all(p.requires_grad for p in seq.parameters()),
+                    msg="Expected all parameters to require grad but some did not!",
+                )
+
+        def _assert_post_backward_reshard_count(step_idx, num_steps):
+            if step_idx < num_steps - 1 or not unfreeze_params:
+                # If the input does not require gradient, then the 0th
+                # frozen linear gets resharded in the catch-all reshard
+                # since we cannot register an autograd hook on it
+                expected_post_backward_reshard_count = (
+                    self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
+                )
+            else:
+                # This follows the normal post-backward hook path
+                expected_post_backward_reshard_count = self.NUM_LINEARS
+            self.assertEqual(
+                post_backward_reshard_count, expected_post_backward_reshard_count
+            )
+
         with mock.patch(
             "torch.distributed.fsdp._runtime_utils._post_backward_reshard",
             _post_backward_reshard_with_count,
         ):
-            num_steps = 2
+            num_steps = 3
+            # interleave a `no_grad` step to validate post-backward hooks are not registered in that context
+            # and that `requires_grad` is reset appropriately when unfreezing
+            nograd_step_idx = 1
             for step_idx in range(num_steps):
                 if unfreeze_params and step_idx == num_steps - 1:
                     # Unfreeze the parameters on the last step to emulate some
@@ -115,21 +140,94 @@ class TestFSDPFineTune(FSDPTest):
                 inp = torch.randn(
                     (8, 5), device="cuda", requires_grad=inp_requires_grad
                 )
-                seq(inp).sum().backward()
-                if step_idx < num_steps - 1 or not unfreeze_params:
-                    # If the input does not require gradient, then the 0th
-                    # frozen linear gets resharded in the catch-all reshard
-                    # since we cannot register an autograd hook on it
-                    expected_post_backward_reshard_count = (
-                        self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
-                    )
+                if step_idx == nograd_step_idx:
+                    with torch.no_grad():
+                        output = seq(inp)
                 else:
-                    # This follows the normal post-backward hook path
-                    expected_post_backward_reshard_count = self.NUM_LINEARS
-                self.assertEqual(
-                    post_backward_reshard_count, expected_post_backward_reshard_count
-                )
-                post_backward_reshard_count = 0
+                    output = seq(inp)
+                if step_idx != nograd_step_idx:
+                    output.sum().backward()
+                    _assert_post_backward_requires_grad(seq)
+                    _assert_post_backward_reshard_count(step_idx, num_steps)
+                    post_backward_reshard_count = 0
+
+    def _init_multi_traversal_module(self) -> nn.Module:
+        torch.manual_seed(42)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_0 = nn.Linear(5, 5, device="cuda")
+                self.layer_no_grad = nn.Linear(5, 5, device="cuda")
+                self.layer_with_grad = nn.Linear(5, 5, device="cuda")
+                self.layer_no_grad.requires_grad_(False)
+
+            def forward(self, x):
+                # Layer `layer_no_grad` and `layer_with_grad` are called
+                # multiple times, IOW, their parameters are used multiple times
+                # during forward pass.
+                x = self.layer_0(x)
+                for _ in range(10):
+                    x = self.layer_no_grad(self.layer_with_grad(x))
+                    # Make sure calling the same layer multiple times works
+                    # regardless whether gradient is enabled.
+                    with torch.no_grad():
+                        x += self.layer_with_grad(x)
+                return x
+
+        return TestModule()
+
+    @skip_if_lt_x_gpu(2)
+    def test_hooks_multi_traversal(self):
+        """
+        Tests that the hooks do reshard / unshard correctly in the case of same
+        parameters being used multiple times during forward pass.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [False, True],
+                "inp_requires_grad": [False, True],
+                "forward_prefetch": [False, True],
+            },
+            self._test_hooks_multi_traversal,
+        )
+
+    def _test_hooks_multi_traversal(
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        inp_requires_grad: bool,
+        forward_prefetch: bool,
+    ):
+        seq = self._init_multi_traversal_module()
+        policy = ModuleWrapPolicy({nn.Linear})
+        fsdp_seq = FSDP(
+            copy.deepcopy(seq),
+            auto_wrap_policy=policy,
+            sharding_strategy=sharding_strategy,
+            use_orig_params=use_orig_params,
+            forward_prefetch=forward_prefetch,
+        )
+        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[self.rank])
+        fsdp_optim = torch.optim.Adam(fsdp_seq.parameters(), lr=1e-2)
+        ddp_optim = torch.optim.Adam(ddp_seq.parameters(), lr=1e-2)
+        torch.manual_seed(self.rank + 1)
+        losses = []
+        for _ in range(6):
+            inp = torch.randn((8, 5), device="cuda", requires_grad=inp_requires_grad)
+            for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
+                loss = seq(inp).sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+                optim.zero_grad()
+            torch.testing.assert_close(losses[0], losses[1])
+            losses.clear()
 
     @skip_if_lt_x_gpu(2)
     def test_parity_with_ddp(self):

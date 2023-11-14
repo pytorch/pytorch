@@ -3,8 +3,7 @@
 
 #include <ATen/cuda/Exceptions.h>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 namespace blas {
 
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
@@ -65,4 +64,4 @@ C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status) {
 } // namespace solver
 #endif
 
-}} // namespace at::cuda
+} // namespace at::cuda

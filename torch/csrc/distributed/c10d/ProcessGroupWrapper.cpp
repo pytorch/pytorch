@@ -546,6 +546,14 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
   return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
+void ProcessGroupWrapper::startCoalescing() {
+  return backend_->startCoalescing();
+}
+
+c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
+  return backend_->endCoalescing();
+}
+
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
   return backend_;
 }

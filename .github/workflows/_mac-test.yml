@@ -49,7 +49,7 @@ jobs:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -99,6 +99,13 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
         # checks for labels and re-enabled test issues.  It does not actually do
@@ -108,6 +115,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Pre-process arm64 wheels
         if: inputs.build-environment == 'macos-12-py3-arm64'
@@ -119,7 +127,7 @@ jobs:
         id: test-timeout
         shell: bash
         env:
-          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
@@ -137,6 +145,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         run: |
           # shellcheck disable=SC1090
@@ -178,14 +187,7 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: |
-          cat test/**/*.log || true
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
         if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}

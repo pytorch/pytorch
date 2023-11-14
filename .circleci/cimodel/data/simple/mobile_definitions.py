@@ -2,17 +2,14 @@
 PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
 """
 
-import cimodel.lib.miniutils as miniutils
 import cimodel.data.simple.util.branch_filters
+import cimodel.lib.miniutils as miniutils
 
 
 class MobileJob:
     def __init__(
-            self,
-            docker_image,
-            docker_requires,
-            variant_parts,
-            is_master_only=False):
+        self, docker_image, docker_requires, variant_parts, is_master_only=False
+    ):
         self.docker_image = docker_image
         self.docker_requires = docker_requires
         self.variant_parts = variant_parts
@@ -40,13 +37,14 @@ class MobileJob:
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
+            props_dict[
+                "filters"
+            ] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         return [{"pytorch_linux_build": props_dict}]
 
 
-WORKFLOW_DATA = [
-]
+WORKFLOW_DATA = []
 
 
 def get_workflow_jobs():

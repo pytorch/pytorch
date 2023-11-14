@@ -48,7 +48,7 @@ _onnx_dep = True  # flag to import onnx package.
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, google_printer=True, *args, **kwargs
+        model, inputs, *args, google_printer=True, **kwargs
     )
 
 
@@ -992,6 +992,16 @@ class TestOperators(common_utils.TestCase):
         y = torch.zeros(4, requires_grad=True)
         z = torch.ones(5, requires_grad=True)
         self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
+    def test_meshgrid_indexing(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(
+            lambda x, y, z: torch.meshgrid(x, y, z, indexing="xy"),
+            (x, y, z),
+            opset_version=9,
+        )
 
     def test_topk(self):
         x = torch.arange(1.0, 6.0, requires_grad=True)

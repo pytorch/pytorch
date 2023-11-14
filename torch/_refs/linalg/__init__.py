@@ -15,12 +15,18 @@ from torch._prims_common import (
     check_is_matrix,
     Dim,
     DimsType,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     NumberType,
     TensorLikeType,
 )
-from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
+    elementwise_type_promotion_wrapper,
+    out_wrapper,
+)
 
-__all__ = ["diagonal", "matrix_norm", "norm", "svd", "svdvals", "vector_norm"]
+
+__all__ = ["diagonal", "matrix_norm", "norm", "svd", "svdvals", "vector_norm", "vecdot"]
 
 
 def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
@@ -257,3 +263,14 @@ def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, 
 @out_wrapper(exact_dtype=True)
 def svdvals(A: TensorLikeType) -> Tensor:
     return svd(A, full_matrices=False)[1]
+
+
+# CompositeImplicitAutograd
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x", "y"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
+    check_fp_or_complex(x.dtype, "linalg.vecdot")
+    return (x.conj() * y).sum(dim=dim)

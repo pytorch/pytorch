@@ -17,13 +17,6 @@ ARG LLVMDEV
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
-# (optional) Install thrift.
-ARG THRIFT
-COPY ./common/install_thrift.sh install_thrift.sh
-RUN if [ -n "${THRIFT}" ]; then bash ./install_thrift.sh; fi
-RUN rm install_thrift.sh
-ENV INSTALLED_THRIFT ${THRIFT}
-
 # Install user
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh

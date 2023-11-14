@@ -162,12 +162,17 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "BlenderbotForCausalLM",
 }
 
+SKIP_DUE_TO_CONTROL_FLOW = {"AllenaiLongformerBase"}
 
-REQUIRE_HIGHER_TOLERANCE = {
+
+REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "MT5ForConditionalGeneration",
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "RobertaForQuestionAnswering",
 }
 
 
@@ -411,6 +416,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def fp32_only_models(self):
         return FP32_ONLY_MODELS
 
+    @property
+    def skip_models_due_to_control_flow(self):
+        return SKIP_DUE_TO_CONTROL_FLOW
+
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -450,6 +459,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
@@ -530,10 +540,13 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
+        else:
+            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):

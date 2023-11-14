@@ -95,9 +95,9 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
-            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": "Param {} requires grad, "
+            lint_list.append({"name": LintCode.REQUIRES_GRAD.name, "message": f"Param {name} requires grad, "
                              "please set torch.no_grad() to reduce memory usage and improve computation speed during "
-                              "inference phase.".format(name)})
+                              "inference phase."})
 
     op_names = torch.jit.export_opnames(script_module)
     for op_name in op_names:

@@ -35,12 +35,10 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
-#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
-#endif
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
@@ -137,6 +135,7 @@ struct THPFunction {
 bool THPFunction_initModule(PyObject* module);
 extern PyTypeObject THPFunctionType;
 extern PyObject* THPFunctionClass;
+extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

@@ -1,6 +1,6 @@
 import atexit
-import shutil
 import re
+import shutil
 import textwrap
 from typing import List, Optional, Tuple
 
@@ -11,18 +11,20 @@ from core.types import Definition, FlatIntermediateDefinition, Label
 
 
 _TEMPDIR: Optional[str] = None
+
+
 def get_temp_dir() -> str:
     global _TEMPDIR
     if _TEMPDIR is None:
-        _TEMPDIR = _make_temp_dir(prefix="instruction_count_microbenchmarks", gc_dev_shm=True)
+        _TEMPDIR = _make_temp_dir(
+            prefix="instruction_count_microbenchmarks", gc_dev_shm=True
+        )
         atexit.register(shutil.rmtree, path=_TEMPDIR)
     return _TEMPDIR
 
 
 def _flatten(
-    key_prefix: Label,
-    sub_schema: Definition,
-    result: FlatIntermediateDefinition
+    key_prefix: Label, sub_schema: Definition, result: FlatIntermediateDefinition
 ) -> None:
     for k, value in sub_schema.items():
         if isinstance(k, tuple):
@@ -79,7 +81,8 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
     if column_match is None:
         raise ValueError(
             f"Column header `{lines[0]}` "
-            f"does not match pattern `{column_header_pattern}`")
+            f"does not match pattern `{column_header_pattern}`"
+        )
 
     assert re.search(separation_pattern, lines[1])
 

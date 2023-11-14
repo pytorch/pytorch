@@ -213,6 +213,24 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
+
+        # Today, optimize_ddp=True and keep_output_stride=False can lead to silent
+        # correctness issues. The problem is that ddp_optimizer works by partitioning
+        # the dynamo graph, sending each subgraph through aot autograd to inductor,
+        # and creates example inputs by eagerly interpreting each subgraph to get
+        # an output that with the same metadata that we'd get from eager mode.
+        # This is a problem though, for torch._inductor.config.keep_output_stride.
+        # The above config can cause the outputs of the first graph to have
+        # **different** strides from eager, causing the inputs that we pass
+        # to the second graph to be wrong.
+        # To really fix this, we would need to faithfully ask inductor
+        # what the outputs to each graph it expects are.
+        assert torch._inductor.config.keep_output_stride, """\
+Detected that you are running DDP with torch.compile, along with these two flags:
+- torch._dynamo.config.optimize_ddp = True
+- torch._inductor.config.keep_output_stride = False
+This combination of flags is incompatible. Please set keep_output_stride to False,
+or file a github issue."""
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()

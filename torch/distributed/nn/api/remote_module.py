@@ -500,8 +500,8 @@ class _RemoteModule(nn.Module):
                 and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
             ):
                 raise AttributeError(
-                    "Attribute {} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
-                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(k)
+                    f"Attribute {k} must be either in ``_REMOTE_MODULE_PICKLED_ATTRIBUTES`` or "
+                    "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``."
                 )
 
     def _install_generated_methods(self):
@@ -729,11 +729,9 @@ def _remote_module_reducer(remote_module):
         # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
         elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
             print(
-                "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
+                f"The new attribute ``{k}`` of RemoteModule is ignored during RPC pickling. "
                 "To pickle this attribute, please add it to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES``. "
-                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.".format(
-                    k
-                ),
+                "Otherwise, please explicitly add it to ``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``.",
                 file=sys.stderr,
             )
 

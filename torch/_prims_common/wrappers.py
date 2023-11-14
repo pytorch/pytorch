@@ -1,36 +1,44 @@
+import inspect
+import warnings
+from functools import wraps
+from itertools import chain
+
+from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
+
 import torch
+import torch._prims_common as utils
 from torch._prims_common import (
+    CustomOutParamAnnotation,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
     NumberType,
+    ShapeType,
     TensorLike,
     TensorLikeType,
-    ShapeType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._prims_common as utils
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
-import inspect
-from functools import wraps
-import warnings
-from itertools import chain
 
 @overload
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
+
 @overload
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
+
 
 @overload
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
+
 @overload
 def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
     pass
+
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(a, dtype):
@@ -47,9 +55,7 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(
-        f"Received type {type(a)} that is neither a tensor or a number!"
-    )
+    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -87,6 +93,9 @@ class elementwise_type_promotion_wrapper:
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
 
+    The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
+    not None.
+
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
     """
@@ -112,7 +121,7 @@ class elementwise_type_promotion_wrapper:
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
+            flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
@@ -126,6 +135,12 @@ class elementwise_type_promotion_wrapper:
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)
+
+            # Override the return_dtype if a dtype arg is present and not None
+            if "dtype" in bound.arguments:
+                maybe_dtype = bound.arguments["dtype"]
+                if maybe_dtype:  # dtype cannot be None
+                    result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)
@@ -190,8 +205,18 @@ def _safe_copy_out(
 
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
-    is_tensor = len(out_names) == 0
-    assert is_tensor or len(out_names) >= 2
+    # The wrapped function needs to convert the output parameters to ensure
+    # compatability between the Python API (which always uses "out" as the
+    # parameter name and may be a tuple) and the Aten API (which may have
+    # multiple output parematers and use different parameter names such as
+    # "grad_input", "indices" or "values".)
+
+    default_out_names = ("out",)
+    if len(out_names) == 0:
+        # Use default in out name
+        out_names = default_out_names
+
+    is_tensor = len(out_names) == 1
 
     def _out_wrapper(fn: Callable) -> Callable:
         """
@@ -273,23 +298,47 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert sig.return_annotation in (sig.empty, out_type)
+        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+            sig.empty,
+            out_type,
+        )
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
+
         _fn.__annotations__ = fn.__annotations__
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
+
+        # In the special case of having a single tensor out parameter with a
+        # name other than out, add a special annotation to name the parameter
+        if is_tensor and out_names != default_out_names:
+            _fn.__annotations__[CustomOutParamAnnotation] = out_names[0]
+
+        # Add an indicator attribute that can be used in special cases
+        # where having a function wrapped by `out_wrapper` is not desirable e.g.
+        # jit
+        _fn._torch_decompositions_out_wrapper = f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"  # type: ignore[attr-defined]
+
         return _fn
 
     return _out_wrapper
 
 
+def _maybe_remove_out_wrapper(fn: Callable):
+    return inspect.unwrap(
+        fn,
+        stop=lambda f: not hasattr(f, "_torch_decompositions_out_wrapper"),
+    )
+
+
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
+            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
+                torch._C.DispatchKey.ADInplaceOrView
+            )
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):
@@ -305,7 +354,9 @@ def backwards_not_supported(prim):
     @wraps(prim)
     def _autograd_impl(*args, **kwargs):
         flat_args, args_spec = tree_flatten((args, kwargs))
-        if torch.is_grad_enabled() and any(a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)):
+        if torch.is_grad_enabled() and any(
+            a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)
+        ):
             # TODO: There is a subtle bug here: prims like copy_to
             # return their input argument after mutating it; and custom
             # autograd function will incorrectly turn the result into

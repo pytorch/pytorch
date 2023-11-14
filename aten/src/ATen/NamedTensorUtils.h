@@ -11,7 +11,7 @@ namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(ITensorListRef tensors) {
+inline bool has_names(const ITensorListRef& tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const Tensor& t) {
     return t.has_names();
   });

@@ -12,7 +12,7 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import List, Optional, Union
@@ -22,7 +22,7 @@ from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
 # context.  The Enum SpecialArgName covers all of these cases;
-# grep for their construction sites to see when they can occr.
+# grep for their construction sites to see when they can occur.
 
 
 class SpecialArgName(Enum):
@@ -61,12 +61,15 @@ voidT = BaseCppType("", "void")
 
 
 class CType(ABC):
+    @abstractmethod
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         raise NotImplementedError
 
+    @abstractmethod
     def cpp_type_registration_declarations(self) -> str:
         raise NotImplementedError
 
+    @abstractmethod
     def remove_const_ref(self) -> "CType":
         return self
 

@@ -13,14 +13,12 @@
 #
 
 
-
-
-import sysconfig
 import sys
+import sysconfig
 
 flags = [
-    f'-DPYTHON_EXECUTABLE:FILEPATH={sys.executable}',
+    f"-DPYTHON_EXECUTABLE:FILEPATH={sys.executable}",
     f"-DPYTHON_INCLUDE_DIR={sysconfig.get_path('include')}",
 ]
 
-print(' '.join(flags), end='')
+print(" ".join(flags), end="")

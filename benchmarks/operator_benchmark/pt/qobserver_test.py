@@ -1,47 +1,45 @@
-
-import operator_benchmark as op_bench
 import torch
 import torch.ao.quantization.observer as obs
 
+import operator_benchmark as op_bench
+
 qobserver_short_configs_dict = {
-    'attr_names': ('C', 'M', 'N', 'dtype', 'device'),
-    'attrs': (
-        (3, 512, 512, torch.quint8, 'cpu'),
-        (3, 512, 512, torch.quint8, 'cuda'),
+    "attr_names": ("C", "M", "N", "dtype", "device"),
+    "attrs": (
+        (3, 512, 512, torch.quint8, "cpu"),
+        (3, 512, 512, torch.quint8, "cuda"),
     ),
-    'tags': ('short',),
+    "tags": ("short",),
 }
 
 q_hist_observer_short_configs_dict = {
-    'attr_names': ('C', 'M', 'N', 'dtype', 'device'),
-    'attrs': (
-        (3, 512, 512, torch.quint8, 'cpu'),
-    ),
-    'tags': ('short',),
+    "attr_names": ("C", "M", "N", "dtype", "device"),
+    "attrs": ((3, 512, 512, torch.quint8, "cpu"),),
+    "tags": ("short",),
 }
 
 qobserver_long_configs_dict = {
-    'C': (32, 64),
-    'M': (256, 1024),
-    'N': (256, 1024),
-    'device': ('cpu', 'cuda'),
-    'dtype': (torch.quint8,),  # dtype doesn't change the timing, keep the same
-    'tags': ('long',),
+    "C": (32, 64),
+    "M": (256, 1024),
+    "N": (256, 1024),
+    "device": ("cpu", "cuda"),
+    "dtype": (torch.quint8,),  # dtype doesn't change the timing, keep the same
+    "tags": ("long",),
 }
 
 q_hist_observer_long_configs_dict = {
-    'C': (1, 3, 8),
-    'M': (256, 1024),
-    'N': (256, 1024),
-    'device': ('cpu',),
-    'dtype': (torch.quint8,),  # dtype doesn't change the timing, keep the same
-    'tags': ('long',),
+    "C": (1, 3, 8),
+    "M": (256, 1024),
+    "N": (256, 1024),
+    "device": ("cpu",),
+    "dtype": (torch.quint8,),  # dtype doesn't change the timing, keep the same
+    "tags": ("long",),
 }
 
 
 qobserver_per_tensor_configs_short = op_bench.config_list(
     cross_product_configs={
-        'qscheme': (torch.per_tensor_affine, torch.per_tensor_symmetric)
+        "qscheme": (torch.per_tensor_affine, torch.per_tensor_symmetric)
     },
     **qobserver_short_configs_dict,
 )
@@ -53,7 +51,7 @@ qobserver_per_tensor_configs_long = op_bench.cross_product_configs(
 
 qobserver_per_channel_configs_short = op_bench.config_list(
     cross_product_configs={
-        'qscheme': (torch.per_channel_affine, torch.per_channel_symmetric)
+        "qscheme": (torch.per_channel_affine, torch.per_channel_symmetric)
     },
     **qobserver_short_configs_dict,
 )
@@ -65,7 +63,7 @@ qobserver_per_channel_configs_long = op_bench.cross_product_configs(
 
 q_hist_observer_per_tensor_configs_short = op_bench.config_list(
     cross_product_configs={
-        'qscheme': (torch.per_tensor_affine, torch.per_tensor_symmetric)
+        "qscheme": (torch.per_tensor_affine, torch.per_tensor_symmetric)
     },
     **q_hist_observer_short_configs_dict,
 )
@@ -77,36 +75,36 @@ q_hist_observer_per_tensor_configs_long = op_bench.cross_product_configs(
 
 
 qobserver_per_tensor_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
+    attr_names=["op_name", "op_func"],
     attrs=[
-        ['MinMaxObserver', obs.MinMaxObserver],
-        ['MovingAverageMinMaxObserver', obs.MovingAverageMinMaxObserver],
-    ]
+        ["MinMaxObserver", obs.MinMaxObserver],
+        ["MovingAverageMinMaxObserver", obs.MovingAverageMinMaxObserver],
+    ],
 )
 
 qobserver_per_channel_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
+    attr_names=["op_name", "op_func"],
     attrs=[
-        ['PerChannelMinMaxObserver', obs.PerChannelMinMaxObserver],
-        ['MovingAveragePerChannelMinMaxObserver',
-         obs.MovingAveragePerChannelMinMaxObserver],
-    ]
+        ["PerChannelMinMaxObserver", obs.PerChannelMinMaxObserver],
+        [
+            "MovingAveragePerChannelMinMaxObserver",
+            obs.MovingAveragePerChannelMinMaxObserver,
+        ],
+    ],
 )
 
 q_hist_observer_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
+    attr_names=["op_name", "op_func"],
     attrs=[
-        ['HistogramObserver', obs.HistogramObserver],
-        ['HistogramObserverCalculateQparams', obs.HistogramObserver],
-    ]
+        ["HistogramObserver", obs.HistogramObserver],
+        ["HistogramObserverCalculateQparams", obs.HistogramObserver],
+    ],
 )
 
 
 class QObserverBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func, device):
-        self.inputs = {
-            "f_input": torch.rand(C, M, N, device=device)
-        }
+        self.inputs = {"f_input": torch.rand(C, M, N, device=device)}
         self.op_func = op_func(dtype=dtype, qscheme=qscheme).to(device)
 
     def forward(self, f_input):
@@ -128,17 +126,20 @@ class QObserverBenchmarkCalculateQparams(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_tests_from_op_list(
     qobserver_per_tensor_list,
     qobserver_per_tensor_configs_short + qobserver_per_tensor_configs_long,
-    QObserverBenchmark)
+    QObserverBenchmark,
+)
 
 op_bench.generate_pt_tests_from_op_list(
     qobserver_per_channel_list,
     qobserver_per_channel_configs_short + qobserver_per_channel_configs_long,
-    QObserverBenchmark)
+    QObserverBenchmark,
+)
 
 op_bench.generate_pt_tests_from_op_list(
     q_hist_observer_list,
     q_hist_observer_per_tensor_configs_short + q_hist_observer_per_tensor_configs_long,
-    QObserverBenchmarkCalculateQparams)
+    QObserverBenchmarkCalculateQparams,
+)
 
 
 if __name__ == "__main__":

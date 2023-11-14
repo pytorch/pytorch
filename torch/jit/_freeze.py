@@ -1,17 +1,20 @@
-"""Freezing
+"""Freezing.
 
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule
 
 
-def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: bool = True):
-    r"""
+def freeze(
+    mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: bool = True
+):
+    r"""Freeze ScriptModule, inline submodules, and attributes as constants.
+
     Freezing a :class:`ScriptModule` will clone it and attempt to inline the cloned
     module's submodules, parameters, and attributes as constants in the TorchScript IR Graph.
     By default, `forward` will be preserved, as well as attributes & methods specified in
@@ -123,7 +126,8 @@ def run_frozen_optimizations(
     mod, optimize_numerics: bool = True, preserved_methods: Optional[List[str]] = None
 ):
     r"""
-    Runs a series of optimizations looking for patterns that occur in frozen graphs.
+    Run a series of optimizations looking for patterns that occur in frozen graphs.
+
     The current set of optimizations includes:
         - Dropout Removal
         - Pretranspose Linear Layers
@@ -174,10 +178,13 @@ def run_frozen_optimizations(
         )
 
 
-def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]] = None) -> ScriptModule:
+def optimize_for_inference(
+    mod: ScriptModule, other_methods: Optional[List[str]] = None
+) -> ScriptModule:
     """
-    Performs a set of optimization passes to optimize a model for the
-    purposes of inference. If the model is not already frozen, optimize_for_inference
+    Perform a set of optimization passes to optimize a model for the purposes of inference.
+
+    If the model is not already frozen, optimize_for_inference
     will invoke `torch.jit.freeze` automatically.
 
     In addition to generic optimizations that should speed up your model regardless
@@ -206,7 +213,8 @@ def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]]
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
             "optimize_for_inference expects a ScriptModule as input. "
-            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
+            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'."
+        )
 
     if other_methods is None:
         other_methods = []

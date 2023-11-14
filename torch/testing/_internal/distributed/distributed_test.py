@@ -185,13 +185,17 @@ DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
 
-def get_profiling_event(postfix, profiler):
+def get_profiling_event(event_name, profiler):
     event_list = (
         profiler.events()
         if isinstance(profiler, torch.profiler.profile)
         else profiler.function_events
     )
-    return [event for event in event_list if event.name.endswith(postfix)]
+    return [
+        event for event in event_list if (
+            event.name.endswith(event_name) or event.name.startswith(event_name)
+        )
+    ]
 
 
 # Base error message substring on unfinished reductions.
@@ -713,7 +717,7 @@ class DistributedTest:
                 self.assertEqual(dist.get_backend(group_id), backend_str)
             else:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Invalid process group specified"
+                    ValueError, "Invalid process group specified"
                 ):
                     dist.get_backend(group_id)
 
@@ -849,9 +853,9 @@ class DistributedTest:
                 return
 
             if new_backend == "gloo":
-                self.assertTrue(isinstance(group_id, dist.ProcessGroupGloo))
+                self.assertTrue(group_id._get_backend_name(), "gloo")
             if new_backend == "nccl":
-                self.assertTrue(isinstance(group_id, dist.ProcessGroupNCCL))
+                self.assertTrue(group_id._get_backend_name(), "nccl")
 
             self.assertEqual(rank, group[dist.get_rank(group_id)])
             self.assertEqual(len(group), dist.get_world_size(group_id))
@@ -872,7 +876,7 @@ class DistributedTest:
             self._test_group_override_backend(self._init_group_test)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(3)
+        @skip_if_lt_x_gpu(2)
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
@@ -955,7 +959,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -970,8 +974,8 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
 
             with self.assertRaisesRegex(
-                RuntimeError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                ValueError,
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
@@ -1492,7 +1496,7 @@ class DistributedTest:
             if rank == 0:
                 rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
                 device_id = rank_to_GPU[rank][0]
-                with self.assertRaisesRegex(RuntimeError, "^Invalid ``op``"):
+                with self.assertRaisesRegex(ValueError, "^Invalid ``op``"):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
                     dist.batch_isend_irecv([send_op])
@@ -1504,7 +1508,7 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                with self.assertRaisesRegex(RuntimeError, "^Invalid ``p2p_op_list``"):
+                with self.assertRaisesRegex(ValueError, "^Invalid ``p2p_op_list``"):
                     dist.batch_isend_irecv([1, 2])
 
         # NCCL Batch SEND RECV Mixed Backend Error
@@ -1519,7 +1523,7 @@ class DistributedTest:
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
                 with self.assertRaisesRegex(
-                    RuntimeError, "All ops need to use the same group"
+                    ValueError, "All ops need to use the same group"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
@@ -2772,7 +2776,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             for unsupported_op in unsupported_ops:
                 with self.assertRaisesRegex(
-                    RuntimeError, "all_reduce does not support"
+                    ValueError, "all_reduce does not support"
                 ):
                     dist.all_reduce(
                         _build_tensor(1, dtype=torch.cfloat), unsupported_op, group_id
@@ -3004,7 +3008,7 @@ class DistributedTest:
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             group, group_id, rank = self._init_global_test()
-            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
+            with self.assertRaisesRegex(ValueError, "all_reduce does not support"):
                 dist.all_reduce_coalesced(
                     [_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id
                 )
@@ -4871,7 +4875,7 @@ class DistributedTest:
                     if optimize_subset:
                         self.assertNotEqual(
                             opt_hook_init_params[0],
-                            list(ddp_model_with_optimizer_hook.parameters())[0],
+                            next(iter(ddp_model_with_optimizer_hook.parameters())),
                         )
                         # Untouched params should be equal
                         self.assertEqual(
@@ -4993,6 +4997,7 @@ class DistributedTest:
             self,
             optim_cls,
             optim_kwargs,
+            init_before,
             gradient_as_bucket_view=True,
         ):
             # Need to seed to ensure inputs are unique across rank. Otherwise,
@@ -5016,17 +5021,23 @@ class DistributedTest:
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
                 optim = optim_cls(model.parameters(), **optim_kwargs)
-                # Note: have to apply_optimizer_in_backward before wrapping with DDP.
-                _apply_optimizer_in_backward(
-                    optimizer_class=optim_cls,
-                    params=model_optim_in_bwd.parameters(),
-                    optimizer_kwargs=optim_kwargs,
-                )
+                if init_before:
+                    _apply_optimizer_in_backward(
+                        optimizer_class=optim_cls,
+                        params=model_optim_in_bwd.parameters(),
+                        optimizer_kwargs=optim_kwargs,
+                    )
                 model_optim_in_bwd = nn.parallel.DistributedDataParallel(
                     model_optim_in_bwd,
                     device_ids=[self.rank],
                     gradient_as_bucket_view=gradient_as_bucket_view,
                 )
+                if not init_before:
+                    _apply_optimizer_in_backward(
+                        optimizer_class=optim_cls,
+                        params=model_optim_in_bwd.parameters(),
+                        optimizer_kwargs=optim_kwargs,
+                    )
 
                 for p1, p2 in zip(model.parameters(), model_optim_in_bwd.parameters()):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
@@ -5062,56 +5073,70 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
-            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+            for optim_cls, init_before in itertools.product(
+                [torch.optim.SGD, torch.optim.Adam], [True, False]
+            ):
                 with self.subTest(optim_cls=optim_cls):
                     self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls, optim_kwargs={"lr": 0.03}
+                        optim_cls=optim_cls,
+                        optim_kwargs={"lr": 0.03},
+                        init_before=init_before,
                     )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
-            self._test_ddp_apply_optim_in_backward(
-                optim_cls=torch.optim.SGD,
-                optim_kwargs={"lr": 0.03},
-                gradient_as_bucket_view=False,
-            )
+            for init_before in [True, False]:
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=torch.optim.SGD,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=init_before,
+                    gradient_as_bucket_view=False,
+                )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
-            torch.manual_seed(self.rank)
-            torch.cuda.manual_seed(self.rank)
-            model = TwoLinLayerNet()
-            model_clone = copy.deepcopy(model)
-            # Parameters to ignore are in the format {module_name}.{param_name}
-            params_to_ignore = ["a.weight"]
-            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                model, params_to_ignore
-            )
-            _apply_optimizer_in_backward(
-                optimizer_class=torch.optim.SGD,
-                params=model.parameters(),
-                optimizer_kwargs={"lr": 0.03},
-            )
-            net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank),
-                device_ids=[self.rank],
-            )
-            inp = torch.randn(1, 10)
-            a, b = net(inp)
-            (a.transpose(0, 1) @ b).sum().backward()
-            # a.weight did not go through allreduce, so optimizer acted on local
-            # gradient, which should be different across ranks. Remaining params
-            # should be equal.
-            models = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(models, model)
-            rank0_model, remainder = models[0], models[1:]
-            for m in remainder:
-                self.assertNotEqual(rank0_model.a.weight, m.a.weight)
-                self.assertEqual(
-                    list(rank0_model.b.parameters()), list(m.b.parameters())
-                )
-                self.assertEqual(rank0_model.a.bias, m.a.bias)
+            for init_before in [True, False]:
+                with self.subTest(init_before=init_before):
+                    torch.manual_seed(self.rank)
+                    torch.cuda.manual_seed(self.rank)
+                    model = TwoLinLayerNet()
+                    # Parameters to ignore are in the format {module_name}.{param_name}
+                    params_to_ignore = ["a.weight"]
+                    torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                        model, params_to_ignore
+                    )
+                    if init_before:
+                        _apply_optimizer_in_backward(
+                            optimizer_class=torch.optim.SGD,
+                            params=model.parameters(),
+                            optimizer_kwargs={"lr": 0.03},
+                        )
+                    net = torch.nn.parallel.DistributedDataParallel(
+                        model.cuda(self.rank),
+                        device_ids=[self.rank],
+                    )
+                    if not init_before:
+                        _apply_optimizer_in_backward(
+                            optimizer_class=torch.optim.SGD,
+                            params=model.parameters(),
+                            optimizer_kwargs={"lr": 0.03},
+                        )
+                    inp = torch.randn(1, 10)
+                    a, b = net(inp)
+                    (a.transpose(0, 1) @ b).sum().backward()
+                    # a.weight did not go through allreduce, so optimizer acted on local
+                    # gradient, which should be different across ranks. Remaining params
+                    # should be equal.
+                    models = [None for _ in range(dist.get_world_size())]
+                    dist.all_gather_object(models, model)
+                    rank0_model, remainder = models[0], models[1:]
+                    for m in remainder:
+                        self.assertNotEqual(rank0_model.a.weight, m.a.weight)
+                        self.assertEqual(
+                            list(rank0_model.b.parameters()), list(m.b.parameters())
+                        )
+                        self.assertEqual(rank0_model.a.bias, m.a.bias)
 
         def _get_fp16_config(self) -> _MixedPrecision:
             return _MixedPrecision(
@@ -7032,7 +7057,7 @@ class DistributedTest:
                     # zero gradient. If we kept dividing by static initial world
                     # size as processes leave, the grad would be smaller.
                     expected_grad = torch.ones(dim, dim, device=self.rank) * grad_scale
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grads so that it's the same every iteration
                     net.zero_grad()
@@ -7052,7 +7077,7 @@ class DistributedTest:
                         * grad_scale
                         * effective_ws
                     ) / dist.get_world_size()
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grad so that it's the same every iteration.
                     net.zero_grad()
@@ -7733,11 +7758,11 @@ class DistributedTest:
                 )
                 proxy_params = list(model.fc2.parameters())
                 proxy_buffers = list(model.fc2.buffers())
-                model_fc2_name = [
+                model_fc2_name = next(
                     module_name
                     for module_name, module in model.named_modules()
                     if module is model.fc2
-                ][0]
+                )
                 proxy_param_names = [
                     f"{model_fc2_name}.{param_name}"
                     for param_name, _ in model.fc2.named_parameters()
@@ -8285,7 +8310,7 @@ class DistributedTest:
             )
             # Ensure errors are raised upon incorrect arguments.
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
@@ -9750,7 +9775,7 @@ class DistributedTest:
             def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(device))._abort()
+                    pg._get_backend(torch.device(device))._shutdown()
                     time.sleep(1)
 
             if self.rank != 1:
@@ -10117,6 +10142,40 @@ class DistributedTest:
                 start_powerSGD_iter=4,
             )
             self._test_hook_pickling(hook, powersgd_state)
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_device_mesh_initialization(self):
+            """
+            Test DDP with device_mesh initialization.
+            """
+            world_size = int(os.environ["WORLD_SIZE"])
+
+            from torch.distributed._device_mesh import init_device_mesh
+            device_mesh = init_device_mesh("cuda", (world_size,))
+
+            pg = _get_default_group()
+
+            torch.cuda.set_device(self.rank)
+            model = TwoLinLayerNet().cuda()
+            ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_mesh=device_mesh)
+            self.assertEqual(ddp_model.device_mesh, device_mesh)
+            self.assertEqual(ddp_model.device_mesh.get_dim_groups(mesh_dim=0), pg)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Cannot specify both process_group and device_mesh arguments."
+            ):
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    model, process_group=pg, device_mesh=device_mesh
+                )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Only 1D device mesh is supported,"
+            ):
+                device_mesh = init_device_mesh("cuda", (2, world_size // 2))
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    model, device_mesh=device_mesh
+                )
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

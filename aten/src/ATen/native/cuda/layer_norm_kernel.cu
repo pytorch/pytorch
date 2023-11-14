@@ -42,6 +42,13 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
   scalar_t val[vec_size];
 };
 
+// Checks alignment of buffers for using vectorized loads / stores
+template<typename T>
+bool can_vectorize(const T * ptr, int alignment) {
+  uint64_t addr = reinterpret_cast<uint64_t>(ptr);
+  return addr % alignment == 0;
+};
+
 
 template <typename T, typename T_ACC>
 __global__ void RowwiseMomentsCUDAKernel(
@@ -225,33 +232,40 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     auto i1 = blockIdx.x;
     const T * block_row = X + i1 * N;
     WelfordDataLN wd = compute_stats(block_row, N, s_data);
+
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
+    const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+    const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
     vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     const int n_vec_to_read = N/vec_size;
+
     T_ACC rstd_val = c10::cuda::compat::rsqrt(wd.sigma2 + eps);
-    //no tail, N is guaranteed to be multiple of vec size
+
+    // No tail, N is guaranteed to be multiple of vec size
     for (int i = thrx; i < n_vec_to_read; i += numx) {
       vec_t data = X_vec[i];
       vec_t out;
-      //computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
-      if (gamma != nullptr && beta != nullptr) {
+
+      // Computation is performed in T_ACC, X is cast to T_ACC and result is implicitly cast to T
+      if (gamma_vec != nullptr && beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
-          + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
+            + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
-      } else if (gamma != nullptr) {
+      } else if (gamma_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+          out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
         }
-      } else if (beta != nullptr) {
+      } else if (beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta[i*vec_size + ii]);
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta_vec[i].val[ii]);
         }
       } else {
         #pragma unroll
@@ -294,36 +308,6 @@ __global__ __inline__ void vectorized_layer_norm_kernel(
   T* Y){
     vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
   }
-
-template <typename T>
-__global__ void ComputeInternalGradientsCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-  __shared__ T_ACC db_shared[C10_WARP_SIZE];
-  const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    sum1 +=
-        static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
-    sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
-  }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  if (threadIdx.x == 0) {
-    ds[i] = sum1;
-    db[i] = sum2;
-  }
-}
 
 
 template<typename T, typename T_ACC>
@@ -390,7 +374,6 @@ __device__ __inline__ void compute_gI(
   }
 
 
-
 template<typename T, typename T_ACC>
 __global__ void layer_norm_grad_input_kernel(
   const T* __restrict__ dY,
@@ -407,49 +390,122 @@ __global__ void layer_norm_grad_input_kernel(
   }
 
 
-template <typename T, typename T_ACC>
-__global__ void ComputeGradientFusedParamsCUDAKernel(
-    int64_t M,
-    int64_t N,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c1,
-    acc_type<T, true>* c2) {
-  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index < M) {
-    const T_ACC s = T_ACC(1) / static_cast<T_ACC>(N);
-    const T_ACC a = (db[index] * static_cast<T_ACC>(mean[index]) - ds[index]) *
-        static_cast<T_ACC>(rstd[index]) * static_cast<T_ACC>(rstd[index]) *
-        static_cast<T_ACC>(rstd[index]) * s;
-    c1[index] = a;
-    c2[index] =
-        -(a * static_cast<T_ACC>(mean[index]) +
-          db[index] * static_cast<T_ACC>(rstd[index]) * s);
+// This implementation gets called when input buffers (dY, X, gamma and dX) are aligned
+// to vec_size * sizeof(T). Compared to the unvectorized implementation, it is about 10%
+// faster measuread at PT operator level, with cases seeing a 2X speedup (where N >> M).
+// There are no noticeable regressions on the rest of the sizes.
+
+template<typename T, typename T_ACC>
+__global__ void layer_norm_grad_input_kernel_vectorized(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* dX,
+  const int N) {
+  alignas(sizeof(double)) extern __shared__ char shared_data[];
+  T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
+
+  const auto bIdx = blockIdx.x;
+  const T_ACC mean_val = mean[bIdx];
+  const T_ACC rstd_val = rstd[bIdx];
+  const T* X_i = X + bIdx * N;
+  const T* dY_i = dY + bIdx * N;
+  T* dX_i = dX + bIdx * N;
+
+  using vec_t = aligned_vector<T, vec_size>;
+  const vec_t* X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
+  const vec_t* dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
+  const vec_t* gamma_vec_ptr = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
+
+  vec_t X_i_vec_reg, dY_i_vec_reg, gamma_vec_reg, dX_i_vec_reg;
+  for (int k = 0; k < vec_size; ++k) {
+    gamma_vec_reg.val[k] = T(1);
+  }
+
+  T_ACC stats_x1{0}, stats_x2{0};
+  unsigned int l = threadIdx.x * vec_size;
+  for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
+    unsigned int vec_idx = l / vec_size;
+    if (gamma != nullptr) {
+      gamma_vec_reg = gamma_vec_ptr[vec_idx];
+    }
+
+    X_i_vec_reg = X_i_vec_ptr[vec_idx];
+    dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
+
+    for (int k = 0; k < vec_size; ++k) {
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      stats_x1 += c_loss * gamma_val;
+      stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
+    }
+  }
+
+  // Tail Loop
+  for (; l < N; l++) {
+    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
+    const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
+    stats_x1 += c_loss * gamma_val;
+    stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
+  }
+
+  // Reduction in Shared Memory
+  stats_x1 = cuda_utils::BlockReduceSum(stats_x1, reduce_buf);
+  stats_x2 = cuda_utils::BlockReduceSum(stats_x2, reduce_buf);
+  if (threadIdx.x == 0) {
+    reduce_buf[0] = stats_x1;
+    reduce_buf[1] = stats_x2;
+  }
+  __syncthreads();
+  stats_x1 = reduce_buf[0];
+  stats_x2 = reduce_buf[1];
+
+  T_ACC fH = N;
+  T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
+
+  l = threadIdx.x * vec_size;
+  for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
+    unsigned int vec_idx = l / vec_size;
+    if (gamma != nullptr) {
+      gamma_vec_reg = gamma_vec_ptr[vec_idx];
+    }
+
+    X_i_vec_reg = X_i_vec_ptr[vec_idx];
+    dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
+
+    for (int k = 0; k < vec_size; ++k) {
+      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const T_ACC x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const T_ACC dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+
+      T_ACC f_grad_input = fH * gamma_val * dy;
+      f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
+      f_grad_input -= stats_x1;
+      f_grad_input *= term1;
+      dX_i_vec_reg.val[k] = f_grad_input;
+    }
+
+    dX_i_vec[vec_idx] = dX_i_vec_reg;
+  }
+
+  // Tail Loop
+  for (; l < N; l += blockDim.x) {
+    const T_ACC x = X_i[l];
+    const T_ACC dy = dY_i[l];
+    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    T_ACC f_grad_input = fH * gamma_val * dy;
+    f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
+    f_grad_input -= stats_x1;
+    f_grad_input *= term1;
+    dX_i[l] = f_grad_input;
   }
 }
 
-template <typename T, typename T_ACC>
-__global__ void LayerNormBackwardCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    const T_ACC* a,
-    const acc_type<T, true>* b,
-    const acc_type<T, true>* c,
-    T* dX) {
-  const int64_t i = blockIdx.x;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    dX[index] =
-        static_cast<T_ACC>(a[i]) * static_cast<T_ACC>(dY[index]) * gamma_v +
-        b[i] * static_cast<T_ACC>(X[index]) + c[i];
-  }
-}
 
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
@@ -715,14 +771,19 @@ void LayerNormKernelImplInternal(
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+
   // check if can take fast path - all tensors are properly aligned, N is less than 2^24 (to use float count),
   // N is multiple of vec_size (so that all rows are aligned if tensor is aligned)
-  auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
+  bool can_vec_X = can_vectorize(X_data, alignment);
+  bool can_vec_Y = can_vectorize(Y_data, alignment);
+  bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
+  bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
+
   if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
-  can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
+  can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
   } else {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
@@ -1095,7 +1156,7 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-#if defined __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
     if (M >= 32768) {
       const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
       const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
@@ -1123,10 +1184,24 @@ void LayerNormBackwardKernelImplInternal(
     }
 #else
     const dim3 blocks(M);
-    int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-    layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
-    X_data, mean_data, rstd_data, gamma_data, dX_data, N);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
+
+    bool bVectorSizeMultiple = (N % vec_size == 0);
+    bool bTargetDataTypes = (std::is_same<T, float>::value || std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value);
+    const unsigned int alignment = sizeof(T) * vec_size;
+    bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
+      can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
+
+    if (bAlignedBuffers && bTargetDataTypes && bVectorSizeMultiple) {
+      layer_norm_grad_input_kernel_vectorized<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+          X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+          X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
 #endif
   }
 

@@ -7,10 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -1539,4 +1537,4 @@ Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vector
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY
