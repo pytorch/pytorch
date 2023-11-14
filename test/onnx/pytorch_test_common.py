@@ -9,6 +9,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
+import onnx_test_common
 import packaging.version
 
 import torch
@@ -224,7 +225,10 @@ def skip_model_type_is_exported_program_test(reason: str):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if self.model_type == "torch.export.ExportedProgram":
+            if (
+                self.model_type
+                == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
                 raise unittest.SkipTest(
                     f"Skip model_type==torch.export.ExportedProgram test. {reason}"
                 )
@@ -248,7 +252,10 @@ def skip_model_type_is_not_exported_program_test(reason: str):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if self.model_type != "torch.export.ExportedProgram":
+            if (
+                self.model_type
+                != onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
                 raise unittest.SkipTest(
                     f"Skip model_type==torch.export.ExportedProgram test. {reason}"
                 )
