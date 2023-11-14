@@ -44,7 +44,6 @@ from torch._prims_common import (
     is_float_dtype,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
-    StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
@@ -208,7 +207,6 @@ def ir_node_to_tensor(x, guard_shape=True):
     else:
         shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
-    stride: StrideType
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
@@ -868,8 +866,8 @@ class Reduction(Loops):
 
         if reduction_type in ("argmin", "argmax"):
             flatten_index = FixedLayout(
-                None,  # type: ignore[arg-type]
-                None,  # type: ignore[arg-type]
+                None,
+                None,
                 reduction_ranges,
                 FlexibleLayout.contiguous_strides(reduction_ranges),
             ).make_indexer()
@@ -4446,7 +4444,7 @@ class FallbackKernel(ExternKernelAlloc):
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
 
-        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        serializer = GraphModuleSerializer(None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs

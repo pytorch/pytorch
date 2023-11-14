@@ -54,6 +54,7 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterator,
     List,
@@ -969,7 +970,7 @@ class CUDAGraphNode:
         if not self.cached_tensor_outputs:
             self._initialize_cached_tensors()
 
-        outputs: List[Any] = []
+        outputs: List[Optional[Union[int, torch.Tensor]]] = []
 
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
@@ -1000,7 +1001,7 @@ class CUDAGraphNode:
             else:
                 assert isinstance(storage, int)
                 out = self._reconstruct_from_tensor_metadata(
-                    metadata, outputs[storage].untyped_storage()
+                    metadata, cast(torch.Tensor, outputs[storage]).untyped_storage()
                 )
 
             outputs.append(out)

@@ -130,7 +130,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -247,7 +247,7 @@ def convert_shape_to_inductor(
 
 
 def convert_shape_to_symint(
-    lst: Iterable[Union[int, sympy.Expr]]
+    lst: List[Union[int, sympy.Expr]]
 ) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
