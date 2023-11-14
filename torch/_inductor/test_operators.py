@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Function
 
 _test_lib_def = torch.library.Library("_inductor_test", "DEF")
-_test_lib_def.define("realize(Tensor self) -> Tensor")
+_test_lib_def.define("realize(Tensor self) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
 
 _test_lib_impl = torch.library.Library("_inductor_test", "IMPL")
 for dispatch_key in ("CPU", "CUDA", "Meta"):

@@ -3621,8 +3621,6 @@ class ExternKernel(InputsKernel):
         return False
 
     def codegen_kwargs(self):
-        if not self.kwargs:
-            return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
@@ -3777,9 +3775,35 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
+    # Generate abi-compatible kernel names for shim kernels.
+    # Each individual shim kernel may have its own versioning rule.
+    # However, we don't expect we would end up with too many of such rules.
+    def _get_abi_compatible_kernel(self):
+        if not V.graph.cpp_wrapper:
+            return self.kernel
+
+        def sdpa_ver_fn():
+            # For sdpa, we need the v2 version only if any optional
+            # kwarg is missing.
+            if any(
+                self.get_kwargs_value(arg_name) is None
+                for arg_name in self.ordered_kwargs_for_cpp_kernel
+            ):
+                return f"{self.kernel}_v2"
+            else:
+                return self.kernel
+
+        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
+        if (ver_fn := kernel_to_ver.get(self.kernel, None)) is not None:
+            return ver_fn()
+        return self.kernel
+
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
+        # Now we setup abi_compatible_kernel after self.kernel
+        # and kwargs are adjusted appropriately.
+        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
         V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3799,6 +3823,7 @@ class ExternKernelAlloc(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.abi_compatible_kernel = None
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
@@ -3880,7 +3905,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, _ = self.get_kernel_and_configs()
-        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+        # If we are autotuning, not all arguments will be passed
+        self.ordered_kwargs_for_cpp_kernel = [
+            arg for arg in kernel.arg_names if arg in kernel_args
+        ]
 
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
@@ -6697,6 +6725,38 @@ class MultiOutputNoSizeAssert(MultiOutput):
     def codegen(self, wrapper):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        )
+
+
+class Broadcast(InPlaceCollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, src):
+        super().__init__(layout, inputs, constant_args)
+        self.src = src
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
+    @classmethod
+    def create(
+        cls, x: "TensorBox", src: int, tag: str, ranks: List[int], group_size: int
+    ):
+        inplace_inputs = cls.wrap_inputs_as_inplace([x])
+        packed = Broadcast(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
+            inputs=inplace_inputs,
+            constant_args=[tag, ranks, group_size],
+            src=src,
+        )
+        mark_node_as_mutating(packed, inplace_inputs[0])
+        return inplace_inputs[0]
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.broadcast("
+            f"{output_name}, async_op=True, group={output_name}_pg, src={self.src})"
         )
 
 
