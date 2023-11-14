@@ -220,7 +220,7 @@ def ir_node_to_tensor(x, guard_shape=True):
 
 
 def may_convert_to_optional(value):
-    if isinstance(value, list) and not value and V.graph.cpp_wrapper:
+    if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
         # {c10::nullopt} instead of {}
         return [None]
@@ -3718,7 +3718,7 @@ class ExternKernelOut(ExternKernel):
             self.output_view,
             self.codegen_reference(),
             args,
-            self.kernel,
+            self.cpp_kernel if V.graph.cpp_wrapper else self.kernel,
         )
 
     def __init__(
@@ -3737,7 +3737,8 @@ class ExternKernelOut(ExternKernel):
         )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
-        self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.kernel = kernel
+        self.cpp_kernel = cpp_kernel
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
@@ -3775,14 +3776,17 @@ class ExternKernelAlloc(ExternKernel):
                 self.get_kwargs_value(arg_name) is None
                 for arg_name in self.ordered_kwargs_for_cpp_kernel
             ):
-                return f"{self.kernel}_v2"
+                return f"{self.cpp_kernel}_v2"
             else:
-                return self.kernel
+                return self.cpp_kernel
 
         kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
-        if (ver_fn := kernel_to_ver.get(self.kernel, None)) is not None:
+        if (ver_fn := kernel_to_ver.get(self.cpp_kernel, None)) is not None:
             return ver_fn()
-        return self.kernel
+        return self.cpp_kernel
+
+    def codegen_kernel_name(self):
+        return self.cpp_kernel if V.graph.cpp_wrapper else self.kernel
 
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -3808,7 +3812,8 @@ class ExternKernelAlloc(ExternKernel):
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.name = V.graph.register_buffer(self)
-        self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.kernel = kernel
+        self.cpp_kernel = cpp_kernel
         self.abi_compatible_kernel = None
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
@@ -4015,7 +4020,7 @@ class ScatterFallback(ExternKernel):
         wrapper.generate_scatter_fallback(
             x,
             [x, self.constant_args[0], index, src],
-            self.kernel,
+            self.cpp_kernel if V.graph.cpp_wrapper else self.kernel,
             self.fn,
             self.src_is_tensor,
             self.kwargs["reduce"],
@@ -4063,14 +4068,12 @@ class ScatterFallback(ExternKernel):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
 
-        if V.graph.cpp_wrapper:
-            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
-            get_operator_enum = {"add": "sum", "multiply": "prod"}
-            if reduce in get_operator_enum:
-                reduce = get_operator_enum[reduce]
-            self.kernel = self.get_cpp_kernel(fn, reduce)
-        else:
-            self.kernel = fn
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+        self.cpp_kernel = self.get_cpp_kernel(fn, reduce)
+        self.kernel = fn
         self.fn = fn
 
         constant_args: Tuple[Any, ...]
@@ -4110,7 +4113,11 @@ class IndexPutFallback(ExternKernel):
 
         indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
         args = [x, indices_str, values, *self.codegen_const_args()]
-        wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args))
+        wrapper.writeline(
+            wrapper.wrap_kernel_call(
+                self.cpp_kernel if V.graph.cpp_wrapper else self.kernel, args
+            )
+        )
 
     def should_allocate(self):
         return False
@@ -4132,7 +4139,8 @@ class IndexPutFallback(ExternKernel):
             (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
-        self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
+        self.cpp_kernel = "at::index_put_"
+        self.kernel = "aten.index_put_"
         mark_node_as_mutating(self, x)
 
 
@@ -4226,9 +4234,7 @@ class FallbackKernel(ExternKernelAlloc):
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
-        self.use_cpp_op_schema = False
-
-        self.op_overload = kernel
+        self.use_runtime_dispatch = False
 
         assert isinstance(
             kernel,
@@ -4237,60 +4243,8 @@ class FallbackKernel(ExternKernelAlloc):
                 torch._ops.HigherOrderOperator,
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
+        self.op_overload = kernel
 
-        if kernel.namespace == "aten":
-            # Aten Fallback Ops
-            assert isinstance(kernel, torch._ops.OpOverload)
-            op_base_name = kernel.__name__.split(".")[0]
-
-            if V.graph.cpp_wrapper:
-                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
-                    self.use_cpp_op_schema = True
-                    self.set_cpp_kernel(kernel)
-                else:
-                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.kernel = (
-                        f"at::{op_base_name}"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
-                    schema = kernel._schema
-
-                    self.args_default_value = [
-                        {"type": x.real_type, "value": x.default_value}
-                        for x in schema.arguments
-                        if not x.kwarg_only
-                    ]
-                    self.ordered_kwargs_for_cpp_kernel = [
-                        x.name for x in schema.arguments if x.kwarg_only
-                    ]
-                    self.kwargs_default_value = {
-                        x.name: {"type": x.real_type, "value": x.default_value}
-                        for x in schema.arguments
-                        if x.kwarg_only
-                    }
-            else:
-                self.kernel = f"aten.{op_base_name}"
-
-        elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
-                self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
-            else:
-                raise NotImplementedError(
-                    "Unable to find HigherOrderOperator kernel name"
-                )
-        else:
-            # For non-aten OpOverload, i.e. custom ops
-            if V.graph.cpp_wrapper:
-                self.use_cpp_op_schema = True
-                self.set_cpp_kernel(kernel)
-            else:
-                self.kernel = (
-                    f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
-                )
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.kernel)
@@ -4316,6 +4270,7 @@ class FallbackKernel(ExternKernelAlloc):
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
+        self.cpp_kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
             f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
@@ -4485,7 +4440,62 @@ class FallbackKernel(ExternKernelAlloc):
         return [*args, *ordered_kwargs]
 
     def codegen(self, wrapper):
-        if self.use_cpp_op_schema:
+        kernel = self.op_overload
+        if kernel.namespace == "aten":
+            # Aten Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            op_base_name = kernel.__name__.split(".")[0]
+
+            if V.graph.cpp_wrapper:
+                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                    self.use_runtime_dispatch = True
+                    self.set_cpp_kernel(kernel)
+                else:
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.cpp_kernel = (
+                        f"at::{op_base_name}"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+
+                    self.args_default_value = [
+                        {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if not x.kwarg_only
+                    ]
+                    self.ordered_kwargs_for_cpp_kernel = [
+                        x.name for x in schema.arguments if x.kwarg_only
+                    ]
+                    self.kwargs_default_value = {
+                        x.name: {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if x.kwarg_only
+                    }
+            else:
+                self.kernel = f"aten.{op_base_name}"
+
+        elif isinstance(kernel, torch._ops.HigherOrderOperator):
+            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
+                self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
+            else:
+                raise NotImplementedError(
+                    "Unable to find HigherOrderOperator kernel name"
+                )
+        else:
+            # For non-aten OpOverload, i.e. custom ops
+            if V.graph.cpp_wrapper:
+                self.use_runtime_dispatch = True
+                self.set_cpp_kernel(kernel)
+            else:
+                self.kernel = (
+                    f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+                )
+
+        if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
 
             exported_args = None
@@ -4497,7 +4507,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
-                self.kernel,
+                self.codegen_kernel_name(),
                 args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
@@ -4925,7 +4935,7 @@ class ConvolutionUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.cpp_kernel if V.graph.cpp_wrapper else self.kernel,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5000,7 +5010,7 @@ class ConvolutionBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5090,7 +5100,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5173,7 +5183,7 @@ class MKLPackedLinear(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5227,7 +5237,7 @@ class LinearUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5293,7 +5303,7 @@ class LinearBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5364,7 +5374,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5617,7 +5627,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5801,7 +5811,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             conv_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5975,7 +5985,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.kernel,
+            self.codegen_kernel_name(),
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
