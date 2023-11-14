@@ -646,12 +646,21 @@ class SSGraph:
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
-        debug_path=V.debug._path
+        stream_log_path = os.environ.get("TORCHINDUCTOR_STREAM_LOG_PATH", None)
+        stream_file_path = os.environ.get("TORCHINDUCTOR_STREAM_FILE_PATH", None)
+        model_name = os.environ.get("model", "")
+        if stream_log_path is not None:
+            debug_path = stream_log_path
+        else:
+            debug_path=V.debug._path
         if not debug_path:
-            debug_path = "/tmp/yhao/debug2023/"
+            debug_path = "/tmp/yhao/profile_mode/"
             os.makedirs(debug_path, exist_ok=True)
         content = {}
-        stream_assign_file = f"{debug_path}/resnet18_stream_assignment.json"
+        if stream_file_path is not None:
+            stream_assign_file = stream_file_path
+        else:
+            stream_assign_file = f"{debug_path}/{model_name}_{current_time}_stream_assign.json"
         if os.path.exists(stream_assign_file):
             with open(stream_assign_file, 'r') as fin:
                 content = json.load(fin)
