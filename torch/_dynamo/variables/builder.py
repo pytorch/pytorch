@@ -1743,6 +1743,7 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims=constraint_dims,
             )
         )
+        # See Note - [On fake tensor policy and fresh fake modes for backends]
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
