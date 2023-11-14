@@ -3,7 +3,6 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
-#include <autograd/python_variable.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
