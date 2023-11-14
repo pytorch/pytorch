@@ -21,6 +21,7 @@ from torch.testing._internal.opinfo.core import (
     NumericsFilter,
     OpInfo,
     S,
+    sample_inputs_elementwise_binary,
     SampleInput,
     UnaryUfuncInfo,
 )
@@ -59,6 +60,21 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         t[0] = 0
 
         yield SampleInput(t)
+
+
+def sample_inputs_hermite_polynomial_he(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(
+        op, device, dtype, requires_grad, **kwargs
+    )
+    make_arg = partial(
+        make_tensor,
+        device=device,
+        requires_grad=requires_grad,
+    )
+    if dtype == torch.float32:
+        yield SampleInput(
+            make_arg((S,), dtype=dtype), make_arg((L, 1), dtype=torch.float16)
+        )
 
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
@@ -449,6 +465,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo(
         "special.hermite_polynomial_he",
         dtypes=all_types_and(torch.bool),
+        sample_inputs_func=sample_inputs_hermite_polynomial_he,
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
