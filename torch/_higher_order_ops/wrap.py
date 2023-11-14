@@ -82,7 +82,13 @@ class TagActivationCheckpoint(HigherOrderOperator):
     in the forward and recomputed forward in backward.
     """
 
-    context_fn_list = []
+    # Each utils.checkpoint call has an temporary entry in `context_fn_map` storing its context function.
+    # The entry is removed after the checkpointed function is traced through the first time
+    # (at which point the context function is moved to be attached to the graph module).
+    # Reason is that we want the lifetime of the context function to be tied to the graph module
+    # (because as long as the graph module is valid, the context function needs to stay valid),
+    # but there is no way to do this linking during Dynamo tracing, so we have to use this temp map as a bridge.
+    context_fn_tmp_map = {}
 
     def __init__(self):
         super().__init__("tag_activation_checkpoint")
@@ -130,7 +136,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
-        context_fn_id = kwargs.pop('context_fn_id')
+        context_fn_id = kwargs.pop('context_fn_id', None)
         if context_fn_id is not None:
             assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
                 "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
@@ -142,7 +148,12 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
             kwargs["use_reentrant"] = False
-            kwargs["context_fn"] = self.context_fn_list[context_fn_id]
+            if not hasattr(gmod, "_checkpoint_context_fn"):
+                # Move the context_fn from temp map to the graph module.
+                assert context_fn_id in TagActivationCheckpoint.context_fn_tmp_map
+                gmod._checkpoint_context_fn = TagActivationCheckpoint.context_fn_tmp_map[context_fn_id]
+                del TagActivationCheckpoint.context_fn_tmp_map[context_fn_id]
+            kwargs["context_fn"] = gmod._checkpoint_context_fn
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachedTorchDispatchMode.
             gmod = self.tag_nodes(gmod)

@@ -1287,6 +1287,8 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    context_fn_count = itertools.count(1)
+
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
@@ -1297,8 +1299,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         context_fn_id = None
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
             context_fn = kwargs.pop("context_fn")
-            self.value.context_fn_list.append(context_fn.fn)
-            context_fn_id = len(self.value.context_fn_list) - 1
+            context_fn_id = next(CheckpointHigherOrderVariable.context_fn_count)
+            TagActivationCheckpoint.context_fn_tmp_map[context_fn_id] = context_fn.fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
@@ -1310,7 +1312,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
-        checkpoint_kwargs["context_fn_id"] = context_fn_id
+        if context_fn_id is not None:
+            checkpoint_kwargs["context_fn_id"] = context_fn_id
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
