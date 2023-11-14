@@ -2212,15 +2212,15 @@ class TestScriptDict(JitTestCase):
         """
         Test the __repr__ method.
         """
-        self._compare_eager_and_script(repr, {1: 2})
+        self._compare_eager_and_script(lambda d: repr(d), {1: 2})
 
     def test_bool(self):
         """
         Test the __bool__ method. This should return True
         if the dictionary is non-empty and False otherwise.
         """
-        self._compare_eager_and_script(bool, {1: 2})
-        self._compare_eager_and_script(bool, {})
+        self._compare_eager_and_script(lambda d: bool(d), {1: 2})
+        self._compare_eager_and_script(lambda d: bool(d), {})
 
     def test_iter(self):
         """
@@ -2327,8 +2327,8 @@ class TestScriptDict(JitTestCase):
         """
         Test len() builtin function.
         """
-        self._compare_eager_and_script(len, {1: 2})
-        self._compare_eager_and_script(len, {})
+        self._compare_eager_and_script(lambda d: len(d), {1: 2})
+        self._compare_eager_and_script(lambda d: len(d), {})
 
     @unittest.skip("Cannot pass until all dicts returned from TorchScript are ScriptDicts")
     def test_nested(self):
@@ -2435,15 +2435,15 @@ class TestScriptList(JitTestCase):
         """
         Test the __repr__ method.
         """
-        self._compare_eager_and_script(repr, [1])
+        self._compare_eager_and_script(lambda l: repr(l), [1])
 
     def test_bool(self):
         """
         Test the __bool__ method. This should return True
         if the list is non-empty and False otherwise.
         """
-        self._compare_eager_and_script(bool, [1])
-        self._compare_eager_and_script(bool, [])
+        self._compare_eager_and_script(lambda l: bool(l), [1])
+        self._compare_eager_and_script(lambda l: bool(l), [])
 
     def test_iter(self):
         """
@@ -2569,8 +2569,8 @@ class TestScriptList(JitTestCase):
         """
         Test len() builtin function.
         """
-        self._compare_eager_and_script(len, [1, 2, 3, 4])
-        self._compare_eager_and_script(len, [])
+        self._compare_eager_and_script(lambda l: len(l), [1, 2, 3, 4])
+        self._compare_eager_and_script(lambda l: len(l), [])
 
     def test_count(self):
         """

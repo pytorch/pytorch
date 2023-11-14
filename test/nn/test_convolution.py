@@ -626,7 +626,7 @@ class TestConvolutionNN(NNTestCase):
             weight = torch.randn(3, 5, 6, requires_grad=True)
             bias = torch.randn(6, requires_grad=True)
 
-            gradcheck(F.conv_tbc, (inp, weight, bias, 3))
+            gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")

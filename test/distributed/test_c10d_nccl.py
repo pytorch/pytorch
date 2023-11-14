@@ -2893,7 +2893,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         "Frequently times out see https://github.com/pytorch/pytorch/issues/58920"
     )
     def test_nccl_errors_blocking_abort(self):
-        self._test_nccl_errors_blocking(os.abort)
+        self._test_nccl_errors_blocking(lambda: os.abort())
 
     @with_nccl_blocking_wait
     @requires_nccl()

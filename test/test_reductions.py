@@ -864,7 +864,7 @@ class TestReductions(TestCase):
         from scipy.special import logsumexp
         self._test_dim_ops(
             lambda t, d: t.logsumexp(d),
-            logsumexp,
+            lambda n, d: logsumexp(n, d),
             use_integral=False)
 
     @onlyCPU
@@ -925,12 +925,12 @@ class TestReductions(TestCase):
 
     @onlyCPU
     def test_sum_integer_upcast(self, device):
-        self._test_reduce_integer_upcast(torch.sum, False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, **kwargs), False)
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.sum(x, 0, **kwargs))
 
     @onlyCPU
     def test_prod_integer_upcast(self, device):
-        self._test_reduce_integer_upcast(torch.prod, False)
+        self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, **kwargs), False)
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.prod(x, 0, **kwargs))
 
     @onlyCPU

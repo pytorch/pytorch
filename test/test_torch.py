@@ -2016,7 +2016,7 @@ else:
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
                        lambda: _ind_get_fn(x, ind_cpu),
-                       x.nonzero,
+                       lambda: x.nonzero(),
                        lambda: _cond_fn(y),
                        lambda: torch.nn.functional.one_hot(ind),
                        lambda: torch.repeat_interleave(x, repeats))
@@ -5244,14 +5244,14 @@ else:
             return input_generator_fn
 
         transformation_fns = [
-            torch.zeros_like,
-            torch.ones_like,
+            lambda t, **kwargs: torch.zeros_like(t, **kwargs),
+            lambda t, **kwargs: torch.ones_like(t, **kwargs),
             lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
             lambda t, **kwargs: torch.randint_like(t, 100, **kwargs),
-            torch.randn_like,
-            torch.rand_like,
+            lambda t, **kwargs: torch.randn_like(t, **kwargs),
+            lambda t, **kwargs: torch.rand_like(t, **kwargs),
             lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
-            torch.empty_like]
+            lambda t, **kwargs: torch.empty_like(t, **kwargs)]
 
         formats_shapes = (
             (torch.channels_last, (4, 3, 8, 8)),
@@ -7083,17 +7083,17 @@ class TestTorch(TestCase):
                 _internal=True),
             lambda: torch.FloatStorage._dtype,
             lambda: s0._resize_(20),
-            s0._size,
+            lambda: s0._size(),
             lambda: s0._untyped_storage,
-            s0._is_shared,
-            s0._share_memory_,
-            s0._pickle_storage_type,
+            lambda: s0._is_shared(),
+            lambda: s0._share_memory_(),
+            lambda: s0._pickle_storage_type(),
             lambda: s0._setitem(slice(0, s0._size()), 1),
-            s0._element_size,
+            lambda: s0._element_size(),
             lambda: s0._deepcopy({}),
-            s0._data_ptr,
-            s0._nbytes,
-            t0._typed_storage,
+            lambda: s0._data_ptr(),
+            lambda: s0._nbytes(),
+            lambda: t0._typed_storage(),
         ]
 
         if torch.cuda.is_available():
@@ -7113,17 +7113,17 @@ class TestTorch(TestCase):
                     _internal=True),
                 lambda: torch.cuda.FloatStorage._dtype,
                 lambda: s1._resize_(20),
-                s1._size,
+                lambda: s1._size(),
                 lambda: s1._untyped_storage,
-                s1._is_shared,
-                s1._share_memory_,
-                s1._pickle_storage_type,
+                lambda: s1._is_shared(),
+                lambda: s1._share_memory_(),
+                lambda: s1._pickle_storage_type(),
                 lambda: s1._setitem(slice(0, s1._size()), 1),
-                s1._element_size,
+                lambda: s1._element_size(),
                 lambda: s1._deepcopy({}),
-                s1._data_ptr,
-                s1._nbytes,
-                t1._typed_storage,
+                lambda: s1._data_ptr(),
+                lambda: s1._nbytes(),
+                lambda: t1._typed_storage(),
             ]
 
         # Check that each of the TypedStorage internal function calls do not
@@ -7139,11 +7139,11 @@ class TestTorch(TestCase):
     def test_typed_storage_deprecation_warning(self):
         s0 = torch.FloatStorage(10)
         funcs = [
-            torch.FloatStorage,
+            lambda: torch.FloatStorage(),
             lambda: torch.FloatStorage.dtype,
             lambda: s0.fill_(0),
             lambda: s0.is_cuda,
-            s0.untyped,
+            lambda: s0.untyped(),
             lambda: len(s0),
             lambda: s0[0],
         ]
@@ -7151,11 +7151,11 @@ class TestTorch(TestCase):
         if torch.cuda.is_available():
             s1 = torch.cuda.FloatStorage(10)
             funcs += [
-                torch.cuda.FloatStorage,
+                lambda: torch.cuda.FloatStorage(),
                 lambda: torch.cuda.FloatStorage.dtype,
                 lambda: s1.fill_(0),
                 lambda: s1.is_cuda,
-                s1.untyped,
+                lambda: s1.untyped(),
                 lambda: len(s1),
                 lambda: s1[0],
             ]
@@ -7566,7 +7566,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
         if not torch.cuda.is_available():
-            self.assertRaises(RuntimeError, x.pin_memory)
+            self.assertRaises(RuntimeError, lambda: x.pin_memory())
         else:
             pinned = x.pin_memory()
             self.assertTrue(pinned.is_pinned())
@@ -7735,10 +7735,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
-        self.assertRaisesRegex(AssertionError, msg, torch.cuda.current_device)
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
-        self.assertRaisesRegex(TypeError, msg, torch.cuda.FloatTensor)
+        self.assertRaisesRegex(TypeError, msg, lambda: torch.cuda.FloatTensor())
         self.assertRaisesRegex(TypeError, msg, lambda: torch.set_default_tensor_type(torch.cuda.FloatTensor))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
@@ -8899,7 +8899,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_tensor_base_init(self):
         # Direct construction not OK
-        self.assertRaises(RuntimeError, torch._C.TensorBase)
+        self.assertRaises(RuntimeError, lambda: torch._C.TensorBase())
 
         # But construction of subclass is OK
         class T(torch._C.TensorBase):
@@ -8909,7 +8909,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_storage_base_init(self):
         # Direct construction not OK
-        self.assertRaises(RuntimeError, torch._C.StorageBase)
+        self.assertRaises(RuntimeError, lambda: torch._C.StorageBase())
 
         # But construction of subclass is OK
         class T(torch._C.StorageBase):
@@ -9453,7 +9453,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # best we can do.
         del y
 
-        self.assertRaises(RuntimeError, x.sigmoid)
+        self.assertRaises(RuntimeError, lambda: x.sigmoid())
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_storage_dead_weak_ref(self):
@@ -9470,7 +9470,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del y
 
         self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", x.float)
+        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
 
     def test_tensor_resurrected_weak_ref(self):
         x = torch.empty(2)

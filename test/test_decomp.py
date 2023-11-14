@@ -766,7 +766,7 @@ class TestDecomp(TestCase):
                     self.check_decomposed(aten_name, mode)
 
                 if not skip_decomp_vjp and (op.aten_backward_name in decomposition_names or run_all):
-                    cotangents = tree_map(torch.randn_like, decomp_out)
+                    cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                          as mode, enable_python_dispatcher():

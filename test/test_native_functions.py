@@ -43,7 +43,7 @@ class TestNativeFunctions(TestCase):
         self._test_raises_str_typeerror(lambda arg: torch._C._nn.pad(x, arg))
 
     def test_vararg_symintlist_error(self):
-        self._test_raises_str_typeerror(torch.rand)
+        self._test_raises_str_typeerror(lambda arg: torch.rand(arg))
         self._test_raises_str_typeerror(lambda arg: torch.rand(*arg))
 
     def test_symintlist_error_with_overload_but_is_unique(self):
@@ -53,7 +53,7 @@ class TestNativeFunctions(TestCase):
 
     def test_symintlist_error_with_overload(self):
         x = torch.randn(1)
-        self._test_raises_str_typeerror(x.view)
+        self._test_raises_str_typeerror(lambda arg: x.view(arg))
 
     def test_intlist_error_with_overload(self):
         x = torch.randn(1)

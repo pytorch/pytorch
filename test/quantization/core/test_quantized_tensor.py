@@ -1379,7 +1379,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(x_q.is_pinned(), False)
         x_pin = torch.empty_quantized([3], x_q, pin_memory=True, dtype=torch.quint8)
         self.assertEqual(x_pin.is_pinned(), False)
-        self.assertRaises(RuntimeError, x_q.pin_memory)
+        self.assertRaises(RuntimeError, lambda: x_q.pin_memory())
 
     def test_fp16_saturate_op(self):
         x = torch.ones(5, 5, dtype=torch.float32) * 65532

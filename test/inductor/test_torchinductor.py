@@ -6169,7 +6169,9 @@ class CommonTemplate:
                     mod = make_fx(fo)(*inps0)
                     _ = compile_fx_inner(mod, inps0)
 
-            pass_ops = [fn for fn in [aten.sum, aten.prod, aten.any, aten.all]]
+            pass_ops = [
+                lambda *x: fn(*x) for fn in [aten.sum, aten.prod, aten.any, aten.all]
+            ]
             for po in pass_ops:
                 compiled = torch._dynamo.optimize("inductor")(po)
                 expected = po(*inps0)
@@ -6358,16 +6360,16 @@ class CommonTemplate:
             x = gen(m, k, dtype=dtype)
             y = gen(k, n, dtype=dtype)
             z = gen(n, dtype=dtype)
-            self.common(torch.mm, (x, y))
-            self.common(torch.matmul, (x, y))
+            self.common(lambda x, y: torch.mm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.addmm(z, x, y), (x, y, z))
 
         for dtype in dtypes:
             x = gen(b, m, k, dtype=dtype)
             y = gen(b, k, n, dtype=dtype)
             z = gen(n, dtype=dtype)
-            self.common(torch.bmm, (x, y))
-            self.common(torch.matmul, (x, y))
+            self.common(lambda x, y: torch.bmm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
     @requires_cuda()

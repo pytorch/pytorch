@@ -9247,14 +9247,14 @@ class TestViewOpsMPS(TestCaseMPS):
         # 0-dim
         s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
 
-        gradcheck(torch_fn, s)
-        gradgradcheck(torch_fn, s)
+        gradcheck(lambda x: torch_fn(x), s)
+        gradgradcheck(lambda x: torch_fn(x), s)
 
         # 1-dim
         a = torch.rand(4, dtype=torch.double, requires_grad=True)
 
-        gradcheck(torch_fn, a)
-        gradgradcheck(torch_fn, a)
+        gradcheck(lambda x: torch_fn(x), a)
+        gradgradcheck(lambda x: torch_fn(x), a)
 
         # 2,3,4-dim
         b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
@@ -9262,8 +9262,8 @@ class TestViewOpsMPS(TestCaseMPS):
         d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
 
         input_tuple = (s, a, b, c, d)
-        gradcheck(torch_fn, input_tuple)
-        gradgradcheck(torch_fn, input_tuple)
+        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
+        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
 
     def test_atleast_gradient(self, device="mps"):
         self._test_atleast(device, torch.atleast_1d)

@@ -52,17 +52,17 @@ non_decomposed_unary_list = [
 
 # The dict value is (match_count, match_nodes, inplace)
 binary_list = {
-    torch.add: (1, 2, False),  # call_function
+    lambda x, y: torch.add(x, y): (1, 2, False),  # call_function
     lambda x, y: torch.add(y, x): (1, 2, False),  # call_function
     lambda x, y: x.add(y): (1, 2, False),  # call_method
     lambda x, y: x.add_(y): (1, 2, True),  # call_method
-    torch.sub: (1, 2, False),  # call_function
+    lambda x, y: torch.sub(x, y): (1, 2, False),  # call_function
     lambda x, y: x.sub(y): (1, 2, False),  # call_method
     lambda x, y: x.sub_(y): (1, 2, True),  # call_method
 }
 
 quantization_add_fn_list = [
-    torch.add,
+    lambda x, y: torch.add(x, y),
     lambda x, y: x.add(y),
 ]
 

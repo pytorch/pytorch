@@ -1812,7 +1812,7 @@ class TestBinaryUfuncs(TestCase):
         #   scalars.
         def _scalar_helper(python_op, torch_op):
             for a, b in product(range(-10, 10), range(-10, 10)):
-                for op in (lambda x: x * 0.5, math.floor):
+                for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                     a = op(a)
                     b = op(b)
 
@@ -1855,7 +1855,7 @@ class TestBinaryUfuncs(TestCase):
         scripted_div = torch.jit.script(_wrapped_div)
         scripted_floordiv = torch.jit.script(_wrapped_floordiv)
         for a, b in product(range(-10, 10), range(-10, 10)):
-            for op in (lambda x: x * 0.5, math.floor):
+            for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                 a = op(a)
                 b = op(b)
 
@@ -1893,7 +1893,7 @@ class TestBinaryUfuncs(TestCase):
         scripted_rfloordiv_scalar = torch.jit.script(_wrapped_rfloordiv_scalar)
 
         for a in range(-10, 10):
-            for op in (lambda x: x * 0.5, math.floor):
+            for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                 a = op(a)
 
                 a_t = torch.tensor(a, device=device)
@@ -1965,7 +1965,7 @@ class TestBinaryUfuncs(TestCase):
         scripted_floor_divide__scalar = torch.jit.script(_wrapped_floor_divide__scalar)
 
         for a, b in product(range(-10, 10), range(-10, 10)):
-            for op in (lambda x: x * 0.5, math.floor):
+            for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                 a = op(a)
                 b = op(b)
 
@@ -2043,7 +2043,7 @@ class TestBinaryUfuncs(TestCase):
         ):
 
             for a, b in product(range(-10, 10), range(-10, 10)):
-                for op in (lambda x: x * 0.5, math.floor):
+                for op in (lambda x: x * 0.5, lambda x: math.floor(x)):
                     a = op(a)
                     b = op(b)
 

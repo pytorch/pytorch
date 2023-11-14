@@ -2605,7 +2605,7 @@ class TestBincount(TestCase):
 parametrize_interp_sc = parametrize(
     "sc",
     [
-        subtest(np.float_, name="real"),
+        subtest(lambda x: np.float_(x), name="real"),
         subtest(lambda x: _make_complex(x, 0), name="complex-real"),
         subtest(lambda x: _make_complex(0, x), name="complex-imag"),
         subtest(lambda x: _make_complex(x, np.multiply(x, -2)), name="complex-both"),

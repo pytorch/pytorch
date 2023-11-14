@@ -2501,8 +2501,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}):
                 self.assertEqual(loop_out, batched_out)
         B0 = 5
-        test(torch.argmax, [torch.randn(B0)])
-        test(torch.argmax, [torch.randn(B0, 2, 3)])
+        test(lambda x: torch.argmax(x), [torch.randn(B0)])
+        test(lambda x: torch.argmax(x), [torch.randn(B0, 2, 3)])
         test(lambda x: torch.argmax(x, 0), [torch.randn(B0, 2, 3)])
         test(lambda x: torch.argmax(x, -1), [torch.randn(B0, 2, 3)])
         test(lambda x: torch.argmax(x, 2), [torch.randn(B0, 2, 3)])

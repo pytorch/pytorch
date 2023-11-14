@@ -329,7 +329,7 @@ class TestNestedTensor(NestedTestCase):
 
     @torch.inference_mode()
     def test_default_nested_tensor(self):
-        self.assertRaises(TypeError, torch.nested.nested_tensor)
+        self.assertRaises(TypeError, lambda: torch.nested.nested_tensor())
         default_nested_tensor = torch.nested.nested_tensor([])
         default_tensor = torch.tensor([])
         # self.assertEqual(default_nested_tensor.nested_dim(), 1)
@@ -385,7 +385,7 @@ class TestNestedTensor(NestedTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "NestedTensorImpl doesn't support sizes",
-                a1.size,
+                lambda: a1.size(),
             )
 
     def test_size_dim(self):
@@ -420,7 +420,7 @@ class TestNestedTensor(NestedTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "NestedTensorImpl doesn't support strides",
-                a1.stride,
+                lambda: a1.stride(),
             )
 
     @unittest.skipIf(IS_FBCODE, "is_contiguous is not virtual in fbcode.")
@@ -1960,7 +1960,7 @@ class TestNestedTensorDeviceType(NestedTestCase):
         self.assertRaisesRegex(
             RuntimeError,
             "For nested tensors, squeeze without the dim argument",
-            nt.squeeze
+            lambda: nt.squeeze()
         )
         # error case: squeeze nested dimension
         self.assertRaisesRegex(
