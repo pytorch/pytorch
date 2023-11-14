@@ -24,8 +24,8 @@ class Geometric(Distribution):
         P(X=k) = (1-p)^{k} p, k = 0, 1, ...
     
     .. note::
-        :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success hence draws samples in :math:`{0, 1, ...}`, whereas
-        :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`{1, 2, ...}`.
+        :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success hence draws samples in :math:`\{0, 1, \ldots\}`, whereas
+        :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`.
 
     Example::
 
