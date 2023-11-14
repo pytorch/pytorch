@@ -7021,6 +7021,15 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
 
+    def test_autograd_printing_view_created_in_no_grad_inplaced_in_no_grad(self):
+        a = torch.ones(1, requires_grad=True)
+
+        with torch.no_grad():
+            b = a[:]
+            b *= 2
+
+        self.assertEqual(repr(b), "tensor([2.], grad_fn=<Undefined>)")
+
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
         with torch.no_grad():
