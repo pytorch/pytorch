@@ -311,7 +311,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf /*|| q_dtype == at::kBFloat16*/,
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16, 
                 "FlashAttention only support fp16 and bf16 data type");
     if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
@@ -467,17 +467,18 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
 
-    //reorder tensors and make contiguous
-    q.permute({0,2,1,3}).contiguous();
-    k.permute({0,2,1,3}).contiguous();
-    v.permute({0,2,1,3}).contiguous();
-    out.permute({0,2,1,3}).contiguous();
     
-    at::Tensor M = at::empty({q.sizes()[0] * q.sizes()[1], q.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
+    //reorder tensors and make contiguous
+    at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
+    at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
+    at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
+    at::Tensor output_t =out.permute({0,2,1,3}).contiguous();
+    
+    at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
 
     dim3  grid;
-    grid.x = (q.sizes()[2] + 128 - 1) / 128;	// BLOCK_M = 128
-    grid.y = q.sizes()[0] * q.sizes()[1];
+    grid.x = (q_t.sizes()[2] + 128 - 1) / 128;	// BLOCK_M = 128
+    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
     
@@ -488,26 +489,26 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 	    constexpr int				        STAGE = 3;
 	    oort::attn_fwd<STAGE,128,64,64,true>	        fwd_opt;
 	    auto					        err   = fwd_opt(grid, block,
-							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
-								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
+								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
 	  }
 	else
 	  {
 	    constexpr int			                STAGE = 1;
 	    oort::attn_fwd<STAGE,128,64,64, true>                fwd_opt;
 	    auto				                err   = fwd_opt(grid, block,
-							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
-								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
+								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
 	  }
        }
      else if (q_dtype == at::kBFloat16)
@@ -517,34 +518,34 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      	    constexpr int				        STAGE = 3;
      	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
      	    auto					        err   = fwd_opt(grid, block,
-     							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
-     								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-     								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-     								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-     								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-     								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+     							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
+     								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+     								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+     								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+     								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
      	  }
      	else
      	  {
      	    constexpr int			                STAGE = 1;
      	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
      	    auto				                err   = fwd_opt(grid, block,
-     							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
-     								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-     								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-     								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-     								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-     								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+     							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
+     								q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+     								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+     								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+     								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
+     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
      	  }
        }
 
      //undo reorder tensors
-     q.permute({0,2,1,3}).contiguous();
-     k.permute({0,2,1,3}).contiguous();
-     v.permute({0,2,1,3}).contiguous();
-     out.permute({0,2,1,3}).contiguous();
+     q_t.permute({0,2,1,3}).contiguous();
+     k_t.permute({0,2,1,3}).contiguous();
+     v_t.permute({0,2,1,3}).contiguous();
+     output_t.permute({0,2,1,3}).contiguous();
   
      hipStreamSynchronize(stream);
   
