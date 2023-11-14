@@ -266,7 +266,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
     'torch/csrc/onnx/init.cpp',
-    'torch/csrc/profiler/**/*',
     'torch/csrc/quantized/**/*',
     'torch/csrc/mps/**/*',
 ]
