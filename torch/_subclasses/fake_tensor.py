@@ -261,11 +261,13 @@ class FakeTensorConverter:
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
-    def __init__(self):
+    def __init__(self, parent=None):
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
+
+        self.parent = parent
 
     def add_constant_storage_mapping(self, fake_tensor):
         # when you have a constant, aliased tensor:
@@ -333,6 +335,18 @@ class FakeTensorConverter:
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
     ):
+        if self.parent is not None:
+            t = self.parent.from_real_tensor(
+                fake_mode.parent,
+                t,
+                make_constant=make_constant,
+                shape_env=shape_env,
+                ignore_subclass=ignore_subclass,
+                source=source,
+                dynamic_dims=dynamic_dims,
+                constraint_dims=constraint_dims,
+                memoized_only=memoized_only,
+            )
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -1321,10 +1335,13 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        parent=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
-        self.fake_tensor_converter = FakeTensorConverter()
+        self.fake_tensor_converter = FakeTensorConverter(
+            parent.fake_tensor_converter if parent is not None else None
+        )
         if static_shapes is not None:
             self.static_shapes = static_shapes
         else:
@@ -1356,6 +1373,17 @@ class FakeTensorMode(TorchDispatchMode):
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
+
+        # The parent fake tensor mode lets you specify a fake tensor mode that
+        # you should fakeify any real tensors through first, before you
+        # fakeify them again here.  This is most useful if you have an
+        # immutable fake tensor mode you've created to keep track of the
+        # initial memoized fakeifications of real tensors; you can then
+        # chain fresh fake tensor modes off of the original fake tensor
+        # mode to reuse all of the properties you set, while having a
+        # completely distinct universe of fake tensors which you can mutate to
+        # your hearts content.
+        self.parent = parent
 
         self.shape_env = shape_env
 
