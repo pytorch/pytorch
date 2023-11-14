@@ -85,7 +85,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         dist_msd, dist_osd = get_state_dict(
             dist_model, optimizers=dist_optim, options=options
         )
-        self._verify_msd(model, msd, dist_msd, options)
+        self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
@@ -119,7 +119,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         dist_msd, dist_osd = get_state_dict(
             dist_model, optimizers=dist_optim, options=options
         )
-        self._verify_msd(model, msd, dist_msd, options)
+        self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
@@ -128,7 +128,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         _patch_optimizer_state_dict(dist_model, optimizers=dist_optim, options=options)
         dist_msd = dist_model.state_dict()
         dist_osd = dist_optim[0].state_dict()
-        self._verify_msd(model, msd, dist_msd, options)
+        self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
