@@ -1017,7 +1017,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
