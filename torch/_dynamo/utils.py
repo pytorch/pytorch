@@ -1000,7 +1000,10 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
 
 
 def tensor_to_id(value):
-    return [id(k) if isinstance(k, (torch.Tensor, MethodWrapperType)) else k for k in value.keys()]
+    return [
+        id(k) if isinstance(k, (torch.Tensor, MethodWrapperType)) else k
+        for k in value.keys()
+    ]
 
 
 def const_repr(x, *, local) -> str:
