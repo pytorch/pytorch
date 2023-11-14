@@ -14,7 +14,11 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.nested._internal.nested_tensor import (
+    jagged_from_list,
+    jagged_from_tensor_and_lengths,
+    ViewBufferFromNested,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -360,10 +364,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     fake_inp = fake_mode.from_tensor(
                         inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
                     )
-                    # Clear the cache, so that we can properly cover the first dynamic compile.
-                    # Alternatively, remove this line and lower the frame counts by 1 below, as the
-                    # first recompile is accounted for via caching.
-                    shape_env.source_to_symint_node_cache.clear()
                     opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
             self.assertEqual(cnt.op_count, exp_op_count)
@@ -802,6 +802,19 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
             )
         return jagged_from_list(out, offsets)
+
+    def _get_nc_jagged_tensor(self, inner_dim, starts, lengths, requires_grad=True):
+        # Makes a jagged tensor with N constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        max_dim = (starts + lengths).max()
+        values_tensor = torch.randn(
+            starts.shape[0],
+            max_dim.item(),
+            inner_dim,
+            requires_grad=requires_grad,
+            dtype=torch.float64,
+        )
+        return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
         compile_count = [0]
