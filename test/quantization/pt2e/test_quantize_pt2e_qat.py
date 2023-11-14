@@ -41,7 +41,6 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
-    TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 
@@ -334,11 +333,16 @@ class _BaseTestQuantizePT2EQAT(PT2EQATTestCase):
 
     def _get_model(
         self,
-        has_conv_bias: bool=True,
-        has_bn: bool=True,
-        has_relu: bool=False,
+        has_conv_bias: bool = True,
+        has_bn: bool = True,
+        has_relu: bool = False,
         **conv_kwargs,
     ):
+        """
+        Return an instance of a simple test model containing the
+        conv[-bn][-relu] pattern. By default, this returns a
+        conv-bn model with conv bias.
+        """
         return self._TestModel(
             self.conv_class,
             self.bn_class,
