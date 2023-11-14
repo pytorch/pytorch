@@ -1317,7 +1317,7 @@ class FakeTensor(torch.Tensor):
 # Note - [On fake tensor policy and fresh fake modes for backends]
 #
 # FakeTensorMode does memoization - this memoization is generally fine, but there are some cases
-# where we want to disable memoization in favor of producing fake tensors anew. In dynamo, the
+# where we want to avoid this memoization in favor of producing fake tensors anew. In dynamo, the
 # case for when this happens is when we call a backend. All backends are invoked with a fresh fake_mode
 # because after dynamo trace, the memoized tensors reflect the state of the fake tensor *at the end* of
 # trace, rather than at the beginning.
