@@ -2455,7 +2455,6 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
-    input_dtype = torch.float if not input.is_floating_point() else input.dtype
     offset = 0.5 if exact else 0.0
 
     for d in range(num_spatial_dims):
@@ -2475,7 +2474,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
 
-        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
+        output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
         input_indices = ((output_indices + offset) * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)

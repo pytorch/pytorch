@@ -102,7 +102,7 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.upsample_nearest2d,
-        # aten._upsample_nearest_exact2d,
+        aten._upsample_nearest_exact2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
     ]
