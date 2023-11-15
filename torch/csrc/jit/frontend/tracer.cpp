@@ -679,14 +679,12 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Generator>& value) {
-  Graph* g = n->owningGraph();
-
   if (value.has_value() && value->defined()) {
-    detail::genericAddInput(n, *value);
-  } else {
-    Value* undef_gen = g->insertNode(g->createNone())->output();
-    n->addInput(undef_gen);
+    detail::badArgType(*value);
   }
+  Graph* g = n->owningGraph();
+  Value* undef_gen = g->insertNode(g->createNone())->output();
+  n->addInput(undef_gen);
 }
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
