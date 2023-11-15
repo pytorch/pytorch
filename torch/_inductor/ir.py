@@ -4155,11 +4155,11 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x, device):
         if (
             not x.is_extern()
-            and not config.split_const_graph
             and all(
                 (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
                 for r in x.get_reads()
             )
+            and (not V.graph.aot_mode or not config.split_const_graph)
         ):
             return x.constant_to_device(device)
 
