@@ -393,6 +393,8 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) {
+      // Note [ Persisting PyErr state across autograd engine threads ]
+      //
       // Throw a python_error with the PyErr state persisted so that we don't
       // lose the error state when returning to the cpu thread. Ordinarily, if
       // we were calling into python during backward, e.g. executing a hook
