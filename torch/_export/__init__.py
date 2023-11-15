@@ -491,15 +491,6 @@ def _export_to_torch_ir(
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
 
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
     constraints = constraints or []
     kwargs = kwargs or {}
 
@@ -796,7 +787,7 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
-    lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
+    tensor_constants = lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
     _replace_sym_size_ops_pass(gm)
     exported_program = ExportedProgram(
         gm,
@@ -809,6 +800,7 @@ def _export(
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         (args, kwargs),
+        tensor_constants=tensor_constants,
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
@@ -834,17 +826,20 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
-    from .serde.serialize import serialize
+    from .serde.serialize import serialize, SerializedArtifact
     from .serde.schema import SCHEMA_VERSION
-    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version)
 
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
-        # Save serialized_ep and serialized_state_dict to the zip file
-        zipf.writestr('serialized_exported_program.json', serialized_program)
-        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        # Save every field the SerializedArtifact to a file
+        for field in dataclasses.fields(artifact):
+            field_name = field.name
+            serialized_field = getattr(artifact, field_name)
+            zipf.writestr(f"serialized_{field_name}.json", serialized_field)
+
         zipf.writestr('version', str(SCHEMA_VERSION))
 
         # Add extra files if provided
@@ -874,13 +869,18 @@ def load(
                 f"schema version {SCHEMA_VERSION}."
             )
 
+        from .serde.serialize import deserialize, SerializedArtifact
+
         # Load serialized_ep and serialized_state_dict from the zip file
-        serialized_ep = zipf.read('serialized_exported_program.json')
-        serialized_state_dict = zipf.read('serialized_state_dict.json')
+        artifact: SerializedArtifact = SerializedArtifact(
+            **{
+                field.name: zipf.read(f"serialized_{field.name}.json")
+                for field in dataclasses.fields(SerializedArtifact)
+            }
+        )
 
         # Deserialize ExportedProgram
-        from .serde.serialize import deserialize
-        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+        ep = deserialize(artifact)
 
         # Populate extra_files map
         if extra_files is not None:

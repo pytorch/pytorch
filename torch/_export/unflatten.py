@@ -464,7 +464,7 @@ class ModuleFrame:
 
     def copy_node(self, node):
         self.print("copying", node.format_node())
-        self.node_map[node] = self.graph.node_copy(node, lambda n: self.remap_input(n))
+        self.node_map[node] = self.graph.node_copy(node, self.remap_input)
         self.seen_nodes[node.name] = node
 
     def run_outer(self):
