@@ -5,7 +5,7 @@ import logging
 
 import torch
 
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 
 from torch._inductor.utils import do_bench, do_bench_using_profiling
 
@@ -33,4 +33,6 @@ class TestBench(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests("cuda")
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(triton=True)

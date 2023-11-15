@@ -1,8 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
-#include <type_traits>
-
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
@@ -363,8 +361,6 @@ void addMetadataJson(const std::string& key, const std::string& value) {
 
 void profilerStep() {
 #ifdef USE_KINETO
-  libkineto::api().initProfilerIfRegistered();
-
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().step();
   } else {
