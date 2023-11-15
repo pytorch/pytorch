@@ -1147,11 +1147,6 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
-    # ctypes limits the number of args to 1024, refer to:
-    # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
-    # We set a conservative threshold here.
-    MAX_FUSED_KERNEL_ARGS_NUM = 500
-
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
@@ -2196,8 +2191,7 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
             if device is not None:
-                args_num = self.get_backend(device).get_num_args()
-                if args_num > Scheduler.MAX_FUSED_KERNEL_ARGS_NUM:
+                if self.get_backend(device).ready_to_flush():
                     self.flush()
 
         self.flush()
@@ -2233,12 +2227,6 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def get_num_args(self):
-        """
-        Returns number of args for the kernel being scheduled. Returns -1 if not supported.
-        """
-        return -1
-
     def codegen_template(
         self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
@@ -2259,6 +2247,12 @@ class BaseScheduling:
     def codegen_sync(self):
         """
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
+        """
+        raise NotImplementedError()
+
+    def ready_to_flush(self) -> bool:
+        """
+        Check whether the backend is request scheduler flush the generated kernel.
         """
         raise NotImplementedError()
 

@@ -2793,11 +2793,16 @@ class CppKernelProxy(CppKernel):
 
 
 class CppScheduling(BaseScheduling):
+    # ctypes limits the number of args to 1024, refer to:
+    # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
+    # We set a conservative threshold here.
+    MAX_FUSED_KERNEL_ARGS_NUM = 500
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.get_kernel_group()
         self._ready_to_flush = False
-        
+
     def set_flush_status(self, status: bool):
         self._ready_to_flush = status
 
@@ -2846,9 +2851,13 @@ class CppScheduling(BaseScheduling):
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
+        args_num = self.get_num_args()
+        if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
+            self.set_flush_status(True)
+
     def get_num_args(self):
         return self.kernel_group.get_num_args()
-    
+
     def ready_to_flush(self):
         return self._ready_to_flush
 
