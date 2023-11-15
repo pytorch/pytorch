@@ -463,7 +463,6 @@ auto handle_torch_function_no_python_arg_parser(
   // In theory we could remove their __torch_dispatch__, but both of these
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
   // which would mean a mode would be **required** to access their metadata.
-
   if (is_mode_active()) {
     // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
     // modes, which will always be at the bottom of the mode stack).

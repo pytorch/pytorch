@@ -54,7 +54,8 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
+        key = self.__dict__.get("_dispatch_key", None)
+        _push_mode(self, key)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -84,7 +85,7 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):
-    if k is not None:
+    if k is not None and k != DispatchKey.PreDispatch:
         from torch._ops import push_mode_for_key, get_cached_ops
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         # Clear the cache of every op that has been used so far, for this particular key.
@@ -94,11 +95,19 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
                 op._uncache_dispatch(key)
         push_mode_for_key(k, mode)
     else:
-        _push_on_torch_dispatch_stack(mode)
+        if k is None:
+            _push_on_torch_dispatch_stack(mode)
+        else:
+            _push_on_torch_dispatch_stack(mode, True)
+
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
-    if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
+    if k is None or isinstance(k, torch._C._TorchDispatchModeKey) or k == torch._C.DispatchKey.PreDispatch:
+        if k == torch._C.DispatchKey.PreDispatch:
+            a = _pop_torch_dispatch_stack(None, True)
+            return a
+        assert k is None or isinstance(k, torch._C._TorchDispatchModeKey)
         return _pop_torch_dispatch_stack(k)
     from torch._ops import pop_mode_for_key
     # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".

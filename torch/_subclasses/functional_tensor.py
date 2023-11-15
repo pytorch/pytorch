@@ -166,7 +166,7 @@ class FunctionalTensor(torch.Tensor):
         # _mirror_autograd_meta_to queries tensor sizes,
         # and otherwise the sym_size() call will go to the proxy mode before hitting
         # FunctionalTensor.__torch_dispatch__
-        with FunctionalTensorMode():
+        with FunctionalTensorMode(pre_dispatch=True):
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
             out = FunctionalTensor(x_functional)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
@@ -190,7 +190,7 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self, pre_dispatch=False):
         self.is_on_stack = False
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
@@ -198,11 +198,15 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
         self.decompose_composite_implicit_ops = True
+        self.pre_dispatch = pre_dispatch
+        self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         if (
-            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+            torch._C._get_dispatch_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL, self.pre_dispatch
+            )
             is None
         ):
             self.enter_stack.append(True)
@@ -283,9 +287,11 @@ class FunctionalTensorMode(TorchDispatchMode):
             | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
         exclude_to_set = (
-            torch._C._dispatch_tls_local_exclude_set().remove(
-                torch._C.DispatchKey.Functionalize
+            torch._C._dispatch_tls_local_exclude_set()
+            .remove(
+                torch._C.DispatchKey.Functionalize,
             )
+            .remove(torch._C.DispatchKey.PreDispatch)
             - FunctionalTensor._extra_dispatch_keys
         )
         # All we want to do here is re-use the existing C++ functionalization logic.

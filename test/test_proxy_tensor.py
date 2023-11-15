@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
@@ -442,6 +443,32 @@ def forward(self, x_1):
                 for node in traced.graph.nodes
             )
         )
+
+    def test_pre_dispatch_functionalization(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                y = y + x_unwrapped
+                y.mul_(5)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO this is wrong but probs trivial to fix
+        # basically find where functional ops go during functionalzation
+        # and add predispatch key there
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    _tensor_constant0 = self._tensor_constant0
+    mul = torch.ops.aten.mul.Tensor(_tensor_constant0, 5);  _tensor_constant0 = None
+    return mul""")
 
     def test_val_metadata_mutation(self):
         def f(x):

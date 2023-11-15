@@ -656,6 +656,7 @@ def emit_inplace_functionalization_body(
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
+          c10::impl::IncludeDispatchKeyGuard include_guard(DispatchKey::PreDispatch);
           tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
         }}
         {wrap_propagate_mutations_and_return(f, g.functional, 'tmp_output')}
