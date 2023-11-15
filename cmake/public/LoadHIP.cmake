@@ -11,6 +11,10 @@ else()
   set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
 endif()
 
+if(NOT EXISTS ${HIP_PATH})
+  return()
+endif()
+
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
