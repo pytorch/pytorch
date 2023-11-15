@@ -87,7 +87,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
             self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
 
-            # redistribute the tensor back to its original placment for comparison.
+            # redistribute the tensor back to its original placement for comparison.
             state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
                 device_mesh,
                 placements=original_placement,

@@ -21,6 +21,8 @@ AOTIModelRunner::AOTIModelRunner(
       model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
   run_func_ = reinterpret_cast<decltype(run_func_)>(
       model_so_->sym("AOTInductorModelContainerRun"));
+  get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
+      model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       create_func_(&container_handle_, num_models, is_cpu, cubin_dir));
@@ -57,6 +59,15 @@ std::vector<at::Tensor> AOTIModelRunner::run(
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::vector<const char*> AOTIModelRunner::get_call_spec() {
+  const char* in_spec;
+  const char* out_spec;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_call_spec_func_(container_handle_, &in_spec, &out_spec));
+  std::vector<const char*> call_spec = {in_spec, out_spec};
+  return call_spec;
 }
 
 } // namespace torch::inductor

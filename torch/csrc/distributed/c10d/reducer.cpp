@@ -291,8 +291,11 @@ void Reducer::initialize_local_used_map() {
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
-  // work if we always put it on CPU.
-  options = options.device(params_[0].device());
+  // work if we always put it on CPU. The dist backend for MTIA doesn't support
+  // int32 allreduce for now, so it has to be placed on CPU.
+  options = options.device(
+      (params_[0].is_mtia()) ? c10::Device(c10::DeviceType::CPU)
+                             : params_[0].device());
   local_used_map_dev_ = at::empty({static_cast<long>(variable_count)}, options);
 }
 
@@ -2303,6 +2306,19 @@ void Reducer::remove_autograd_hooks() {
 void Reducer::check_finalized() {
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
+}
+
+void Reducer::update_process_group(
+    c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  process_group_ = std::move(new_process_group);
+}
+
+void Reducer::force_bucket_rebuild() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  has_rebuilt_bucket_ = false;
+  rebuilt_params_.clear();
+  rebuilt_param_indices_.clear();
 }
 
 } // namespace c10d

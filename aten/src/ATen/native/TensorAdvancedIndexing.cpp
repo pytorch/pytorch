@@ -1880,6 +1880,27 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
+Tensor masked_scatter_backward_symint(
+    const Tensor& grad,
+    const Tensor& mask,
+    c10::SymIntArrayRef sizes) {
+  c10::SymInt numel = 1;
+  for (const auto& size : sizes) {
+    numel *= size;
+  }
+  auto mask_selected = grad.masked_select(mask);
+  auto diff_nelem = numel - mask_selected.sym_numel();
+  if (diff_nelem > 0) {
+    // because mask_selected returns a 1-d tensor with size of masked elements
+    // that are 1, we need to fill out the rest with zeros then reshape back to
+    // tensor2's size.
+    auto zeros_fillin =
+        at::zeros_symint({std::move(diff_nelem)}, grad.options());
+    mask_selected = at::cat({mask_selected, std::move(zeros_fillin)}, 0);
+  }
+  return mask_selected.view_symint(sizes);
+}
+
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
   NoNamesGuard guard;
   TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_fill_ only supports boolean masks, but got mask "
@@ -2312,8 +2333,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (const auto j : c10::irange(n1)) {
-            (void)j; //Suppress unused variable warning
+          for (C10_UNUSED const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

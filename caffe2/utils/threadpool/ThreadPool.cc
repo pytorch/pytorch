@@ -2,7 +2,7 @@
 #include "WorkersPool.h"
 #include "caffe2/core/logging.h"
 
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #else
 #include <thread>
@@ -45,7 +45,7 @@ namespace {
 }
 
 size_t getDefaultNumThreads() {
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 

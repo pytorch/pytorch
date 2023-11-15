@@ -667,6 +667,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str time_us_s = "time_us";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -782,6 +783,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           te.addr_;
       trace_entry[size_s] = te.size_;
       trace_entry[stream_s] = int64_t(te.stream_);
+      trace_entry[time_us_s] = te.time_.t_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -890,10 +892,22 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      // HIP-only property; reuse name attribute for CUDA builds
+      .def_readonly(
+          "gcnArchName",
+#if USE_ROCM
+          &cudaDeviceProp::gcnArchName
+#else
+          &cudaDeviceProp::name
+#endif // USE_ROCM
+          )
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
+#if USE_ROCM
+               << ", gcnArchName='" << prop.gcnArchName << "'"
+#endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ")";
@@ -1479,6 +1493,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
+    {"_nccl_version_suffix",
+     THCPModule_nccl_version_suffix,
+     METH_NOARGS,
+     nullptr},
     {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
     {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
     {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},

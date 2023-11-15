@@ -13,6 +13,7 @@ from .optimizer import (
     _get_value,
     _stack_if_compiling,
     _use_grad_for_differentiable,
+    _view_as_real,
 )
 
 __all__ = ["RAdam", "radam"]
@@ -371,16 +372,16 @@ def _multi_tensor_radam(
         grouped_state_steps,
     ), _) in grouped_tensors.values():
         # Update steps
-        torch._foreach_add_(grouped_state_steps, 1)
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
         if has_complex:
-            for i in range(len(grouped_params)):
-                if torch.is_complex(grouped_params[i]):
-                    grouped_params[i] = torch.view_as_real(grouped_params[i])
-                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
-                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
-
+            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
 
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1

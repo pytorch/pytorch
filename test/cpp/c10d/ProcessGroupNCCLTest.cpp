@@ -438,7 +438,7 @@ void testSparseAllreduce(const std::string& path, int rank, int size) {
       // row indices
       EXPECT_EQ(sizes[1], inputDim);
     } else if (sizes[0] == 2) {
-      // coorindate indices
+      // coordinate indices
       EXPECT_EQ(sizes[1], inputDim * inputDim);
     }
 
@@ -489,7 +489,7 @@ void testSparseAllreduceLarge(const std::string& path, int rank, int size) {
       // row indices
       EXPECT_EQ(sizes[1], inputDim);
     } else if (sizes[0] == 2) {
-      // coorindate indices
+      // coordinate indices
       EXPECT_EQ(sizes[1], inputDim * inputDim);
     }
 
@@ -734,6 +734,7 @@ void testSequenceNumInit(
 class ProcessGroupNCCLTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    c10::initLogging();
     // Use WORLD_SIZE and RANK environmental variables to do multi-node
     // distributed testing
     auto sizeEnv = std::getenv("WORLD_SIZE");
