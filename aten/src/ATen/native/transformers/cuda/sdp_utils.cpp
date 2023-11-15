@@ -262,6 +262,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_flash,
+      check_for_seq_len_0_nested_tensor,
       check_nonzero_sequence_lengths,
       check_last_dim_stride_equals_1,
       check_flash_attention_hardware_support,
