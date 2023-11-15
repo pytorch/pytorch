@@ -25,7 +25,7 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 
 from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
     TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -786,7 +786,8 @@ class serialization_method:
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
-    def _test_serialization_new_format_old_format_compat(self, device, weights_only):
+    @parametrize("weights_only", (True, False))
+    def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
         def test(f_new, f_old):
@@ -800,14 +801,10 @@ class TestBothSerialization(TestCase):
             x_old_load = torch.load(f_old, weights_only=weights_only)
             self.assertEqual(x_old_load, x_new_load)
 
-        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
-            test(f_new, f_old)
-
-    def test_serialization_new_format_old_format_compat(self, device):
-        self._test_serialization_new_format_old_format_compat(device, False)
-
-    def test_serialization_new_format_old_format_compat_safe(self, device):
-        self._test_serialization_new_format_old_format_compat(device, True)
+        with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
+            with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+                test(f_new, f_old)
+            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
