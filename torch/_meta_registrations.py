@@ -3015,7 +3015,7 @@ def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
         lambda: (f"Tensor list must have at least one tensor."),
     )
 
-    nlists = 0
+    nlists = 1
     for iarg, arg in enumerate(args[1:]):
         if isinstance(arg, list):
             nlists += 1
