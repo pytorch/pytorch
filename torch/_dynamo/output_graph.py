@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -278,12 +279,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
+        self.immutable_fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=shape_env,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.mutable_fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            allow_non_fake_inputs=True if self.export else False,
+            parent=self.immutable_fake_mode,
+        )
+        self.tracing_context: TracingContext = TracingContext(self.mutable_fake_mode)
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
