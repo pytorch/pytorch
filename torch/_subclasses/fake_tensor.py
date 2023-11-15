@@ -336,17 +336,21 @@ class FakeTensorConverter:
         memoized_only=False,
     ):
         if self.parent is not None:
-            t = self.parent.from_real_tensor(
-                fake_mode.parent,
-                t,
-                make_constant=make_constant,
-                shape_env=shape_env,
-                ignore_subclass=ignore_subclass,
-                source=source,
-                dynamic_dims=dynamic_dims,
-                constraint_dims=constraint_dims,
-                memoized_only=memoized_only,
-            )
+            # Avoid mixing modes NYI (actually, we can probably make
+            # a fake tensor that gets run in the wrong ambient fake tensor
+            # mode swap the modes properly)
+            with unset_fake_temporarily():
+                t = self.parent.from_real_tensor(
+                    fake_mode.parent,
+                    t,
+                    make_constant=make_constant,
+                    shape_env=shape_env,
+                    ignore_subclass=ignore_subclass,
+                    source=source,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
+                    memoized_only=memoized_only,
+                )
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
