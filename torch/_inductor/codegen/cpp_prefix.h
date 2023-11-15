@@ -9,15 +9,15 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -247,18 +247,23 @@ inline float flag_to_float_scalar(T src) {
   return ret;
 }
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 
 inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectorized<float> mask) {
-  at::vec::Vectorized<float> zero_vec(0);
 # if defined(CPU_CAPABILITY_AVX512)
+    at::vec::Vectorized<float> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
     return _mm512_mask_loadu_ps(zero_vec, mmask, src);
-# else // AVX2
+# elif defined(CPU_CAPABILITY_AVX2)
     auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
     return _mm256_maskload_ps(src, mmask);
+# elif defined(CPU_CAPABILITY_ZVECTOR)
+    auto result = at::vec::Vectorized<float>::loadu(src);
+    return (result & mask);
+# else
+# error Unsupported vectorization CPU capability
 # endif
 }
 
@@ -271,7 +276,7 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
   auto zero = _mm256_set1_epi16(0);
   auto temp = _mm256_mask_loadu_epi16(zero, mmask, src);
   return _mm512_inserti32x8(_mm512_castsi256_si512(temp), zero, 1);
-# else // AVX2
+# elif defined(CPU_CAPABILITY_AVX2)
   auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
   auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
   __at_align__ uint32_t mmask[8];
@@ -281,6 +286,18 @@ inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
     result[i] = mmask[i] == 0xFFFFFFFF ? src[i].x: uint16_t(0);
   }
   return at::vec::Vectorized<T>::loadu(result);
+# elif defined(CPU_CAPABILITY_ZVECTOR)
+  auto result = at::vec::Vectorized<T>::loadu(src, 8);
+  uint32_t maskdata[8] = { 0 };
+  uint16_t maskdata_dest[16] = { 0 };
+  mask.store(maskdata);
+  for (auto i = 0; i < 8; i++) {
+    maskdata_dest[i] = (maskdata[i] == 0xFFFFFFFF) ? 0xFFFF: 0;
+  }
+  auto maskvector = at::vec::Vectorized<T>::loadu(maskdata_dest);
+  return (result & maskvector);
+# else
+# error Unsupported vectorization CPU capability
 # endif
 }
 
@@ -291,7 +308,7 @@ inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vec
     auto zero = _mm_set1_epi8(0);
     auto temp = _mm_mask_loadu_epi8(zero, mmask, src);
     return _mm512_inserti64x2(_mm512_set1_epi32(0), temp, 0);
-# else // AVX2
+# elif defined(CPU_CAPABILITY_AVX2)
     auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
     auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
     __at_align__ uint32_t mmask[8];
@@ -301,6 +318,18 @@ inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vec
       result[i] = mmask[i] == 0xFFFFFFFF ? src[i]: uint8_t(0);
     }
     return at::vec::Vectorized<uint8_t>::loadu(result);
+# elif defined(CPU_CAPABILITY_ZVECTOR)
+    auto result = at::vec::Vectorized<uint8_t>::loadu(src, 8);
+    uint32_t maskdata[8];
+    uint8_t maskdata_dest[32] = { 0 };
+    mask.store(maskdata);
+    for (auto i = 0; i < 8; i++) {
+      maskdata_dest[i] = (maskdata[i] == 0xFFFFFFFF) ? 0xFF: 0;
+    }
+    auto maskvector = at::vec::Vectorized<uint8_t>::loadu(maskdata_dest);
+    return (result & maskvector);
+# else
+# error Unsupported vectorization CPU capability
 # endif
 }
 
@@ -357,6 +386,7 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
   return vec_convert_to_mask(src);
 }
 
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 template <>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int> src) {
 #if defined(CPU_CAPABILITY_AVX2)
@@ -365,6 +395,7 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int> src) {
   return at::vec::Vectorized<float>(_mm512_castsi512_ps(src));
 #endif
 }
+#endif
 
 template <>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {

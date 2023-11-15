@@ -80,8 +80,23 @@ class TestCuda(TestCase):
         torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
-        pinned_t = torch.ones(1 << 21).pin_memory()
-        self.assertTrue(pinned_t.is_pinned())
+        try:
+            pinned_t = torch.ones(1 << 21).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+            pinned_t = torch.ones(1 << 24).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+        except RuntimeError as e:
+            # Some GPUs don't support same address space on host and device side
+            pass
+
+    def test_pinned_memory_with_cudaregister_multithread(self):
+        num_threads = 4
+        threads = [threading.Thread(target=self.test_pinned_memory_with_cudaregister)
+                   for t in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     def test_cudart_register(self):
         t = torch.ones(20)

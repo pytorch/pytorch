@@ -157,7 +157,8 @@ void CommTraceLogger::recordComms(
       outSize,
       dtype,
       curInSplitSizes_,
-      curOutSplitSizes_);
+      curOutSplitSizes_,
+      world_size);
 
   ++seqnum;
 

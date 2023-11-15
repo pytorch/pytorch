@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import functools
 
 import torch
@@ -554,6 +555,54 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             hook = functools.partial(pre_hook, k=2)
             h(x).sum().backward()
             self.assertEqual(orig_grad * 2, x.grad)
+
+    def test_post_acc_grad_hook(self):
+        def hook(input_t):
+            input_t.mul_(input_t.grad)
+            input_t.grad.mul_(5)
+
+        def reg_and_mul(x, y):
+            x.register_post_accumulate_grad_hook(hook)
+            return x * y
+
+        cnts = None
+
+        def test_fn(fn):
+            fn(x, y)
+            b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True)
+            x.backward(b)
+            if cnts:
+                self.assertEqual(cnts.frame_count, 1)
+            # These same exact assertions run on both eager and compiled
+            # X goes to x*2 becaue of mul_
+            self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
+            # This test proves grad aliasing works -
+            self.assertEqual(x.grad, b * 5)
+
+        # Eager values
+        x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
+        y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        test_fn(reg_and_mul)
+
+        # Compiled
+        for backend in ["eager", "aot_eager", "inductor"]:
+            for compiled_bwd in [False, True]:
+                torch._dynamo.reset()
+                x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
+                y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+
+                cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                compiled_fn = torch._dynamo.optimize(cnts, nopython=True)(reg_and_mul)
+
+                compiled_bwd_ctx = (
+                    compiled_autograd.enable(
+                        torch.compile(backend=backend, fullgraph=True)
+                    )
+                    if compiled_bwd
+                    else contextlib.nullcontext()
+                )
+                with compiled_bwd_ctx:
+                    test_fn(compiled_fn)
 
 
 if __name__ == "__main__":
