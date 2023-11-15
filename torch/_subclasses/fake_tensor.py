@@ -325,7 +325,7 @@ class FakeTensorConverter:
     def from_real_tensor(
         self,
         fake_mode,
-        t,
+        orig_t,
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
@@ -335,6 +335,9 @@ class FakeTensorConverter:
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
     ):
+        if make_constant:
+            assert not isinstance(orig_t, FakeTensor)
+
         if self.parent is not None:
             # Avoid mixing modes NYI (actually, we can probably make
             # a fake tensor that gets run in the wrong ambient fake tensor
@@ -342,7 +345,7 @@ class FakeTensorConverter:
             with unset_fake_temporarily():
                 t = self.parent.from_real_tensor(
                     fake_mode.parent,
-                    t,
+                    orig_t,
                     make_constant=make_constant,
                     shape_env=shape_env,
                     ignore_subclass=ignore_subclass,
@@ -351,6 +354,8 @@ class FakeTensorConverter:
                     constraint_dims=constraint_dims,
                     memoized_only=memoized_only,
                 )
+        else:
+            t = orig_t
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -376,7 +381,7 @@ class FakeTensorConverter:
                     fake_mode,
                     make_meta_t(),
                     existing_device,
-                    constant=t if make_constant else None,
+                    constant=orig_t if make_constant else None,
                 )
 
         out = self.meta_converter(
@@ -1169,6 +1174,7 @@ class FakeTensor(torch.Tensor):
             )
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
+        assert not isinstance(constant, FakeTensor)
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]

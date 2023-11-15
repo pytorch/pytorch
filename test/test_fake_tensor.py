@@ -580,6 +580,15 @@ class FakeTensorTest(TestCase):
             a2 = mode2.from_tensor(a)
         self.assertTrue(free_symbols(a2.size(0)))
 
+    def test_fake_of_fake_constant(self):
+        mode1 = FakeTensorMode()
+        mode2 = FakeTensorMode(parent=mode1)
+        # Should not segfault
+        with mode2:
+            x = torch.tensor([2])
+
+        self.assertEqual(x.constant, torch.tensor([2]))
+
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
