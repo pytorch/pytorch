@@ -901,6 +901,14 @@ def get_report_path(argv=UNITTEST_ARGS, pytest=False):
     return test_report_path
 
 
+def get_cov_path(argv=UNITTEST_ARGS):
+    test_filename = sanitize_test_filename(arvg[0])
+    cov_reportdir = os.path.join(os.path.join("test-reports", "cov-info"), test_filename)
+    os.makdirs(cov_reportdir)
+    cov_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.json")
+    return cov_report_path
+
+
 def sanitize_pytest_xml(xml_file: str):
     # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
     # consider somehow modifying the XML logger in conftest to do this instead
@@ -1028,6 +1036,8 @@ def run_tests(argv=UNITTEST_ARGS):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+            pytest_args.append(f'--cov=torch')
+            pytest_args.append(f'--cov-report=json:{get_cov_path()}')
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 

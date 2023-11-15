@@ -1649,6 +1649,7 @@ def check_pip_packages() -> None:
 
 
 def main():
+    shell("pip install pytest-cov".split(" "))
     check_pip_packages()
 
     options = parse_args()
