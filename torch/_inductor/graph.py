@@ -198,8 +198,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
-        self.collect_device_info()
-
+        self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.constant_reprs: Dict[str, str] = {}
@@ -405,23 +404,6 @@ class GraphLowering(torch.fx.Interpreter):
         if idx is not None:
             self.device_idxs.add(idx)
 
-    def collect_device_info(self):
-        # Collect device info from inputs/buffers/parameters. In some extreme case,
-        # a model may not have any input/buffer/parameter, but some graph nodes
-        # may contain device info, e.g. factory ops, and those device info will
-        # be collected when executing those nodes.
-        for node in self.module.graph.nodes:
-            if node.op == "placeholder" and isinstance(
-                node.meta.get("val", None), torch.Tensor
-            ):
-                tensor = node.meta["val"]
-                self.device_types.add(tensor.device.type)
-                self.add_device_idx(tensor.device.index)
-
-        for tensor in list(self.module.buffers()) + list(self.module.parameters()):
-            self.device_types.add(tensor.device.type)
-            self.add_device_idx(tensor.device.index)
-
     @property
     def fake_mode(self):
         return V.fake_mode
@@ -591,6 +573,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
+        self.device_types.add(example.device.type)
+        self.add_device_idx(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -731,7 +715,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
-            log.debug("lowering %s %s", LazyString(lambda: n.format_node()), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
         origins = {n}
         if n.op == "call_function":
@@ -910,20 +894,23 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, "cuda" in self.device_types):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
+        self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
             self.wrapper_code = (
-                CudaWrapperCodeGen()
-                if "cuda" in self.device_types
-                else CppWrapperCodeGen()
+                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
             )
             return
 
         device_types = self.device_types.copy()
+        # In terms of some operations that don't have input tensors, we need to
+        # check the device of the buffers.
+        for buffer in self.buffers:
+            device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
         # TODO(Eikan): Only support mixing cpu and other device now.
         assert len(device_types) <= 1, "Does not support mixing {}".format(
@@ -1011,10 +998,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             # Directly return the file path with the compiled code
             return AotCodeCache.compile(
-                self,
-                code,
-                serialized_extern_kernel_nodes,
-                cuda="cuda" in self.device_types,
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
         else:
             return self.compile_to_module().call
