@@ -19,7 +19,6 @@
 #include <c10/util/string_view.h>
 #include <cmath>
 #include <functional>
-#include <c10/macros/Export.h>
 
 /**
 * Note [SDPA Runtime Dispatch]
