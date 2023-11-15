@@ -3428,13 +3428,19 @@ class TestNestedTensorSubclass(NestedTestCase):
     def test_narrow(self, device):
         starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
         lengths = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        buffer = (
+            torch.arange(0, 10, device=device, dtype=torch.int64)
+            .unsqueeze(0).expand(5, -1).clone().detach()
+        )
         nt = torch.nested.narrow(
-            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone().detach(),
+            buffer,
             1,
             starts,
             lengths,
             layout=torch.jagged
         )
+
+        self.assertTrue(nt._is_view() and nt._base is buffer)
 
         # TODO: Use this approach when unbind is functional
         # unbinded_nt = nt.unbind()
@@ -3450,7 +3456,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        nt_contiguous, _ = jagged_from_list([a, b, c], None)
+        nt_contiguous = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
 
         starts_nc = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
         lengths_nc = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)

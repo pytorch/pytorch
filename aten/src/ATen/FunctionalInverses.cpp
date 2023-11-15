@@ -244,12 +244,17 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
 }
 
 Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, creating nested tensors isn't supported during functionalization");
     return Tensor();
 }
 
 Tensor FunctionalInverses::_nested_view_from_values_offsets_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& offsets, const Tensor& dummy) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets() during the functionalization pass. For now, creating nested tensors isn't supported during functionalization");
+    return Tensor();
+}
+
+Tensor FunctionalInverses::_nested_view_from_values_offsets_lengths_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& offsets, const Tensor& lengths, const Tensor& dummy) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets_lengths() during the functionalization pass. For now, creating nested tensors isn't supported during functionalization");
     return Tensor();
 }
 

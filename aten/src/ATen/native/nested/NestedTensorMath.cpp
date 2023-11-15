@@ -870,6 +870,16 @@ Tensor _nested_view_from_values_offsets(
   return Tensor();
 }
 
+Tensor _nested_view_from_values_offsets_lengths(
+    const Tensor& values,
+    const Tensor& offsets,
+    const Tensor& lengths,
+    const Tensor& dummy) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_view_from_values_offsets_lengths(): expected to be implemented from Python");
+  return Tensor();
+}
+
 std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
   return std::make_tuple(
       construct_nested_strides(nested_size),

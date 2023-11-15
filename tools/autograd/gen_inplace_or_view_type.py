@@ -61,6 +61,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_neg_view",
     "_nested_view_from_buffer",
     "_nested_view_from_values_offsets",
+    "_nested_view_from_values_offsets_lengths",
 ]
 
 VIEW_FUNCTIONS = {
