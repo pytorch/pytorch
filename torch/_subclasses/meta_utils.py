@@ -233,7 +233,9 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(
+            t, src, dynamic_dims=dynamic_dims, constraint_dims=constraint_dims
+        ):
             if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
@@ -256,12 +258,22 @@ class MetaConverter:
             self.check_for_expired_weak_storages()
             self.check_expired_count = 0
 
-        def empty_create(inner_t, inner_src):
+        def empty_create(
+            inner_t,
+            inner_src,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
+        ):
             (
                 inner_sizes,
                 inner_strides,
                 inner_storage_offset,
-            ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
+            ) = sym_sizes_strides_storage_offset(
+                inner_t,
+                inner_src,
+                dynamic_dims=dynamic_dims,
+                constraint_dims=constraint_dims,
+            )
             return torch.empty_strided(
                 inner_sizes,
                 inner_strides,
@@ -422,53 +434,83 @@ class MetaConverter:
                                     return t._view_func_unsafe(base)
                                 else:
                                     from torch._dynamo.source import AttrSource
-
-                                    # base is ostensibly a standard dense tensor
-                                    # fake-ify offsets then return view
-                                    offsets_src = AttrSource(source, "_offsets")  # type: ignore[arg-type]
-                                    fake_offsets = callback(
-                                        lambda: empty_create(t._offsets, offsets_src)
-                                    )
-
-                                    if t._lengths is not None:
-                                        lengths_src = AttrSource(source, "_lengths")  # type: ignore[arg-type]
-                                        fake_lengths = callback(
-                                            lambda: empty_create(
-                                                t._lengths, lengths_src
-                                            )
-                                        )
-                                    else:
-                                        fake_lengths = None
-
-                                    ragged_size = get_symbolic_ragged_size(t, source)
-
                                     from torch.nested._internal.nested_tensor import (
                                         _tensor_symint_registry,
                                         nested_view_from_values_offsets,
                                         nested_view_from_values_offsets_lengths,
                                     )
 
+                                    # Meta-ify values while maintaining proper view
+                                    # relationship with the base
+                                    view_nt = t._view_func_unsafe(base)
+                                    (
+                                        values_sizes,
+                                        values_strides,
+                                        values_storage_offset,
+                                    ) = sym_sizes_strides_storage_offset(
+                                        view_nt._values,
+                                        AttrSource(source, "_values"),  # type: ignore[arg-type]
+                                        # convert dynamic_dims from NT dim space -> values dim space
+                                        dynamic_dims=(
+                                            None
+                                            if dynamic_dims is None
+                                            else dynamic_dims[1:]
+                                        ),
+                                        constraint_dims=(
+                                            None
+                                            if constraint_dims is None
+                                            else constraint_dims[1:]
+                                        ),
+                                    )
+                                    new_values = base.as_strided(
+                                        values_sizes,
+                                        values_strides,
+                                        values_storage_offset,
+                                    )
+
+                                    # Meta-ify other attributes (e.g. offsets, lengths)
+                                    attrs, ctx = t.__tensor_flatten__()
+                                    transformed_tensors_dict = {}
+                                    for attr in attrs:
+                                        inner_t = getattr(t, attr)
+                                        if attr == "_values":
+                                            continue
+                                        transformed_tensors_dict[attr] = callback(
+                                            lambda: empty_create(
+                                                inner_t,
+                                                AttrSource(source, attr),  # type: ignore[arg-type]
+                                                dynamic_dims=None,
+                                                constraint_dims=None,
+                                            )
+                                        )
+                                    new_offsets = transformed_tensors_dict["_offsets"]
+                                    new_lengths = transformed_tensors_dict.get(
+                                        "_lengths", None
+                                    )
+
+                                    # Wrap ragged size singleton symint to make it symbolic
+                                    ragged_size = get_symbolic_ragged_size(t, source)
+
                                     # We're not calling __tensor_unflatten__() since we need a
                                     # view, but we still want to ensure the fake offsets or
                                     # lengths are associated with a symbolic ragged size.
                                     ragged_source = (
-                                        fake_offsets
-                                        if fake_lengths is None
-                                        else fake_lengths
+                                        new_offsets
+                                        if new_lengths is None
+                                        else new_lengths
                                     )
                                     _tensor_symint_registry[ragged_source] = ragged_size
 
-                                    if fake_lengths is None:
+                                    if new_lengths is None:
                                         return nested_view_from_values_offsets(
-                                            base, fake_offsets
+                                            new_values, new_offsets
                                         )
                                     else:
                                         # base is a dense tensor that is the result of narrow().
-                                        fake_values = base.flatten(0, 1)
                                         return nested_view_from_values_offsets_lengths(
-                                            fake_values,
-                                            fake_offsets,
-                                            lengths=fake_lengths,
+                                            new_values,
+                                            new_offsets,
+                                            lengths=new_lengths,
                                         )
                             else:
                                 # TODO: Handle dense view of NT when we return a proper view for
@@ -546,9 +588,27 @@ class MetaConverter:
                             transformed_tensors_dict = {}
                             for attr in attrs:
                                 inner_t = getattr(t, attr)
+                                if attr == "_values":
+                                    # convert dynamic_dims from NT dim space -> values dim space
+                                    inner_dynamic_dims = (
+                                        None
+                                        if dynamic_dims is None
+                                        else dynamic_dims[1:]
+                                    )
+                                    inner_constraint_dims = (
+                                        None
+                                        if constraint_dims is None
+                                        else constraint_dims[1:]
+                                    )
+                                else:
+                                    inner_dynamic_dims = None
+                                    inner_constraint_dims = None
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
-                                        inner_t, AttrSource(source, attr)  # type: ignore[arg-type]
+                                        inner_t,
+                                        AttrSource(source, attr),  # type: ignore[arg-type]
+                                        dynamic_dims=inner_dynamic_dims,
+                                        constraint_dims=inner_constraint_dims,
                                     )
                                 )
 

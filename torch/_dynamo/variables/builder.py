@@ -1570,7 +1570,9 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    if any(isinstance(s, SymInt) for s in e.size()):
+    from torch._prims_common import _is_singleton
+
+    if any(isinstance(s, SymInt) and not _is_singleton(s) for s in e.size()):
         return [
             DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
             for s in e.size()
@@ -1721,7 +1723,10 @@ def wrap_to_fake_tensor_and_record(
         )
 
         dynamic_dims, constraint_dims = None, None
-        if not e.is_nested:
+        if not (
+            e.is_nested
+            and not isinstance(e, torch.nested._internal.nested_tensor.NestedTensor)
+        ):
             # TODO: We should probably support this for nested tensors too
             dynamic_dims, constraint_dims = _automatic_dynamic(
                 e, tx, source.name(), static_shapes
