@@ -1254,11 +1254,12 @@ def get_guard_fail_reason(
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason: Any = False
             try:
                 fail_reason = eval(part, global_scope, scope)
             except Exception as e:
-                if not config.report_all_guard_failure_checks:
+                if config.report_all_guard_failure_checks:
+                    fail_reason = f"{part} ({repr(e)})"
+                else:
                     raise
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
