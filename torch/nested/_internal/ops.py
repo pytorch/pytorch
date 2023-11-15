@@ -888,6 +888,8 @@ def values_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
+    # TODO: Handle inference mode properly.
+    # See https://github.com/pytorch/pytorch/issues/112024#issuecomment-1779554292
     return inp._values.detach()
 
 
