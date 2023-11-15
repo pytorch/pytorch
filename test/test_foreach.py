@@ -775,11 +775,23 @@ class TestForeach(TestCase):
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
     @onlyCUDA
+    def test_0dim_tensor_overload_cpu_ok(self):
+        tensors = [torch.ones((), device="cuda", dtype=torch.float32) for _ in range(2)]
+        scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
+
+        # For mul and div, the scalar is allowed to be on CPU too
+        actual = torch._foreach_mul(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
+        actual = torch._foreach_div(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
+
+
+    @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
-            torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
+            torch._foreach_add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
 
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
