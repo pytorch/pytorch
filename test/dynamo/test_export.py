@@ -2856,7 +2856,7 @@ def forward(self, x):
         if type_access == "builtin":
             type_fn = type
         elif type_access == "class":
-            type_fn = lambda obj: obj.__class__
+            type_fn = lambda obj: obj.__class__  # noqa: E731
 
         class A:
             @classmethod
