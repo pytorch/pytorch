@@ -271,10 +271,10 @@ class FakeTensorTest(TestCase):
         mode = FakeTensorMode()
         for context in [contextlib.nullcontext, lambda: mode]:
             with context():
-                y = torch.randn(4, 2, 2, 3)
+                y = torch.randn(2, 2, 3)
                 x = torch.randn(2, 2, 3).to('cuda')
                 with self.assertRaises(RuntimeError):
-                    x[[1, 2]] = y
+                    x[[1, 1]] = y
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
