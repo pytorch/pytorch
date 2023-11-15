@@ -5293,7 +5293,9 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
     return (nbatch, channels, *output_size)
 
 
-@register_meta(aten.upsample_nearest1d.default)
+@register_meta(
+    [aten.upsample_nearest1d.default, aten._upsample_nearest_exact1d.default]
+)
 def upsample_nearest1d(input, output_size, scales=None):
     torch._check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
@@ -5307,7 +5309,9 @@ def upsample_nearest1d(input, output_size, scales=None):
     )
 
 
-@register_meta(aten.upsample_nearest2d.default)
+@register_meta(
+    [aten.upsample_nearest2d.default, aten._upsample_nearest_exact2d.default]
+)
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     torch._check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
@@ -5331,7 +5335,12 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     return output
 
 
-@register_meta(aten.upsample_nearest2d_backward.default)
+@register_meta(
+    [
+        aten.upsample_nearest2d_backward.default,
+        aten._upsample_nearest_exact2d_backward.default,
+    ]
+)
 def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.SymInt]],
@@ -5361,7 +5370,9 @@ def upsample_nearest2d_backward(
     )  # type: ignore[call-overload]
 
 
-@register_meta(aten.upsample_nearest3d.default)
+@register_meta(
+    [aten.upsample_nearest3d.default, aten._upsample_nearest_exact3d.default]
+)
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     torch._check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
