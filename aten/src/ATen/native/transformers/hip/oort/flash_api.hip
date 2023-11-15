@@ -477,17 +477,20 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
 
     dim3  grid;
-    grid.x = (q_t.sizes()[2] + 128 - 1) / 128;	// BLOCK_M = 128
+    grid.x = (q_t.sizes()[2] + 32 - 1) / 32;	// BLOCK_M = 32
     grid.y = q_t.sizes()[0] * q_t.sizes()[1];
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
+
+
+    at::Tensor softmax_fa_t = at::empty({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
     
      if(q_dtype == at::kHalf)
        {
 	if (is_causal)
 	  {
 	    constexpr int				        STAGE = 3;
-	    oort::attn_fwd<STAGE,128,64,64,true>	        fwd_opt;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
 	    auto					        err   = fwd_opt(grid, block,
 							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
@@ -495,12 +498,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
 								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
 								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
-	  }
+								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+							        *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
+	 } 
 	else
 	  {
 	    constexpr int			                STAGE = 1;
-	    oort::attn_fwd<STAGE,128,64,64, true>                fwd_opt;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
 	    auto				                err   = fwd_opt(grid, block,
 							        (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__fp16*)output_t.data_ptr(),
@@ -508,7 +512,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
 								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
 								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
+								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
 	  }
        }
      else if (q_dtype == at::kBFloat16)
@@ -516,7 +521,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      	if (is_causal)
      	  {
      	    constexpr int				        STAGE = 3;
-     	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
      	    auto					        err   = fwd_opt(grid, block,
      							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
@@ -524,12 +529,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
      								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
      								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
+     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
      	  }
      	else
      	  {
      	    constexpr int			                STAGE = 1;
-     	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+	    oort::attn_fwd<STAGE,32,64,32,true,true,true>	fwd_opt;
      	    auto				                err   = fwd_opt(grid, block,
      							        (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
 								softmax_scale, (float*)M.data_ptr(), (__bf16*)output_t.data_ptr(),
@@ -537,7 +543,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      								k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
      								v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
      								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
-     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, stream);
+     								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+								*(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__bf16*)(softmax_fa_t.data_ptr()), stream);
      	  }
        }
 
@@ -552,9 +559,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      if (seqlenq_ngroups_swapped) {
        out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
        q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
-       softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
+       softmax_fa_t = softmax_fa_t.reshape({batch_size, num_heads_k * seqlen_q, 1}); // JCG we have different dims. Verify
      }
-     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
+     return {out, q_padded, k_padded, v_padded, softmax_fa_t, seed_t, offset_t, p};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -750,9 +757,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                      window_size_left,
                      window_size_right);
 
-    // auto launch = &run_mha_bwd;
-    // launch(params, stream, /*configure=*/true);
-
     at::PhiloxCudaState philox_args;
     if (is_dropout) {
         if (at::cuda::currentStreamCaptureStatus() ==
@@ -768,7 +772,29 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
 
     //JCG TODO WE GO IN HERE TODO backwards
-    //launch(params, stream, /*configure=*/false);
+
+    // _bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
+    // 						   o, do,
+    // 						   do_scaled, delta,
+    // 						   BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
+    // 						   );
+       
+     
+    // _bwd_kernel[(ctx.grid[1],)](
+    // 				q, k, v, ctx.sm_scale,
+    // 				o, do_scaled,
+    // 				dq, dk, dv,
+    // 				L, delta,
+    // 				q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+    // 				k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+    // 				v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+    // 				q.shape[0], q.shape[1], q.shape[2],
+    // 				block_scale * ctx.grid[0],
+    // 				BLOCK_M=BLOCK, BLOCK_N=BLOCK,
+    // 				BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+    // 				CAUSAL=ctx.causal,
+    // 				num_stages=1,
+    // 				);    
 
     // For MQA/GQA we need to sum dK and dV across the groups
     if (num_heads_k != num_heads) {
