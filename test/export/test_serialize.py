@@ -216,7 +216,7 @@ class TestDeserialize(TestCase):
         def _check_graph_nodes(gm1, gm2, _check_meta=True):
             # TODO: The _check_meta flag bypasses checking for
             # source_fn/nn_module_stack as there is an issue with
-            # roundtripping the source_fn value on torch.ops.map nodes
+            # roundtripping the source_fn value on torch.ops.higher_order.map_impl nodes
             # original source_fn: <functorch.experimental._map.MapWrapper object at 0x7f80a0549930>
             # deserialized source_fn: 'functorch.experimental._map.map'
 
