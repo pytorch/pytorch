@@ -32,7 +32,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
-    from .torch_version import __version__ as __version__
+    from .torch_version import __version__ as __version__ #bad comment
+unused_var=10
 
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
