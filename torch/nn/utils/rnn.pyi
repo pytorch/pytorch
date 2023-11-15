@@ -10,12 +10,12 @@ from typing import (
     Union,
 )
 
-from torch._prims_common import DeviceLikeType
-
 from typing_extensions import Self
 
 from torch import Tensor
-from torch.types import _device, _dtype
+
+from torch._prims_common import DeviceLikeType
+from torch.types import _dtype
 
 class PackedSequence_(NamedTuple):
     data: Tensor
