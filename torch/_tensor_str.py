@@ -606,7 +606,7 @@ def _str_intern(inp, *, tensor_contents=None):
         # Accessing the grad_fn calls rebasing logic which would cause an error
         # if that tensor is a view created in no-grad mode modified in-place in
         # no-grad mode. See: https://github.com/pytorch/pytorch/issues/99968
-        grad_fn_name = "Undefined"
+        grad_fn_name = "Invalid"
 
     if grad_fn_name is None and grad_fn is not None:
         grad_fn_name = type(grad_fn).__name__
