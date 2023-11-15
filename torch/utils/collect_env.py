@@ -48,7 +48,7 @@ SystemEnv = namedtuple('SystemEnv', [
 
 
 def run(command):
-    """Returns (return-code, stdout, stderr)"""
+    """Return (return-code, stdout, stderr)."""
     shell = True if type(command) is str else False
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=shell)
@@ -64,7 +64,7 @@ def run(command):
 
 
 def run_and_read_all(run_lambda, command):
-    """Runs command using run_lambda; reads and returns entire output if rc is 0"""
+    """Run command using run_lambda; reads and returns entire output if rc is 0."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -72,7 +72,7 @@ def run_and_read_all(run_lambda, command):
 
 
 def run_and_parse_first_match(run_lambda, command, regex):
-    """Runs command using run_lambda, returns the first regex match if it exists"""
+    """Run command using run_lambda, returns the first regex match if it exists."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -82,7 +82,7 @@ def run_and_parse_first_match(run_lambda, command, regex):
     return match.group(1)
 
 def run_and_return_first_line(run_lambda, command):
-    """Runs command using run_lambda and returns first line if output is not empty"""
+    """Run command using run_lambda and returns first line if output is not empty."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -154,7 +154,7 @@ def get_running_cuda_version(run_lambda):
 
 
 def get_cudnn_version(run_lambda):
-    """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
+    """Return a list of libcudnn.so; it's hard to tell which one is being used."""
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
@@ -374,8 +374,7 @@ def get_libc_version():
 
 
 def get_pip_packages(run_lambda):
-    """Returns `pip list` output. Note: will also find conda-installed pytorch
-    and numpy packages."""
+    """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
