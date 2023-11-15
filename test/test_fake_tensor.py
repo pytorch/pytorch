@@ -563,6 +563,16 @@ class FakeTensorTest(TestCase):
         a2 = mode2.from_tensor(a)
         self.assertTrue(free_symbols(a2.size(0)))
 
+    def test_fake_parent_with_active_mode(self):
+        shape_env = ShapeEnv()
+        mode1 = FakeTensorMode(shape_env=shape_env)
+        mode2 = FakeTensorMode(parent=mode1, shape_env=shape_env)
+        a = torch.randn(4)
+        a1 = mode1.from_tensor(a, dynamic_dims=[DimDynamic.DYNAMIC])
+        with mode2:
+            a2 = mode2.from_tensor(a)
+        self.assertTrue(free_symbols(a2.size(0)))
+
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
