@@ -23,6 +23,7 @@ _default_timeout_seconds = 600
 class StaticTCPRendezvous(RendezvousHandler):
     """
     Static rendezvous that is a wrapper around the TCPStore.
+
     Creates TCPStore based on the input parameters with the
     listener on the agent with group_rank=0
     """
