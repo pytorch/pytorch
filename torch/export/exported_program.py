@@ -585,25 +585,11 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForConstraintsPass,
-        )
+        from torch._export.utils import _check_input_constraints_for_graph
 
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
+        _check_input_constraints_for_graph(
+            self.graph, self.range_constraints, self.equality_constraints
+        )(*args)
 
     def _validate(self):
         self.verifier().check(self)
