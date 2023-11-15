@@ -9788,6 +9788,78 @@ class DistributedTest:
                 running = False
                 t.join()
 
+        @skip_if_lt_x_gpu(4)
+        @require_world_size(4)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_update_process_group(self):
+            def get_num_torch_recompiles():
+                guard_failures = torch._dynamo.utils.guard_failures
+                num_recompiles = [len(guard_failures[code]) for code in guard_failures]
+                return 0 if len(num_recompiles) == 0 else max(num_recompiles)
+
+            input = torch.rand(10, 10).cuda(self.rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(10, 10).cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            model = torch.compile(ddp)
+
+            def run_iteration():
+                out = model(input)
+                out.sum().backward()
+                torch.cuda.synchronize()
+
+            # Run regular iteration.
+            run_iteration()
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
+
+            # Now reduce world_size and run iteration.
+            group_size_2 = dist.new_group(ranks=[0, 1])
+            ddp._update_process_group(group_size_2)
+            if self.rank in [0, 1]:
+                run_iteration()
+
+            # Increase the world size and run iteration.
+            group_size_3 = dist.new_group(ranks=[1, 2, 3])
+            ddp._update_process_group(group_size_3)
+            if self.rank in [1, 2, 3]:
+                run_iteration()
+
+            # Back to default size.
+            ddp._update_process_group(_get_default_group())
+            run_iteration()
+
+            # Now create default pg of smaller size.
+            dist.destroy_process_group()
+
+            if self.rank in [1, 2, 3]:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=BACKEND,
+                    world_size=3,
+                    rank=self.rank - 1,
+                    timeout=timedelta(seconds=default_pg_timeout),
+                )
+                ddp._update_process_group(_get_default_group())
+                run_iteration()
+                dist.destroy_process_group()
+
+            # Need to init pg again for "_barrier" to succeed.
+            dist.init_process_group(
+                init_method=self.init_method,
+                backend=BACKEND,
+                world_size=4,
+                rank=self.rank,
+                timeout=timedelta(seconds=default_pg_timeout),
+            )
+
+            # Validate no more recompiles.
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
 
 
         @skip_if_lt_x_gpu(2)

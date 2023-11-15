@@ -364,20 +364,23 @@ def _do_annotate_conv_bn(
     The output of the pattern must include a dictionary from string name to node
     for the following names: "input", "conv", "weight", "bias", and "output".
     """
-    def get_pattern(conv_fn: Callable):
+
+    def get_pattern(conv_fn: Callable, relu_is_inplace: bool):
         def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
             conv = conv_fn(x, conv_weight, conv_bias)
             bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
             if has_relu:
-                output = F.relu(bn)
+                output = F.relu_(bn) if relu_is_inplace else F.relu(bn)
             else:
                 output = bn
             return output, {
                 "input": x,
+                "conv": conv,
                 "weight": conv_weight,
                 "bias": conv_bias,
                 "output": output,
             }
+
         return _conv_bn
 
     # Needed for matching, otherwise the matches gets filtered out due to unused
@@ -390,15 +393,17 @@ def _do_annotate_conv_bn(
         (F.conv2d, _conv2d_bn_example_inputs),
     ]
 
-    # Add cuda dimension
-    new_combinations = [(x, y, False) for (x, y) in combinations]
-    if torch.cuda.is_available():
-        new_combinations.extend([(x, y, True) for (x, y) in combinations])
-    combinations = new_combinations
+    # Add `is_cuda` and `relu_is_inplace` dimensions
+    combinations = itertools.product(
+        combinations,
+        [True, False] if torch.cuda.is_available() else [False],  # is_cuda
+        [True, False] if has_relu else [False],                   # relu_is_inplace
+    )
 
     # Match against all conv dimensions and cuda variants
-    for conv_fn, example_inputs, is_cuda in combinations:
-        pattern = get_aten_graph_module(get_pattern(conv_fn), example_inputs, is_cuda)
+    for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:
+        pattern = get_pattern(conv_fn, relu_is_inplace)
+        pattern = get_aten_graph_module(pattern, example_inputs, is_cuda)
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
@@ -409,32 +414,23 @@ def _do_annotate_conv_bn(
     for match in matches:
         name_node_map = match.name_node_map
         input_node = name_node_map["input"]
+        conv_node = name_node_map["conv"]
         weight_node = name_node_map["weight"]
         bias_node = name_node_map["bias"]
         output_node = name_node_map["output"]
 
-        # Find conv node and validate its args
-        if len(input_node.users) != 1:
-            raise ValueError("Expected input node to be consumed by conv only")
-        if len(weight_node.users) != 1:
-            raise ValueError("Expected weight node to be consumed by conv only")
-        input_user = list(input_node.users.keys())[0]
-        weight_user = list(weight_node.users.keys())[0]
-        if weight_user is not input_user:
-            raise ValueError("Expected weight user to be the same as input user")
-        conv_node = input_user
-        partition = [conv_node, weight_node]
-
-        # Validate conv bias if it exists
-        if bias_node is not None:
-            if len(bias_node.users) != 1:
-                raise ValueError("Expected bias node to be consumed by conv only")
-            bias_user = list(bias_node.users.keys())[0]
-            if bias_user is not input_user:
-                raise ValueError("Expected bias user to be the same as input user")
-            partition.append(bias_node)
+        # Validate conv args
+        if conv_node.args[0] is not input_node:
+            raise ValueError("Conv arg did not contain input node ", input_node)
+        if conv_node.args[1] is not weight_node:
+            raise ValueError("Conv arg did not contain weight node ", weight_node)
+        if len(conv_node.args) > 2 and conv_node.args[2] is not bias_node:
+            raise ValueError("Conv arg did not contain bias node ", bias_node)
 
         # Skip if the partition is already annotated or is filtered out by the user
+        partition = [conv_node, weight_node]
+        if bias_node is not None:
+            partition.append(bias_node)
         if _is_annotated(partition):
             continue
         if filter_fn and any(not filter_fn(n) for n in partition):
@@ -457,6 +453,7 @@ def _do_annotate_conv_bn(
         _mark_nodes_as_annotated(partition)
         annotated_partitions.append(partition)
     return annotated_partitions
+
 
 @register_annotator("gru_io_only")
 def _annotate_gru_io_only(
