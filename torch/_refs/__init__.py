@@ -1969,7 +1969,7 @@ def _to_dispatch(*args, **kwargs):
 
 @_to_dispatch.register
 def _to_device(
-    device: DeviceLikeType,
+    device: torch.device,
     dtype: torch.dtype,
     non_blocking: bool = False,
     copy: bool = False,
