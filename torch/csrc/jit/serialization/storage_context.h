@@ -62,9 +62,9 @@ class TORCH_API DeserializationStorageContext {
       const DeserializationStorageContext&) = delete;
   DeserializationStorageContext(const DeserializationStorageContext&) = delete;
 
-  void addStorage(const std::string& name, const c10::Storage& storage) {
+  void addStorage(std::string name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
-    name_storage_map_.insert({name, storage});
+    name_storage_map_.emplace(std::move(name), std::move(storage));
   }
 
   bool hasStorage(const std::string& name) {
