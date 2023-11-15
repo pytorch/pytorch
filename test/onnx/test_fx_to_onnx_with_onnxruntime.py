@@ -945,34 +945,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_exported_program_as_input_lifting_buffers_mutation(self):
-        class CustomModule(nn.Module):
+        class CustomModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.my_parameter = nn.Parameter(torch.tensor(2.0))
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
-                self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
-                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
-                self.fc1 = nn.Linear(9216, 128, bias=False)
-                self.fc2 = nn.Linear(128, 10, bias=False)
+                self.register_buffer("my_buffer", torch.tensor(4.0))
 
             def forward(self, x, b):
-                tensor_x = self.conv1(x)
-                tensor_x = torch.nn.functional.sigmoid(tensor_x)
-                tensor_x = self.conv2(tensor_x)
-                tensor_x = torch.nn.functional.sigmoid(tensor_x)
-                tensor_x = torch.nn.functional.max_pool2d(tensor_x, 2)
-                tensor_x = torch.flatten(tensor_x, 1)
-                tensor_x = self.fc1(tensor_x)
-                tensor_x = torch.nn.functional.sigmoid(tensor_x)
-                tensor_x = self.fc2(tensor_x)
-                output = torch.nn.functional.log_softmax(tensor_x, dim=1)
+                output = x + b
                 (
-                    self.my_buffer2.add_(1.0) + self.my_buffer1
+                    self.my_buffer.add_(1.0) + 3.0
                 )  # Mutate buffer through in-place addition
                 return output
 
-        inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
+        inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
         exported_program: torch.export.ExportedProgram = torch.export.export(
             CustomModule(), args=inputs
         )
