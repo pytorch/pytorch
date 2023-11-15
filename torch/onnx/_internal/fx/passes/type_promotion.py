@@ -138,6 +138,12 @@ class TypePromotionRule(abc.ABC):
 class ElementwiseTypePromotionRule(TypePromotionRule):
     """Defines how to perform elementwise type promotion for 'torch.ops.{namespace}.{op_name}'."""
 
+    _USE_OPMATH: bool = False
+    """Whether to use opmath to compute the promoted input dtype.
+    If used, upcasts will be inserted everywhere for lower precision models.
+    Set to False and have torchlib handle upcasts in op implementation internally.
+    """
+
     def __init__(
         self,
         namespace: str,
@@ -199,9 +205,11 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             type_promotion_kind=self.promotion_kind,
         )
 
+        consolidated_input_dtype = computed_dtype if self._USE_OPMATH else result_dtype
+
         return TypePromotionSnapshot(
-            {i: computed_dtype for i in candidate_args.keys()},
-            {name: computed_dtype for name in candidate_kwargs.keys()},
+            {i: consolidated_input_dtype for i in candidate_args.keys()},
+            {name: consolidated_input_dtype for name in candidate_kwargs.keys()},
             result_dtype,
         )
 
