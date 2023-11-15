@@ -50,7 +50,7 @@ PyObject* THPGradientEdgeClass = nullptr;
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
-    throw python_error();                  \
+    throw_python_error();                  \
   }
 
 // Anonymous namespace for helpful functions used in this file
@@ -60,7 +60,10 @@ namespace {
 // error immediately at the callsite) instead of doing `raise python_error()`
 // and relying on the engine to persist for us. But, removing this seems to
 // cause the following test to fail:
-// python test/distributed/rpc/test_tensorpipe_agent.py -k test_backward_autograd_engine_error
+//
+// python test/distributed/rpc/test_tensorpipe_agent.py -k
+// test_backward_autograd_engine_error
+//
 // See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
   python_error err;

@@ -28,12 +28,12 @@ static void check_single_result(
 
 namespace {
 
-  // See TODO in python_function.cpp where this function is also duplicated.
-  void throw_python_error() {
-    python_error err;
-    err.persist();
-    throw std::move(err);
-  }
+// See TODO in python_function.cpp where this function is also duplicated.
+void throw_python_error() {
+  python_error err;
+  err.persist();
+  throw std::move(err);
+}
 
 } // namespace
 
