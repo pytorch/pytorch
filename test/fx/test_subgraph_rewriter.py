@@ -381,7 +381,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         Here, we want to be able to match the original graph's
         `call_function.add` Node with the pattern graph's
-        `plaeholder.x` Node.
+        `placeholder.x` Node.
 
         Credit to Jerry Zhang (GitHub: jerryzh168) for this test case
         """

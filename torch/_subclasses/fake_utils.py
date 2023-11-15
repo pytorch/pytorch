@@ -11,7 +11,6 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
 
 
 aten = torch._ops.ops.aten
@@ -43,6 +42,25 @@ def output_alias_each_other(outputs):
         if stor in storages:
             return True
         storages.add(stor)
+    return False
+
+
+def is_sdpa_error(func, idx, e):
+    if (
+        func is aten._scaled_dot_product_flash_attention.default
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
+    if (
+        (
+            func is aten._scaled_dot_product_efficient_attention.default
+            or func is aten._efficient_attention_forward.default
+        )
+        and idx in (2, 3)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
@@ -101,8 +119,8 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         r = func(*args, **kwargs)
         if fake_r is not None:
-            r_flat, _ = tree_flatten(r)
-            f_flat, _ = tree_flatten(fake_r)
+            r_flat = pytree.tree_leaves(r)
+            f_flat = pytree.tree_leaves(fake_r)
             assert len(f_flat) == len(
                 r_flat
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
@@ -128,7 +146,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                 )
 
             for idx, (r_out, fake_out) in enumerate(
-                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+                zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
             ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
@@ -156,17 +174,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                             allow_rhs_unbacked=True,
                         )
                     except Exception as e:
-                        if (
-                            func is aten._scaled_dot_product_flash_attention.default
-                            and idx in (6, 7)
-                            and "Devices" in repr(e)
-                        ):
-                            continue
-                        if (
-                            func is aten._scaled_dot_product_efficient_attention.default
-                            and idx in (2, 3)
-                            and "Devices" in repr(e)
-                        ):
+                        if is_sdpa_error(func, idx, e):
                             continue
                         error_message = (
                             f"{context} mismatched tensor metadata: {e}"
