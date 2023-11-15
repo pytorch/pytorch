@@ -3,7 +3,7 @@ import json
 import pathlib
 import sys
 import unittest
-from typing import Any, Dict, Set
+from typing import Any, Dict, List, Set
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -18,6 +18,9 @@ try:
         TestPrioritizations,
     )
     from tools.testing.target_determination.heuristics import HEURISTICS
+    from tools.testing.target_determination.heuristics.interface import (
+        HeuristicInterface,
+    )
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
         _get_previously_failing_tests,
     )
@@ -33,6 +36,22 @@ def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     json.dump(contents, file_object)
     file_object.seek(0)
     return file_object
+
+
+class DummyHeuristicOne(HeuristicInterface):
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+
+    def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
+        return TestPrioritizations(tests_being_ranked=tests)
+
+    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
+        return {test: 1 for test in tests}
+
+
+class DummyHeuristicTwo(DummyHeuristicOne):
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
 
 
 class TestParsePrevTests(HeuristicsTestMixin):
@@ -414,6 +433,28 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_probable_tests=expected_aggregated_probable_relevance,
             expected_unranked_tests=expected_aggregated_unranked_relevance,
         )
+
+    def test_add_test_mode_heuristics_with_class_granularity(self) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test2::TestFooClass"],
+        )
+
+        failing_test_run = TestRun(
+            "test2"
+        )  # Since the class level heuristic is a trial one, only the full test can fail
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(DummyHeuristicOne(), heuristic1)
+        aggregator.add_heuristic_results(DummyHeuristicTwo(trial_mode=True), heuristic2)
+
+        # This should not throw an error
+        aggregator.get_test_stats(failing_test_run)
 
 
 if __name__ == "__main__":
