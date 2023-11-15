@@ -52,7 +52,7 @@ from torch.utils.weak import WeakIdRef
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+    pass
 
 DimList = List
 
@@ -329,8 +329,7 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        policy=None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -367,8 +366,7 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -404,8 +402,7 @@ class FakeTensorConverter:
         shape_env=None,
         ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        policy=None,
         memoized_only=False,
     ):
         return self.from_real_tensor(
@@ -415,8 +412,7 @@ class FakeTensorConverter:
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
@@ -1859,8 +1855,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        policy=None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1869,9 +1864,7 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
+            assert policy is None, "cannot set both static_shapes and policy"
             shape_env = None
         return self.fake_tensor_converter(
             self,
@@ -1879,8 +1872,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
