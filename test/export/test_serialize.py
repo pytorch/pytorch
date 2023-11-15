@@ -84,7 +84,7 @@ class TestSerialize(TestCase):
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
-        # aten::native_layer_norm returns 3 tensnors
+        # aten::native_layer_norm returns 3 tensors
         self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
@@ -423,7 +423,9 @@ class TestDeserialize(TestCase):
     def test_tensor_tensor_list(self):
         from torch.library import Library
         lib = Library("_export", "FRAGMENT")
-        lib.define("_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])")
+        lib.define(
+            "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
+            tags=torch.Tag.pt2_compliant_tag)
 
         def _test_tensor_tensor_list_output(x, y):
             return y, [x]

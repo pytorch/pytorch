@@ -1086,6 +1086,9 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 .. math::
 
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
+
+.. note::
+  Sigma (:math:`\sigma`) is used to denote the scale parameter in Cauchy distribution.
 """,
 )
 
@@ -1906,11 +1909,19 @@ add_docstr_all(
     r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements drawn from the exponential distribution:
+Fills :attr:`self` tensor with elements drawn from the PDF (probability density function):
 
 .. math::
 
-    f(x) = \lambda e^{-\lambda x}
+    f(x) = \lambda e^{-\lambda x}, x > 0
+
+.. note::
+  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`)
+  implying that zero can be sampled from the exponential distribution.
+  However, :func:`torch.Tensor.exponential_` does not sample zero,
+  which means that its actual support is the interval (0, :math:`\inf`).
+
+  Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
 """,
 )
 
@@ -4031,8 +4042,10 @@ add_docstr_all(
     r"""
 record_stream(stream)
 
-Ensures that the tensor memory is not reused for another tensor until all
-current work queued on :attr:`stream` are complete.
+Marks the tensor as having been used by this stream.  When the tensor
+is deallocated, ensure the tensor memory is not reused for another tensor
+until all work queued on :attr:`stream` at the time of deallocation is
+complete.
 
 .. note::
 
@@ -6036,7 +6049,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    P(x) = \dfrac{1}{\text{to} - \text{from}}
+    f(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 

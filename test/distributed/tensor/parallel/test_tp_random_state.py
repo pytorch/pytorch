@@ -115,11 +115,11 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 # compare local shards across TP groups
                 def dp_weights_assert(tensor1, tensor2):
                     if enable_distribute_flag:
-                        # local weights shall be initialized the same acorss TP groups
+                        # local weights shall be initialized the same across TP groups
                         self.assertEqual(tensor1, tensor2)
                     else:
                         # without the parallel RNG, weight initialization violates the TP setup:
-                        # local weights are initialized differently acorss TP groups due to different
+                        # local weights are initialized differently across TP groups due to different
                         # random seeds set in data loading.
                         self.assertNotEqual(tensor1, tensor2)
 
