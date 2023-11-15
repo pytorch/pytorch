@@ -3604,6 +3604,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcmul'),
         xfail('clamp'),
 
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
+
         # TypeError: expected Tensor as element 0 in argument 0, but got float
         xfail('item'),
     }))
@@ -3660,6 +3662,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.multi_head_attention_forward'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),

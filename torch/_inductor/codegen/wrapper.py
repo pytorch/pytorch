@@ -1389,13 +1389,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
         self.header.splice(
             f"""
-            static int64_t align(int64_t nbytes) {{
+            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
             """
@@ -1960,7 +1962,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        self.generate_c_shim_extern_kernel_call(extern_kernel.kernel, args)
+        assert (
+            extern_kernel.abi_compatible_kernel is not None
+        ), f"abi_compatible_kernel is None for {extern_kernel.kernel=}"
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.abi_compatible_kernel, args
+        )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
@@ -1986,13 +1993,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        if len(grid) != 1:
-            raise NotImplementedError("triton.autotune not yet supported")
-        grid = grid[0]
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
         self.generate_kernel_call(
             kernel_name,
             args,
-            grid=grid,
+            grid=grid_decision,
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=True,
@@ -2558,7 +2575,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             and isinstance(type_, torch.OptionalType)
         ):
             if val is None:
-                return "nullptr"
+                return "0"  # nullptr is not available in C
             if isinstance(val, (bool, int, str, float)):
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
@@ -2748,16 +2765,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(
-                arg,
-                (
-                    sympy.Integer,
-                    sympy.Expr,
-                    sympy.Symbol,
-                    SymbolicCallArg,
-                ),
-            ):
+            if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Expr):
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
