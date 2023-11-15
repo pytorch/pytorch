@@ -7599,7 +7599,6 @@ def ___make_guard_fn():
             return [t * k for t in yield_from_gen(t_list)]
 
         t_list = [torch.randn([2, 3])] * 3
-        multiplier = torch.tensor([10])
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)

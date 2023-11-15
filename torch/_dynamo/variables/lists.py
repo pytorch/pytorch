@@ -79,12 +79,14 @@ class BaseListVariable(VariableTracker):
 
         if isinstance(index, slice):
             if self.source is not None:
+                # TODO mlazos clone: remove this
                 return self.clone(
                     items=self.items[index],
                     source=GetItemSource(self.source, index),
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 )
             else:
+                # TODO mlazos clone: remove this
                 return self.clone(
                     items=self.items[index],
                     mutable_local=MutableLocal() if self.mutable_local else None,
@@ -617,10 +619,11 @@ class ListIteratorVariable(VariableTracker):
 
     def next_variables(self, tx):
         assert self.mutable_local
-        if self.index >= len(self.items):
+        old_index = self.index
+        if old_index >= len(self.items):
             raise StopIteration()
         self.index += 1
-        return self.items[self.index], self
+        return self.items[old_index], self
 
     def as_python_constant(self):
         if self.index > 0:
