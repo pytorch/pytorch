@@ -197,7 +197,7 @@ class TestFloat8Dtype(TestCase):
     """
 
     @dtypes(*FLOAT8_DTYPES)
-    @dtypesIfCUDA(CUDA_FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
         x = torch.zeros(8, dtype=torch.float, device=device)
