@@ -1324,7 +1324,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        return _make_inlined(tx, pytree.tree_flatten)(variable, treespec)
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
