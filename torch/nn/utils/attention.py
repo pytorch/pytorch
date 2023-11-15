@@ -329,8 +329,8 @@ class CausalBias(AttnBias):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_mask: "CausalBias",
-        dropout_p: float,
-        is_causal: bool,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
         scale: Optional[float] = None,
     ) -> torch.Tensor:
         r"""
