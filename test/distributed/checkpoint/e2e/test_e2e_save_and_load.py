@@ -1,12 +1,22 @@
 # Owner(s): ["oncall: distributed"]
 
 from enum import auto, Enum
+from functools import partial
 
 import torch
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.checkpoint.state_dict import (
+    get_state_dict,
+    set_state_dict,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+    _patch_model_state_dict,
+    _patch_optimizer_state_dict
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
@@ -63,7 +73,7 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type, train_steps=2):
+    def _create_model(self, compile, model_type, train_steps=2, make_stateful=False):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -96,6 +106,10 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         if compile:
             model = torch.compile(model)
+
+        if make_stateful:
+            _patch_model_state_dict(model)
+            _patch_optimizer_state_dict(model, optimizers=optim)
 
         return model, optim
 
@@ -136,6 +150,43 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             optimizers=dist_optim,
             model_state_dict=dist_msd,
             optim_state_dict=dist_osd,
+        )
+
+        # train one more step on both models
+        loss = _train(model, optim, train_steps=1)
+        dist_loss = _train(dist_model, dist_optim, train_steps=1)
+        self.assertEqual(loss, dist_loss)
+
+        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
+        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
+
+        self._verify_msd(model_sd, dist_msd)
+        self._verify_osd_by_load(
+            model, optim, torch.optim.Adam(model.parameters(), lr=0.1), optim_sd
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    @parametrize("compile", [True, False])
+    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
+    def test_stateful(self, compile, model_type):
+
+        model, optim = self._create_model(compile, ModelType.NONE)
+        _train(model, optim, train_steps=2)
+
+        dist_model, dist_optim = self._create_model(compile, model_type, make_stateful=True)
+        _train(dist_model, dist_optim, train_steps=2)
+
+        DCP.save(
+            state_dict={"model": dist_model, "optimizer": dist_optim},
+            storage_writer=DCP.FileSystemWriter(self.temp_dir),
+        )
+
+        dist_model, dist_optim = self._create_model(compile, model_type, make_stateful=True)
+        DCP.load(
+            state_dict={"model": dist_model, "optimizer": dist_optim},
+            storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
 
         # train one more step on both models

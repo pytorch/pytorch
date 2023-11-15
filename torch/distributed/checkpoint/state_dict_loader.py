@@ -24,14 +24,15 @@ def load(
     planner: Optional[LoadPlanner] = None,
 ) -> None:
 
-    state_dict_copy = state_dict.copy()
+    statetful_sd = {}
+    for key, elem in state_dict.items():
+        statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
-    load_state_dict(state_dict_copy, storage_reader, process_group, coordinator_rank, no_dist, planner)
-    for key, elem in state_dict_copy.items():
+    load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
+    for key, elem in state_dict.items():
         if isinstance(elem, Stateful):
-            elem.load_state_dict(state_dict_copy[key])
+            elem.load_state_dict(statetful_sd[key])
         state_dict[key] = elem
-
 
 
 def load_state_dict(
