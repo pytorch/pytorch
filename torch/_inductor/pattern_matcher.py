@@ -71,9 +71,9 @@ class Match:
         self.args = args or []
         self.kwargs = kwargs or {}
         # The nodes matched in this expression
-        self.nodes: List[torch.fx.Nodes] = []
+        self.nodes: List[torch.fx.Node] = []
         # Mapping CallFunction to the node.target
-        self.targets: Dict[_TargetExpr, torch.fx.Target] = {}
+        self.targets: Dict[_TargetExpr, torch.fx.node.Target] = {}
         self.ctx: Optional[MatchContext] = None
         self.replacement_graph: Optional[torch.fx.Graph] = None
 
@@ -113,7 +113,7 @@ class Match:
         ]
 
     def output_node(self) -> torch.fx.Node:
-        return [p for p in self.output_nodes() if p][0]
+        return next(p for p in self.output_nodes() if p)
 
     def replace_with_graph(self, replacement_graph, args):
         assert self.ctx
@@ -1091,12 +1091,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 class PatternMatcherPass:
     def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
-        self.patterns: DefaultDict[torch.fx.Target, List[PatternEntry]] = defaultdict(
-            list
-        )
+        self.patterns: DefaultDict[
+            torch.fx.node.Target, List[PatternEntry]
+        ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
 
-    def __getitem__(self, item: torch.fx.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1251,6 +1251,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
             lambda g, i: make_boxed_func(g),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
+            keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
     assert gm
