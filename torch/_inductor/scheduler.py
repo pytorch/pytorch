@@ -2015,6 +2015,7 @@ class Scheduler:
                 assert storage.is_input_buffer()
                 V.graph.wrapper_code.codegen_free(storage.data)
 
+        V.graph.removed_buffers.clear()
         self.buffer_names_to_free.clear()
 
     def remove_kernel_local_buffers(self):
