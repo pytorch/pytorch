@@ -110,6 +110,9 @@ class NumpyCompatNormalization:
 
                 self.cache[node.target] = replaceable_kwargs
 
+            if not replaceable_kwargs:
+                continue
+
             new_kwargs = {}
             kwargs_changed = False
             for k, v in kwargs.items():
@@ -120,15 +123,7 @@ class NumpyCompatNormalization:
                     new_kwargs[k] = v
 
             if kwargs_changed:
-                with graph.inserting_after(node):
-                    new_node = graph.call_function(
-                        node.target,
-                        args=node.args,
-                        kwargs=new_kwargs,
-                    )
-                node.replace_all_uses_with(new_node)
-                new_node.meta.update(node.meta)
-                graph.erase_node(node)
+                node.kwargs = torch.fx.immutable_collections.immutable_dict(new_kwargs)
                 counters["inductor"]["numpy_compat_normalization"] += 1
 
 
