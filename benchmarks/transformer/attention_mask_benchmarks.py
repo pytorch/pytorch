@@ -176,10 +176,10 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
 
 
 def generate_experiment_configs() -> List[ExperimentConfig]:
-    batch_sizes = [1, 8, 16, 32, 64, 128, 256, 512, 1024]
-    num_heads = [8, 16, 32]
-    q_kv_seq_lens = [(128, 256), (256, 512), (512, 1024), (1024, 2048), (1, 2048)]
-    embed_dims = [1024, 2048, 4096]
+    batch_sizes = [1, 8, 16, 128]
+    num_heads = [16, 32]
+    q_kv_seq_lens = [(128, 256), (256, 416), (512, 4097), (1024, 2048), (1, 2048)]
+    embed_dims = [2048, 4096]
     dtypes = [
         torch.bfloat16,
     ]
