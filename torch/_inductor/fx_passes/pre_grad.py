@@ -68,12 +68,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
-<<<<<<< HEAD
         numpy_compat_normalization(gm.graph)
-        group_batch_fusion_pre_grad_passes(gm.graph)
-=======
-        group_batch_fusion_passes(gm.graph, True)
->>>>>>> 273280b1df ([Inductor] Refactor group/batch fusion to support user defined execution order and configs)
+        group_batch_fusion_passes(gm.graph, pre_grad=True)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
 

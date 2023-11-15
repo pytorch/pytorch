@@ -78,7 +78,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
-        group_batch_fusion_passes(gm.graph, False)
+        group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
 
         for patterns in pass_patterns:

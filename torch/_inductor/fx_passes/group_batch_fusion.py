@@ -728,7 +728,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         )
     elif has_fbgemm:  # Only group fusion (which needs fbgemm) in post grad.
         fusions = generate_fusion_from_config(
-            config.pre_grad_fusion_options, pre_grad=False
+            config.post_grad_fusion_options, pre_grad=False
         )
 
     for rule in fusions:
