@@ -29,8 +29,6 @@ from typing import (
     Union,
 )
 
-import numpy
-
 from typing_extensions import Self
 
 import torch
@@ -635,9 +633,7 @@ class ONNXProgram:
         self._fake_context = fake_context
         self._export_exception = export_exception
 
-    def __call__(
-        self, *args: Any, options=None, **kwargs: Any
-    ) -> Sequence[Union[numpy.ndarray, torch.Tensor, int, float, bool]]:
+    def __call__(self, *args: Any, options=None, **kwargs: Any) -> Any:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
@@ -657,7 +653,7 @@ class ONNXProgram:
         ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
 
         onnxruntime_input = {
-            k.name: torch.Tensor.numpy(v, force=True)
+            k.name: v.numpy(force=True)
             for k, v in zip(ort_session.get_inputs(), onnx_input)
         }
 
