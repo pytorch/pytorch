@@ -26,6 +26,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_check_write_access,
+    gh_dismiss_pr_reviews,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -1795,6 +1796,10 @@ def try_revert(
     )
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
+    dismiss_approval_msg = (
+        "Your PR has been reverted. Since you lack write permissions "
+        "for this repository, a new approval review is required to merge this PR."
+    )
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
     msg += revert_msg
@@ -1811,6 +1816,9 @@ def try_revert(
         reviewers = pr.get_approved_by()
         for author in pr.get_authors().keys():
             if not gh_check_write_access(pr.org, pr.project, author):
+                gh_dismiss_pr_reviews(
+                    pr.org, pr.project, pr.pr_num, message=dismiss_approval_msg
+                )
                 gh_request_pr_reviewers(pr.org, pr.project, pr.pr_num, reviewers)
                 break
 
