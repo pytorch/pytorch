@@ -257,5 +257,33 @@ class TestUnflatten(TestCase):
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
+    def test_unflatten_wrong_input(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_list = torch.nn.ParameterList()
+                self.param_dict = torch.nn.ParameterDict()
+                for i in range(2):
+                    self.param_list.append(torch.nn.Parameter(torch.randn((2, 3))))
+                    self.param_dict[f"key_{i}"] = torch.nn.Parameter(
+                        torch.randn((2, 3))
+                    )
+
+            def forward(self, x):
+                a = x.sum()
+                for i in range(2):
+                    a = a + self.param_list[i].sum()
+                    a = a + self.param_dict[f"key_{i}"].sum()
+                return a
+
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        with self.assertRaisesRegex(RuntimeError, "Input arg4_1.shape"):
+            export_module(torch.randn(6, 6))
+
+        unflattened = export_module.module(flat=False)
+        with self.assertRaisesRegex(RuntimeError, "Input arg4_1.shape"):
+            unflattened(torch.randn(6, 6))
+
+
 if __name__ == '__main__':
     run_tests()

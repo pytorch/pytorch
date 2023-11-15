@@ -1156,6 +1156,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kVE;
   }
 
+  bool is_privateuseone() const {
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
+    if (C10_UNLIKELY(device_policy_)) {
+      return device_custom().is_privateuseone();
+    }
+    return device_opt_.has_value() && device_opt_->type() == kPrivateUse1;
+  }
+
   bool is_mkldnn() const {
     return key_set_.has_all(c10::mkldnn_ks);
   }

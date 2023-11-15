@@ -5188,6 +5188,90 @@ def meta__scaled_dot_product_efficient_backward(
     return grad_q, grad_k, grad_v, grad_bias
 
 
+@register_meta(
+    [
+        aten._efficient_attention_forward,
+    ]
+)
+def meta__efficient_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: Optional[int],
+    dropout_p: float,
+    custom_mask_type: int,
+    compute_log_sumexp: bool = False,
+    scale: Optional[float] = None,
+    causal_diagonal: Optional[Tensor] = None,
+    seqlen_k: Optional[Tensor] = None,
+):
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (B, num_heads, logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return res, logsum_exp, seed, offset, M, N
+
+
+@register_meta(
+    [
+        aten._efficient_attention_backward,
+    ]
+)
+def meta__efficient_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    logsumexp: Tensor,
+    dropout_p: float,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    custom_mask_type: int,
+    bias_requires_grad: bool,
+    scale: Optional[float] = None,
+    num_splits_key: Optional[int] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    if bias is not None:
+        assert bias is not None
+        lastDim = bias.size(-1)
+        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        new_sizes = list(bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+    else:
+        grad_bias = torch.empty((), device=query.device)
+
+    return grad_query, grad_key, grad_value, grad_bias
+
+
 @register_meta([aten._scaled_mm.default])
 def meta_scaled_mm(
     self: torch.Tensor,
