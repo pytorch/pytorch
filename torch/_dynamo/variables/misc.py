@@ -831,6 +831,7 @@ class SkipFilesVariable(VariableTracker):
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
+                    # TODO mlazos clone: remove this
                     return fn.clone(wraps_source=args[0].source)
                 unimplemented(f"functools.wraps({fn})")
 

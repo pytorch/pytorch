@@ -882,6 +882,7 @@ class BuiltinVariable(VariableTracker):
             if isinstance(arg, dict):
                 return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.ConstDictVariable):
+                # TODO mlazos clone: remove this
                 return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
             elif isinstance(
                 arg,
@@ -1160,6 +1161,7 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
+                # TODO mlazos clone: remove this
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
@@ -1185,6 +1187,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
+                # TODO mlazos clone: remove this
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
