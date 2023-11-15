@@ -988,6 +988,9 @@ def get_node_device(node: fx.Node) -> Optional[torch.device]:
 
 
 def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
+    """
+    Get the number of cpu inputs to a node
+    """
     cpu_indeg: Dict[fx.Node, int] = Counter()
 
     for node in graph.nodes:
@@ -1112,4 +1115,8 @@ def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node
         if constructor_dependencies[node]:
             cannot_move_to_cuda.update(constructor_dependencies[node])
 
-    return set(constructors) - cannot_move_to_cuda
+    all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
+    for constructor in cannot_move_to_cuda:
+        all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
+
+    return set(constructors) - all_cannot_move_to_cuda
