@@ -505,8 +505,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
@@ -555,8 +556,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
@@ -607,8 +609,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
@@ -655,8 +658,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
@@ -692,8 +696,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=_invalid_context_gen,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
