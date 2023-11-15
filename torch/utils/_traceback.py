@@ -151,7 +151,7 @@ def format_frame(frame, *, base=None, line=False):
     extra_line = ""
     if line:
         extra_line = f"{frame.line}  # "
-    return f"{extra_line}{shorten_filename(frame.filename, base=base)}: {frame.lineno} in {frame.name}"
+    return f"{extra_line}{shorten_filename(frame.filename, base=base)}:{frame.lineno} in {frame.name}"
 
 def format_traceback_short(tb):
     """Format a TracebackType in a short way, printing only the inner-most frame."""
