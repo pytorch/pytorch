@@ -1036,7 +1036,7 @@ def run_tests(argv=UNITTEST_ARGS):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
-            pytest_args.append(f'--cov=torch')
+            pytest_args.append('--cov=torch')
             pytest_args.append(f'--cov-report=json:{get_cov_path()}')
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
