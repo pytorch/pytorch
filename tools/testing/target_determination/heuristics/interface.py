@@ -302,7 +302,6 @@ class TestPrioritizations:
         If the heuristic split this test run among multiple runs, then return the
         highest relevance of any of the test runs.
         """
-        # Look for a complete match first
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
                 #  Different heuristics may result in a given test file being split
