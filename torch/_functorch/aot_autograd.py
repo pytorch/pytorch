@@ -883,6 +883,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         aliased_out = aliased_out.detach()
     elif not aliased_base_tensor.requires_grad and target_requires_grad:
         aliased_out.requires_grad_(True)
+    # For outputs aliasing inputs, we need to check if the dtype has changed.
+    # as_strided() is the "most generic" view, but it does not cover cross-dtype views
+    if aliased_out.dtype != target_meta_tensor.dtype:
+        aliased_out = aliased_out.view(target_meta_tensor.dtype)
     return aliased_out
 
 def to_fun(t):
@@ -1155,7 +1159,6 @@ def run_functionalized_fw_and_collect_metadata(
                 requires_grad=requires_grad,
                 mutation_type=_get_mutation_type(
                     keep_input_mutations,
-                    is_train,
                     mutates_data,
                     mutates_metadata,
                     mutations_hidden_from_autograd,
@@ -1426,7 +1429,15 @@ from a multi-output view call")
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data and info.requires_grad and not info.mutations_hidden_from_autograd
+            if _get_mutation_type(
+                keep_input_mutations,
+                mutates_data=info.mutates_data,
+                mutates_metadata=info.mutates_metadata,
+                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+                requires_grad=info.requires_grad
+                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
+                # this can also include metadata mutations, and inputs that do not require grad,
+            ) == MutationType.MUTATED_OUT_GRAPH and info.mutates_data and info.requires_grad
         ]
         f_output_tangents = [
             o
@@ -1696,7 +1707,7 @@ def fn_input_mutations_to_outputs(
         mutated_inputs_to_return = [
             x
             for (i, x) in enumerate(args)
-            if meta.input_info[i].mutates_metadata or (meta.input_info[i].mutates_data and not keep_data_input_mutations)
+            if i in meta.mutated_inp_runtime_indices
         ]
         return *mutated_inputs_to_return, *outs
     return inner_fn
@@ -2121,8 +2132,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             updated_flat_args.extend([seed, offset])
 
-        if torch._guards.TracingContext.get():
-            torch._guards.TracingContext.get().fw_metadata = fw_metadata \
+        if tracing_context := torch._guards.TracingContext.try_get():
+            tracing_context.fw_metadata = fw_metadata \
                 if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
         compiled_fw = compiler(fw_module, updated_flat_args)
 
@@ -2294,24 +2305,18 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
 
 def _check_if_mutation_can_be_in_graph(
     keep_input_mutations: bool,
-    is_train: bool,
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
     requires_grad
 ):
     if keep_input_mutations:
-        if mutations_hidden_from_autograd:
-            return True
-        if is_train:
-            return mutates_data and not mutates_metadata and not requires_grad
-        return not mutates_metadata
+        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
     return False
 
 
 def _get_mutation_type(
     keep_input_mutations: bool,
-    is_train: bool,
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
@@ -2322,7 +2327,6 @@ def _get_mutation_type(
 
     if _check_if_mutation_can_be_in_graph(
         keep_input_mutations,
-        is_train,
         mutates_data,
         mutates_metadata,
         mutations_hidden_from_autograd,
@@ -2644,7 +2648,6 @@ def create_synthetic_base_metadata(
         mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
-            m.is_train,
             mutates_data,
             mutates_metadata,
             mutations_hidden_from_autograd,
@@ -2922,8 +2925,7 @@ fw_metadata={str(fw_metadata)}
     # Update our input metadata to remove duped input metadata.
     updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask, add_dupe_map)
 
-    tracing_context = TracingContext.get()
-    if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
+    if tracing_context := TracingContext.try_get() and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -3184,36 +3186,16 @@ def create_runtime_wrapper(
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
-        if keep_input_mutations:
-            if not trace_joint:
-                assert (
-                    len(all_outs)
-                    == num_metadata_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases
-                )
-                assert (
-                    runtime_metadata.num_mutated_inp_runtime_indices == num_metadata_mutated_inps
-                )
-            else:
-                num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
-                # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
-                if num_graph_handled > 0:
-                    all_outs = all_outs[:-num_graph_handled]
-                assert (
-                    len(all_outs)
-                    == num_mutated_runtime_inps + runtime_metadata.num_outputs + num_intermediate_bases
-                )
-                assert (
-                    runtime_metadata.num_mutated_inp_runtime_indices == num_mutated_runtime_inps
-                )
+        if keep_input_mutations and trace_joint:
+            num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
+            # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
+            if num_graph_handled > 0:
+                all_outs = all_outs[:-num_graph_handled]
 
-        else:
-            assert (
-                len(all_outs)
-                == num_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases
-            )
-            assert (
-                runtime_metadata.num_mutated_inp_runtime_indices == num_mutated_inps
-            )
+        assert (
+            len(all_outs)
+            == num_mutated_runtime_inps + runtime_metadata.num_outputs + num_intermediate_bases
+        )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -3866,8 +3848,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # 1) There is a check in the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
-            if torch._guards.TracingContext.get():
-                torch._guards.TracingContext.get().fw_metadata = inner_meta
+            if tracing_context := torch._guards.TracingContext.try_get():
+                tracing_context.fw_metadata = inner_meta
 
             with TracingContext.report_output_strides() as fwd_output_strides:
                 compiled_fw_func = aot_config.fw_compiler(
@@ -3952,7 +3934,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             exc_info=True
                         )
 
-    saved_context = TracingContext.get()
+    saved_context = TracingContext.try_get()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -4917,8 +4899,8 @@ def aot_module_simplified(
     # First, the params
     full_args.extend(params_flat)
 
-    if torch._guards.TracingContext.get():
-        torch._guards.TracingContext.get().params_flat = params_flat
+    if tracing_context := torch._guards.TracingContext.try_get():
+        tracing_context.params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
