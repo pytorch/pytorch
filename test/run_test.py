@@ -624,7 +624,7 @@ def run_test(
         if options.continue_through_error and "--subprocess" not in command:
             # I think subprocess is better handled by common_utils? but it's not working atm
             ret_code, was_rerun = run_test_continue_through_error(
-                log_path, command, test_directory, env, timeout, stepcurrent_key, output
+                command, test_directory, env, timeout, stepcurrent_key, output
             )
         else:
             ret_code, was_rerun = retry_shell(
@@ -654,28 +654,31 @@ def run_test(
 
 
 def run_test_continue_through_error(
-    log_path, command, test_directory, env, timeout, stepcurrent_key, output
+    command, test_directory, env, timeout, stepcurrent_key, output
 ):
-    # There are probably better solutions involving --last-failed.  Intented
-    # behavior is if the same test fails 3 times in a row, skip this test on the
-    # next run, but still fail in the end.
+    # Run the test with -x to stop at first failure. Try again, skipping the
+    # previously run tests, repeating this until there is a test that fails 3
+    # times (same number of rVetries we typically give).  Then we skip that
+    # test, and keep going. Basically if the same test fails 3 times in a row,
+    # skip the test on the next run, but still fail in the end. I take advantage
+    # of the value saved in stepcurrent to keep track of the most recently run
+    # test (which is the one that failed if there was a failure).
 
     num_failures = defaultdict(int)
 
     sc_command = f"--sc={stepcurrent_key}"
     while True:
-        ret_code, was_rerun = retry_shell(
+        ret_code = shell(
             command + [sc_command],
             test_directory,
             stdout=output,
             stderr=output,
             env=env,
             timeout=timeout,
-            retries=0,
         )
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
         if ret_code == 0:
-            break
+            break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print(
             f"Got exit code {ret_code}{signal_name}, retrying...",
