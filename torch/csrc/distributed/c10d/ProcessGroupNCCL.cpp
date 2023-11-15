@@ -908,29 +908,28 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
   return true;
 }
 
-ProcessGroupNCCL::DebugInfoCallbackStorer::DebugInfoCallbackStorer(
-    std::string fileName)
-    : fileName_(std::move(fileName)) {}
+ProcessGroupNCCL::DebugInfoWriter::DebugInfoWriter(int rank) {
+  const char* fileName = parseEnvVarString(
+      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
+  filename_ = c10::str(std::string(fileName), rank);
+}
 
-ProcessGroupNCCL::DebugInfoCallbackStorer::~DebugInfoCallbackStorer() = default;
+ProcessGroupNCCL::DebugInfoWriter::~DebugInfoWriter() = default;
 
-void ProcessGroupNCCL::DebugInfoCallbackStorer::storeTraceInfoStorer(
-    int rank,
-    const std::string& ncclTrace) {
-  auto filename = c10::str(std::string(fileName_), rank);
-
+void ProcessGroupNCCL::DebugInfoWriter::write(const std::string& ncclTrace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
-  std::ofstream file(filename, std::ios::binary);
+  std::ofstream file(filename_, std::ios::binary);
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename;
+               << filename_;
     return;
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Wrote finished ";
 }
 
 static std::atomic<size_t> process_group_id = 0;
@@ -1313,13 +1312,13 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void ProcessGroupNCCL::registerDebugInfoCallbackStorer(
-    std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer> callbackStorer) {
+void ProcessGroupNCCL::registerDebugInfoWriter(
+    std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> writer) {
   TORCH_CHECK_WITH(
       DistBackendError,
-      debugInfoCallbackStorer_ == nullptr,
-      "ProcessGroupNCCL DebugInfoCallbackStorer already registered");
-  debugInfoCallbackStorer_ = std::move(callbackStorer);
+      debugInfoWriter_ == nullptr,
+      "ProcessGroupNCCL debugInfoWriter already registered");
+  debugInfoWriter_ = std::move(writer);
 }
 
 void ProcessGroupNCCL::dumpDebuggingInfo() {
@@ -1327,19 +1326,16 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
   if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
     // We dump nccl trace into local disk by default and users can register
-    // their own storer via `registerDebugInfoCallbackStorer`.
+    // their customized writer by inheriting `DebugInfoWriter` via
+    // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
-    if (debugInfoCallbackStorer_ == nullptr) {
+    if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
-      const char* fileName = parseEnvVarString(
-          "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
-      std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer>
-          storeTraceInfoToLocalDiskPtr =
-              std::make_unique<ProcessGroupNCCL::DebugInfoCallbackStorer>(
-                  std::string(fileName));
-      registerDebugInfoCallbackStorer(std::move(storeTraceInfoToLocalDiskPtr));
+      std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> debugInfoWriterPtr =
+          std::make_unique<ProcessGroupNCCL::DebugInfoWriter>(rank_);
+      registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
-    debugInfoCallbackStorer_->storeTraceInfoStorer(rank_, ncclTrace);
+    debugInfoWriter_->write(ncclTrace);
   }
 }
 
@@ -1402,7 +1398,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
   if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       !debugInfoStoreThread.joinable()) &&
+       debugInfoStoreThread.joinable()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1414,7 +1410,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // thread, so We mark the thread detach and the dump of debug info becomes
   // "best effort". If the process exit normally, marking it detach also makes
   // sense because we don't really care about dumping the debug info.
-  debugInfoStoreThread.detach();
+  if (debugInfoStoreThread.joinable()) {
+    debugInfoStoreThread.detach();
+  }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
