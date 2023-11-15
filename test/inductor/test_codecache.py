@@ -93,6 +93,7 @@ class TestFxGraphCache(TestCase):
         cls.tmpdir.cleanup()
 
     def setUp(self):
+        super().setUp()
         counters.clear()
 
     @requires_triton()
