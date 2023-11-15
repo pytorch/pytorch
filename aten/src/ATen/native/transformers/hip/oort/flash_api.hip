@@ -65,6 +65,9 @@
 
 // OORT headers
 #include <oort/attn_fwd.h>
+#include <oort/bwd_kernel_dk_dv.h>
+#include <oort/bwd_kernel_dq.h>
+#include <oort/bwd_preprocess.h>
 
 namespace pytorch_flash {
 
@@ -311,7 +314,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16, 
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
     if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
@@ -434,7 +437,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     at::Tensor seed_t, offset_t;
 
-    
+
     if (p_dropout > 0.0)  {
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
@@ -467,14 +470,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
 
-    
+
     //reorder tensors and make contiguous
     at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
     at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
     at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
     at::Tensor output_t =out.permute({0,2,1,3}).contiguous();
-    
-    at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
+
+    at::Tensor M = at::empty({q_t.sizes()[0] * q_t.sizes()[1], q_t.sizes()[2]}, at::dtype(at::kFloat).device(q.device()));
 
     dim3  grid;
     grid.x = (q_t.sizes()[2] + 32 - 1) / 32;	// BLOCK_M = 32
@@ -482,9 +485,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
 
+    at::Tensor softmax_fa_t = at::empty({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(q.dtype()).device(q.device()));
 
-    at::Tensor softmax_fa_t = at::empty({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
-    
      if(q_dtype == at::kHalf)
        {
 	if (is_causal)
@@ -500,7 +502,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 								output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),
 								q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
 							        *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()), (__fp16*)(softmax_fa_t.data_ptr()), stream);
-	 } 
+	 }
 	else
 	  {
 	    constexpr int			                STAGE = 1;
@@ -553,13 +555,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
      k_t.permute({0,2,1,3}).contiguous();
      v_t.permute({0,2,1,3}).contiguous();
      output_t.permute({0,2,1,3}).contiguous();
-  
+
      hipStreamSynchronize(stream);
-  
+
      if (seqlenq_ngroups_swapped) {
        out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
        q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
-       softmax_fa_t = softmax_fa_t.reshape({batch_size, num_heads_k * seqlen_q, 1}); // JCG we have different dims. Verify
+       //softmax_fa_t = softmax_fa_t.reshape({batch_size, num_heads_k * seqlen_q, 1}); // JCG we have different dims. Verify
      }
      return {out, q_padded, k_padded, v_padded, softmax_fa_t, seed_t, offset_t, p};
 }
@@ -778,23 +780,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     // 						   do_scaled, delta,
     // 						   BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
     // 						   );
-       
-     
-    // _bwd_kernel[(ctx.grid[1],)](
-    // 				q, k, v, ctx.sm_scale,
-    // 				o, do_scaled,
-    // 				dq, dk, dv,
-    // 				L, delta,
-    // 				q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-    // 				k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-    // 				v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-    // 				q.shape[0], q.shape[1], q.shape[2],
-    // 				block_scale * ctx.grid[0],
-    // 				BLOCK_M=BLOCK, BLOCK_N=BLOCK,
-    // 				BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
-    // 				CAUSAL=ctx.causal,
-    // 				num_stages=1,
-    // 				);    
+
+
 
     // For MQA/GQA we need to sum dK and dV across the groups
     if (num_heads_k != num_heads) {
@@ -830,7 +817,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_WARN("[mha_varlen_bwd not supported on ROCm");
 
     at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
-    
+
     return { q, k, v, softmax_d };
 }
 } // namespace pytorch_fmha
