@@ -34,10 +34,6 @@
 #include <iosfwd>
 #include <ostream>
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
-#include <cassert>
-#endif
-
 namespace c10 {
 
 namespace detail {
@@ -51,12 +47,8 @@ namespace detail {
  */
 #if defined(__CUDA__) || defined(__HIP__)
 C10_HOST_DEVICE C10_API inline float fp8e4m3fnuz_to_fp32_value(uint8_t) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
-  // TORCH_INTERNAL_ASSERT is not supported on a device
-  assert(false);
-#else
-  TORCH_INTERNAL_ASSERT(false, "e4m3fnuz is not supported by CUDA or HIP");
-#endif
+  CUDA_KERNEL_ASSERT(false && "e4m3fnuz is not supported by CUDA or HIP");
+  return -1.0;
 }
 #else
 C10_API float fp8e4m3fnuz_to_fp32_value(uint8_t input);
@@ -72,7 +64,7 @@ C10_HOST_DEVICE inline uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
    * (i.e. the first value which would overflow in to the sign bit, resulting in
    * a NaN) in fp8e4m3fnuz range:
    * 1 0000 000 - fp8e4m3fnuz
-   * 0 10000110 00000000000000000000000 - fp32
+   * 0 10000111 00000000000000000000000 - fp32
    */
   constexpr uint32_t fnuz_max = UINT32_C(0x87) << 23;
 
@@ -103,13 +95,13 @@ C10_HOST_DEVICE inline uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
   f_bits ^= sign;
 
   if (f_bits >= fnuz_max) {
-    // NaN -- sign bit set to 1, rest 0s
+    // NaN -- sign bit set to 1, rest 0s.
     return 0x80;
   }
 
-  if (f_bits < (UINT32_C(121) << 23)) {
-    // Input number is smaller than 2^(-7), which is the smallest
-    // fp8e4m3fnuz normal number
+  if (f_bits < (UINT32_C(0x78) << 23) /* 2^-7 in float32 */) {
+    // Input exponent is less than -7, the smallest e4m3fnuz exponent, so the
+    // number will become subnormal.
     f_bits = fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
     result = static_cast<uint8_t>(f_bits - denorm_mask);
     if (result == 0) {

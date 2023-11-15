@@ -3,7 +3,7 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import dtypes, dtypesIfCPU, dtypesIfCUDA, instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
@@ -17,6 +17,11 @@ FLOAT8_DTYPES = [
     torch.float8_e5m2fnuz,
     torch.float8_e4m3fn,
     torch.float8_e4m3fnuz,
+]
+
+CUDA_FLOAT8_DTYPES = [
+    torch.float8_e5m2,
+    torch.float8_e4m3fn,
 ]
 
 # The following information are not yet provided by torch.finfo.
@@ -187,24 +192,20 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
-    def setUp(self):
-        name = self._testMethodName
-
-        if "fnuz" in name and "cpu" not in name:
-            raise unittest.SkipTest("fnuz ops are only supported on CPU")
-
     """
     Sanity test for zeros comparison
     """
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
         self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @parametrize("get_input", ROUND_TRIP_TEST_CASES)
     def test_cast_round_trip(self, dtype, get_input, device):
         """Numerical test of float8 conversion, by performing a round-trip cast
@@ -216,7 +217,8 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float(), atol=0, rtol=0)
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_special_numbers(self, dtype, device):
         """Test special numbers."""
 
@@ -250,7 +252,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
     multiplication - doesn't seem worth it.
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
         shape = (10, 10)
         a = torch.randn(shape)
@@ -264,7 +266,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
         self.assertEqual(mul8, mul8_simulated)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
