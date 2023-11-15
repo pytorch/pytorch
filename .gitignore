@@ -372,6 +372,5 @@ android/pytorch_android_torchvision/.cxx
 .pyre_configuration
 .pyre_configuration.codenav
 .arcconfig
-.watchmanconfig
 .stable_pyre_client
 .pyre_client
