@@ -430,7 +430,7 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
         aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
         aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
 
-        # This should not throw an error
+        # These should not throw an error
         aggregator.get_test_stats(TestRun("test2::TestFooClass"))
         aggregator.get_test_stats(TestRun("test2"))
 
