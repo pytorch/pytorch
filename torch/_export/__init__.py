@@ -65,6 +65,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
+    _create_stateful_graph_module,
     _process_constraints,
     CallSpec,
     combine_args_kwargs,
@@ -202,15 +203,11 @@ def _process_dynamic_shapes(
                     "try None instead",
                 )
 
+    import inspect
     if isinstance(f, ExportedProgram):
-        combined_args = {
-            k: args[i] if i < len(args) else kwargs[k]
-            for i, k in enumerate(dynamic_shapes)
-        }
-    else:
-        import inspect
-        signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
-        combined_args = signature.bind(*args, **kwargs).arguments
+        f = f.module()
+    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+    combined_args = signature.bind(*args, **kwargs).arguments
 
     # This means user didn't specify dynamic shapes with argument names.
     combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
@@ -373,18 +370,30 @@ def capture_pre_autograd_graph(
             **kwargs,
         )[0]
 
-        for n in m.graph.nodes:
-            n.meta["is_torch_exported"] = True
-
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
 
         def _eval(self, mode: bool = True):
             raise NotImplementedError("Calling eval() is not supported yet.")
 
-        m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return m
+        _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+
+        m.meta["inline_constraints"] = {
+            k: v
+            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
+
+        flat_args, _ = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+        unlifted_m = _create_stateful_graph_module(
+            m,
+            range_constraints=range_constraints,
+            equality_constraints=equality_constraints,
+        )
+        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
+        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
+        return unlifted_m
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -418,13 +427,6 @@ def _convert_input_to_fake(gm, args, kwargs):
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
     return fake_args, fake_kwargs, fake_mode
-
-
-def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
-    for node in gm.graph.nodes:
-        if "is_torch_exported" in node.meta:
-            return True
-    return False
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -508,35 +510,21 @@ def _export_to_torch_ir(
     # We convert to nn.Module because __call__ of ExportedProgram
     # is untracable right now.
     if isinstance(f, ExportedProgram):
-        if len(constraints) > 0:
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                "Cannot provide constraints for already exported program."
-            )
         f = f.module()
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            # TODO Horrible hack to skip dynamo
-            if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
-                if len(constraints) > 0:
-                    raise UserError(
-                        UserErrorType.INVALID_INPUT,
-                        "Cannot provide constraints for already exported program."
-                    )
-                gm_torch_level = f
-            else:
-                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
-                    gm_torch_level, _ = torch._dynamo.export(
-                        f,
-                        constraints=constraints,
-                        assume_static_by_default=True,
-                        tracing_mode="symbolic",
-                    )(
-                        *args,
-                        **kwargs,
-                    )
+            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+                gm_torch_level, _ = torch._dynamo.export(
+                    f,
+                    constraints=constraints,
+                    assume_static_by_default=True,
+                    tracing_mode="symbolic",
+                )(
+                    *args,
+                    **kwargs,
+                )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
         except GuardOnDataDependentSymNode as e:
@@ -762,8 +750,6 @@ def _export(
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
 
-        node.meta["is_torch_exported"] = True
-
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
@@ -787,10 +773,11 @@ def _export(
         outputs=[make_argument_spec(node) for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)],
     )
     export_graph_signature = ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
+    num_params_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
 
     range_constraints, equality_constraints = _process_constraints(
         gm,
-        export_graph_signature,
+        num_params_buffers,
         flat_args,
     )
 
