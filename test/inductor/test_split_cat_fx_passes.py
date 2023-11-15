@@ -3,6 +3,7 @@
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -1063,6 +1064,23 @@ class TestSplitCatFxPasses(TestCase):
                 expected_stack_tahn_unbind_merged,
             )
             counters.clear()
+
+    def test_numpy_compat_normalization(self):
+        def fn(x, y):
+            a = torch.stack([x, y], axis=1)
+            b = torch.mul(x, x2=y)
+            c = torch.mul(x, x2=y)
+            d = torch.mul(x, x2=y)
+            e = torch.max(x, dim=1, keepdims=True)
+            f = torch.dropout(x=x, p=0.5, train=True)
+            return a, b, c, d, e, f
+
+        fn_t = torch.fx.symbolic_trace(fn)
+        numpy_compat_normalization(fn_t.graph)
+
+        for n in fn_t.graph.nodes:
+            for k in n.kwargs.keys():
+                self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch
     def test_stack_normalization_axis_kwarg(self):
