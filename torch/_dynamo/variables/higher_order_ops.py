@@ -1196,11 +1196,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = add_subgraph(
             tx,
             self.source,
             "wrap_body",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+            body_gmod,
         )
 
         body_node = make_attr(tx, body_name)
@@ -1216,7 +1217,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, treespec
+        return proxy_args, {}, example_value, treespec, body_gmod
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1224,7 +1225,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
+        p_args, p_kwargs, example_value, treespec, _ = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
 
@@ -1296,24 +1297,21 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
         from .builder import wrap_fx_proxy
 
-        context_fn_id = None
+        context_fn = None
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
-            context_fn = kwargs.pop("context_fn")
-            context_fn_id = next(CheckpointHigherOrderVariable.context_fn_count)
-            TagActivationCheckpoint.context_fn_tmp_map[context_fn_id] = context_fn.fn
+            context_fn = kwargs.pop("context_fn").fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value, treespec = self.create_wrapped_node(
+        p_args, _, example_value, treespec, checkpointed_gmod = self.create_wrapped_node(
             tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
         )
+        if context_fn is not None:
+            checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
-
-        if context_fn_id is not None:
-            checkpoint_kwargs["context_fn_id"] = context_fn_id
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
