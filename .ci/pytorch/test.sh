@@ -999,10 +999,6 @@ test_docs_test() {
 }
 
 test_executorch() {
-  # Test torchgen generated code for Executorch.
-  echo "Testing ExecuTorch op registration"
-  "$BUILD_BIN_DIR"/test_edge_op_registration
-
   pushd /executorch
 
   echo "Install torchvision and torchaudio"
@@ -1015,10 +1011,16 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
   export PYTHON_EXECUTABLE=python
+  # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
+
+  # Test torchgen generated code for Executorch.
+  echo "Testing ExecuTorch op registration"
+  "$BUILD_BIN_DIR"/test_edge_op_registration
+
   assert_git_not_dirty
 }
 
