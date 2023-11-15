@@ -16,6 +16,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/CallOnce.h>
@@ -316,6 +317,55 @@ c10::List<c10::IValue> new_list() {
 }
 
 } // namespace
+
+// Map from each communicator to its device index.
+// This map is used when register/deregister cache segments from cache
+// allocator. See design notes below:
+// - Each segment should be registered only to the communicator on the
+//   same device.
+// - We cannot reuse devNCCLCommMap_ in each ProcessGroup because the key may be
+//   ranks rather than device in point-to-point case.
+// - This map has also to be maintained as global variable since the register
+//   hooks are called outside the scope of any PG, thus we need traverse
+//   communicators in all PGs.
+static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
+static std::mutex ncclCommDevIdxMapMutex;
+static bool allocatorHooksAttached = false;
+void cacheAllocatorRegisterHook(
+    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+  // Register after SEGMENT_ALLOC
+  if (te.action_ !=
+      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+  for (auto& it : ncclCommDevIdxMap) {
+    auto& ncclComm = it.first;
+    auto& devIdx = it.second;
+    if (te.device_ == devIdx) {
+      ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+    }
+  }
+}
+
+void cacheAllocatorDeregisterHook(
+    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+  // deregister before SEGMENT_FREE
+  if (te.action_ !=
+      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+  for (auto& it : ncclCommDevIdxMap) {
+    auto& ncclComm = it.first;
+    auto& devIdx = it.second;
+    if (te.device_ == devIdx) {
+      ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+    }
+  }
+}
 
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
@@ -817,6 +867,12 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   for (const auto& ncclComm : ncclComms_) {
     ncclComm->ncclCommAbort();
   }
+
+  ncclCommDevIdxMapMutex.lock();
+  for (const auto& comm : ncclComms_) {
+    ncclCommDevIdxMap.erase(comm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
 }
 
 ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
@@ -865,6 +921,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
+      terminateHeartbeatMonitorThread_(false),
+      collectiveDebugInfoMode_(false),
       uid_(process_group_id++) {
   TORCH_CHECK_WITH(
       ValueError,
@@ -875,12 +933,27 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  heartbeat_ = 1ULL;
+  monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
+  heartbeatTimeoutInSec_ = parseEnvVarIntDefault(
+      TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
       parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
+#ifdef NCCL_HAS_COMM_REGISTER
+  useTensorRegisterAllocatorHook_ =
+      parseEnvVarFlag(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK);
+  if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+          expandable_segments()) {
+    useTensorRegisterAllocatorHook_ = false;
+    LOG(INFO)
+        << "[Rank " << rank_
+        << "] disables NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+  }
+#endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
@@ -920,20 +993,24 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const char* torch_distributed_debug =
       parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
   const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
-            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TIMEOUT(ms): " << options_->timeout.count()
-            << ", USE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << ", TORCH_DISTRIBUTED_DEBUG: "
-            << std::string(torch_distributed_debug)
-            << ", NCCL_DEBUG: " << std::string(nccl_debug)
-            << ", ID=" << this->getID();
+  LOG(INFO)
+      << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options: "
+      << "NCCL version: " << getNcclVersion()
+      << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+      << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+      << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
+      << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+      << ", TIMEOUT(ms): " << options_->timeout.count()
+      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
+      << ", TORCH_DISTRIBUTED_DEBUG: " << std::string(torch_distributed_debug)
+#ifdef NCCL_HAS_COMM_REGISTER
+      << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+      << useTensorRegisterAllocatorHook_
+#endif
+      << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
+      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+      << ", NCCL_DEBUG: " << std::string(nccl_debug)
+      << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -946,6 +1023,19 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
       size_); // worldSize
+
+  // Attach hooks to cache allocator to trigger the hooks whenever a traced
+  // action is called. In the following hooks, we register a newly allocated
+  // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
+  // SEGMENT_FREE action occurs.
+  // We attach hooks only once at the first PG creation.
+  if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorRegisterHook);
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorDeregisterHook);
+    allocatorHooksAttached = true;
+  }
 
 #ifdef USE_NCCL_WITH_UCC
   static c10::once_flag initialize_ucc_lib_flag;
@@ -1124,6 +1214,20 @@ void abortCommsFromMap(
 
 // Abort all communicators on this rank
 void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+  // Remove record from global ncclCommDevIdxMapMutex before aboarting,
+  // so that a new cache segment would not register to already aborded
+  // communicators. Note that ncclCommDevIdxMap is a global container which may
+  // contain other PG's communicators, thus we need to only erase communicators
+  // for the current PG.
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& it : devNCCLCommMap_) {
+    auto& ncclComms = it.second;
+    for (const auto& ncclComm : ncclComms) {
+      ncclCommDevIdxMap.erase(ncclComm);
+    }
+  }
+  ncclCommDevIdxMapMutex.unlock();
+
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
@@ -1139,6 +1243,8 @@ void ProcessGroupNCCL::shutdown() {
   abort(abortReason);
 
   workMetaListCV_.notify_one();
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -1158,11 +1264,111 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // threads dying due to aborted communicator and raising a SIGABRT
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+
+  // We need to wait for abort to finish before we can safely shut down
+  // heartbeat monitoring thread.
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+  if (ncclHeartbeatMonitorThread_.joinable()) {
+    ncclHeartbeatMonitorThread_.join();
+  }
+#endif
+}
+
+void dump_debugging_info() {
+  LOG(ERROR)
+      << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
+  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
+    // TODO: Find the right and proper way to dump the debug info.
+    // We cannot print out debugging info directly.
+    LOG(ERROR) << "nccl_trace: " << dump_nccl_trace();
+  }
+}
+
+void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
+  // Logging with `FATAL`, after errMsg printed, it calls `std::abort()`
+  // to terminate the program execution.
+  LOG(FATAL) << errMsg;
+}
+
+void ProcessGroupNCCL::heartbeatMonitor() {
+  uint64_t heartBeatCounter = 0ULL;
+  while (true) {
+    // This won't have any lock since this lock is only used here.
+    // Please be aware that mutex `monitorMutex_` should not be used
+    // somewhere else to avoid the deadlock.
+    std::unique_lock<std::mutex> lock(monitorMutex_);
+    if (monitorWakeUpCV_.wait_for(
+            lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
+              return terminateHeartbeatMonitorThread_.load();
+            })) {
+      // For the normal complete or user interception, monitorWakeUpCV_
+      // will get notified, we early return and exit heartbeatMonitor.
+      return;
+    }
+
+    // Check the heart beat of watchdog thread.
+    auto heartbeat = heartbeat_;
+    if (heartbeat != heartBeatCounter) {
+      heartBeatCounter = heartbeat;
+    } else {
+      // No heartbeat increase detected and timeout.
+      break;
+    }
+  }
+
+  // In the timeout case and we now only dump the flight recorder
+  // to std::out. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  dump_debugging_info();
+
+  // Create a error message reported from MonitorThread, so
+  // we throw exception and make the whole process to be killed.
+  const auto exitMsg = c10::str(
+      "[Rank ",
+      rank_,
+      "] NCCL monitor thread timeout. Basically, this could ",
+      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
+      "especially when your program enters a deadlock state in watchdog"
+      "or destructors. If you see this error, please file a bug to pytorch.");
+
+  // There are two possible cases for the watchdog thread exit:
+  // Case one: desync report runs quickly, and it follows the step:
+  // collective timeout -> desync -> exception handling -> destructors
+  // -> set terminateHeartbeatMonitorThread_ -> notify monitorWakeUpCV_.
+  // So the code either early returns above or will skip the sleep below.
+  // Case two: desync might be slow or get stuck. Or we get stuck in
+  // destructors, we will sleep for some time before calling std::abort() to
+  // kill the whole process.
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+      !terminateHeartbeatMonitorThread_.load()) {
+    // Leave another two mins for desync report generation or process group
+    // destroy.
+    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  }
+
+  if (!terminateHeartbeatMonitorThread_.load()) {
+    const auto logMsg = c10::str(
+        "[Rank ",
+        rank_,
+        "] monitoring thread detects no heartbeat and will finally kill the process!",
+        " terminateProcessGroup_",
+        terminateProcessGroup_,
+        " collectiveDebugInfoMode_",
+        collectiveDebugInfoMode_);
+    LOG(ERROR) << logMsg;
+    terminateProcess(exitMsg);
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    if (monitorThreadEnabled_.load()) {
+      ncclHeartbeatMonitorThread_ =
+          std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
+    }
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
@@ -1225,6 +1431,10 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
 }
 
+std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
+  return retrieveDesyncReport(store_, "NCCL", rank_, size_);
+}
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
 
@@ -1237,6 +1447,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
         lock,
         std::chrono::milliseconds(kWatchdogThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
+    // Bump up heart beat by one.
+    heartbeat_++;
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1256,7 +1468,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
-            auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+            // Set shutdown mode, so the heartbeat monitor thread will not abort
+            // process immediately.
+            collectiveDebugInfoMode_.store(true);
+            auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
@@ -1498,6 +1713,12 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   devNCCLCommMap_.erase(devNCCLCommMapKey);
   // Clear used device indices.
   usedDeviceIdxs_.clear();
+
+  ncclCommDevIdxMapMutex.lock();
+  for (const auto& comm : ncclComms) {
+    ncclCommDevIdxMap.erase(comm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
@@ -1662,6 +1883,34 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (it != inInitializationCommMap_.end()) {
     devNCCLCommMap_.emplace(devicesKey, std::move(it->second));
     inInitializationCommMap_.erase(devicesKey);
+
+    // Now ncclComms are fully initialized.
+    // Register all active CUDA memory segments in cache allocator to
+    // the new NCCL communicators
+    if (useTensorRegisterAllocatorHook_) {
+      auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+      // Register the segment to a new NCCL communicator if on the same device
+      for (const auto& segmentInfo : snapshot.segments) {
+        for (const auto i : c10::irange(devices.size())) {
+          if (segmentInfo.device != devices[i].index())
+            continue;
+          ncclComms[i]->registerSegment(
+              reinterpret_cast<void*>(segmentInfo.address),
+              segmentInfo.total_size);
+        }
+      }
+
+      // Record the mapping between ncclComm and device index so that later
+      // register hook can register a newly allocated segment to communicators
+      // on the same device.
+      // NOTE: we need remove the communicator from this map when it is
+      // destroyed, otherwise may register onto an invalid communicator.
+      ncclCommDevIdxMapMutex.lock();
+      for (const auto i : c10::irange(devices.size())) {
+        ncclCommDevIdxMap.emplace(ncclComms[i], devices[i].index());
+      }
+      ncclCommDevIdxMapMutex.unlock();
+    }
   }
 
   it = devNCCLCommMap_.find(devicesKey);
@@ -2553,6 +2802,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       tensors,
       tensors,
@@ -2570,7 +2821,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
             stream.stream());
       },
       OpType::BROADCAST,
-      "nccl:broadcast");
+      "nccl:broadcast",
+      avoidRecordStreams);
 }
 
 // _broadcast_oop adds an out-of-place broadcast in PGNCCL
@@ -3663,6 +3915,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
+
   return collective(
       outputTensors,
       inputs,
@@ -3672,7 +3926,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          if (!avoidRecordStreams_) {
+          if (!avoidRecordStreams) {
             for (auto input : inputs) {
               c10::cuda::CUDACachingAllocator::recordStream(
                   input.storage().data_ptr(), stream);
@@ -3684,7 +3938,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
         return ncclSuccess;
       },
       OpType::SCATTER,
-      "nccl:scatter");
+      "nccl:scatter",
+      avoidRecordStreams);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
