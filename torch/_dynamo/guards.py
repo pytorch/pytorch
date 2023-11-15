@@ -50,21 +50,21 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_const_keys,
-    dict_const_keys_repr,
-    dict_param_key_ids,
+    dict_keys_getitem,
+    dict_keys_repr,
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
+    tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -106,15 +106,15 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___dict_param_key_ids": dict_param_key_ids,
-    "___dict_const_keys": dict_const_keys,
+    "___tensor_to_id": tensor_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
+    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
     "inf": float("inf"),
-    "__load_module": lambda name: importlib.import_module(name),
+    "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy":
@@ -187,7 +187,7 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Type[object]], str],
+        id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -467,6 +467,20 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_local():
             return self.ID_MATCH(guard)
 
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = [
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                ]
+                self._produce_guard_code(guard, code)
+            else:
+                self.FUNCTION_MATCH(guard)
+
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
@@ -504,22 +518,21 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        param_key_ids = set(dict_param_key_ids(value))
-        const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(
-            const_keys, local=is_from_local_source(guard.originating_source)
+        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
+        const_keys_repr = dict_keys_repr(
+            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
         )
-        if param_key_ids:
-            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
+        if any_tensor:
+            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys_repr}")
+            code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -1054,20 +1067,12 @@ class CheckFunctionManager:
                 return converted
 
             dynamic_dims_sizes = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "size"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "stride"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
                 for t in tensor_check_examples
             ]
 
