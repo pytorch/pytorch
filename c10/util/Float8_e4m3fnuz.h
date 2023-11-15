@@ -45,7 +45,7 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-#if defined(__CUDA__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__) || defined(__HIP__)
 C10_HOST_DEVICE C10_API inline float fp8e4m3fnuz_to_fp32_value(uint8_t) {
   CUDA_KERNEL_ASSERT(false && "e4m3fnuz is not supported by CUDA or HIP");
   return -1.0;
