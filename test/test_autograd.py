@@ -7033,7 +7033,18 @@ for shape in [(1,), ()]:
 
         # Special handling for printing view created in no-grad and modified
         # in-placed in no-grad.
-        self.assertEqual(repr(b), "tensor([2.], grad_fn=<Undefined>)")
+        self.assertEqual(repr(b), "tensor([2.], grad_fn=<Invalid>)")
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+            @staticmethod
+            def backward(ctx, x):
+                return x
+
+        c = Func.apply(a)
+        self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
 
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
