@@ -174,7 +174,7 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
 def cuda_and_enabled_mixed_mm(match):
@@ -247,7 +247,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
     extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
 )
 def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
         mat1, mat2, mat2_mm_shape, mat2_dtype
     )
 
@@ -270,7 +270,7 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
     extra_check=cuda_and_enabled_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
