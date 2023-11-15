@@ -1013,6 +1013,7 @@ class SoftMarginLoss(_Loss):
 
     The loss is computed between input tensor :math:`x` and target tensor :math:`y`
     (containing 1 or -1).
+
     .. math::
         \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
 
