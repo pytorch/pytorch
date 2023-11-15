@@ -397,7 +397,7 @@ def _do_annotate_conv_bn(
     combinations = itertools.product(
         combinations,
         [True, False] if torch.cuda.is_available() else [False],  # is_cuda
-        [True, False] if has_relu else [False],                   # relu_is_inplace
+        [True, False] if has_relu else [False],  # relu_is_inplace
     )
 
     # Match against all conv dimensions and cuda variants
