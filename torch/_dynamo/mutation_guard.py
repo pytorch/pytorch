@@ -121,6 +121,6 @@ def install_generation_tagging_init():
 
         Module.__setstate__ = patched_setstate
 
-        Module.___needs_generation_tag_patch = False
+        Module.___needs_generation_tag_patch = False  # type: ignore[attr-defined]
 
     GenerationTracker.generation += 1
