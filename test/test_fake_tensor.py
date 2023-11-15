@@ -560,6 +560,13 @@ class FakeTensorTest(TestCase):
         mode2 = FakeTensorMode(parent=mode1, shape_env=shape_env)
         a = torch.randn(4)
         a1 = mode1.from_tensor(a, dynamic_dims=[DimDynamic.DYNAMIC])
+        del a1
+        a2 = mode2.from_tensor(a)
+        self.assertTrue(free_symbols(a2.size(0)))
+        a2_dup = mode2.from_tensor(a)
+        self.assertIs(a2, a2_dup)
+        del a2
+        del a2_dup
         a2 = mode2.from_tensor(a)
         self.assertTrue(free_symbols(a2.size(0)))
 

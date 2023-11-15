@@ -388,6 +388,28 @@ class FakeTensorConverter:
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
         )
+        # This is a bit tricky.  We make use of FakeTensorMode as a persistent
+        # mapping so that we can remap real tensors to the same corresponding
+        # fake tensor if we ask for a remapping.  This remapping is currently
+        # load bearing in the Dynamo-AOTAutograd interaction, where
+        # AOTAutograd will try to refakeify real tensors to "fetch" the fake
+        # tensors that Dynamo created.
+        #
+        # However, FakeTensorMode doesn't actually hold a strong reference to
+        # fake tensors!  This is to break the reference cycle
+        # FakeTensorMode -> memo table -(weak)-> FakeTensor -> FakeTensorMode.
+        # So it's actually pretty easy to lose the reference.  Dynamo ensures
+        # the fakes don't go dead by saving them in TrackedFakes, but when
+        # you have chained two modes together, you can easily lose the
+        # fake tensor from the parent tensor.  This puts a strong reference to
+        # the parent on the child, so that their lifetimes are tied.
+        #
+        # If we eventually refactor AOTAutograd to use a separate, non-weak
+        # dict to lookup fake tensors from real tensors, this attribute would
+        # still be useful so that when we fakeify a tensor, we can get what
+        # the original fake (prior to any mutation was).  The alternative is
+        # to rewrite all fakeification call sites in Dynamo to manually do
+        # the first fakeify, and then the second fakeify.
         if self.parent is not None:
             out._orig_fake = t
         if out is NotImplemented:
