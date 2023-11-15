@@ -37,7 +37,7 @@ def group_functions_by_op_name(
         for k, group in (
             itertools.groupby(
                 eligible_ops,
-                key=lambda g: config.func_name_base_str(g),
+                key=config.func_name_base_str,
             )
         )
     ]

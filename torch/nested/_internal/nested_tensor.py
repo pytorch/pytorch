@@ -8,15 +8,17 @@ from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
 _tensor_id_counter = 0
-_tensor_id_registry = WeakTensorKeyDictionary()
+_tensor_symint_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_id(tensor, *, coeff=1):
+def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
-    if tensor not in _tensor_id_registry:
-        _tensor_id_registry[tensor] = _tensor_id_counter
+    if tensor not in _tensor_symint_registry:
+        _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
+            _tensor_id_counter, coeff
+        )
         _tensor_id_counter += 1
-    return torch._C._get_singleton_int(_tensor_id_registry[tensor], coeff)
+    return _tensor_symint_registry[tensor]
 
 
 class NestedTensor(torch.Tensor):
@@ -49,7 +51,6 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         lengths=None,
-        ragged_size=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -72,23 +73,17 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, ragged_size=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
 
-        if ragged_size is None:
-            # ragged_size needs to be explicitly passed during tracing (1) when
-            # we initially fakify the nested tensor, and (2) when we rewrap as
-            # we perform operations on fake nested tensors.
-            # Calling get_tensor_id won't work in those cases because we want
-            # the existing symbolic ragged_size to be propagated.
-            if lengths is None:
-                ragged_size = get_tensor_id(offsets, coeff=1)
-            else:
-                ragged_size = get_tensor_id(lengths, coeff=1)
+        # Query cache for the symint associated with offsets or lengths
+        # (create a new one if needed).
+        ragged_source = offsets if lengths is None else lengths
+        ragged_size = get_tensor_symint(ragged_source, coeff=1)
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
@@ -151,10 +146,7 @@ class NestedTensor(torch.Tensor):
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        if "_lengths" in inner_tensors and inner_tensors["_lengths"] is not None:
-            lengths = inner_tensors["_lengths"]
-        else:
-            lengths = None
+        lengths = inner_tensors.get("_lengths", None)
 
         # NOTE [ Storing symbolic values as plain attributes on subclasses ]
         #
@@ -181,17 +173,19 @@ class NestedTensor(torch.Tensor):
         # propagated the meta["ragged_size"] which is still a symint and the
         # subclass is responsible for making sure that the symint doesn't leak.
         #
-        if not has_free_symbols(values) and not has_free_symbols(offsets):
-            # Note that we cannot simply check if is_fake(values) because
-            # during aot autograd, FunctionalTensors are not fake but hold
-            # symbolic sizes.
-            meta["ragged_size"] = None
+        # Note that we cannot simply check if is_fake(values) because
+        # during aot autograd, FunctionalTensors are not fake but hold
+        # symbolic sizes.
+        ragged_source = offsets if lengths is None else lengths
+        if has_free_symbols(ragged_source) or has_free_symbols(values):
+            # Associate offsets or lengths (possibly fake, possibly functionalized)
+            # with the ragged_size.
+            _tensor_symint_registry[ragged_source] = meta["ragged_size"]
 
         return NestedTensor(
             values,
             offsets=offsets,
             lengths=lengths,
-            ragged_size=meta["ragged_size"],
             requires_grad=meta["requires_grad"],
         )
 
@@ -228,15 +222,12 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
-        ctx.kwargs = {
-            "ragged_size": x._size[x._ragged_idx],
-        }
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(gO, offsets=offsets, **ctx.kwargs)
+        return NestedTensor(gO, offsets=offsets)
 
 
 # Not actually a view!
