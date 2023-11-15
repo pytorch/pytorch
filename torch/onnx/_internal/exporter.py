@@ -1204,7 +1204,7 @@ class Exporter:
                 fake_context=self.options.fake_context,
                 model_signature=getattr(
                     self.model, "graph_signature", None
-                ),  # isinstance(self.model, ExportedProgram)
+                ),  # Available for isinstance(self.model, ExportedProgram) only
             )
 
     def _assert_fake_tensor_mode(self):
