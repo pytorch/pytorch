@@ -130,7 +130,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -233,7 +233,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into

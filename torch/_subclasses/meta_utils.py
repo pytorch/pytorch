@@ -309,7 +309,7 @@ class MetaConverter:
                     from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-                    if shape_env and not t.is_nested:
+                    if shape_env and not t.is_nested and not t._base.is_nested:
                         base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
                     else:
                         base_dynamic_dims = None
