@@ -1183,7 +1183,7 @@ def _prefetch_handle(
     current_handle: Optional[FlatParamHandle],
     prefetch_mode: _PrefetchMode,
 ) -> None:
-    """Prefetche the next handles if needed (without synchronization).
+    """Prefetch the next handles if needed (without synchronization).
 
     An empty handles key cannot prefetch.
     """
