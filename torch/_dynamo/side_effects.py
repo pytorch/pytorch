@@ -214,14 +214,13 @@ class SideEffects:
 
     def _track_obj(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable.mutable_local = mutable_cls(source)
-        variable.source = source
+        assert variable.source is not None
+        variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -231,13 +230,10 @@ class SideEffects:
 
     def track_object_existing(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(
-            source, item, variable, mutable_cls=AttributeMutationExisting
-        )
+        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
 
     def track_object_new(
         self,

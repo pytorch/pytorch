@@ -235,11 +235,9 @@ class VariableBuilder:
                 self.install_guards(dup_guard)
             return side_effect_result
         vt = self._wrap(value)
-        assert vt.source is not None
+        vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
-            vt = self.tx.output.side_effects.track_object_existing(
-                self.source, value, vt
-            )
+            vt = self.tx.output.side_effects.track_object_existing(value, vt)
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
@@ -451,11 +449,12 @@ class VariableBuilder:
                     result,
                     type(value),
                     default_factory=self._wrap(value.default_factory),
+                    source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value))
+                result = ConstDictVariable(result, type(value), source=self.source)
 
-            return self.tx.output.side_effects.track_dict(self.source, value, result)
+            return self.tx.output.side_effects.track_dict(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -542,7 +541,6 @@ class VariableBuilder:
                 for n, v in enumerate(value.saved_tensors)
             ]
             return self.tx.output.side_effects.track_object_existing(
-                self.source,
                 value,
                 AutogradFunctionContextVariable(
                     value,
@@ -612,9 +610,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
@@ -764,9 +760,7 @@ class VariableBuilder:
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
@@ -782,10 +776,10 @@ class VariableBuilder:
             for i, item in enumerate(value)
         ]
         result = BaseListVariable.cls_for_instance(value)(
-            output, mutable_local=MutableLocal()
+            output, mutable_local=MutableLocal(), source=self.source
         )
         if istype(value, list):
-            return self.tx.output.side_effects.track_list(self.source, value, result)
+            return self.tx.output.side_effects.track_list(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -829,13 +823,11 @@ class VariableBuilder:
         if mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = UnspecializedNNModuleVariable(value)
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
@@ -900,7 +892,7 @@ class VariableBuilder:
                 or self.source.guard_source().is_nn_module()
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value)
+                return ConstantVariable.create(value=value, source=self.source)
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
@@ -1122,7 +1114,7 @@ class VariableBuilder:
                     # a constant (but this should have been handled
                     # in the caller, TBH)
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return ConstantVariable.create(value=value)
+                    return ConstantVariable.create(value=value, source=self.source)
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
