@@ -14,7 +14,7 @@ import sys
 import types
 
 import torch
-
+import numpy
 
 class VFModule(types.ModuleType):
     vf: types.ModuleType
