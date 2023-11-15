@@ -8,3 +8,4 @@ flake8-pyi==20.5.0
 mccabe==0.6.1
 pycodestyle==2.6.0
 pyflakes==2.2.0
+torchfix==0.1.1

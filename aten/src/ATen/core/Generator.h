@@ -145,6 +145,9 @@ Generator make_generator(Args&&... args) {
   return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
 
+Generator make_generator_for_device(
+    c10::Device device, c10::optional<int64_t> seed = c10::nullopt);
+
 /**
  * Utility function to static cast input Generator* to
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
