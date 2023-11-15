@@ -1303,7 +1303,13 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value, treespec, checkpointed_gmod = self.create_wrapped_node(
+        (
+            p_args,
+            _,
+            example_value,
+            treespec,
+            checkpointed_gmod,
+        ) = self.create_wrapped_node(
             tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
         )
         if context_fn is not None:
