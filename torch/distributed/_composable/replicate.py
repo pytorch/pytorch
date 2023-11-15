@@ -24,7 +24,7 @@ class _ReplicateState(_State):
     def _collect_params(
         self,
         module: nn.Module,
-        ignored_modules: List[nn.Module],
+        ignored_modules: Set[nn.Module],
         ignored_params: Set[nn.Parameter],
         prefix: str = _ROOT_MODULE_PREFIX,
     ) -> None:
