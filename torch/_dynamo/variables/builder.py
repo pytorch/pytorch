@@ -234,7 +234,7 @@ class VariableBuilder:
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
-        vt = self._wrap(value).clone(**self.options())
+        vt = self._wrap(value)
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(
                 self.source, value, vt

@@ -220,7 +220,8 @@ class SideEffects:
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
+        variable.mutable_local = mutable_cls(source)
+        variable.source = source
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -325,11 +326,9 @@ class SideEffects:
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
 
-    def mutation(self, oldvar, newvar):
-        self.check_allowed_side_effect(oldvar)
-        return newvar.clone(
-            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
+    def mutation(self, var):
+        self.check_allowed_side_effect(var)
+        var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]

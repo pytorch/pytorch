@@ -767,7 +767,8 @@ class TritonKernelVariable(VariableTracker):
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
             # TODO mlazos clone: remove this
-            return self.clone(grid=grid).call_function(tx, args, kwargs)
+            self.grid = grid
+            return self.call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)

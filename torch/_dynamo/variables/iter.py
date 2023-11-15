@@ -24,7 +24,7 @@ class RepeatIteratorVariable(IteratorVariable):
     # Repeat needs no mutation, clone self
     def next_variables(self, tx):
         # TODO mlazos clone: remove this
-        return self.item.clone(), self
+        return self.item, self
 
 
 class CountIteratorVariable(IteratorVariable):

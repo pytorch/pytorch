@@ -214,23 +214,27 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and arg_hashable and self.mutable_local:
             assert not kwargs and len(args) == 2
+            tx.output.side_effects.mutation(self)
             k = Hashable(args[0])
             self.items[k] = args[1]
-            return self
+
+            return ConstantVariable.create(None)
         elif name in ("pop", "get") and args[0] not in self and len(args) == 2:
             # missing item, return the default value
             return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
-            self.items.pop(Hashable(args[0]))
-            return self
+            tx.output.side_effects.mutation(self)
+            x = self.items.pop(Hashable(args[0]))
+            return x
         elif (
             name == "update"
             and args
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
+            tx.output.side_effects.mutation(self)
             self.items.update(args[0].items)
-            return self
+            return ConstantVariable.create(None)
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(args[0])
         elif name == "__contains__" and len(args) == 1:

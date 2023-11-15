@@ -353,6 +353,7 @@ class BuiltinVariable(VariableTracker):
 
             # TODO mlazos: need to handle options here
             a.items.extend(b.unpack_var_sequence(tx))
+            return a
 
         list_like_iadd_handlers = [
             (
@@ -1162,7 +1163,9 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 # TODO mlazos clone: remove this
-                return obj.var_getattr(tx, name).clone(source=source)
+                var = obj.var_getattr(tx, name)
+                var.source = source
+                return var
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
@@ -1188,7 +1191,9 @@ class BuiltinVariable(VariableTracker):
         else:
             try:
                 # TODO mlazos clone: remove this
-                return obj.var_getattr(tx, name).clone(source=source)
+                var = obj.var_getattr(tx, name)
+                var.source = source
+                return var
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 

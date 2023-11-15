@@ -361,7 +361,9 @@ class DequeVariable(CommonListMethodsVariable):
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
-            return self.items.popleft()
+            item = self.items[0]
+            self.items = self.items[1:]
+            return item
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
             self.items = [args[0]] + list(self.items)
