@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import os
+import sys
 import tempfile
 import unittest
 from typing import Dict
@@ -17,20 +18,37 @@ from torch._inductor.utils import aot_inductor_launcher, cache_dir
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 
-from torch.testing._internal.common_utils import IS_FBCODE, TestCase
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import (
     copy_tests,
+    HAS_CUDA,
     requires_cuda,
     requires_multigpu,
     TestFailure,
 )
-from torch.testing._internal.triton_utils import (
-    add_kernel,
-    add_kernel_2d_autotuned,
-    add_kernel_autotuned,
-    triton,
-)
 from torch.utils import _pytree as pytree
+
+if HAS_CUDA:
+    import triton
+    from torch.testing._internal.triton_utils import (
+        add_kernel,
+        add_kernel_2d_autotuned,
+        add_kernel_autotuned,
+    )
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
 class AOTInductorModelRunner:
@@ -1270,6 +1288,8 @@ copy_tests(
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(skip_rocm=True, triton=True)
+    # cpp_extension N/A in fbcode
+    if HAS_CUDA and not TEST_WITH_ROCM:
+        run_tests(needs="filelock")

@@ -12,6 +12,7 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.test_case import run_tests
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -216,8 +217,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
     "view_as_complex": {f16},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
 }
 
 
@@ -232,8 +231,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
     "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
 }
 
@@ -617,6 +614,4 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests()
+    run_tests()
