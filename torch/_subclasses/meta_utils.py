@@ -634,22 +634,14 @@ class MetaConverter:
         shape_env=None,
         *,
         callback=lambda t: t(),
-        ignore_subclass=False,
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        from torch._subclasses.fake_tensor import FakeTensor
 
-        if (
-            type(t) is torch.Tensor
-            or type(t) is torch.nn.Parameter
-            or (ignore_subclass and isinstance(t, torch.Tensor))
-            or is_traceable_wrapper_subclass(t)
-            or isinstance(t, FakeTensor)
-        ):
+        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
@@ -716,23 +708,14 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                # When ignoring subclasses, we treat the input tensor "as if" it
-                # were a normal tensor and create a non-subclassed fake tensor
-                # that, modulo type and attributes, resembles the original tensor.
-                # This can be helpful if you're planning to simulate the subclassness
-                # by hand, e.g., as is done in Dynamo
-                ctx = contextlib.nullcontext()
-                if ignore_subclass:
-                    ctx = torch._C.DisableTorchFunctionSubclass()
-                with ctx:
-                    r = self.meta_tensor(
-                        t,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
-                    )
+                r = self.meta_tensor(
+                    t,
+                    shape_env=shape_env,
+                    callback=callback,
+                    source=source,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
+                )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
