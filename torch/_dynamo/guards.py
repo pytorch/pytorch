@@ -439,13 +439,16 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None))) and not config.generate_interpreter_agnostic_code:
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        self.ID_MATCH(guard)
+        if config.generate_interpreter_agnostic_code:
+            self.TYPE_MATCH(guard)
+        else:
+            self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
@@ -465,7 +468,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         if guard.is_local():
-            return self.ID_MATCH(guard)
+            return self.CLOSURE_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
@@ -657,7 +660,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module():
+        if guard.is_nn_module() and not config.generate_interpreter_agnostic_code:
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):

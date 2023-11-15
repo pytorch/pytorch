@@ -323,6 +323,8 @@ only_allow_pt2_compliant_ops = False
 
 capture_autograd_function = True
 
+generate_interpreter_agnostic_code = True
+
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
 

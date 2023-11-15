@@ -464,9 +464,13 @@ class VariableBuilder:
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - frozenset")
             self.install_guards(GuardBuilder.ID_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
         elif isinstance(value, enum.Enum):
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - enum")
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
         elif is_builtin_callable(value):
@@ -500,6 +504,8 @@ class VariableBuilder:
             return FunctoolsPartialVariable(func_obj, args, keywords, original=value)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - typing")
             self.install_guards(GuardBuilder.ID_MATCH)
             return TypingVariable(
                 value,
@@ -582,6 +588,8 @@ class VariableBuilder:
                 value,
             )
         elif isinstance(value, _StreamBase):
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - _StreamBase")
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
                 None,
@@ -590,6 +598,8 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, _EventBase):
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - _EventBase")
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
                 None,
@@ -618,18 +628,26 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - ProcessGroup")
             self.install_guards(GuardBuilder.ID_MATCH)
             return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - DeviceMeshVariable")
             self.install_guards(GuardBuilder.ID_MATCH)
             return DeviceMeshVariable(value, source=self.source)
         elif PlacementClassVariable.is_placement_type(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - PlacementClassVariable")
             self.install_guards(GuardBuilder.ID_MATCH)
             return PlacementClassVariable(value, source=self.source)
         elif PlacementVariable.is_placement(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            if config.generate_interpreter_agnostic_code:
+                unimplemented("Interpreter agnostic code NYI - PlacementVariable")
             self.install_guards(GuardBuilder.ID_MATCH)
             return PlacementVariable(
                 value,
@@ -676,6 +694,8 @@ class VariableBuilder:
                 new_symint == 1,
             )
         elif isinstance(value, (JITFunction, Autotuner)):
+            if config.generate_interpreter_agnostic_code:
+                unimplemented(f"Interpreter agnostic code NYI - {type(value)}")
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
