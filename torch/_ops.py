@@ -487,6 +487,9 @@ class OpOverload(OperatorBase):
         self.__qualname__ = self._name
         self.__annotations__ = {}
 
+        # If the OpOverload was constructed from a Library.def in Python.
+        self._defined_in_python = self.__qualname__ in torch.library._defs
+
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
         for a in self._schema.arguments:

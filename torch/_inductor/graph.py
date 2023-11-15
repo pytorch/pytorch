@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
@@ -18,7 +18,7 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
+from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -78,6 +78,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     }
     if cuda:
         supported_dtype.add(torch.float16)
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -156,9 +158,10 @@ class GraphLowering(torch.fx.Interpreter):
             register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
 
         if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
+            from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+            # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
 
     def __init__(
         self,
@@ -208,8 +211,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_output_index if const_output_index else {}
         )
         self.const_kernels: Set[str] = const_kernels if const_kernels else set()
-        self.constants: OrderedDict[str, torch.Tensor] = (
-            original_constants if original_constants else OrderedDict()
+        self.constants: Dict[str, torch.Tensor] = (
+            original_constants if original_constants else {}
         )
         self.used_constants: Set[str] = set()
         self.constant_reprs: Dict[str, str] = {}
@@ -295,7 +298,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         if any(
-            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+            has_free_symbols(n.args[idx].meta["val"])
+            for n in conv_nodes
+            for idx in [0, 1]
         ):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
@@ -623,6 +628,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
+            log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)
             return out
         except Exception as e:
@@ -728,7 +734,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.current_node = old
 
     def run_node(self, n: torch.fx.Node):
-        log.debug("lowering %s", LazyString(lambda: n.format_node()))
+        def debug(msg):
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -741,25 +749,24 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and fallback_node_due_to_unsupported_type(n)
             ):
+                debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
+                debug("layout_constraints")
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride:
-                # inductor graphs can occasionally return sizes/strides,
-                # e.g. if we need to save symints for the backward graph.
-                if isinstance(n.meta["val"], torch.SymInt):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             elif is_magic_method(n.target):
+                # TODO: this is sus, it probably should be handled in the
+                # lowerings themselves similarly to sym_size/sym-stride
+                debug("is_magic_method")
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
             else:
+                debug("")
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
