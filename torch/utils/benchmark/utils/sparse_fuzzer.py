@@ -19,7 +19,8 @@ class FuzzedSparseTensor(FuzzedTensor):
         dtype=torch.float32,
         cuda=False
     ):
-        """
+        """Initialize a FuzzedSparseTensor object.
+
         Args:
             name:
                 A string identifier for the generated Tensor.

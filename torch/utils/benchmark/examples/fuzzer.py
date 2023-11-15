@@ -1,4 +1,4 @@
-"""Example of the Timer and Fuzzer APIs:
+"""Example of the Timer and Fuzzer APIs.
 
 $ python -m examples.fuzzer
 """

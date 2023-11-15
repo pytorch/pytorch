@@ -29,7 +29,8 @@ _IQR_GROSS_WARN_THRESHOLD = 0.25
 
 @dataclasses.dataclass(init=True, repr=False, eq=True, frozen=True)
 class TaskSpec:
-    """Container for information used to define a Timer. (except globals)"""
+    """Container for information used to define a Timer. (except globals)."""
+
     stmt: str
     setup: str
     global_setup: str = ""
@@ -78,6 +79,7 @@ class Measurement:
     serializable and provides several convenience methods
     (including a detailed __repr__) for downstream consumers.
     """
+
     number_per_run: int
     raw_times: List[float]
     task_spec: TaskSpec
@@ -200,7 +202,8 @@ class Measurement:
         return self.sub_label or self.stmt or "[Unknown]"
 
     def __repr__(self) -> str:
-        """
+        """Generate a representation of a measurement.
+
         Example repr:
             <utils.common.Measurement object at 0x7f395b6ac110>
               Broadcasting add (4x8)
@@ -228,7 +231,7 @@ class Measurement:
 
     @staticmethod
     def merge(measurements: Iterable["Measurement"]) -> List["Measurement"]:
-        """Convenience method for merging replicates.
+        """Merge replicates of measurements.
 
         Merge will extrapolate times to `number_per_run=1` and will not
         transfer any metadata. (Since it might differ between replicates)
@@ -274,7 +277,7 @@ def unit_to_english(u: str) -> str:
 
 
 def trim_sigfig(x: float, n: int) -> float:
-    """Trim `x` to `n` significant figures. (e.g. 3.14159, 2 -> 3.10000)"""
+    """Trim `x` to `n` significant figures. (e.g. 3.14159, 2 -> 3.10000)."""
     assert n == int(n)
     magnitude = int(torch.tensor(x).abs().log10().ceil().item())
     scale = 10 ** (magnitude - n)

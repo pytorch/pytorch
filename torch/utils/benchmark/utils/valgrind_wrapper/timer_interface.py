@@ -46,6 +46,7 @@ class FunctionCounts:
         4) Two higher order methods (`filter` and `transform`) for custom
            manipulation.
     """
+
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
     truncate_rows: bool = True
@@ -134,7 +135,8 @@ class FunctionCounts:
         instructions involve unicode to dictionary lookups which Python uses to
         map variable names. FunctionCounts is generally a content agnostic
         container, however this is sufficiently important for obtaining
-        reliable results to warrant an exception."""
+        reliable results to warrant an exception.
+        """
         return self.filter(lambda fn: "dictobject.c:lookdict_unicode" not in fn)
 
     def _merge(
@@ -167,6 +169,7 @@ class CallgrindStats:
     methods are provided as well; the most significant is
     `CallgrindStats.as_standardized()`.
     """
+
     task_spec: common.TaskSpec
     number_per_run: int
     built_with_debug_symbols: bool
@@ -195,7 +198,7 @@ class CallgrindStats:
         return output
 
     def stats(self, inclusive: bool = False) -> FunctionCounts:
-        """Returns detailed function counts.
+        """Return detailed function counts.
 
         Conceptually, the FunctionCounts returned can be thought of as a tuple
         of (count, path_and_function_name) tuples.
@@ -209,7 +212,7 @@ class CallgrindStats:
         return self.stmt_inclusive_stats if inclusive else self.stmt_exclusive_stats
 
     def counts(self, *, denoise: bool = False) -> int:
-        """Returns the total number of instructions executed.
+        """Return the total number of instructions executed.
 
         See `FunctionCounts.denoise()` for an explanation of the `denoise` arg.
         """
@@ -308,6 +311,7 @@ class CopyIfCallgrind:
 
     See `GlobalsBridge` for why this matters.
     """
+
     def __init__(self, value: Any, *, setup: Optional[str] = None):
         for method, supported_types in _GLOBALS_ALLOWED_TYPES.items():
             if any(isinstance(value, t) for t in supported_types):
@@ -754,7 +758,7 @@ class _ValgrindWrapper:
         bindings: Optional[CallgrindModuleType],
     ) -> str:
         def block_stmt(stmt: str, indent: int = 0) -> str:
-            """Partially unroll benchmark loop.
+            """Partial unroll benchmark loop.
 
             The naive template looks something like:
                 "for _ in range({number}): {stmt}"

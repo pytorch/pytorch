@@ -1,4 +1,4 @@
-"""Trivial use of Timer API:
+"""Trivial use of Timer API.
 
 $ python -m examples.simple_timeit
 """

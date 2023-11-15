@@ -76,9 +76,7 @@ if HAS_TABULATE:
         optimizer: Optional[torch.optim.Optimizer] = None,
         loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
-        """
-        Use this utility to benchmark torch.compile
-        """
+        """Use this utility to benchmark torch.compile."""
         if backend:
             try:
                 torch._dynamo.reset()
@@ -120,10 +118,11 @@ if HAS_TABULATE:
         loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
         """
-        This is a simple utility that can be used to benchmark torch.compile
+        Benchmark torch.compile with this simple utility.
+
         In particular it ensures that your GPU is setup to use tensor cores if it supports its
         It also tries out all the main backends and prints a table of results so you can easily compare them all
-        Many of the backendds have their own optional dependencies so please pip install them seperately
+        Many of the backendds have their own optional dependencies so please pip install them seperately.
 
         You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
