@@ -1,6 +1,8 @@
 import os
 import sys
 from enum import Enum
+import pdb
+import io
 
 import torch
 
@@ -53,6 +55,20 @@ if is_available():
         set_debug_level_from_env,
         _make_nccl_premul_sum,
     )
+
+    def breakpoint(rank: int = 0):
+        """
+        Set a pdb breakpoint, but only on a single rank.  All other ranks will wait for you to be
+        done with the pdb session before continuing.
+        """
+        if get_rank() == rank:
+            # This will be the case when your subprocess was created by
+            # multiprocessing.Process, see
+            # https://stackoverflow.com/questions/30134297/python-multiprocessing-stdin-input
+            if isinstance(sys.stdin, io.TextIOWrapper):
+                sys.stdin = open(0)
+            pdb.set_trace(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
+        barrier()
 
     if sys.platform != "win32":
         from torch._C._distributed_c10d import (
