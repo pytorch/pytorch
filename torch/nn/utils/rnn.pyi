@@ -10,6 +10,8 @@ from typing import (
     Union,
 )
 
+from torch._prims_common import DeviceLikeType
+
 from typing_extensions import Self
 
 from torch import Tensor
@@ -54,7 +56,7 @@ class PackedSequence(PackedSequence_):
     @overload
     def to(
         self: _T,
-        device: Optional[Union[_device, str]] = None,
+        device: Optional[DeviceLikeType] = None,
         dtype: Optional[_dtype] = None,
         non_blocking: bool = False,
         copy: bool = False,

@@ -1567,25 +1567,23 @@ class CppVecKernel(CppKernel):
 
         return self.cse.generate(self.loads, line)
 
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        assert mode is None
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        var = self.args.output(name)
-        index = self.rename_indexing(index)
+    def get_vec_store_line(self, value, var, index, dtype):
+        """
+        Get a store line str that stores `value` into `var` at `index` of `dtype`.
+        :param value: Vectorized type templaterized on `dtype`.
+        :param var: buffer to store into.
+        :index: index into the `var`.
+        """
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
-        dtype = V.graph.get_dtype(name)
         non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
         if non_contiguous:
             var_expr = "tmpbuf"
-        if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        elif V.graph.get_dtype(name) in [torch.uint8]:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        else:
+        if dtype == torch.float:
             line = f"{value}.store({var_expr});"
+        else:
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
         if non_contiguous:
             inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
@@ -1599,7 +1597,20 @@ class CppVecKernel(CppKernel):
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
-        self.stores.writeline(DeferredLine(name, line))
+        return line
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        assert mode is None
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                self.get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
+            )
+        )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
@@ -1708,9 +1719,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             )
         else:
             # Vertical reduction
-            store_lines = [
-                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
-            ]
+            store_lines = []
             if out_dtype != dtype:
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
@@ -1718,16 +1727,19 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                         DeferredLine(
                             name,
                             f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                        ),
-                        DeferredLine(
-                            name,
-                            f"{_lowp_fp_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
-                        ),
+                        )
                     ]
+                    value = _lowp_fp_tmpvar_vec
                 else:
                     raise AssertionError(
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
+            store_lines += [
+                DeferredLine(
+                    name,
+                    self.get_vec_store_line(value, var, index, out_dtype),
+                )
+            ]
             self.reduction_suffix.writelines(store_lines)
 
 
