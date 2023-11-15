@@ -127,9 +127,9 @@ class TestForeach(TestCase):
 
         for sample in op.sample_zero_size_inputs(device, dtype):
             if not op.has_no_out_of_place:
-                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
             with InplaceForeachVersionBumpCheck(self, sample.input):
-                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
     @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     @ops(
@@ -244,7 +244,7 @@ class TestForeach(TestCase):
                     (rhs_arg,) = transformed_sample.args
                     ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
                     sum(wrapped_op(
-                        [rhs_arg, tensors], is_cuda=False, is_fastpath=False
+                        [rhs_arg, tensors], is_cuda=False, expect_fastpath=False
                     )).mean().backward()
                     sum([ref.func(ref_rhs_arg, t) for t in ref_tensors]).mean().backward()
                     self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
@@ -630,7 +630,7 @@ class TestForeach(TestCase):
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
-        actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord, zero_size=False)
+        actual = fn(inputs, is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
         expect = ref_fn(inputs, ord=ord)
 
         if dtype == torch.float16:
@@ -694,7 +694,7 @@ class TestForeach(TestCase):
         self.assertTrue(all(t.requires_grad for t in sample.input))
         if func.func in foreach_pointwise_op_db:
             sample.kwargs.pop("values", None)
-        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
+        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, expect_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
@@ -712,7 +712,7 @@ class TestForeach(TestCase):
             class Foo:
                 pass
 
-            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
+            out = func((sample.input, *sample.args), is_cuda=False, expect_fastpath=False, **sample.kwargs)
             foo = Foo()
             meta_dict = out[0].grad_fn.metadata
             meta_dict[0] = foo
