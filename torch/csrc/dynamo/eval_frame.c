@@ -154,7 +154,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   }
 
 // Uncomment next line to print debug message
-// #define TORCHDYNAMO_DEBUG 1
+#define TORCHDYNAMO_DEBUG 1
 
 #ifdef TORCHDYNAMO_DEBUG
 
@@ -975,6 +975,7 @@ static PyObject* _custom_eval_frame(
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
+  DEBUG_TRACE("cache miss %s", get_frame_name(frame));
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =

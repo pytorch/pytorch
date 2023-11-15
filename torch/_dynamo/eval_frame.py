@@ -326,6 +326,7 @@ class _TorchDynamoContext:
         self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        print("CALL ENTER - ", fn)
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config
@@ -375,6 +376,7 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            print("CALLL _FN - ", fn)
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
@@ -632,6 +634,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    remote=False
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -681,8 +684,13 @@ def optimize(
             dynamic=dynamic,
             hooks=hooks,
         )
+
+    if remote:
+        callback = convert_frame.convert_frame_remote(backend, hooks=hooks)
+    else:
+        callback = convert_frame.convert_frame(backend, hooks=hooks)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        callback,
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,

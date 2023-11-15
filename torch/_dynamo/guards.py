@@ -67,6 +67,7 @@ from .utils import (
     tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    check_module_str,
 )
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def uninteresting_files():
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
+    "__check_module_str": check_module_str,
     "___current_backend": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
     ),
@@ -308,6 +310,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
+        assert not config.generate_interpreter_agnostic_code
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -445,12 +448,14 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        if config.generate_interpreter_agnostic_code:
-            self.TYPE_MATCH(guard)
-        else:
-            self.ID_MATCH(guard)
+        code = []
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
+        if config.generate_interpreter_agnostic_code:
+            self.TYPE_MATCH(guard)
+            code.append(f"__check_module_str(\"\"\"{str(val)}\"\"\", str({ref}))")
+        else:
+            self.ID_MATCH(guard)
 
         def setup_guard():
             assert istype(val.training, bool)
@@ -464,6 +469,9 @@ class GuardBuilder(GuardBuilderBase):
             setup_guard()
         else:
             exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
+
+        if code:
+            self._produce_guard_code(guard, code)
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

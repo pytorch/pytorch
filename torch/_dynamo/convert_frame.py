@@ -8,6 +8,7 @@ import types
 import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
+import pickle
 
 try:
     import numpy as np
@@ -71,6 +72,7 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
+    deserialize_function_object_from_file,
     gen_record_file_name,
     increment_frame,
     is_namedtuple,
@@ -80,6 +82,8 @@ from .utils import (
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
+    attrs_code_object,
+    attrs_function,
     write_record_to_file,
 )
 
@@ -571,6 +575,7 @@ def _compile(
             return None
 
         assert output.guards is not None
+        breakpoint()
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
@@ -588,6 +593,7 @@ def _compile(
             hooks.guard_export_fn(output.guards)
 
         output.local_scope.clear()
+
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
@@ -659,6 +665,91 @@ def _compile(
                 non_compliant_ops,
             )
             log_compilation_event(metrics)
+
+
+def _placeholder_remote_fetch(unique_frame_id):
+    try:
+        file_path = f"{unique_frame_id}.pkl"
+        with open(file_path, 'rb') as file:
+            serialized = file.read()
+
+        attributes, func_attrs = pickle.loads(serialized)
+        code_obj = types.CodeType(*attributes)
+        guard_fn = deserialize_function_object_from_file(func_attrs)
+        return code_obj, guard_fn
+    except Exception as e:
+        breakpoint()
+        return None, None
+
+def _placeholder_remote_write(unique_frame_id, code_attrs, func_attrs):
+    file_path = f"{unique_frame_id}.pkl"
+    code_and_guards = (code_attrs, func_attrs)
+    breakpoint()
+    with open(file_path, 'wb') as file:
+        pickle.dump(code_and_guards, file)
+
+
+def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+
+    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
+        counters["frames"]["total"] += 1
+        try:
+            breakpoint()
+            # Cache miss, check remote
+            remote_code, remote_guards = _placeholder_remote_fetch("my_frame")
+            breakpoint()
+            if remote_code and remote_guards:
+                result = GuardedCode(remote_code, remote_guards)
+            else:
+                result = inner_convert(frame, cache_entry, hooks, frame_state)
+                breakpoint()
+                code_attrs = attrs_code_object(result.code)
+                func_attrs = attrs_function(result.check_fn)
+                breakpoint()
+                _placeholder_remote_write("my_frame", code_attrs, func_attrs)
+
+            counters["frames"]["ok"] += 1
+            return result
+        except Exception as e:
+            # These two exception types are "soft" failure, in the sense that
+            # we know this is due to something we didn't implement all the
+            # way, scare the user less about it.  That being said, if you
+            # are trying to understand why a graph break happened, it's still
+            # important to have this information, so offer it.
+            #
+            # NB: NotImplementedError used to be on this list, but actually
+            # it is impossible for it to reach here, as it is converted into
+            # InternalTorchDynamoError.  This behavior seemed reasonable
+            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
+            # someone wanted these to also get suppressed.  If so, you'll
+            # need to make these exceptions not get wrapped
+
+            # We intentionally don't want to suppress error here.
+            if isinstance(e, UncapturedHigherOrderOpError):
+                raise
+
+            soft_fail = isinstance(e, Unsupported)
+            if not config.suppress_errors and not soft_fail:
+                raise
+
+            # Suppress the error.  NB: It's very important to do the
+            # suppression logging HERE, where the actual suppression
+            # happens. Previously it was somewhere else and so it was
+            # possible to accidentally not log at all.
+            record_filename = getattr(e, "record_filename", None)
+            code = frame.f_code
+            error_msg = format_error_msg(e, code, record_filename, frame)
+
+            if soft_fail:
+                log.info(error_msg, exc_info=True)
+            else:
+                log.warning(error_msg, exc_info=True)
+        return None
+
+    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+    return _convert_frame
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

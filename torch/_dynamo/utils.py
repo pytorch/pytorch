@@ -2316,3 +2316,47 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
     )
+
+def check_module_str(ref_str, module_str):
+    breakpoint()
+    return ref_str == module_str
+
+def attrs_code_object(code_obj):
+    if not isinstance(code_obj, types.CodeType):
+        raise TypeError("Object must be a code object")
+
+    attributes = (
+        code_obj.co_argcount, code_obj.co_posonlyargcount, code_obj.co_kwonlyargcount,
+        code_obj.co_nlocals, code_obj.co_stacksize, code_obj.co_flags, code_obj.co_code,
+        code_obj.co_consts, code_obj.co_names, code_obj.co_varnames, code_obj.co_filename,
+        code_obj.co_name, code_obj.co_firstlineno, code_obj.co_lnotab, code_obj.co_freevars,
+        code_obj.co_cellvars
+    )
+
+    return attributes
+
+def attrs_function(func):
+    if not isinstance(func, types.FunctionType):
+        raise TypeError("Object must be a function")
+
+    func_data = {
+        'code': attrs_code_object(func.__code__),
+        'name': func.__name__,
+        # 'defaults': func.__defaults__,
+        # 'closure': func.__closure__
+    }
+
+    return func_data
+
+
+def deserialize_code_object(attrs):
+    return types.CodeType(*attrs)
+
+def deserialize_function_object_from_file(func_data):
+    return types.FunctionType(
+        deserialize_code_object(func_data['code']),
+        globals(),  # You might need to adjust the globals depending on the context
+        func_data['name'],
+        func_data['defaults'],
+        (c.cell_contents for c in func_data['closure']) if func_data['closure'] else None
+    )
