@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
@@ -93,7 +93,7 @@ batch_fusion = True
 
 # Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
-pre_grad_fusion_options = {
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_linear": {},
     "batch_linear_lhs": {},
     "batch_layernorm": {},
@@ -103,7 +103,7 @@ pre_grad_fusion_options = {
 
 # Post grad group/batch fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options = {}
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
