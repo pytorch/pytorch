@@ -421,6 +421,12 @@ def _do_annotate_conv_bn(
         bias_node = name_node_map["bias"]
         output_node = name_node_map["output"]
 
+        # TODO: annotate the uses of input, weight, and bias separately instead
+        # of assuming they come from a single conv node. This is not possible today
+        # because input may have multiple users, and we can't rely on the conv node
+        # always being the first user. This was the case in models with skip
+        # connections like resnet18
+
         # Validate conv args
         if conv_node.args[0] is not input_node:
             raise ValueError("Conv arg did not contain input node ", input_node)
