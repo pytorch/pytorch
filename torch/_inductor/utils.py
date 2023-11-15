@@ -12,6 +12,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -130,7 +131,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -618,7 +619,11 @@ instance_descriptor = collections.namedtuple(
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+        cache_dir = os.path.join(
+            tempfile.gettempdir(),
+            "torchinductor_" + sanitized_username,
+        )
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
