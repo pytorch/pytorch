@@ -1167,6 +1167,34 @@ class AOTInductorTestsTemplate:
             ]
         self.check_model(Model(), (a, b), constraints=constraints)
 
+    def test_triton_kernel_dynamic_shape_with_div(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        @triton.jit
+        def pass_kernel(x, num):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                num = x.numel() // 4
+
+                grid = lambda meta: (triton.cdiv(num, 16),)  # noqa: E731
+                pass_kernel[grid](x, num)
+                return x
+
+        a = torch.randn(10, device=self.device)
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 10,
+        ]
+        self.check_model(Model(), (a,), constraints=constraints)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1197,8 +1225,6 @@ copy_tests(
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
-        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
     },
 )

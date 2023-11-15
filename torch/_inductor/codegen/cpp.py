@@ -315,9 +315,9 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"at::native::div_floor_integer({x}, {div})"
+                x = f"c10::div_floor_integer({x}, {div})"
             else:
-                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+                x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
@@ -326,8 +326,8 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"at::native::div_floor_integer({x}, {div})"
-        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+            return f"c10::div_floor_integer({x}, {div})"
+        return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -442,16 +442,19 @@ def get_current_node_opt_ctx() -> OptimizationContext:
 class CppCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges):
         super().__init__(name, bounds)
-        # TODO: init needed variables 
-        self.is_scalar = True
-        self.dtype = torch.float # TODO: add type propagation
-        self.is_mask = False
+        self.is_vec = False
+        self.dtype = None
         self.relevant_itervars = set()
 
     def update_on_args(self, name, args, kwargs):
-        self.relevant_itervars.update(*[arg.relevant_itervars for arg in args if isinstance(arg, CppCSEVariable)])
-        if any(not arg.is_scalar for arg in args if isinstance(arg, CppCSEVariable)):
-            self.is_scalar = False
+        if name == "load":
+            self.set_relevant_itervars(args[1])
+        else:
+            self.relevant_itervars.update(*[arg.relevant_itervars for arg in args if isinstance(arg, CppCSEVariable)])
+            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
+                self.is_vec = True
+        if hasattr(V.interpreter, "current_node") and get_current_node_opt_ctx() is not None:
+            self.dtype = get_current_node_opt_ctx().dtype
 
     def set_relevant_itervars(self, index):
         for s in index.free_symbols:
@@ -827,28 +830,33 @@ class CppVecOverrides(CppOverrides):
 
         def wrap(func):
             def wrapper(*args, **kwargs):
-                has_scalar = False
-                has_vector = False
-                for arg in args:
-                    if isinstance(arg, CppCSEVariable):
-                        if arg.is_scalar:
-                            has_scalar = True
-                        else:
-                            has_vector = True
+                has_scalar = any(not arg.is_vec for arg in args if isinstance(arg, CppCSEVariable))
+                has_vector = any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable))
                 if has_scalar and has_vector:
                     new_args = []
                     for arg in args:
-                        if isinstance(arg, CppCSEVariable) and arg.is_scalar:
-                            new_arg = V.kernel.cse.generate(V.kernel.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[arg.dtype]}>({arg.name})")
-                            new_arg.is_scalar = False
+                        if isinstance(arg, CppCSEVariable) and not arg.is_vec:
+                            # TODO: factor out the logic for broadcast
+                            if arg.dtype == torch.bool:
+                                new_arg = V.kernel.cse.generate(V.kernel.compute, f"to_float_mask({arg.name})")
+                            else:
+                                new_arg = V.kernel.cse.generate(V.kernel.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[arg.dtype]}>({arg.name})")
+                            # TODO: factor out a function to copy metadata from another variable
+                            new_arg.dtype = arg.dtype
+                            new_arg.relevant_itervars = arg.relevant_itervars
+                            new_arg.is_vec = True
                             new_args.append(new_arg)
                         else:
                             new_args.append(arg)
                     return func(*new_args, **kwargs)
-                elif has_scalar and not has_vector:
+                if has_scalar and not has_vector:
                     scalar_ops = super(CppVecOverrides, self)
                     return getattr(scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__))(*args, **kwargs)
                 return func(*args, **kwargs)
+            if func.__name__ in ["masked"]:
+                # we handle ops.masked separately in its own function
+                # due to the special handling of masked body
+                return func
             return wrapper
 
         for name, method in vars(cls).items():
@@ -1166,6 +1174,8 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
+        if not isinstance(x, CppCSEVariable) or not x.is_vec:
+            return CppOverrides.to_dtype(x, dtype, src_dtype)
         assert dtype in [
             torch.bool,
             torch.float,
@@ -1173,8 +1183,6 @@ class CppVecOverrides(CppOverrides):
             torch.float16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
-        if not isinstance(x, CppCSEVariable) or x.is_scalar:
-            return CppOverrides.to_dtype(x, dtype, src_dtype)
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
         opt_ctx_x = get_opt_ctx(node.args[1])
@@ -1225,22 +1233,25 @@ class CppVecOverrides(CppOverrides):
         V.kernel.compute.splice(code)
 
         if other == float("-inf"):
-            other_code = (
-                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
-            )
+            other_code = f"-std::numeric_limits<float>::infinity()"
         elif other == float("inf"):
-            other_code = (
-                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
-            )
+            other_code = f"std::numeric_limits<float>::infinity()"
+        # elif isinstance(other, bool):
+        #     other_code = f"static_cast<{type}>({str(other).lower()})"
         elif math.isnan(other):
-            other_code = (
-                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
-            )
+            other_code = f"std::numeric_limits<float>::quiet_NaN()"
         else:
-            other_code = f"at::vec::Vectorized<float>({other!r})"
-        type = f"decltype({var}())"
-        float_mask = f"to_float_mask({new_mask})"
-        return f"{type}::blendv({other_code}, {var}(), {float_mask})"
+            other_code = f"static_cast<float>({repr(other)})"
+
+        if result.is_vec:
+            other_code = f"at::vec::Vectorized<float>({other_code})"
+            type = f"decltype({var}())"
+            float_mask = f"to_float_mask({new_mask})"
+            csevar = V.kernel.cse.generate(V.kernel.compute, f"{type}::blendv({other_code}, {var}(), {float_mask})")
+        else:
+            csevar = V.kernel.cse.generate(V.kernel.compute, f"{mask} ? {var}() : {other_code}")
+        csevar.update_on_args("masked", (mask, body, other, result), {})
+        return csevar
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -1249,7 +1260,7 @@ class CppVecOverrides(CppOverrides):
         assert opt_ctx
         assert opt_ctx.dtype == torch.int32
         assert opt_ctx.is_most_inner_loop_irrevelant
-        return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
+        return CppOverrides.index_expr(expr, torch.int32)
 
 
 class CppKernel(Kernel):
@@ -1308,7 +1319,7 @@ class CppKernel(Kernel):
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         csevar = self.cse.generate(self.loads, line)
-        csevar.set_relevant_itervars(index)
+        csevar.update_on_args("load", (name, index), {})
         return csevar
 
     def store(self, name, index, value, mode=None):
@@ -1641,29 +1652,27 @@ class CppVecKernel(CppKernel):
             line = f"([&]() {{ {tmpbufdeclare} {tmpbufdefine} return {line}; }})()"
 
         csevar = self.cse.generate(self.loads, line)
-        csevar.is_scalar = False
-        csevar.set_relevant_itervars(index)
+        csevar.update_on_args("load", (name, index), {})
+        csevar.is_vec = True
         return csevar
 
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        assert mode is None
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        var = self.args.output(name)
-        index = self.rename_indexing(index)
+    def get_vec_store_line(self, value, var, index, dtype):
+        """
+        Get a store line str that stores `value` into `var` at `index` of `dtype`.
+        :param value: Vectorized type templaterized on `dtype`.
+        :param var: buffer to store into.
+        :index: index into the `var`.
+        """
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
-        dtype = V.graph.get_dtype(name)
         non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
         if non_contiguous:
             var_expr = "tmpbuf"
-        if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        elif V.graph.get_dtype(name) in [torch.uint8]:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        else:
+        if dtype == torch.float:
             line = f"{value}.store({var_expr});"
+        else:
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
         if non_contiguous:
             inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
@@ -1677,7 +1686,23 @@ class CppVecKernel(CppKernel):
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
-        self.stores.writeline(DeferredLine(name, line))
+        return line
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        assert mode is None
+        assert isinstance(value, CppCSEVariable), value
+        if not value.is_vec:
+            value = self.cse.generate(self.compute, f"at::vec::Vectorized<float>({value})")
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                self.get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
+            )
+        )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
@@ -1691,6 +1716,7 @@ class CppVecKernel(CppKernel):
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
+        assert isinstance(value, CppCSEVariable) and value.is_vec, value
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
@@ -1732,6 +1758,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
+        # TODO: make it a cse variable
         acc_vec = f"{acc}_vec"
 
         self.reduction_var_map[acc_vec] = reduction_type
@@ -1786,9 +1813,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             )
         else:
             # Vertical reduction
-            store_lines = [
-                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
-            ]
+            store_lines = []
             if out_dtype != dtype:
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
@@ -1796,16 +1821,19 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                         DeferredLine(
                             name,
                             f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});",
-                        ),
-                        DeferredLine(
-                            name,
-                            f"{_lowp_fp_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
-                        ),
+                        )
                     ]
+                    value = _lowp_fp_tmpvar_vec
                 else:
                     raise AssertionError(
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
+            store_lines += [
+                DeferredLine(
+                    name,
+                    self.get_vec_store_line(value, var, index, out_dtype),
+                )
+            ]
             self.reduction_suffix.writelines(store_lines)
 
 
@@ -1918,8 +1946,8 @@ class CppTile2DKernel(CppVecKernel):
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             csevar = self.cse.generate(self.loads, line)
-            csevar.is_scalar = False
-            csevar.set_relevant_itervars(index)
+            csevar.update_on_args("load", (name, index), {})
+            csevar.is_vec = True
             return csevar
         else:
             new_index = self.scale_index_with_offset(
@@ -2021,7 +2049,7 @@ class CppVecKernelChecker(CppVecKernel):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
 
-    def is_loop(self, name: str, index: sympy.Expr):
+    def has_loop(self):
         assert self.itervars is not None
         return len(self.itervars) > 0
 
@@ -2107,6 +2135,10 @@ class CppVecKernelChecker(CppVecKernel):
 
             var = self.cse.newvar()
 
+            if not self.has_loop():
+                self.disable_vec(f"not a loop")
+                return var
+
             if load_dtype in [torch.bool, torch.uint8] and not (
                 opt_ctx.is_load_as_mask or opt_ctx.is_load_uint8_as_float
             ):
@@ -2122,13 +2154,14 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
-            index = self.rename_indexing(index)
-            if self.simd_vec and not self.is_loop(name, index):
-                self.disable_vec(f"not a loop: {index}")
             return var
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
+            if not self.has_loop():
+                self.disable_vec(f"not a loop")
+                return self.simd_vec
+
             store_dtype = V.graph.get_dtype(name)
 
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
@@ -2156,8 +2189,6 @@ class CppVecKernelChecker(CppVecKernel):
 
             if index.is_number:
                 self.disable_vec(f"constant store index: {index}")
-            if self.simd_vec and not self.is_loop(name, index):
-                self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -2801,9 +2832,7 @@ class CppKernelProxy(CppKernel):
                 and contig_vars_sorted[-1] == len(self.itervars) - 1
             ):
                 return contig_vars_sorted
-            return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
-                -1:
-            ]
+            return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
 
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types

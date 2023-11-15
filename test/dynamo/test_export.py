@@ -2851,7 +2851,13 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    def test_access_class_method_from_user_class(self):
+    @common_utils.parametrize("type_access", ["builtin", "class"])
+    def test_access_class_method_from_user_class(self, type_access):
+        if type_access == "builtin":
+            type_fn = type
+        elif type_access == "class":
+            type_fn = lambda obj: obj.__class__  # noqa: E731
+
         class A:
             @classmethod
             def func(cls):
@@ -2859,18 +2865,10 @@ def forward(self, x):
 
         def f(x):
             a = A()
-            return x.sum() + type(a).func().sum()
+            return x.sum() + type_fn(a).func().sum()
 
         gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
         self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
-
-        def f_correct(x):
-            a = A()
-            return x.sum() + a.__class__.func().sum()
-
-        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
@@ -3021,7 +3019,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expect operands to be a tuple of Tensors, but got",
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_list_operands(*example_inputs)
 
@@ -3034,7 +3032,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError, "Expect operands to be a tuple of Tensors, but got"
+            RuntimeError,
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_tensor_operands(*example_inputs)
 
@@ -3275,7 +3274,9 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         sin = l_x_.sin();  l_x_ = None
@@ -3284,7 +3285,9 @@ class GraphModule(torch.nn.Module):
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
         cos = l_x_.cos();  l_x_ = None
