@@ -1185,7 +1185,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(
-            lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
+            torch.promote_types,
             [grad.dtype for grad in grads],
         )
         return total_norm.to(total_norm_dtype)
