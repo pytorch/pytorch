@@ -21,6 +21,7 @@
 #include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
+
 namespace at::native {
 namespace {
 
@@ -220,6 +221,7 @@ template <typename scalar_t>
 typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 batch_norm_cpu_collect_stats_channels_last_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
+
   using Vec = Vectorized<scalar_t>;
   // keep acc_type as opmath_type will use float type when scalar_t==float
   // while acc_type uses double for float.
