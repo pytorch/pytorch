@@ -682,9 +682,7 @@ class FxGraphCache:
         """
         Helper to get the shape env from the tracing context.
         """
-        tracing_context = torch._guards.TracingContext.get()
-        assert tracing_context is not None
-        return tracing_context.fake_mode.shape_env
+        return torch._guards.TracingContext.get().fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -1394,8 +1392,8 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
-    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
-    if not config.is_fbcode():
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.aot_inductor.abi_compatible:
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
 
