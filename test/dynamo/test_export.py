@@ -2851,8 +2851,13 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    @common_utils.parametrize("type_fn", [type, lambda obj: obj.__class__])
-    def test_access_class_method_from_user_class(self, type_fn):
+    @common_utils.parametrize("type_access", ["builtin", "class"])
+    def test_access_class_method_from_user_class(self, type_access):
+        if type_access == "builtin":
+            type_fn = type
+        elif type_access == "class":
+            type_fn = lambda obj: obj.__class__  # noqa: E731
+
         class A:
             @classmethod
             def func(cls):
