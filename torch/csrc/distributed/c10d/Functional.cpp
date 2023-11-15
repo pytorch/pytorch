@@ -66,10 +66,11 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
-at::Tensor all_reduce_(
-    at::Tensor input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+at::Tensor& all_reduce_(
+    at::Tensor& input,
+    std::string reduce_op,
+    // c10::string_view group_name,
+    std::string group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -82,24 +83,23 @@ at::Tensor all_reduce_(
 
 at::Tensor all_reduce(
     const at::Tensor& input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::string reduce_op,
+    std::string group_name) {
   auto output = input.clone();
   return all_reduce_(output, reduce_op, group_name);
 }
 
-at::Tensor all_reduce__functionalization_glue(
-    at::Tensor input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+at::Tensor& all_reduce__functionalization_glue(
+    at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(input));
   at::functionalization::impl::sync(input);
   auto input_ = at::functionalization::impl::from_functional_tensor(input);
   static auto op_handle =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("_c10d_functional::all_reduce", "")
-          .typed<at::Tensor(
-              const at::Tensor&, const std::string&, const std::string&)>();
+          .typed<at::Tensor(const at::Tensor&, std::string, std::string)>();
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
@@ -113,8 +113,8 @@ at::Tensor all_reduce__functionalization_glue(
 
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::string reduce_op,
+    std::string group_name) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -127,9 +127,9 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 }
 
 std::vector<at::Tensor> all_reduce_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    std::string reduce_op,
+    std::string group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone());
@@ -139,8 +139,8 @@ std::vector<at::Tensor> all_reduce_coalesced(
 
 std::vector<at::Tensor> all_reduce_coalesced__functionalization_glue(
     std::vector<at::Tensor> inputs,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::string reduce_op,
+    std::string group_name) {
   std::vector<at::Tensor> inputs_;
   for (const auto& input : inputs) {
     TORCH_INTERNAL_ASSERT(
@@ -153,9 +153,7 @@ std::vector<at::Tensor> all_reduce_coalesced__functionalization_glue(
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("_c10d_functional::all_reduce_coalesced", "")
           .typed<std::vector<at::Tensor>(
-              const std::vector<at::Tensor>&,
-              const std::string&,
-              const std::string&)>();
+              std::vector<at::Tensor>, std::string, std::string)>();
   std::vector<at::Tensor> tmp_outputs;
   {
     at::AutoDispatchSkipFunctionalize guard;
@@ -180,9 +178,9 @@ at::Tensor allocate_all_gather_output(
 }
 
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const int64_t group_size,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
@@ -199,8 +197,8 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
-    const int64_t group_size,
-    const std::string& group_name) {
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
 }
@@ -221,10 +219,10 @@ at::Tensor allocate_reduce_scatter_output(
 }
 
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const std::string& reduce_op,
-    const int64_t group_size,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
@@ -242,20 +240,20 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 }
 
 at::Tensor reduce_scatter_tensor(
-    at::Tensor input,
-    const std::string& reduce_op,
-    const int64_t group_size,
-    const std::string& group_name) {
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, reduce_op, group_size, group_name)[0];
 }
 
 at::Tensor all_to_all_single(
-    at::Tensor input,
-    const std::vector<int64_t>& output_split_sizes,
-    const std::vector<int64_t>& input_split_sizes,
-    const std::string& group_name) {
+    const at::Tensor& input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    std::string group_name) {
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] =
       std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
@@ -264,9 +262,9 @@ at::Tensor all_to_all_single(
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->alltoall_base(
       output,
-      input,
-      const_cast<std::vector<int64_t>&>(output_split_sizes),
-      const_cast<std::vector<int64_t>&>(input_split_sizes));
+      const_cast<at::Tensor&>(input),
+      output_split_sizes,
+      input_split_sizes);
   c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
   return output;
 }
