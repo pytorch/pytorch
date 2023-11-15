@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 import operator
@@ -67,6 +68,60 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
     for k, v in input_dicts.items():
         suffixes.append(f"{k}_{v}")
     return f"{cls.__name__}_{'_'.join(suffixes)}"
+
+
+def skip_model_type_is_exported_program_test(reason: str):
+    """Skip test with models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for skipping the ONNX export test.
+
+    Returns:
+        A decorator for skipping tests.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                raise unittest.SkipTest(
+                    f"Skip model_type==torch.export.ExportedProgram test. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_model_type_is_not_exported_program_test(reason: str):
+    """Skip test without models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for skipping the ONNX export test.
+
+    Returns:
+        A decorator for skipping tests.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                != onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                raise unittest.SkipTest(
+                    f"Skip model_type==torch.export.ExportedProgram test. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
 
 
 @parameterized.parameterized_class(
@@ -136,7 +191,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "torch._export.verifier.SpecViolationError: Operator '<built-in function pow>' is not an allowed operator type:"
         "(<class 'torch._ops.OpOverload'>, <class 'torch._ops.HigherOrderOperator'>)"
         "Valid builtin ops: [<built-in function getitem>, <built-in function add>, <built-in function mul>,"
@@ -457,7 +512,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "RuntimeError:"
         " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
         " If you need this functionality, please file a github issue."
@@ -490,7 +545,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "RuntimeError:"
         " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
         " If you need this functionality, please file a github issue."
@@ -533,7 +588,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.skip_model_type_is_not_exported_program_test(
+    @skip_model_type_is_not_exported_program_test(
         "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
         "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
@@ -604,7 +659,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
         " Github issue: https://github.com/pytorch/pytorch/issues/112443"
     )
@@ -616,7 +671,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4))
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
         " Github issue: https://github.com/pytorch/pytorch/issues/112443"
     )
@@ -628,7 +683,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.skip_model_type_is_exported_program_test(
+    @skip_model_type_is_exported_program_test(
         "AssertionError: AssertionError: original output #1 is BaseModelOutputWithPastAndCrossAttentions("
         " last_hidden_state=FakeTensor(..., size=(2, 128, 16), grad_fn=<ViewBackward0>),"
         " past_key_values=((FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
