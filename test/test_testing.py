@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import \
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
@@ -412,6 +412,28 @@ if __name__ == '__main__':
 
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
+
+    @onlyCPU
+    @ops(
+        [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("cuda")
+                )
+            )
+            > 0
+        ][:1],
+        dtypes=OpDTypes.none,
+    )
+    def test_supported_dtypes(self, device, op):
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual(
+            op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
+        )
 
 instantiate_device_type_tests(TestTesting, globals())
 

@@ -121,7 +121,7 @@ def _get_lstm_with_individually_observed_parts(
             if op_index not in op_index_to_activation_post_process_ctr:
                 continue
             assert len(node.users) == 1
-            activation_post_process_name = list(node.users.keys())[0].name
+            activation_post_process_name = next(iter(node.users.keys())).name
             activation_post_process_ctr = op_index_to_activation_post_process_ctr[op_index]
             if activation_post_process_ctr is not None:
                 setattr(cell, activation_post_process_name, activation_post_process_ctr())

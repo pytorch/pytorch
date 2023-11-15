@@ -17,7 +17,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.immutable_collections import immutable_dict
 
-from .. import config, ir, pattern_matcher
+from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -93,9 +93,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     move_constructors_to_cuda(gm.graph)
 
     fake_tensor_updater.incremental_update()
+
     # Keep this last, since it introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-    reinplace_scatters(gm.graph)
+    reinplace_inplaceable_ops(gm.graph)
     gm.recompile()
     gm.graph.lint()
 
@@ -176,7 +177,7 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
-    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)  # type: ignore[attr-defined]
+    return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
 def cuda_and_enabled_mixed_mm(match):
@@ -249,7 +250,7 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
     extra_check=cuda_and_enabled_mixed_mm_and_not_int8,
 )
 def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
-    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(  # type: ignore[attr-defined]
+    return inductor.kernel.unpack_mixed_mm.tuned_uint4x2_mixed_mm(
         mat1, mat2, mat2_mm_shape, mat2_dtype
     )
 
@@ -272,7 +273,7 @@ def uint4x2_mixed_mm(match: Match, mat1, mat2, mat2_mm_shape, mat2_dtype):
     extra_check=cuda_and_enabled_mixed_mm,
 )
 def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
-    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)  # type: ignore[attr-defined]
+    return inductor.kernel.mm.tuned_mixed_mm(mat1, mat2, mat2_dtype)
 
 
 @register_graph_pattern(
@@ -487,8 +488,8 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
+def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same metadata"""
     val1 = node1.meta.get("val")
     val2 = node2.meta.get("val")
     return (
@@ -496,6 +497,8 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val2 is not None
         and val1.size() == val2.size()
         and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
+        and val1.device == val2.device
         and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
 
@@ -508,6 +511,7 @@ def register_noop_decomp(targets, nop_arg=0):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
             (cond, nop_arg)
         )
+        return cond
 
     return register_fun
 
@@ -567,16 +571,22 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp([aten.clone, aten.alias])
+@register_noop_decomp(aten.view)
+def view_noop(arg, size):
+    return arg.shape == size
+
+
+# Note, we also always have a check for identical metadata, which is why these
+# are safe
+@register_noop_decomp([aten.copy], nop_arg=1)
+@register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
 
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
-    Removes aten.clone and aten.alias ops from the graph when it's safe.
-
-    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     input_storages = set()
     output_storages = set()
@@ -587,7 +597,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
         else:
             break
 
-    for out in tuple(graph.nodes)[-1].args[0]:
+    for out in next(iter(reversed(graph.nodes))).args[0]:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
@@ -610,7 +620,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_layout(node, src) and cond(*args, **kwargs):
+            if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -618,19 +628,27 @@ def remove_noop_ops(graph: torch.fx.Graph):
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
 
-def reinplace_scatters(graph):
+def reinplace_inplaceable_ops(graph):
     """
-    Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1), and the node being mutated
-    shares storage with no other nodes.
-
-    Also handles input mutations when there is a corresponding copy node.
+    Reinplaces in-placeable operations.
+    If there are no uses of a view of the mutated arg after the current node,
+    it is possible to inplace the op.
+    This above algorithm could be justified by observing side effects. While
+    we traverse the graph in forwards direction, only latter nodes could view
+    side effects of the current node. If the current node is not used later as
+    well as no view of this node is used later in the graph, then it is safe to
+    inplace as there would be no way to observe the side effects.
+    This condition is slightly different for graph inputs where they can only
+    be inplaced if the above condition is true and there's a copy_ in the
+    epilogue that signals that the caller wants to observe the mutation.
     """
 
     copy_args_to_copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
-    for node in reversed(graph.nodes):
+    node_order: Dict[Any, int] = {}
+    for i, node in enumerate(reversed(graph.nodes)):
+        node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
             dst = node.args[0]
@@ -647,7 +665,23 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def can_replace(node, mutated_arg):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+        node_loc = node_order[node]
+        for view in shared_view_nodes:
+            for user in view.users:
+                # Skip all users before node
+                if node_order[user] <= node_loc:
+                    continue
+                # Skip over the copy_ epilogue node that could get reinplaced
+                if copy_node == user:
+                    continue
+                return True
+        return False
+
+    def can_inplace(node, mutated_arg):
+        if isinstance(mutated_arg, (list, tuple)):
+            return all(can_inplace(node, arg) for arg in mutated_arg)
+
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -657,32 +691,57 @@ def reinplace_scatters(graph):
             ):
                 return False
 
-            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
+            if any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=copy_node
+            ):
                 return False
 
-            # Check for any uses other than current node and copy_ epilogue
-            if len(mutated_arg.users) > 2:
-                return False
-
-            graph.erase_node(copy_node)
             return True
+        elif any(view.op == "placeholder" for view in shared_view_nodes):
+            # If mutated arg is view of any of the inputs of the graph,
+            # do not allow for inplacing.
+            # This would require more sophisticated algorithm to handle
+            return False
         else:
-            # NB: This condition could be relaxed if none of the aliases
-            # are used after this mutation op. But that's trickier.
-            if len(shared_view_nodes) > 1:  # Arg aliases another node
-                return False
-            if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                return False
-            return True
+            return not any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=None
+            )
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+        aten._unsafe_index_put.default: InplaceableOp(
+            inductor_prims._unsafe_index_put_, 0
+        ),
     }
+
+    try:
+        c10d_functional = torch.ops._c10d_functional
+        inplaceable_collective_ops = {
+            c10d_functional.all_reduce.default: InplaceableOp(
+                c10d_functional.all_reduce_.default, 0
+            ),
+            c10d_functional.all_reduce_coalesced.default: InplaceableOp(
+                c10d_functional.all_reduce_coalesced_.default, 0
+            ),
+        }
+        inplaceable_ops.update(inplaceable_collective_ops)
+    except AttributeError:
+        # _c10d_functional ops are only available when torch
+        # is built with USE_DISTRIBUTED=1.
+        pass
+
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
+            mutated_arg = node.args[inplaceable_op.mutated_arg]
+            if can_inplace(node, mutated_arg):
+                # TODO(yifu): this doesn't properly remove copy epilogues for
+                # ops that mutate multiple inputs. Need to revise the copy
+                # node tracking logic to support the case.
+                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                if copy_node is not None:
+                    graph.erase_node(copy_node)
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
@@ -692,7 +751,12 @@ def reinplace_scatters(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_replace(node, node.kwargs["kwargs"][arg]):
+                mutated_arg = node.kwargs["kwargs"][arg]
+                if can_inplace(node, mutated_arg):
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                    if copy_node is not None:
+                        graph.erase_node(copy_node)
+                else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
@@ -913,10 +977,9 @@ def cannot_be_moved_to_cuda(node):
     ) and node.target.namespace not in ("prims", "aten"):
         return True
 
-    # can take mixed devices - bail for now
-    incompatible_ops = (aten._embedding_bag.default,)
-
-    return node.target in incompatible_ops
+    # only move ops to inductor lowerings for now,
+    # fallback ops may have weird cpu/cuda incompatibilities
+    return node.target in torch._inductor.lowering.fallbacks
 
 
 def get_node_device(node: fx.Node) -> Optional[torch.device]:

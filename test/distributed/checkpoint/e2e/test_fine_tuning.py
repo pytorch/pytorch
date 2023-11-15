@@ -93,7 +93,7 @@ class TestFineTuning(DTensorTestBase):
         model = FSDP(model, device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-        # Trainining
+        # Training
         for i in range(3):
             batch = torch.rand(32, DIM, device="cuda")
             loss = model(batch).sum()
@@ -158,7 +158,7 @@ class TestFineTuning(DTensorTestBase):
                 # If this is the restart of the fine tuning, then checkpoint should exit.
                 self.assertEqual(i, 0)
 
-            # Trainining
+            # Training
             for j in range(3):
                 batch = torch.rand(32, DIM, device="cuda")
                 loss = model(batch).sum()
