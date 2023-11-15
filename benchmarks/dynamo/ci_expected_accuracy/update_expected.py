@@ -23,6 +23,7 @@ import subprocess
 import sys
 import urllib
 from io import BytesIO
+from itertools import product
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -146,7 +147,7 @@ if __name__ == "__main__":
 
     suites = {
         f"{a}_{b}"
-        for a, b in zip(
+        for a, b in product(
             [
                 "aot_eager",
                 "aot_inductor",
