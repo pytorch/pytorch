@@ -371,3 +371,7 @@ android/pytorch_android_torchvision/.cxx
 # Pyre configs (for internal usage)
 .pyre_configuration
 .pyre_configuration.codenav
+.arcconfig
+.watchmanconfig
+.stable_pyre_client
+.pyre_client
