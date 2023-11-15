@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import copy
 import itertools
+import sys
+import unittest
 
 import torch
 from torch import nn
@@ -9,9 +11,17 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 
 from torch.testing._internal.inductor_utils import copy_tests, HAS_CPU, HAS_CUDA
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
 class ConvOp(nn.Module):
@@ -181,6 +191,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 del EfficientConvBNEvalTemplate
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests()
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

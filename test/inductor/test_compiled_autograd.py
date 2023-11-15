@@ -7,10 +7,12 @@ import torch
 import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import load_test_module
 from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+# note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
 def compiler_fn(gm):
@@ -533,6 +535,5 @@ for name, fn in test_autograd.TestAutograd.__dict__.items():
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests()
+    if HAS_CPU:
+        run_tests(needs="filelock")
