@@ -33,7 +33,6 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -565,10 +564,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
+        from .dicts import is_hashable
+
+        # TODO this should probably be merged with the dict handling
 
         index = (
             key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            if is_hashable(key) and key.source is not None
             else key.as_python_constant()
         )
 
