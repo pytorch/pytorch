@@ -1026,8 +1026,24 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
-        with self.restore_global_state():
-            compiled_fn = self.call_user_compiler(gm)
+        parent_fake_mode = self.immutable_fake_mode
+        backend_fake_mode = FakeTensorMode(
+            shape_env=parent_fake_mode.shape_env,
+            parent=parent_fake_mode,
+        )
+        # Dynamo maintains two fake modes - an immutable fake mode which acts as the "parent"
+        # fake mode and is the source of truth for initial memoizations. We can dynamically
+        # swap fake modes as needed, so that the fake mode use by backends is "fresh".
+        # A fresh fake mode means fresh fake tensors, which, for backends ensures that
+        # tensors match their original metadata at the start of trace, as opposed to their metadata
+        # at the end of trace.
+        old_fake_mode = self.tracing_context.fake_mode
+        self.tracing_context.fake_mode = backend_fake_mode
+        try:
+            with self.restore_global_state(), backend_fake_mode:
+                compiled_fn = self.call_user_compiler(gm)
+        finally:
+            self.tracing_context.fake_mode = old_fake_mode
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
