@@ -2614,6 +2614,79 @@ TEST_F(VulkanAPITest, layer_norm_4d) {
       {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
 }
 
+void test_native_layer_norm(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef normalized_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    const float eps) {
+  c10::InferenceMode mode;
+
+  const auto input_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu =
+      at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu =
+      at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::native_layer_norm(
+      input_cpu, normalized_shape, weight_cpu, bias_cpu, eps);
+  const auto output_vulkan = at::native_layer_norm(
+      input_vulkan, normalized_shape, weight_vulkan, bias_vulkan, eps);
+
+  const auto check0 =
+      almostEqual(std::get<0>(output_cpu), std::get<0>(output_vulkan).cpu());
+  const auto check1 =
+      almostEqual(std::get<1>(output_cpu), std::get<1>(output_vulkan).cpu());
+  const auto check2 =
+      almostEqual(std::get<2>(output_cpu), std::get<2>(output_vulkan).cpu());
+
+  if (!check0) {
+    std::cout
+        << "the first output of native_layer_norm: layer_norm is incorrect"
+        << std::endl;
+    showRtol(std::get<0>(output_cpu), std::get<0>(output_vulkan).cpu());
+  }
+  if (!check1) {
+    std::cout << "the second output of native_layer_norm: mean is incorrect"
+              << std::endl;
+    showRtol(std::get<1>(output_cpu), std::get<1>(output_vulkan).cpu());
+  }
+  if (!check2) {
+    std::cout
+        << "the third output of native_layer_norm: 1/sqrt(var+eps) is incorrect"
+        << std::endl;
+    showRtol(std::get<2>(output_cpu), std::get<2>(output_vulkan).cpu());
+  }
+
+  ASSERT_TRUE(check0 && check2 && check2);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_2d) {
+  test_native_layer_norm({5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_3d) {
+  test_native_layer_norm({11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_native_layer_norm({11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_4d) {
+  test_native_layer_norm({3, 11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({3, 11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_native_layer_norm(
+      {3, 11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+  test_native_layer_norm(
+      {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
+}
+
 TEST_F(VulkanAPITest, leaky_relu) {
   for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
     const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
