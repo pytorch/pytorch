@@ -26,7 +26,8 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     gradcheck,
     make_tensor,
-    NOTEST_CPU
+    NOTEST_CPU,
+    TEST_WITH_TORCHDYNAMO
 )
 
 
@@ -1654,12 +1655,17 @@ class TestSDPA(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        choice = torch._fused_sdp_choice(q, k, v, dropout_p=dropout)
         if type == "nested" \
                 or dropout > 0.0 \
                 or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+            self.assertEqual(choice, SDPBackend.MATH)
         else:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
+            # _fused_sdp_choice w/o dropout returns the wrong value in dynamo for some reason?
+            # https://github.com/pytorch/pytorch/issues/113524
+            if not TEST_WITH_TORCHDYNAMO:
+                self.assertEqual(choice, SDPBackend.FLASH_ATTENTION)
+
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])

@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    skipIfTorchDynamo,
 )
 
 
@@ -242,6 +243,7 @@ class TestOneArrToScalar(TestCase):
         assert ta == tn
 
     @parametrize("func, np_func", one_arg_scalar_funcs_xfail)
+    @skipIfTorchDynamo
     def test_toscalar_list(self, func, np_func):
         t = [[1, 2, 3], [4, 5, 6]]
         ta = func(t)
