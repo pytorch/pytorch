@@ -24,7 +24,8 @@ __all__ = [
 
 
 class GradcheckError(RuntimeError):
-    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`"""
+    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
+
     pass
 
 
@@ -255,8 +256,9 @@ def _iter_tensor(x_tensor):
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
 ) -> List[Tuple[torch.Tensor, ...]]:
-    """Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
-    not specified, targets are the input. Returns M * N Jacobians where N is the
+    """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`.
+
+    If not specified, targets are the input. Returns M * N Jacobians where N is the
     number of tensors in target that require grad and M is the number of non-integral
     outputs.
 
@@ -305,7 +307,9 @@ def _get_numerical_jacobian(
 
 
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
-    """Deprecated API to compute the numerical Jacobian for a given fn and its inputs.
+    """Compute the numerical Jacobian for a given fn and its inputs.
+
+    This is a Deprecated API.
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
@@ -485,8 +489,9 @@ def get_numerical_jacobian_wrt_specific_input(
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
-    to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
+    """Compute the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect to `target`.
+
+    Return N * M Jacobians where N is the number of tensors in target that require grad and
     M is the number of non-integral outputs.
     Contrary to other functions here, this function requires "inputs" to actually be used by the function.
     The computed value is expected to be wrong if the function captures the inputs by side effect instead of
@@ -1940,7 +1945,7 @@ def gradcheck(
     check_backward_ad: bool = True,
     fast_mode: bool = False,
     masked: Optional[bool] = None,
-) -> bool:
+) -> bool:  # noqa: D400,D205
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
@@ -2129,7 +2134,7 @@ def gradgradcheck(
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
     masked: bool = False,
-) -> bool:
+) -> bool:  # noqa: D400,D205
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
