@@ -8,6 +8,7 @@
 
 #include <numeric>
 #include <type_traits>
+#include <fmt/format.h>
 
 namespace c10 {
 
@@ -211,6 +212,8 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
+  std::string str() const;
+
   // If both are symbolic, this checks if
   // they share the same node.
   // If both are not symbolic this just checks normal equality.
@@ -360,3 +363,24 @@ DECLARE_SYMINT_OP(size_t, SymInt)
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
 } // namespace c10
+
+namespace fmt {
+  template <>
+  struct formatter<c10::SymInt> {
+    constexpr auto parse(format_parse_context& ctx) {
+      auto it = ctx.begin(), end = ctx.end();
+      if (it != end && *it != '}') {
+        throw format_error("unexpected format");
+      }
+      return it;
+    }
+
+    template <typename FormatContext>
+    auto format(const c10::SymInt& p, FormatContext& ctx) {
+      return format_to(
+          ctx.out(),
+          "{}",
+          p.str());
+    }
+  };
+}

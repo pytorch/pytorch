@@ -88,7 +88,7 @@ endif()
 if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
-target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+target_link_libraries(c10 PUBLIC fmt::fmt-header-only)
 
 if(C10_USE_NUMA)
   target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})

@@ -152,6 +152,14 @@ void SymInt::operator+=(const SymInt& sci) {
   *this = *this + sci;
 }
 
+std::string SymInt::str() const {
+  if (is_heap_allocated()) {
+    return toSymNodeImplUnowned()->str();
+  } else {
+    return std::to_string(as_int_unchecked());
+  }
+}
+
 std::ostream& operator<<(std::ostream& os, const SymInt& s) {
   if (s.is_heap_allocated()) {
     os << s.toSymNodeImplUnowned()->str();
