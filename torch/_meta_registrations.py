@@ -3124,6 +3124,16 @@ def meta__foreach_copy_inplace(self, src, non_blocking=False):
 
 @register_meta(
     [
+        aten._foreach_maximum_.List,
+        aten._foreach_minimum_.List,
+    ]
+)
+def meta__foreach_binop__list(self, other):
+    _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta(
+    [
         aten._foreach_addcdiv.Scalar,
         aten._foreach_addcmul.Scalar,
     ]
