@@ -58,8 +58,13 @@ if is_available():
 
     def breakpoint(rank: int = 0):
         """
-        Set a pdb breakpoint, but only on a single rank.  All other ranks will wait for you to be
-        done with the pdb session before continuing.
+        Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
+        done with the breakpoint before continuing.  This calls ``breakpoint()`` under the
+        hood, so you can customize it using the normal facilities, e.g., ``PYTHONBREAKPOINT``
+        environment variable.
+
+        Args:
+            rank (int): Which rank to break on.  Default: ``0``
         """
         if get_rank() == rank:
             # This will be the case when your subprocess was created by
@@ -70,7 +75,7 @@ if is_available():
                 old_stdin = sys.stdin
                 sys.stdin = open(0)
             try:
-                pdb.set_trace(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
+                breakpoint(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
             finally:
                 if old_stdin is not None:
                     sys.stdin.close()
