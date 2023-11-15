@@ -33,6 +33,8 @@ from torch.export.exported_program import (
     ModuleCallSignature,
 )
 
+from .utils import _check_input_constraints_pre_hook
+
 
 __all__ = [
     "ExportBackwardSignature",
@@ -238,6 +240,44 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
 
     return inp_pos_to_param_buffer_name
 
+
+class _StatefulGraphModuleFactory(type):
+    """
+    Metaclass that ensures a private constructor for _StatefulGraphModule
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+        )
+
+    def _create(cls, root, graph, range_constraints=None, equality_constraints=None):
+        return super().__call__(
+            root,
+            graph,
+            range_constraints=range_constraints,
+            equality_constraints=equality_constraints
+        )
+
+
+class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleFactory):
+    def __init__(self, root, graph, range_constraints=None, equality_constraints=None):
+        super().__init__(root, graph)
+        self.range_constraints = range_constraints or []
+        self.equality_constraints = equality_constraints or []
+
+
+def _create_stateful_graph_module(plain_graph_module: torch.fx.GraphModule, range_constraints, equality_constraints):
+    stateful_gm = _StatefulGraphModule._create(
+        plain_graph_module,
+        plain_graph_module.graph,
+        range_constraints=range_constraints,
+        equality_constraints=equality_constraints
+    )
+    stateful_gm.register_forward_pre_hook(_check_input_constraints_pre_hook, with_kwargs=True)
+    return stateful_gm
+
+
 def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
     new_gm = copy.deepcopy(ep.graph_module)
     inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
@@ -252,8 +292,9 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
         ep.graph_signature.buffers_to_mutate,
         ep.graph_signature.user_outputs,
     )
-    new_gm.meta.update(ep.graph_module.meta)
-    return new_gm
+    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep.equality_constraints)
+    unlift_gm.meta.update(ep.graph_module.meta)
+    return unlift_gm
 
 
 def _create_graph_module_for_export(root, graph):
@@ -279,7 +320,7 @@ def _create_graph_module_for_export(root, graph):
 
 def _process_constraints(
     graph_module: torch.fx.GraphModule,
-    graph_signature: ExportGraphSignature,
+    num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
 ) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple[InputDim, InputDim]]]:
     """
@@ -303,7 +344,6 @@ def _process_constraints(
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
-    num_params_buffer = len(graph_signature.buffers) + len(graph_signature.parameters)
 
     # Create dict mapping tensor_id to node names
     tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
@@ -314,8 +354,8 @@ def _process_constraints(
             # All placeholder nodes should be together in the beginning of the
             # graph
             break
-        if i >= num_params_buffer:
-            example_input = example_inputs[i - num_params_buffer]
+        if i >= num_lifted_params_buffers:
+            example_input = example_inputs[i - num_lifted_params_buffers]
             tensor_id_to_nodes[id(example_input)].append(node.name)
             placeholder_nodes[node.name] = node
 
@@ -364,6 +404,7 @@ def _process_constraints(
         range_constraints[symbol] = ValueRanges(min_val, max_val)
 
     return range_constraints, equality_constraints
+
 
 def combine_args_kwargs(args, kwargs):
     kwargs = kwargs or {}
