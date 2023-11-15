@@ -2803,7 +2803,7 @@ class CppScheduling(BaseScheduling):
         self.get_kernel_group()
         self._ready_to_flush = False
 
-    def set_flush_status(self, status: bool):
+    def _set_flush_status(self, status: bool):
         self._ready_to_flush = status
 
     def group_fn(self, sizes):
@@ -2853,7 +2853,7 @@ class CppScheduling(BaseScheduling):
 
         args_num = self.get_num_args()
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
-            self.set_flush_status(True)
+            self._set_flush_status(True)
 
     def get_num_args(self):
         return self.kernel_group.get_num_args()
@@ -2867,7 +2867,7 @@ class CppScheduling(BaseScheduling):
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
         self.get_kernel_group()
-        self.set_flush_status(False)
+        self._set_flush_status(False)
 
 
 class KernelGroup:
