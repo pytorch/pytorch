@@ -272,6 +272,7 @@ static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
 }
 
 static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
+  HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_num_threads expects an int, "
@@ -281,6 +282,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
   THPUtils_assert(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_getNumInteropThreads(
@@ -292,6 +294,7 @@ static PyObject* THPModule_getNumInteropThreads(
 static PyObject* THPModule_setNumInteropThreads(
     PyObject* module,
     PyObject* arg) {
+  HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_num_interop_threads expects an int, "
@@ -302,6 +305,7 @@ static PyObject* THPModule_setNumInteropThreads(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_setDefaultTensorType(PyObject* _unused, PyObject* type) {
