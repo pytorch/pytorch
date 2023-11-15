@@ -1266,6 +1266,13 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
 
+    def test_view_divisibility_unbacked(self):
+        def f(x):
+            i0 = x.item()
+            r = torch.zeros(i0, 192)
+            return r.view(12, -1, 192)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
+
     def test_unbacked_unify_guard(self):
         def f(x, y):
             z = torch.zeros(x.item())
