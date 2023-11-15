@@ -65,9 +65,16 @@ if is_available():
             # This will be the case when your subprocess was created by
             # multiprocessing.Process, see
             # https://stackoverflow.com/questions/30134297/python-multiprocessing-stdin-input
+            old_stdin = None
             if isinstance(sys.stdin, io.TextIOWrapper):
+                old_stdin = sys.stdin
                 sys.stdin = open(0)
-            pdb.set_trace(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
+            try:
+                pdb.set_trace(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
+            finally:
+                if old_stdin is not None:
+                    sys.stdin.close()
+                    sys.stdin = old_stdin
         barrier()
 
     if sys.platform != "win32":
