@@ -653,11 +653,11 @@ class GraphModuleSerializer:
             return Argument.create(as_layout=_TORCH_TO_SERIALIZE_LAYOUT[arg])
         elif isinstance(arg, torch._C.ScriptObject):
             if not (
-                hasattr(type(arg), "__getstate__") and
-                hasattr(type(arg), "__setstate__")
+                arg._has_method("__getstate__") and
+                arg._has_method("__setstate__")
             ):
                 raise SerializeError(
-                    f"Unable to serialize ScriptObject {arg}. Please define "
+                    f"Unable to serialize custom class '{arg}'. Please define "
                     "serialization methods via def_pickle()."
                 )
             # Custom objects through torchind are serializable with pickle,

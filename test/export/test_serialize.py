@@ -650,6 +650,28 @@ class TestSerializeCustomClass(TestCase):
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
 
+    def test_custom_class_without_pickle_methods(self):
+        custom_obj = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
+        def f(x):
+            return x + x
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                with ep.graph.inserting_before(node):
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_another_instance.default,
+                        (custom_obj,),
+                    )
+                    custom_node.meta["val"] = torch.ones(2, 3)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
+
+        with self.assertRaisesRegex(RuntimeError, r"Unable to serialize custom class"):
+            serialize(ep)
 
 if __name__ == '__main__':
     run_tests()

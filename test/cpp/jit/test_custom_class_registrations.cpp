@@ -274,6 +274,10 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+at::Tensor take_another_instance(
+    const c10::intrusive_ptr<ElementwiseInterpreter>& instance){
+    return torch::zeros({2, 3})}
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ScalarTypeClass>("_ScalarTypeClass")
       .def(torch::init<at::ScalarType>())
@@ -414,6 +418,9 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   // test that schema inference is ok too
   m.def("take_an_instance_inferred", take_an_instance);
 
+  m.def(
+      "take_another_instance(__torch__.torch.classes._TorchScriptTesting._ElementwiseInterpreter x) -> Tensor Y",
+      take_another_instance);
   m.class_<ElementwiseInterpreter>("_ElementwiseInterpreter")
       .def(torch::init<>())
       .def("set_instructions", &ElementwiseInterpreter::setInstructions)
