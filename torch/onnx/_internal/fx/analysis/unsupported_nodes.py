@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict, List
+from typing import Dict
 
-import torch
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
 @dataclasses.dataclass
 class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
-    unsupported_op_to_target_mapping: Dict[str, Dict[str, None]]
+    unsupported_op_to_target_mapping: Dict[str, Dict[str, str]]
 
 
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
@@ -25,7 +24,9 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             return
 
         normalized_op_targets_map = {
-            op: list(targets.keys())
+            # Make error message more precise by adding dtype information.
+            # e.g.  Unsupported FX nodes: {'call_function': ['aten.mul.Tensor(complex)']}
+            op: [f"{node}({dtype})" for node, dtype in targets.items()]
             for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
         }
 
@@ -52,7 +53,8 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             RuntimeErrorWithDiagnostic: If diagnostics are emitted and the diagnostic
                 level is `ERROR`.
         """
-        unsupported_nodes: List[torch.fx.Node] = []
+
+        op_to_target_mapping: Dict[str, Dict[str, str]] = {}
         for node in self.module.graph.nodes:
             if node.op == "call_function":
                 try:
@@ -61,14 +63,23 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                         node, self.diagnostic_context
                     )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
-                    unsupported_nodes.append(node)
-
-        op_to_target_mapping: Dict[str, Dict[str, None]] = {}
-
-        for node in unsupported_nodes:
-            op = node.op
-            target = node.target
-            op_to_target_mapping.setdefault(op, {}).setdefault(str(target), None)
+                    # Extract the dtype information from the diagnostic message.
+                    if e.diagnostic.message and e.diagnostic.message.startswith(
+                        "Cannot find any COMPLEX symbolic function"
+                    ):
+                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
+                            str(node.target), "complex"
+                        )
+                    elif e.diagnostic.message and e.diagnostic.message.startswith(
+                        "Can ONLY find COMPLEX symbolic function"
+                    ):
+                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
+                            str(node.target), "real"
+                        )
+                    else:
+                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
+                            str(node.target), ""
+                        )
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
         self._lint(analysis_result, diagnostic_level)
