@@ -32,7 +32,7 @@
 #include <cstdint>
 #include <tuple>
 
-#include<iostream>
+#include <ATen/ops/zeros.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/core/Tensor.h>
@@ -485,7 +485,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
 
-    at::Tensor softmax_fa_t = at::empty({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(q.dtype()).device(q.device()));
+    at::Tensor softmax_fa_t = at::zeros({q_t.sizes()[0], q_t.sizes()[1], q_t.sizes()[2], k_t.sizes()[2]}, at::dtype(q.dtype()).device(q.device())); // TODO:: Go back to at::empty for performance if this isn't needed after looking at dropout issues.
 
      if(q_dtype == at::kHalf)
        {
