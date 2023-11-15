@@ -508,6 +508,7 @@ class TestControlFlowTraced(TestCase):
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "RuntimeError...multiple layers of mode-style functionalization")
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
