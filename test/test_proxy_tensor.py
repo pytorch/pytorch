@@ -461,13 +461,12 @@ def forward(self, x_1):
             inp = torch.randn(4, 4)
             gm = make_fx(f, pre_dispatch=True)(inp)
 
-        # TODO this is wrong but probs trivial to fix
-        # basically find where functional ops go during functionalzation
-        # and add predispatch key there
+        # TODO actually not decompose
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    _tensor_constant0 = self._tensor_constant0
-    mul = torch.ops.aten.mul.Tensor(_tensor_constant0, 5);  _tensor_constant0 = None
+    mm = torch.ops.aten.mm.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(mm, x_1);  mm = x_1 = None
+    mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
     return mul""")
 
     def test_val_metadata_mutation(self):

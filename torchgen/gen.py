@@ -2436,9 +2436,12 @@ def gen_source_files(
         def gen_op_headers(
             g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
         ) -> List[str]:
+            headers = [
+                "#include <c10/core/impl/TorchDispatchModeTLS.h>",
+            ]
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
-                headers = [
+                headers += [
                     f"#include <ATen/ops/{g.view.root_name}_native.h>",
                     f"#include <ATen/ops/{g.view.root_name}_ops.h>",
                 ]
@@ -2449,7 +2452,7 @@ def gen_source_files(
                     ]
                 return headers
             elif isinstance(g, NativeFunctionsGroup):
-                headers = [
+                headers += [
                     f"#include <ATen/ops/{g.functional.root_name}_native.h>",
                     f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
                     f"#include <ATen/ops/{g.out.root_name}_native.h>",
@@ -2467,7 +2470,7 @@ def gen_source_files(
                     ]
                 return headers
             else:
-                return [
+                return headers + [
                     f"#include <ATen/ops/{g.root_name}_native.h>",
                     f"#include <ATen/ops/{g.root_name}_ops.h>",
                 ]

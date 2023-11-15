@@ -24,6 +24,9 @@
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
 
+#include <c10/core/DispatchKey.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+
 #include <utility>
 #endif
 
@@ -83,7 +86,12 @@ namespace {
     auto should_wrap_outputs = !any_tensor_inputs || any_functional_inputs;
     {
       at::AutoDispatchSkipFunctionalize guard;
-      op.callBoxed(stack);
+      if (c10::impl::TorchDispatchModeTLS::stack_len(true) > 0) {
+        c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKey::PreDispatch);
+        op.callBoxed(stack);
+      } else {
+        op.callBoxed(stack);
+      }
     }
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;
