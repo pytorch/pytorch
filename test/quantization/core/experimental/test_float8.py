@@ -3,7 +3,11 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
@@ -14,6 +18,13 @@ from torch.testing._internal.common_utils import (
 
 FLOAT8_DTYPES = [
     torch.float8_e5m2,
+    torch.float8_e5m2fnuz,
+    torch.float8_e4m3fn,
+    torch.float8_e4m3fnuz,
+]
+
+CUDA_FLOAT8_DTYPES = [
+    torch.float8_e5m2,
     torch.float8_e4m3fn,
 ]
 
@@ -21,13 +32,17 @@ FLOAT8_DTYPES = [
 
 MANTISSA_BITS = {
     torch.float8_e5m2: 2,
+    torch.float8_e5m2fnuz: 2,
     torch.float8_e4m3fn: 3,
+    torch.float8_e4m3fnuz: 3,
 }
 
 # As in np.finfo(dtype).minexp
 MINEXP = {
     torch.float8_e5m2: -14,
+    torch.float8_e5m2fnuz: -15,
     torch.float8_e4m3fn: -6,
+    torch.float8_e4m3fnuz: -7,
 }
 
 SPECIAL_NUMBERS = {
@@ -51,6 +66,19 @@ SPECIAL_NUMBERS = {
         ("00000001", 2**-16, "min_subnorm"),
         ("10000001", -1 * (2**-16), "neg_min_subnorm"),
     ],
+    torch.float8_e5m2fnuz: [
+        ("10000000", float("nan"), "nan"),
+        ("00000000", 0.0, "zero"),
+        ("00000000", -0.0, "neg_zero"),
+        ("01111111", 57344.0, "max_normal"),
+        ("11111111", -57344.0, "neg_max_normal"),
+        ("00000100", 2**-15, "min_normal"),
+        ("10000100", -1 * (2**-15), "neg_min_normal"),
+        ("00000011", 0.75 * (2**-15), "max_subnorm"),
+        ("10000011", -0.75 * (2**-15), "neg_max_subnorm"),
+        ("00000001", 0.25 * (2**-15), "min_subnorm"),
+        ("10000001", -0.25 * (2**-15), "neg_min_subnorm"),
+    ],
     torch.float8_e4m3fn: [
         ("01111111", float("nan"), "nan"),
         ("11111111", float("nan"), "nan"),
@@ -64,6 +92,19 @@ SPECIAL_NUMBERS = {
         ("10000111", -0.875 * (2**-6), "neg_max_subnorm"),
         ("00000001", 2**-9, "min_subnorm"),
         ("10000001", -1 * (2**-9), "neg_min_subnorm"),
+    ],
+    torch.float8_e4m3fnuz: [
+        ("10000000", float("nan"), "nan"),
+        ("00000000", 0.0, "zero"),
+        ("00000000", -0.0, "neg_zero"),
+        ("01111111", 240.0, "max_normal"),
+        ("11111111", -240.0, "neg_max_normal"),
+        ("00001000", 2**-7, "min_normal"),
+        ("10001000", -1 * (2**-7), "neg_min_normal"),
+        ("00000111", 0.875 * (2**-7), "max_subnorm"),
+        ("10000111", -0.875 * (2**-7), "neg_max_subnorm"),
+        ("00000001", 0.125 * (2**-7), "min_subnorm"),
+        ("10000001", -0.125 * (2**-7), "neg_min_subnorm"),
     ],
 }
 
@@ -155,14 +196,20 @@ ROUND_TRIP_TEST_CASES = (
 
 
 class TestFloat8Dtype(TestCase):
-    @parametrize("dtype", FLOAT8_DTYPES)
+    """
+    Sanity test for zeros comparison
+    """
+
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
         x = torch.zeros(8, dtype=torch.float, device=device)
         x8 = torch.zeros(8, dtype=dtype, device=device)
         self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @parametrize("get_input", ROUND_TRIP_TEST_CASES)
     def test_cast_round_trip(self, dtype, get_input, device):
         """Numerical test of float8 conversion, by performing a round-trip cast
@@ -174,7 +221,8 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float(), atol=0, rtol=0)
 
-    @parametrize("dtype", FLOAT8_DTYPES)
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     def test_special_numbers(self, dtype, device):
         """Test special numbers."""
 
@@ -208,7 +256,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
     multiplication - doesn't seem worth it.
     """
 
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
         shape = (10, 10)
         a = torch.randn(shape)
@@ -222,7 +270,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
         self.assertEqual(mul8, mul8_simulated)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
-    @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
+    @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):

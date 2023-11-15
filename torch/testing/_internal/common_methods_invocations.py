@@ -9479,7 +9479,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
