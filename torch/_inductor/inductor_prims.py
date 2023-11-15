@@ -29,7 +29,7 @@ def make_prim(
     )
 
 
-def eager_force_stride(input_tensor: Tensor, stride) -> tuple[int, ...]:
+def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(
@@ -71,7 +71,7 @@ randint = make_prim(
 )
 force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
-    lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
+    eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
 masked_scatter_with_index = make_prim(

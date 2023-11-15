@@ -1468,10 +1468,10 @@ class TestCustomOp(CustomOpTestCaseBase):
             gm.code.strip(),
             """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
-    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
-    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
     return numpy_view_copy""",  # noqa: B950
         )
 
@@ -1697,6 +1697,18 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_builtin_torchscript_ops(self):
+        for op in [torch.ops.aten.sub.complex, torch.ops.aten.mul.complex]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
+    def test_autogen_aten_ops_are_pt2_compliant(self):
+        for op in [
+            torch.ops.aten._foreach_copy.default,
+            torch.ops.aten.fill.Tensor_out,
+        ]:
+            self.assertIn(torch.Tag.generated, op.tags)
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_resolve_packet(self):
         x = torch.randn(3)
         result = torch._C._jit_resolve_packet("aten::sum", x)
@@ -1763,6 +1775,20 @@ def forward(self, x_1):
         x = torch.randn(3)
         y = self.ns().foo(x)
         assert torch.allclose(y, x.sin())
+
+    def test_defined_in_python(self):
+        self.assertFalse(torch.ops.aten.sin.default._defined_in_python)
+        self.assertFalse(torch.ops.aten.sum.dim_IntList._defined_in_python)
+
+        lib = self.lib()
+        torch.library.define("{self._test_ns}::foo", "(Tensor x) -> Tensor", lib=lib)
+        ns = self.ns()
+        self.assertTrue(ns.foo.default._defined_in_python)
+
+        torch.library.define(
+            "{self._test_ns}::bar.overload", "(Tensor x) -> Tensor", lib=lib
+        )
+        self.assertTrue(ns.bar.overload._defined_in_python)
 
     def _test_impl_device(self, name, types, device):
         lib = self.lib()

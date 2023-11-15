@@ -122,10 +122,8 @@ class ExportedProgram:
             verifier = Verifier
         assert issubclass(verifier, Verifier)
         self._verifier = verifier
-
         # Validate should be always the last step of the constructor.
-        # TODO(zhxchen17) Uncomment the following line.
-        # self.verifier().check(self)
+        self.verifier().check(self)
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -265,7 +263,7 @@ class ExportedProgram:
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
             if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
                 res = res[:assertion_dep_token_index]
 
             res = res[num_mutated:]
@@ -587,25 +585,11 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _AddRuntimeAssertionsForConstraintsPass,
-        )
+        from torch._export.utils import _check_input_constraints_for_graph
 
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in self.graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            self.range_constraints,
-            self.equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
+        _check_input_constraints_for_graph(
+            self.graph, self.range_constraints, self.equality_constraints
+        )(*args)
 
     def _validate(self):
         self.verifier().check(self)
