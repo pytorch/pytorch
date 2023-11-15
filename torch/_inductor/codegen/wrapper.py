@@ -1520,7 +1520,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         self.prefix.writeline("  public:")
         for kernel in chain(
-            self.src_to_kernel.values(), self.user_defined_kernel_cache.values(), V.graph.const_kernels
+            self.src_to_kernel.values(),
+            self.user_defined_kernel_cache.values(),
+            V.graph.const_kernels,
         ):
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
