@@ -2720,9 +2720,7 @@ class CppKernelProxy(CppKernel):
                 and contig_vars_sorted[-1] == len(self.itervars) - 1
             ):
                 return contig_vars_sorted
-            return sorted(contig_vars_sorted, key=lambda i: contig_vars_list.count(i))[
-                -1:
-            ]
+            return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
 
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
