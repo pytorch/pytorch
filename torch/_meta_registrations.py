@@ -3094,6 +3094,8 @@ def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
 
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
+    # Only foreach_pow has a ScalarAndTensor method and needs special
+    # handling because it does not work with _meta_foreach_out_of_place.
     torch._check(
         isinstance(exponent, List),
         lambda: f"exponent must be a tensor list but got {type(exponent)}",
@@ -3125,6 +3127,8 @@ def _check_foreach_binop_tensor_lists(self, other):
     ]
 )
 def meta__foreach_binop__list(self, other):
+    # There are no aten.maximum_, aten.minimum_ method
+    # and therefore we cannot use register_meta_foreach
     _check_foreach_binop_tensor_lists(self, other)
 
 
@@ -3135,6 +3139,8 @@ def meta__foreach_binop__list(self, other):
     ]
 )
 def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
+    # forach_addcdiv and addcdiv have different signatures and
+    # cannot use _meta_foreach_out_of_place.
     torch._check(
         all(isinstance(l, List) for l in [self, tensor1, tensor2]),
         lambda: (
