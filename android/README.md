@@ -2,12 +2,12 @@
 
 ## Demo applications and tutorials
 
-Demo applications with code walk-through can be find in [this github repo](https://github.com/pytorch/android-demo-app).
+Demo applications with code walk-through can be found in [this github repo](https://github.com/pytorch/android-demo-app).
 
 ## Publishing
 
 ##### Release
-Release artifacts are published to jcenter:
+Release artifacts are published to JCenter:
 
 ```
 repositories {
