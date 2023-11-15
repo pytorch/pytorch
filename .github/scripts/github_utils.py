@@ -195,6 +195,8 @@ def gh_check_write_access(org: str, repo: str, user: str) -> bool:
     return has_write
 
 
+# Do not use for the normal merge operation as it could lead to rate limits
+# TODO: modify GH_COMMIT_AUTHORS_FRAGMENT in trymerge.py to get the review ids
 def get_pr_review_ids(org: str, repo: str, pr_num: int) -> List[int]:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/reviews"
     review_ids: List[int] = []
@@ -206,7 +208,9 @@ def get_pr_review_ids(org: str, repo: str, pr_num: int) -> List[int]:
         new_reviews = gh_fetch_json_list(url, params=params)
         if not new_reviews:
             break
-        review_ids.extend([review["id"] for review in new_reviews])
+        review_ids.extend(
+            [review["id"] for review in new_reviews if review["state"] == "APPROVED"]
+        )
         page += 1
 
     return review_ids
@@ -214,6 +218,7 @@ def get_pr_review_ids(org: str, repo: str, pr_num: int) -> List[int]:
 
 def gh_dismiss_pr_reviews(org: str, repo: str, pr_num: int, message: str) -> None:
     review_ids = get_pr_review_ids(org, repo, pr_num)
+
     for id in review_ids:
         url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/reviews/{id}/dismissals"
         gh_fetch_url(url, method="PUT", data={"message": message})

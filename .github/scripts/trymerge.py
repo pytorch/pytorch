@@ -1813,9 +1813,9 @@ def try_revert(
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
         gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
-        reviewers = pr.get_approved_by()
         for author in pr.get_authors().keys():
             if not gh_check_write_access(pr.org, pr.project, author):
+                reviewers = pr.get_approved_by()
                 gh_dismiss_pr_reviews(
                     pr.org, pr.project, pr.pr_num, message=dismiss_approval_msg
                 )
