@@ -1119,7 +1119,7 @@ def main():
 
     if IS_WINDOWS and sys.version_info >= (3, 12, 0):
         # torch.version requires this and it is not part
-        # of the default install in 3.12+
+        # of the default cpython install on windows in 3.12+
         install_requires.append("packaging")
 
     # Parse the command line and check the arguments before we proceed with
