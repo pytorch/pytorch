@@ -345,7 +345,7 @@ class MetaConverter:
                     from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-                    if shape_env and not t.is_nested and not t._base.is_nested:
+                    if shape_env and not t._base.is_nested:
                         base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
                     else:
                         base_dynamic_dims = None
@@ -430,25 +430,49 @@ class MetaConverter:
                                         lambda: empty_create(t._offsets, offsets_src)
                                     )
 
+                                    if t._lengths is not None:
+                                        lengths_src = AttrSource(source, "_lengths")  # type: ignore[arg-type]
+                                        fake_lengths = callback(
+                                            lambda: empty_create(
+                                                t._lengths, lengths_src
+                                            )
+                                        )
+                                    else:
+                                        fake_lengths = None
+
                                     ragged_size = get_symbolic_ragged_size(t, source)
 
                                     from torch.nested._internal.nested_tensor import (
                                         _tensor_symint_registry,
                                         nested_view_from_values_offsets,
+                                        nested_view_from_values_offsets_lengths,
                                     )
 
                                     # We're not calling __tensor_unflatten__() since we need a
-                                    # view, but we still want to ensure the fake offsets are
-                                    # associated with a symbolic ragged size.
-                                    _tensor_symint_registry[fake_offsets] = ragged_size
-
-                                    return nested_view_from_values_offsets(
-                                        base, fake_offsets
+                                    # view, but we still want to ensure the fake offsets or
+                                    # lengths are associated with a symbolic ragged size.
+                                    ragged_source = (
+                                        fake_offsets
+                                        if fake_lengths is None
+                                        else fake_lengths
                                     )
+                                    _tensor_symint_registry[ragged_source] = ragged_size
+
+                                    if fake_lengths is None:
+                                        return nested_view_from_values_offsets(
+                                            base, fake_offsets
+                                        )
+                                    else:
+                                        # base is a dense tensor that is the result of narrow().
+                                        fake_values = base.flatten(0, 1)
+                                        return nested_view_from_values_offsets_lengths(
+                                            fake_values,
+                                            fake_offsets,
+                                            lengths=fake_lengths,
+                                        )
                             else:
-                                # TODO: Do we ever need to handle a dense view of an NT?
-                                # Jagged NTs are generally considered views of an underlying
-                                # values buffer, so I don't think so.
+                                # TODO: Handle dense view of NT when we return a proper view for
+                                # e.g. values()
                                 (
                                     sizes,
                                     strides,

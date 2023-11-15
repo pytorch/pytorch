@@ -442,6 +442,9 @@ aten::_nested_view_from_buffer_copy.out
 aten::_nested_view_from_values_offsets
 aten::_nested_view_from_values_offsets_copy
 aten::_nested_view_from_values_offsets_copy.out
+aten::_nested_view_from_values_offsets_lengths
+aten::_nested_view_from_values_offsets_lengths_copy
+aten::_nested_view_from_values_offsets_lengths_copy.out
 aten::_new_zeros_with_same_feature_meta
 aten::_new_zeros_with_same_feature_meta.out
 aten::_nnpack_spatial_convolution

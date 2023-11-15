@@ -85,6 +85,8 @@ class NestedTensor(torch.Tensor):
         ragged_source = offsets if lengths is None else lengths
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
         B = offsets.shape[0] - 1
+        if lengths is not None:
+            assert B == lengths.shape[0]
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
         stride = values.stride()
@@ -224,18 +226,6 @@ class DifferentiableValues(torch.autograd.Function):
         return NestedTensor(gO, offsets=offsets)
 
 
-# Not actually a view!
-# NOTE: @jbschlosser is working on making it a view
-class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
-        return NestedTensor(values.detach(), offsets=offsets, lengths=lengths)
-
-    @staticmethod
-    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
-
-
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
     tensors: List[torch.Tensor],
@@ -342,14 +332,18 @@ def jagged_from_tensor_and_lengths(
 
     if is_contiguous:
         return (
-            ViewNestedFromBuffer.apply(
+            nested_view_from_values_offsets(
                 values[offsets[0] : offsets[-1]], offsets - offsets[0]
             ),
             offsets,
             None,
         )
 
-    return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
+    return (
+        nested_view_from_values_offsets_lengths(values, offsets, length_list),
+        offsets,
+        length_list,
+    )
 
 
 # NB: A dummy arg is required so that NestedTensor.__torch_dispatch__() is invoked
@@ -362,3 +356,9 @@ _nt_view_dummy = NestedTensor(
 
 def nested_view_from_values_offsets(values, offsets):
     return torch._nested_view_from_values_offsets(values, offsets, _nt_view_dummy)
+
+
+def nested_view_from_values_offsets_lengths(values, offsets, lengths):
+    return torch._nested_view_from_values_offsets_lengths(
+        values, offsets, lengths, _nt_view_dummy
+    )

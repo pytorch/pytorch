@@ -903,3 +903,21 @@ def _nested_view_from_values_offsets_default(func, *args, **kwargs):
     values, offsets = new_kwargs["input"], new_kwargs["offsets"]
 
     return NestedTensor(values, offsets)
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_view_from_values_offsets_lengths.default,
+    "values: t, offsets: t, lengths: t, dummy: jt",
+)
+def _nested_view_from_values_offsets_lengths_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values, offsets, lengths = (
+        new_kwargs["input"],
+        new_kwargs["offsets"],
+        new_kwargs["lengths"],
+    )
+
+    return NestedTensor(values, offsets, lengths=lengths)
