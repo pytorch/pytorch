@@ -47,9 +47,9 @@ struct TORCH_API RawTensorMetadataBase {
   explicit RawTensorMetadataBase(const at::Tensor& t);
 
   StorageImplData data_;
-  c10::ScalarType dtype_;
-  c10::Layout layout_;
-  uint32_t dim_;
+  c10::ScalarType dtype_{c10::ScalarType::Undefined};
+  c10::Layout layout_{c10::Layout::Strided};
+  uint32_t dim_{0};
 };
 
 // Collected during profiling.
@@ -64,8 +64,8 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   // Wrap `weak_self_` in `c10::optional` and split device into components to
   // keep struct default constructable. (which the std::array initializer needs)
   c10::optional<WeakTensor> weak_self_;
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
+  c10::DeviceType device_type_{c10::DeviceType::CPU};
+  c10::DeviceIndex device_index_{-1};
 };
 
 // Used during post processing.
@@ -367,8 +367,8 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename T, typename Fn>
   void visit_if_base(Fn&& fn) const {
     visit([&](const auto& extra_fields) {
-      using extra_fields_t = typename std::remove_cv<
-          typename std::remove_reference<decltype(extra_fields)>::type>::type;
+      using extra_fields_t = typename std::remove_cv_t<
+          typename std::remove_reference_t<decltype(extra_fields)>>;
 
       if constexpr (std::is_base_of_v<T, extra_fields_t>) {
         fn(extra_fields);
