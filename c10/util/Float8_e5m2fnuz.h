@@ -45,13 +45,13 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-#if defined(__CUDA__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__) || defined(__HIP__)
 C10_HOST_DEVICE C10_API inline float fp8e5m2fnuz_to_fp32_value(uint8_t) {
   CUDA_KERNEL_ASSERT(false && "e5m2fnuz is not supported by CUDA or HIP");
   return -1.0;
 }
 #else
-C10_HOST C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
+C10_API float fp8e5m2fnuz_to_fp32_value(uint8_t input);
 #endif
 
 /*
