@@ -47,7 +47,6 @@ from torch._prims_common import (
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
-from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
@@ -70,7 +69,6 @@ from .utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
-    try_find_schema,
 )
 from .virtualized import ops, V
 
@@ -3376,18 +3374,6 @@ class ExternKernel(InputsKernel):
     def process_kernel(cls, kernel, *args, **kwargs):
         binded_args = signature(kernel).bind(*args, **kwargs).arguments
 
-        _, schemas = get_signature_for_torch_op(kernel, return_schemas=True)
-
-        schema = None
-        # For cpp wrapper, when kwargs is not empty, for OpOverloadPacket kernel, we need to
-        # know the exact overload schema to handle the kwargs properly when calling the cpp kernel.
-        if (
-            V.graph.cpp_wrapper
-            and kwargs
-            and isinstance(kernel, torch._ops.OpOverloadPacket)
-        ):
-            schema = try_find_schema(schemas, args, kwargs)
-
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
@@ -3444,7 +3430,7 @@ class ExternKernel(InputsKernel):
         if maybe_free_unbacked_symbols(example_output):
             example_output = V.graph.current_node.meta["val"]
 
-        return example_output, tensor_args, non_tensor_args, unflatten_args, schema
+        return example_output, tensor_args, non_tensor_args, unflatten_args
 
     @classmethod
     def convert_to_reinterpret_view(cls, x):
@@ -4193,7 +4179,6 @@ class FallbackKernel(ExternKernelAlloc):
         nontensor_args,
         unflatten_args,
         kwargs=None,
-        schema=None,
     ):
         super().__init__(
             layout,
@@ -4495,7 +4480,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         device = cls.find_device(tensor_args, example_output)
@@ -4507,7 +4491,6 @@ class FallbackKernel(ExternKernelAlloc):
             tensor_args,
             non_tensor_args,
             unflatten_args,
-            schema=schema,
         )
 
         def generate_output(output, indices):
@@ -4586,7 +4569,6 @@ class ComplexView(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         device = FallbackKernel.find_device(tensor_args, example_output)
@@ -6981,7 +6963,6 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         for tensor_arg in tensor_args:
             tensor_arg.realize()
@@ -6992,7 +6973,6 @@ class _CollectiveKernel(FallbackKernel):
             tensor_args,
             non_tensor_args,
             unflatten_args,
-            schema=schema,
         )
         pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
 
@@ -7028,7 +7008,6 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         for tensor_arg in tensor_args:
             tensor_arg.realize()
@@ -7041,7 +7020,6 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema=schema,
             )
             packed.outputs = [
                 MultiOutput(
@@ -7059,7 +7037,6 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema=schema,
             )
             packed.outputs = [packed]
             return packed
@@ -7090,7 +7067,6 @@ class _WaitKernel(_CollectiveKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                schema,
             ) = cls.process_kernel(kernel, inp)
         packed = cls(
             NoneLayout(inp.get_device()),
@@ -7098,7 +7074,6 @@ class _WaitKernel(_CollectiveKernel):
             tensor_args,
             non_tensor_args,
             unflatten_args,
-            schema=schema,
         )
         MutationOutput(inp.layout, inp, packed)
 
