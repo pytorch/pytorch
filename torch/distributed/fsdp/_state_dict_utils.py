@@ -412,7 +412,7 @@ def _local_post_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> Dict[str, Any]:
-    r"""Define a hook that creates a ``ShardedTensor`` from the local flat_param.
+    """Define a hook that creates a ShardedTensor from the local flat_param.
 
     Then, method replaces the state_dict[f"{prefix}{FLAT_PARAM}] with the ``ShardedTensor``.
     No copy will happen. The underlying storage is the same.
@@ -466,9 +466,9 @@ def _local_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
-    r"""Define a hook that finds the local flat_param for this FSDP module from the state_dict.
+    """Define a hook that finds the local flat_param for this FSDP module from the state_dict.
 
-    The flat_param should be a ``ShardedTensor``. This hook converts the ``ShardedTensor``
+    The flat_param should be a ShardedTensor. This hook converts the ShardedTensor
     to a tensor. No copy happen unless padding is required.
     """
     _lazy_init(fsdp_state, module)
