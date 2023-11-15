@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.stateful import Stateful
 
 from .storage import (
     StorageReader,
@@ -12,6 +13,25 @@ from .default_planner import DefaultLoadPlanner
 from .utils import _DistWrapper
 
 __all__ = ["load_state_dict"]
+
+
+def load(
+    state_dict: Dict[str, Any],
+    storage_reader: StorageReader,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[LoadPlanner] = None,
+) -> None:
+
+    state_dict_copy = state_dict.copy()
+
+    load_state_dict(state_dict_copy, storage_reader, process_group, coordinator_rank, no_dist, planner)
+    for key, elem in state_dict_copy.items():
+        if isinstance(elem, Stateful):
+            elem.load_state_dict(state_dict_copy[key])
+        state_dict[key] = elem
+
 
 
 def load_state_dict(

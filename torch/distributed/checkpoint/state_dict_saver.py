@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.stateful import Stateful
 from .planner import SavePlanner
 from .default_planner import DefaultSavePlanner
 
@@ -15,6 +16,20 @@ from .utils import _DistWrapper
 
 __all__ = ["save_state_dict"]
 
+
+def save(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
+    dumpable_state_dict = {}
+    for key, elem in state_dict.items():
+        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+
+    return save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
 
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
