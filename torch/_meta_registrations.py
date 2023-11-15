@@ -3084,6 +3084,7 @@ def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
         aten._foreach_clamp_min_,
         aten._foreach_clamp_max_,
         aten._foreach_lerp_,
+        aten._foreach_copy_,
     ]
 )
 def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
@@ -3115,11 +3116,6 @@ def _check_foreach_binop_tensor_lists(self, other):
             f"but got {len(self)} and {len(other)}."
         ),
     )
-
-
-@register_meta([aten._foreach_copy_])
-def meta__foreach_copy_inplace(self, src, non_blocking=False):
-    _check_foreach_binop_tensor_lists(self, src)
 
 
 @register_meta(
