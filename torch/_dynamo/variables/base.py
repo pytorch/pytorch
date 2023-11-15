@@ -173,7 +173,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ):
         """
         Walk this object and call fn on all the VariableTracker
-        instances to produce a new VariableTracker with the results.
+        instances
         """
         if cache is None:
             cache = dict()
@@ -187,14 +187,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
                 def update_object_dict(v):
                     changed = False
-                    rv = dict(v.__dict__)
+                    rv = v.__dict__
                     for key in rv.keys():
                         if key not in v._nonvar_fields:
                             prior = rv[key]
                             rv[key] = cls.apply(fn, prior, cache, skip_fn)
                             changed = changed or prior is not rv[key]
-                    if changed:
-                        return v.clone(**rv)
+
                     return v
 
                 value = value.unwrap()

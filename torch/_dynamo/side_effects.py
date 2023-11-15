@@ -327,8 +327,9 @@ class SideEffects:
         }
 
     def mutation(self, var):
-        self.check_allowed_side_effect(var)
-        var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
+        if isinstance(var.mutable_local, MutableSideEffects):
+            self.check_allowed_side_effect(var)
+            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]

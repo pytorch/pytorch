@@ -235,6 +235,7 @@ class VariableBuilder:
                 self.install_guards(dup_guard)
             return side_effect_result
         vt = self._wrap(value)
+        assert vt.source is not None
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(
                 self.source, value, vt
@@ -747,7 +748,7 @@ class VariableBuilder:
             )
         elif isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetSetDescriptorVariable(value)
+            return GetSetDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value, source=self.source)
@@ -795,7 +796,9 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        return TupleIteratorVariable(output, mutable_local=MutableLocal())
+        return TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), source=self.source
+        )
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -806,9 +809,9 @@ class VariableBuilder:
         ]
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            return SliceVariable(items)
+            return SliceVariable(items, source=self.source)
         else:
-            return RangeVariable(items)
+            return RangeVariable(items, source=self.source)
 
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule

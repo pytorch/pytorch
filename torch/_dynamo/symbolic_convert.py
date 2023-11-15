@@ -648,26 +648,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
-    def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
-        def repl(v: VariableTracker):
-            if v.mutable_local is oldvar.mutable_local:
-                return newvar
-            return v
-
-        def skip(v: VariableTracker):
-            return v.parents_tracker not in recursive_parents
-
-        recursive_parents = oldvar.parents_tracker.recursive_parents()
-        cache: Dict[int, Tuple[object, object]] = dict()
-        self.output.side_effects.apply(repl, cache, skip_fn=skip)
-        self.stack = [
-            VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
-        ]
-        for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(
-                repl, x, cache, skip_fn=skip
-            )
-
     def inline_user_function_return(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
