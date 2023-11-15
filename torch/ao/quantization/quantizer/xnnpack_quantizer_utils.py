@@ -336,15 +336,7 @@ def _annotate_conv_bn(
     Find conv + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-
-    def _get_pattern(conv_fn: Callable):
-        def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
-            conv = conv_fn(x, conv_weight, conv_bias)
-            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
-            return bn, {"input": x, "conv": conv, "weight": conv_weight, "bias": conv_bias, "output": bn}
-        return _conv_bn
-
-    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, _get_pattern)
+    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=False)
 
 
 @register_annotator("conv_bn_relu")
@@ -357,22 +349,14 @@ def _annotate_conv_bn_relu(
     Find conv + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
-    def _get_pattern(conv_fn: Callable):
-        def _conv_bn_relu(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
-            conv = conv_fn(x, conv_weight, conv_bias)
-            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
-            relu = F.relu(bn)
-            return relu, {"input": x, "conv": conv, "weight": conv_weight, "bias": conv_bias, "output": relu}
-        return _conv_bn_relu
-
-    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, _get_pattern)
+    return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=True)
 
 
 def _do_annotate_conv_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]],
-    get_pattern: Callable,
+    has_relu: bool,
 ) -> List[List[Node]]:
     """
     Given a function that takes in a `conv_fn` and returns a conv-bn[-relu] pattern,
@@ -381,6 +365,22 @@ def _do_annotate_conv_bn(
     The output of the pattern must include a dictionary from string name to node
     for the following names: "input", "conv", "weight", "bias", and "output".
     """
+    def get_pattern(conv_fn: Callable):
+        def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
+            conv = conv_fn(x, conv_weight, conv_bias)
+            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
+            if has_relu:
+                output = F.relu(bn)
+            else:
+                output = bn
+            return output, {
+                "input": x,
+                "weight": conv_weight,
+                "bias": conv_bias,
+                "output": output,
+            }
+        return _conv_bn
+
     # Needed for matching, otherwise the matches gets filtered out due to unused
     # nodes returned by batch norm
     gm.graph.eliminate_dead_code()
@@ -411,28 +411,43 @@ def _do_annotate_conv_bn(
     for match in matches:
         name_node_map = match.name_node_map
         input_node = name_node_map["input"]
-        conv_node = name_node_map["conv"]
         weight_node = name_node_map["weight"]
         bias_node = name_node_map["bias"]
         output_node = name_node_map["output"]
 
-        input_qspec_map = {}
-        input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
-        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
-
-        # adding weight node to the partition as well
+        # Find conv node and validate its args
+        if len(input_node.users) != 1:
+            raise ValueError("Expected input node to be consumed by conv only")
+        if len(weight_node.users) != 1:
+            raise ValueError("Expected weight node to be consumed by conv only")
+        input_user = list(input_node.users.keys())[0]
+        weight_user = list(weight_node.users.keys())[0]
+        if weight_user is not input_user:
+            raise ValueError("Expected weight user to be the same as input user")
+        conv_node = input_user
         partition = [conv_node, weight_node]
 
+        # Validate conv bias if it exists
         if bias_node is not None:
-            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+            if len(bias_node.users) != 1:
+                raise ValueError("Expected bias node to be consumed by conv only")
+            bias_user = list(bias_node.users.keys())[0]
+            if bias_user is not input_user:
+                raise ValueError("Expected bias user to be the same as input user")
             partition.append(bias_node)
 
+        # Skip if the partition is already annotated or is filtered out by the user
         if _is_annotated(partition):
             continue
-
         if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
+        # Annotate conv inputs and pattern output
+        input_qspec_map = {}
+        input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
+        if bias_node is not None:
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
@@ -441,7 +456,6 @@ def _do_annotate_conv_bn(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
-
         _mark_nodes_as_annotated(partition)
         annotated_partitions.append(partition)
     return annotated_partitions
