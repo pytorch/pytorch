@@ -35,20 +35,28 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_MACOS, slowTest
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    run_and_get_cpp_code,
-    TestCase,
-    vec_dtypes,
-)
 from torch.utils._python_dispatch import TorchDispatchMode
 
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
+
+vec_dtypes = test_torchinductor.vec_dtypes
 _lowp_fp_dtypes = (
     torch.bfloat16,
     torch.float16,
 )
+run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
+TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
+check_model = test_torchinductor.check_model
 
 
 class LstmModule(torch.nn.Module):
@@ -2575,11 +2583,7 @@ class CPUReproTests(TestCase):
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.add(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.add(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
@@ -2588,15 +2592,25 @@ class CPUReproTests(TestCase):
     def test_uint8_sub(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.sub(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.sub(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
+
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
 
 
 if __name__ == "__main__":

@@ -27,7 +27,20 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
-from torch.testing._internal.inductor_utils import run_and_get_cpp_code, TestCase
+
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
+run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
+TestCase = test_torchinductor.TestCase
 
 
 def remove_build_path():
