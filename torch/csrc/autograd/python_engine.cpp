@@ -395,16 +395,17 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     if (!result) {
       // Note [ Persisting PyErr state across autograd engine threads ]
       //
-      // Throw a python_error with the PyErr state persisted so that we don't
-      // lose the error state when returning to the cpu thread. Ordinarily, if
-      // we were calling into python during backward, e.g. executing a hook
-      // or custom autograd Function, we would be able to directly use
-      // `throw python_error()`. This is because (1) the engine has logic around
-      // evaluate_function that catches and persists errors, and (2) we init the
-      // PyThreadState on the creation of the thread so we aren't actually
-      // creating a separate PyThreadState everytime we call gil_scoped_acquire.
-      // Errors raised by queue_callback won't be caught by the try-catch around
-      // evaluate_function, so we need to replicate the persisting logic here.
+      // Since the autograd engine is multi-threaded, and Python error state is
+      // local to each thread, it must preserve the python error from the worker
+      // thread and rethrow it as-is in the calling thread. This is done via
+      // persisting the error in the two places that can encounter Python errors:
+      // (1) evaluate function and (2) queued callbacks.
+      //
+      // TODO: the engine is not actually responsible for persisting the error
+      // in the evaluate function case today! See the note above `raise_python_error()`
+      // function in python_function.cpp and python_hooks.cpp for more details.
+      // Persisting an extra time in the engine is fine because doing so is a no-op
+      // when the python_error has already been persisted.
       python_error err;
       err.persist();
       throw std::move(err);

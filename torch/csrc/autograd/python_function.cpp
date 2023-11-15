@@ -56,9 +56,9 @@ PyObject* THPGradientEdgeClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// TODO: I'm not sure why we can't remove this function. Since we
-// create a shared PyThreadState upon initialization, we should be able
-// to rely on the engine to persist for us. But, removing this seems to
+// TODO: I'm not sure why we need to call this function (to persist the
+// error immediately at the callsite) instead of doing `raise python_error()`
+// and relying on the engine to persist for us. But, removing this seems to
 // cause the following test to fail:
 // python test/distributed/rpc/test_tensorpipe_agent.py -k test_backward_autograd_engine_error
 // See Note [ Persisting PyErr state across autograd engine threads ]
