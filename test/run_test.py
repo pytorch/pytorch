@@ -3,6 +3,7 @@
 import argparse
 import copy
 import glob
+import itertools
 import json
 import os
 import pathlib
@@ -732,7 +733,6 @@ def test_distributed(test_module, test_directory, options):
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
     config = DISTRIBUTED_TESTS_CONFIG
-    ret_codes = []
     for backend, env_vars in config.items():
         if sys.platform == "win32" and backend != "gloo":
             continue
@@ -800,12 +800,13 @@ def test_distributed(test_module, test_directory, options):
                         options,
                         extra_unittest_args=["--subprocess"],
                     )
-                ret_codes.append(return_code)
+                if return_code != 0:
+                    return return_code
             finally:
                 shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
-    return max(ret_codes or [0])
+    return 0
 
 
 def run_doctests(test_module, test_directory, options):

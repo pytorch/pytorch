@@ -846,8 +846,6 @@ class DistributedTest:
                 new_backend = "nccl"
             elif BACKEND == "nccl":
                 new_backend = "gloo"
-            elif BACKEND == "ucc":
-                new_backend = "ucc"
             elif BACKEND in DistTestCases.backend_feature["plugin"]:
                 new_backend = "gloo"
 
@@ -880,7 +878,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(BACKEND == "ucc", "broken, ")
+        @unittest.skipIf(BACKEND == "ucc", "broken, see https://github.com/pytorch/pytorch/pull/113620")
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
