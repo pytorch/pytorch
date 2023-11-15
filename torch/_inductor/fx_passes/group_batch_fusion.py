@@ -80,9 +80,9 @@ def register_fusion(name: str, pre_grad=True):
 
 def list_group_batch_fusions(pre_grad=True) -> List[str]:
     if pre_grad:
-        return PRE_GRAD_FUSIONS.keys()
+        return list(PRE_GRAD_FUSIONS.keys())
     else:
-        return POST_GRAD_FUSIONS.keys()
+        return list(POST_GRAD_FUSIONS.keys())
 
 
 class GroupFusion(GroupBatchFusionBase):
@@ -714,7 +714,7 @@ def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
         fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
         _options = graph_search_options.copy()
         _options.update(options)
-        fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore
+        fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
     return fusions
 
 
