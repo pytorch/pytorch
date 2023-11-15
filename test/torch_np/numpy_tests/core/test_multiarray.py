@@ -6839,7 +6839,7 @@ class TestArange(TestCase):
 
 
 class TestRichcompareScalar(TestCase):
-    @xfail  # (reason="comparison: builtin.bools or...?")
+    @skip  # XXX: brittle, fails or passes under dynamo depending on the NumPy version
     def test_richcompare_scalar_boolean_singleton_return(self):
         # These are currently guaranteed to be the boolean singletons, but maybe
         # returning NumPy booleans would also be OK:

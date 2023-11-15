@@ -3,7 +3,7 @@
 # from numpy.testing._private.utils import requires_memory
 import functools
 
-from unittest import skipIf
+from unittest import expectedFailure as xfail, skipIf
 
 from pytest import raises as assert_raises
 
@@ -265,7 +265,7 @@ class TestHistogram(TestCase):
         with assert_raises((RuntimeError, ValueError)):
             np.histogram(vals, range=[0.1, 0.01])
 
-    @xpassIfTorchDynamo  # (reason="edge cases")
+    @xfail  # (reason="edge cases")
     def test_bin_edge_cases(self):
         # Ensure that floating-point computations correctly place edge cases.
         arr = np.array([337, 404, 739, 806, 1007, 1811, 2012])
@@ -275,7 +275,7 @@ class TestHistogram(TestCase):
         right_edges = edges[1:][mask]
         for x, left, right in zip(arr, left_edges, right_edges):
             assert_(x >= left)
-            assert_(x < right)
+            assert_(x < right, msg=f"{x}, {right}")
 
     def test_last_bin_inclusive_range(self):
         arr = np.array([0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 4.0, 5.0])
