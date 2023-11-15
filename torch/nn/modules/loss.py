@@ -1010,7 +1010,7 @@ class HuberLoss(_Loss):
 
 class SoftMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a two-class classification logistic loss.
-    
+
     The loss is computed between input tensor :math:`x` and target tensor :math:`y`
     (containing 1 or -1).
     .. math::
