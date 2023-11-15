@@ -230,12 +230,7 @@ class CommonListMethodsVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
-            tx.replace_all(
-                self,
-                type(self)(
-                    self.items + [arg],
-                ),
-            )
+            self.items.append(arg)
             return ConstantVariable.create(None)
         elif (
             name == "extend"
@@ -245,36 +240,20 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            return tx.replace_all(
-                self,
-                type(self)(
-                    list(self.items) + list(arg.unpack_var_sequence(tx)),
-                ),
-            )
+            self.items.extend(arg.unpack_var_sequence(tx))
+            return ConstantVariable.create(None)
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
-            items = list(self.items)
-            items.insert(idx.as_python_constant(), value)
-            return tx.replace_all(
-                self,
-                type(self)(items),
-            )
+            self.items.insert(idx.as_python_constant(), value)
+            return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
-            items = list(self.items)
-            result = items.pop(*[a.as_python_constant() for a in args])
-            tx.replace_all(
-                self,
-                type(self)(items),
-            )
-            return result
+            return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
-            return tx.replace_all(
-                self,
-                type(self)([]),
-            )
+            self.items.clear()
+            return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
             and self.mutable_local
@@ -283,13 +262,11 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             key, value = args
-            items = list(self.items)
             if isinstance(key, SliceVariable):
-                items[key.as_python_constant()] = list(value.items)
+                self.items[key.as_python_constant()] = list(value.items)
             else:
-                items[key.as_python_constant()] = value
-            result = ListVariable(items)
-            return tx.replace_all(self, result)
+                self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             assert not kwargs
@@ -323,17 +300,15 @@ class ListVariable(CommonListMethodsVariable):
         ):
             assert not kwargs
             key, value = args
-            items = list(self.items)
             if isinstance(key, SliceVariable):
                 if not value.has_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
-                items[key.as_python_constant()] = value
-            result = ListVariable(items)
-            return tx.replace_all(self, result)
+                self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -373,37 +348,22 @@ class DequeVariable(CommonListMethodsVariable):
             assert key.is_python_constant() and isinstance(
                 key.as_python_constant(), int
             )
-            items = list(self.items)
-            items[key.as_python_constant()] = value
-            result = DequeVariable(items)
-            return tx.replace_all(self, result)
+            self.items[key.as_python_constant()] = value
+            return ConstantVariable.create(None)
         elif name == "extendleft" and self.mutable_local:
             assert not kwargs
+
             (arg,) = args
-            return tx.replace_all(
-                self,
-                DequeVariable(
-                    list(arg.unpack_var_sequence(tx)) + list(self.items),
-                ),
-            )
+            self.items = reversed(list(arg.unpack_var_sequence(tx)) + list(self.items))
+            return ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
-            items = collections.deque(self.items)
-            result = items.popleft()
-            tx.replace_all(
-                self,
-                DequeVariable(list(items)),
-            )
-            return result
+            return self.items.popleft()
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
-            return tx.replace_all(
-                self,
-                DequeVariable(
-                    [args[0]] + list(self.items),
-                ),
-            )
+            self.items = [args[0]] + list(self.items)
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -659,13 +619,8 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
-        next_iter = ListIteratorVariable(
-            self.items,
-            self.index + 1,
-            mutable_local=MutableLocal(),
-        )
-        tx.replace_all(self, next_iter)
-        return self.items[self.index], next_iter
+        self.index += 1
+        return self.items[self.index], self
 
     def as_python_constant(self):
         if self.index > 0:

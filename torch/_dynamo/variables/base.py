@@ -317,13 +317,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        new_name = tx.output.new_var(name)
-        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
-            # This is fine for objects that are not mutable locals
-            self.user_code_variable_name = new_name
-            return self
-        new_vt = self.clone(user_code_variable_name=new_name)
-        return tx.replace_all(self, new_vt)
+        self.user_code_variable_name = tx.output.new_var(name)
+        return self
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""

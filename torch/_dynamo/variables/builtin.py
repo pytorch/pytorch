@@ -351,13 +351,8 @@ class BuiltinVariable(VariableTracker):
                 # Handler doesn't apply
                 return None
 
-            return tx.replace_all(
-                a,
-                ListVariable(
-                    list(a.items) + list(b.unpack_var_sequence(tx)),
-                    **options,
-                ),
-            )
+            # TODO mlazos: need to handle options here
+            a.items.extend(b.unpack_var_sequence(tx))
 
         list_like_iadd_handlers = [
             (

@@ -215,27 +215,22 @@ class ConstDictVariable(VariableTracker):
         elif name == "__setitem__" and arg_hashable and self.mutable_local:
             assert not kwargs and len(args) == 2
             k = Hashable(args[0])
-
-            newval = dict(self.items)
-            newval[k] = args[1]
-            return tx.replace_all(self, self.clone(items=newval))
+            self.items[k] = args[1]
+            return self
         elif name in ("pop", "get") and args[0] not in self and len(args) == 2:
             # missing item, return the default value
             return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
-            newval = dict(self.items)
-            result = newval.pop(Hashable(args[0]))
-            tx.replace_all(self, self.clone(items=newval))
-            return result
+            self.items.pop(Hashable(args[0]))
+            return self
         elif (
             name == "update"
             and args
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
-            newval = dict(self.items)
-            newval.update(args[0].items)
-            return tx.replace_all(self, self.clone(items=newval))
+            self.items.update(args[0].items)
+            return self
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(args[0])
         elif name == "__contains__" and len(args) == 1:
@@ -389,8 +384,6 @@ class SetVariable(VariableTracker):
                         if alias_guard:
                             install_guard(e.vt.source.make_guard(alias_guard))
 
-        return self.items
-
     def call_method(
         self,
         tx,
@@ -404,22 +397,12 @@ class SetVariable(VariableTracker):
         if name == "add" and args and self.mutable_local:
             assert not kwargs
             item = args[0]
-            result = SetVariable(
-                self._add(item),
-                mutable_local=self.mutable_local,
-            )
-            tx.replace_all(self, result)
+            self._add(item)
             return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
             assert not args
-            items = list(self.items)
-            result = items.pop()
-            tx.replace_all(
-                self,
-                SetVariable(items),
-            )
-            return result
+            return self.items.pop()
         elif name == "__len__":
             return ConstantVariable.create(len(self.items))
         elif name == "__contains__":

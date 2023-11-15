@@ -29,7 +29,6 @@ from . import (
     config,
     exc,
     logging as torchdynamo_logging,
-    side_effects,
     skipfiles,
     variables,
 )
@@ -668,15 +667,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.symbolic_locals[k] = VariableTracker.apply(
                 repl, x, cache, skip_fn=skip
             )
-
-    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
-            newvar = self.output.side_effects.mutation(oldvar, newvar)
-        else:
-            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
-            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
-        self.update_locals_and_stack(oldvar, newvar)
-        return newvar
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -1452,12 +1442,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        self.replace_all(
-            obj,
-            ListVariable(
-                obj.items + [v],
-            ),
-        )
+        obj.items.append(v)
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
@@ -2497,16 +2482,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
             )
-
-    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        self.check_replace_is_safe(oldvar)
-        newvar = super().replace_all(oldvar, newvar)
-        # recursively check and update parent's locals and stack in case oldvar is from parent
-        translator: InstructionTranslatorBase = self
-        while hasattr(translator, "parent"):
-            translator = translator.parent  # type: ignore[attr-defined]
-            translator.update_locals_and_stack(oldvar, newvar)
-        return newvar
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

@@ -39,9 +39,8 @@ class CountIteratorVariable(IteratorVariable):
     def next_variables(self, tx):
         assert self.mutable_local
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        next_iter = self.clone(item=next_item)
-        tx.replace_all(self, next_iter)
-        return self.item, next_iter
+        self.item = next_item
+        return self.item, self
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -66,35 +65,22 @@ class CycleIteratorVariable(IteratorVariable):
 
         if self.iterator is not None:
             try:
-                new_item, next_inner_iter = self.iterator.next_variables(tx)
-                tx.replace_all(self.iterator, next_inner_iter)
+                new_item = self.iterator.next_variables(tx)
                 if len(self.saved) > MAX_CYCLE:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
-                next_iter = self.clone(
-                    iterator=next_inner_iter,
-                    saved=self.saved + [new_item],
-                    item=new_item,
-                )
 
-                tx.replace_all(self, next_iter)
+                self.saved.append(new_item)
+                self.item = new_item
                 if self.item is None:
-                    return next_iter.next_variables(tx)
-                return self.item, next_iter
+                    return self.next_variables(tx)
+                return self.item
             except StopIteration:
-                next_iter = self.clone(iterator=None)
-                # this is redundant as next_iter will do the same
-                # but we do it anyway for safety
-                tx.replace_all(self, next_iter)
-                return next_iter.next_variables(tx)
+                self.iterator = None
+                return self.next_variables(tx)
         elif len(self.saved) > 0:
-            next_iter = self.clone(
-                saved_index=(self.saved_index + 1) % len(self.saved),
-                item=self.saved[self.saved_index],
-            )
-            tx.replace_all(self, next_iter)
-            return self.item, next_iter
+            self.saved_index = (self.saved_index + 1) % len(self.saved)
+            return self.item
         else:
             raise StopIteration
-        return self.item, next_iter
