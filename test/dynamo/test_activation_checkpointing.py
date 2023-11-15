@@ -89,13 +89,26 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        cloned_args_2nd_run = []
+        for arg in args:
+            cloned_args_2nd_run.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+
         torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
         torch.manual_seed(0)
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
+        compiled_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        result = compiled_fn(*cloned_args)
         result.sum().backward()
+
+        if backend == "inductor":
+            # Show that we actually hardcoded the seed into the random op during
+            # Inductor RNG functionalization pass, so the output of compiled_fn is the same
+            # regardless of torch.manual_seed value.
+            torch.manual_seed(123)
+            result_2nd_run = compiled_fn(*cloned_args_2nd_run)
+            result_2nd_run.sum().backward()
 
         if not skip_check:
             self.assertEqual(
@@ -109,6 +122,18 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                     cloned_arg.grad,
                     msg="Gradient mismatch between torch.compile and eager versions",
                 )
+            if backend == "inductor":
+                self.assertEqual(
+                    result_2nd_run,
+                    result,
+                    msg="Output mismatch between torch.compile 1st run and 2nd run",
+                )
+                for cloned_arg_2nd_run, cloned_arg in zip(cloned_args_2nd_run, cloned_args):
+                    self.assertEqual(
+                        cloned_arg_2nd_run.grad,
+                        cloned_arg.grad,
+                        msg="Gradient mismatch between torch.compile 1st run and 2nd run",
+                    )
 
     @requires_cuda()
     def test_tags_function(self):
@@ -462,6 +487,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
+        if torch.cuda.is_available():
+            self._validate(fn, "inductor", x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -529,6 +556,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
+        if torch.cuda.is_available():
+            self._validate(fn, "inductor", x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -576,6 +605,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
+        if torch.cuda.is_available():
+            self._validate(fn, "inductor", x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @unittest.skip(
@@ -629,6 +660,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
+        if torch.cuda.is_available():
+            self._validate(fn, "inductor", x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -646,7 +679,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def gn(x, y):
             return torch.sigmoid(
-                torch.matmul(torch.matmul(torch.bernoulli(torch.sigmoid(x)), y), y)
+                torch.matmul(torch.matmul(torch.dropout(torch.sigmoid(x), p=0.5, train=True), y), y)
             )
 
         def fn(x, y):
@@ -678,6 +711,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
+        if torch.cuda.is_available():
+            self._validate(fn, "inductor", x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
