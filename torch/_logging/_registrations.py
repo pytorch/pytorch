@@ -1,10 +1,12 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
-register_log("dynamo", "torch._dynamo")
+DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_node"]
+
+register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("aot", "torch._functorch.aot_autograd")
 register_log("inductor", "torch._inductor")
-register_log("dynamic", "torch.fx.experimental.symbolic_shapes")
+register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
 register_log("distributed", "torch.distributed")
 register_log("onnx", "torch.onnx")
