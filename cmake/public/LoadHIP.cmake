@@ -11,7 +11,7 @@ else()
   set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
 endif()
 
-if(NOT EXISTS ${HIP_PATH})
+if(NOT EXISTS ${ROCM_PATH})
   return()
 endif()
 
