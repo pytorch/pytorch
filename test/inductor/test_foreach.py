@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import sys
 import unittest
 
 import torch
@@ -14,15 +15,20 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    check_model_cuda,
-    HAS_CPU,
-    HAS_CUDA,
-    requires_cuda,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
+
+try:
+    try:
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+    except ImportError:
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 bin_ops_under_test = [
@@ -50,6 +56,9 @@ all_ops = parametrize(
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
+scalar_tensor_bin_ops = parametrize(
+    "op", bin_ops_under_test[:2], name_fn=lambda f: f.__name__
+)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
@@ -110,6 +119,18 @@ class ForeachTests(TestCase):
             ),
         )
 
+    def _test_single_scalar_tensor(self, op):
+        def fn(a0, a1):
+            return op([a0, a1], torch.tensor(3.3, device="cuda:0"))
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
+
     # called in test_cpp_wrapper.py
     @requires_cuda()
     def test_foreach_cpp_wrapper(self):
@@ -125,6 +146,12 @@ class ForeachTests(TestCase):
     @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @scalar_tensor_bin_ops
+    def test_single_scalar_tensor(self, op):
+        self._test_single_scalar_tensor(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
