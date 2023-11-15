@@ -7024,8 +7024,8 @@ for shape in [(1,), ()]:
     def test_autograd_print_tensor(self):
         a = torch.ones(1, requires_grad=True)
         a_clone = a.clone()
-        self.assertEqual(repr(a), "tensor([2.], requires_grad=True)")
-        self.assertEqual(repr(a_clone), "tensor([2.], grad_fn=<CloneBackward0>)")
+        self.assertEqual(repr(a), "tensor([1.], requires_grad=True)")
+        self.assertEqual(repr(a_clone), "tensor([1.], grad_fn=<CloneBackward0>)")
 
         with torch.no_grad():
             b = a[:]
