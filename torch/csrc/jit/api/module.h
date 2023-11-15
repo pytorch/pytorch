@@ -90,6 +90,8 @@ struct TORCH_API Module : public Object {
   Module() = default;
   Module(const Module&) = default;
   Module& operator=(const Module&) = default;
+  Module(Module&&) noexcept = default;
+  Module& operator=(Module&&) noexcept = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
@@ -277,7 +279,7 @@ struct TORCH_API Module : public Object {
   // torch.jit.load. It only works on tensors and lists/dicts of tensors
   // because tracing is only supported by these types.
   void store_traced_inputs(std::string func_name, std::vector<IValue> inputs) {
-    if (inputs.size() == 0) {
+    if (inputs.empty()) {
       return;
     }
     auto c10_inputs = c10::impl::GenericList(AnyType::get());
