@@ -595,6 +595,29 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
+def _get_qspec_for_node(node: Node, qspec: QuantizationSpec, gm: torch.fx.GraphModule):
+    if node.op == "get_attr":
+        tensor = getattr(gm, node.target)
+        # torch.histc works until this upper bound
+        HISTC_UPPER_BOUND = 3.4028235e15
+        if tensor.numel() == 1 and tensor.item() > HISTC_UPPER_BOUND:
+            obs_ctr = qspec.observer_or_fake_quant_ctr.p.func
+            # TODO: ideally we can check is_qat flag instead of checking the type of observers here
+            # we can do this after we move is_qat flag to quantizer
+            # for scalar value we'll use MinMaxObserver instead of HistogramObserver
+            if obs_ctr == torch.ao.quantization.observer.HistogramObserver:
+                obs_ctr = torch.ao.quantization.observer.MinMaxObserver
+            new_qspec = QuantizationSpec(
+                dtype=qspec.dtype,
+                quant_min=qspec.quant_min,
+                quant_max=qspec.quant_max,
+                qscheme=qspec.qscheme,
+                is_dynamic=qspec.is_dynamic,
+                observer_or_fake_quant_ctr=obs_ctr.with_args(eps=2**-12),
+            )
+            return new_qspec
+    return qspec
+
 @register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
@@ -624,11 +647,17 @@ def _annotate_add_relu(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act0, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act0] = qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act1, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act1] = qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -639,7 +668,6 @@ def _annotate_add_relu(
             _annotated=True,
         )
     return annotated_partitions
-
 
 @register_annotator("add")
 def _annotate_add(
@@ -664,11 +692,17 @@ def _annotate_add(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act0, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act0] = qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act1, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act1] = qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -707,11 +741,17 @@ def _annotate_mul_relu(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act0, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act0] = qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act1, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act1] = qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -747,11 +787,17 @@ def _annotate_mul(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act0, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act0, output_act_qspec, gm)
+            input_qspec_map[input_act0] = qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
+            qspec = _get_qspec_for_node(input_act1, input_act_qspec, gm)
+            # change the output observer as well to accomdate for histc operator
+            output_act_qspec = _get_qspec_for_node(input_act1, output_act_qspec, gm)
+            input_qspec_map[input_act1] = qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,

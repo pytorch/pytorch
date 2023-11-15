@@ -704,9 +704,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 return x * 3.4028235e38
 
         quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(
-            is_per_channel=True, ptq_act_use_minmax_observer=True
-        )
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
