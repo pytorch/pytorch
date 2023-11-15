@@ -2490,7 +2490,7 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            log.debug("track_symint %s %s %s", LazyString(lambda: source.name()), val, constraint)
+            log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
