@@ -1,0 +1,5 @@
+dev,name,batch_size,speedup,abs_latency,compilation_latency,compression_ratio,eager_peak_mem,dynamo_peak_mem,calls_captured,unique_graphs,graph_breaks,unique_graph_breaks
+cuda,mixnet_l,128,1.342082,84.994877,179.986060,0.970316,7.853681,8.093938,677,2,9,7
+cuda,mixnet_l,128,1.342683,85.109425,48.141032,0.986967,7.853681,7.957386,677,2,9,7
+cuda,mixnet_l,128,1.331193,86.202919,86.225466,0.970316,7.853681,8.093938,677,2,9,7
+cuda,mixnet_l,128,1.336525,85.745968,88.567024,0.970316,7.853681,8.093938,677,2,9,7

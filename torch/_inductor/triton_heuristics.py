@@ -183,6 +183,7 @@ class CachingAutotuner(KernelInterface):
                 return
             self.launchers = []
             compiled_binaries = []
+            binary_launcher = {}
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -193,6 +194,7 @@ class CachingAutotuner(KernelInterface):
                     continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
+                binary_launcher[compiled_binary] = launcher
 
             if len(self.launchers) == 0:
                 raise RuntimeError(
@@ -270,6 +272,8 @@ class CachingAutotuner(KernelInterface):
                     self.launchers.append(
                         self._precompile_config(new_config, warm_cache_only_with_cc)[1]
                     )
+                    # No need to benchmark old config that will likely cause low occupancy.
+                    self.launchers.remove(binary_launcher[compiled_binary])
             self.configs = None
 
     def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):

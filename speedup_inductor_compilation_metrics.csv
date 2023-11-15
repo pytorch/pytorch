@@ -1,0 +1,5 @@
+dev,name,batch_size,_compile.<locals>.compile_inner,OutputGraph.call_user_compiler,create_aot_dispatcher_function,compile_fx.<locals>.fw_compiler_base,GraphLowering.run,GraphLowering.compile_to_module,Scheduler.__init__,Scheduler.codegen,WrapperCodeGen.generate,CachingAutotuner.benchmark_all_configs,compile_fx.<locals>.bw_compiler
+cuda,mixnet_l,128,85.239280,79.871346,76.884893,69.119815,4.983183,120.000243,5.908925,6.241815,0.427672,34.588001,59.748011
+cuda,mixnet_l,128,36.140603,30.529949,27.555470,19.700971,4.735759,22.352724,6.305416,5.794610,0.430007,11.572103,0
+cuda,mixnet_l,128,38.354682,26.930800,24.034539,16.344618,4.590603,21.313963,6.470510,5.426494,0.429965,34.395519,13.152729
+cuda,mixnet_l,128,39.771190,28.482663,25.633167,17.870349,4.582310,23.712005,6.436687,5.493674,0.428452,34.456806,13.969565
