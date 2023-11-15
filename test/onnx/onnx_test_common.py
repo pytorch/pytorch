@@ -286,7 +286,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             export_error = e
             onnx_program = e.onnx_program
 
-        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+        if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
             onnx_program.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
