@@ -3,7 +3,6 @@
 import argparse
 import copy
 import glob
-import itertools
 import json
 import os
 import pathlib
