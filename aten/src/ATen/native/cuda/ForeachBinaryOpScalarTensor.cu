@@ -99,6 +99,10 @@ void foreach_binary_op_(
 #define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda_(    \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
@@ -112,6 +116,10 @@ void foreach_binary_op_(
                                                                          \
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda(     \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
