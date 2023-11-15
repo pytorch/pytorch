@@ -1,4 +1,6 @@
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 #include <c10/util/irange.h>
@@ -346,53 +348,36 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
-// Extend the nested class outside the parent class
-class TestDebugInfoCallbackStorer
-    : public c10d::ProcessGroupNCCL::DebugInfoCallbackStorer {
- public:
-  TestDebugInfoCallbackStorer() : DebugInfoCallbackStorer("") {
-    temp_ = std::tmpfile();
-    TORCH_CHECK(temp_ != nullptr, "Failed to open temporary file");
-  }
-
-  ~TestDebugInfoCallbackStorer() override {
-    std::fclose(temp_);
-  }
-
-  void storeTraceInfoStorer(int rank, const std::string& ncclTrace) override {
-    tracesToStorer_.assign(ncclTrace.begin(), ncclTrace.end());
-    std::fputs(ncclTrace.data(), temp_);
-    std::fflush(temp_);
-    // Reset to the beginning of the file.
-    std::rewind(temp_);
-    std::array<char, 256> buffer;
-    if (std::fgets(buffer.data(), ncclTrace.size(), temp_) != nullptr) {
-      tracesFromStorer_.assign(
-          buffer.begin(), buffer.begin() + ncclTrace.size());
-      // One thing which can not be explained is that, without this line of log,
-      // the last element of `tracesFromStorer_` will be different from
-      // `tracesToStorer_`. Since using TmpFile is just for testing purpose,
-      // this is probably not a big deal.
-      LOG(INFO) << "Read back traces and stored it at a different vector";
+// Function to read what we wrote to the local disk for validation.
+std::string readTraceFromFile(const std::string& filename, size_t size) {
+  std::ifstream file(filename, std::ios::binary);
+  // Read the strings from the file
+  if (file) { // While the file stream is in good state
+    std::string str(size, '\0');
+    file.read(&str[0], size);
+    if (file) {
+      return str;
     }
   }
+  return "";
+}
 
-  std::vector<uint8_t>& getTracesToStorer() {
-    return tracesToStorer_;
+// Extend the nested class outside the parent class
+class TestDebugInfoWriter : public c10d::ProcessGroupNCCL::DebugInfoWriter {
+ public:
+  TestDebugInfoWriter() : DebugInfoWriter(0) {}
+
+  void write(const std::string& ncclTrace) override {
+    traces_.assign(ncclTrace.begin(), ncclTrace.end());
+    c10d::ProcessGroupNCCL::DebugInfoWriter::write(ncclTrace);
   }
 
-  std::vector<uint8_t>& getTracesFromStorer() {
-    return tracesFromStorer_;
-  }
-
-  std::FILE* getTempFile() {
-    return temp_;
+  std::vector<uint8_t>& getTraces() {
+    return traces_;
   }
 
  private:
-  std::vector<uint8_t> tracesToStorer_;
-  std::vector<uint8_t> tracesFromStorer_;
-  std::FILE* temp_;
+  std::vector<uint8_t> traces_;
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
@@ -407,6 +392,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
       0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  auto tempFilename = c10::str(
+      std::filesystem::temp_directory_path().string(), "/nccl_trace_rank_");
+  ASSERT_TRUE(
+      setenv("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", tempFilename.c_str(), 1) == 0);
   // Enable nccl flight recorder.
   ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
@@ -415,13 +404,12 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options);
   // The storer here is very similar to the fallback storer.
-  // The only difference is that we are storing traces at std::tmpfile.
-  std::unique_ptr<TestDebugInfoCallbackStorer> storerForTestPtr =
-      std::make_unique<TestDebugInfoCallbackStorer>();
-  std::vector<uint8_t>& tracesToStorer = storerForTestPtr->getTracesToStorer();
-  std::vector<uint8_t>& tracesFromStorer =
-      storerForTestPtr->getTracesFromStorer();
-  pg.registerDebugInfoCallbackStorer(std::move(storerForTestPtr));
+  // The only difference is that we are storing traces also in memory for
+  // validation.
+  std::unique_ptr<TestDebugInfoWriter> wrterForTestPtr =
+      std::make_unique<TestDebugInfoWriter>();
+  std::vector<uint8_t>& traces = wrterForTestPtr->getTraces();
+  pg.registerDebugInfoWriter(std::move(wrterForTestPtr));
 
   // Normal collective case.
   auto work = pg.allreduce(tensors_);
@@ -441,8 +429,12 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());
-  EXPECT_TRUE(tracesToStorer.size() > 0);
-  EXPECT_TRUE(tracesToStorer == tracesFromStorer);
+  EXPECT_TRUE(traces.size() > 0);
+  auto filename = c10::str(tempFilename, 0);
+  auto traceFromStorage = readTraceFromFile(filename, traces.size());
+  // Check the traces read from storage match with the original nccl trace.
+  EXPECT_TRUE(traceFromStorage == std::string(traces.begin(), traces.end()));
+  std::filesystem::remove(filename);
 }
 
 class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
