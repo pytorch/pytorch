@@ -233,6 +233,7 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not kwargs
             (arg,) = args
             self.items.append(arg)
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif (
             name == "extend"
@@ -243,18 +244,22 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not kwargs
             (arg,) = args
             self.items.extend(arg.unpack_var_sequence(tx))
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
             self.items.insert(idx.as_python_constant(), value)
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
+            tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             self.items.clear()
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
@@ -268,6 +273,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 self.items[key.as_python_constant()] = list(value.items)
             else:
                 self.items[key.as_python_constant()] = value
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
@@ -310,6 +316,7 @@ class ListVariable(CommonListMethodsVariable):
                 self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
                 self.items[key.as_python_constant()] = value
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -351,22 +358,28 @@ class DequeVariable(CommonListMethodsVariable):
                 key.as_python_constant(), int
             )
             self.items[key.as_python_constant()] = value
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "extendleft" and self.mutable_local:
             assert not kwargs
 
             (arg,) = args
-            self.items = reversed(list(arg.unpack_var_sequence(tx)) + list(self.items))
+            prefix = arg.unpack_var_sequence(tx)
+            prefix.reverse()
+            self.items = prefix + list(self.items)
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
             item = self.items[0]
             self.items = self.items[1:]
+            tx.output.side_effects.mutation(self)
             return item
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
             self.items = [args[0]] + list(self.items)
+            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -625,6 +638,7 @@ class ListIteratorVariable(VariableTracker):
         if old_index >= len(self.items):
             raise StopIteration()
         self.index += 1
+        tx.output.side_effects.mutation(self)
         return self.items[old_index], self
 
     def as_python_constant(self):
