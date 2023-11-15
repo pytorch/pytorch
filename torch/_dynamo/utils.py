@@ -147,8 +147,9 @@ def cprofile_wrapper(func):
                 ],
                 stdout=subprocess.PIPE,
             )
-            subprocess.run(
-                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
             )
             print(f"Generated SVG from profile at {str(svg_path)}")
         except FileNotFoundError:
@@ -740,7 +741,7 @@ def torchscript(model, example_inputs, verbose=False):
 def getfile(obj):
     try:
         return inspect.getfile(obj)
-    except TypeError:
+    except (TypeError, OSError):
         return None
 
 
