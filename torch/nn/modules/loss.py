@@ -1036,9 +1036,7 @@ class SoftMarginLoss(_Loss):
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
-          shape as input.
-
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as input.
     """
 
     __constants__ = ['reduction']
