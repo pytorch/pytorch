@@ -208,7 +208,7 @@ class TestSelectAlgorithm(TestCase):
             return torch.mm(a, a)
 
         foo(torch.randn(32, 32, device="cuda"))
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm_dup_args_view(self):

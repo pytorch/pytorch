@@ -958,6 +958,8 @@ class GraphLowering(torch.fx.Interpreter):
             # second pass
             # TODO: reuse self.scheduler from the first pass to speed up the second pass
             self.cpp_wrapper = True
+            self.removed_buffers.clear()
+            self.inplaced_to_remove.clear()
             return self.codegen()
         else:
             # cpu
