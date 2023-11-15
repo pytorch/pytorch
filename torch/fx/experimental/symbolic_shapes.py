@@ -747,8 +747,12 @@ class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
-    constraint_sizes: DimList[DimConstraint]
+    constraint_sizes: DimList[DimConstraint] = None
     # TODO: add storage offset and stride policy
+
+    def __post_init__(self):
+        if self.constraint_sizes is None:
+            object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
