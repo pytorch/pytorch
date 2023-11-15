@@ -11,6 +11,7 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
+from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -1175,10 +1176,12 @@ class BuiltinVariable(VariableTracker):
                 return build_checkpoint_variable(**options)
             elif trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
-            elif source is not None:
-                return VariableBuilder(tx, source)(member)
+            elif is_allowed(member):
+                return TorchVariable(member, **options)
+            elif ConstantVariable.is_literal(member):
+                return ConstantVariable.create(member, **options)
             else:
-                return SourcelessBuilder()(tx, member)
+                return VariableBuilder(tx, source)(member)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 
@@ -1274,17 +1277,24 @@ class BuiltinVariable(VariableTracker):
 
         try:
             py_type = obj.python_type()
-        except NotImplementedError as error:
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                str(error),
-                case_name="unknown_python_type",
-            ) from None
+        except NotImplementedError:
+            py_type = None
 
-        if obj.source is None:
-            return SourcelessBuilder()(tx, py_type)
-        else:
+        if istype(obj, variables.TupleVariable):
+            return BuiltinVariable(py_type)
+
+        if py_type is not None and obj.source:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
+
+        if py_type is not None:
+            return SourcelessBuilder()(tx, py_type)
+
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            f"Can't call type() on generated custom object {obj}. "
+            "Please use __class__ instead",
+            case_name="type_reflection_method",
+        )
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
