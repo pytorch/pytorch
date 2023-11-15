@@ -2114,8 +2114,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             updated_flat_args.extend([seed, offset])
 
-        if torch._guards.TracingContext.get():
-            torch._guards.TracingContext.get().fw_metadata = fw_metadata \
+        if tracing_context := torch._guards.TracingContext.try_get():
+            tracing_context.fw_metadata = fw_metadata \
                 if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
         compiled_fw = compiler(fw_module, updated_flat_args)
 
@@ -2883,8 +2883,7 @@ fw_metadata={str(fw_metadata)}
     # Update our input metadata to remove duped input metadata.
     updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask, add_dupe_map)
 
-    tracing_context = TracingContext.get()
-    if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
+    if tracing_context := TracingContext.try_get() and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -3827,8 +3826,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # 1) There is a check in the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
-            if torch._guards.TracingContext.get():
-                torch._guards.TracingContext.get().fw_metadata = inner_meta
+            if tracing_context := torch._guards.TracingContext.try_get():
+                tracing_context.fw_metadata = inner_meta
 
             with TracingContext.report_output_strides() as fwd_output_strides:
                 compiled_fw_func = aot_config.fw_compiler(
@@ -3913,7 +3912,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             exc_info=True
                         )
 
-    saved_context = TracingContext.get()
+    saved_context = TracingContext.try_get()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -4878,8 +4877,8 @@ def aot_module_simplified(
     # First, the params
     full_args.extend(params_flat)
 
-    if torch._guards.TracingContext.get():
-        torch._guards.TracingContext.get().params_flat = params_flat
+    if tracing_context := torch._guards.TracingContext.try_get():
+        tracing_context.params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
