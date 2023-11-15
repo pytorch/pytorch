@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional, TYPE_CHECKING
+from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
@@ -187,6 +187,8 @@ class MetaConverter:
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
     ):
+        from torch._subclasses.fake_tensor import FakeTensor
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -233,18 +235,25 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(
+            t, src
+        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(
-                    t,
-                    src,
-                    # Assume that the set of dims that are dynamic are the same between
-                    # the wrapper tensor and any inner tensors.
-                    # We can revisit this if this assumption does not hold
-                    # for any important subclasses later.
-                    dynamic_dims=dynamic_dims,
-                    constraint_dims=constraint_dims,
-                )
+                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
+                    # Don't reallocate the sizes; the shape envs are the same,
+                    # so reuse the old sizes/strides/etc
+                    return (t.size(), t.stride(), t.storage_offset())
+                else:
+                    return shape_env.create_symbolic_sizes_strides_storage_offset(
+                        t,
+                        src,
+                        # Assume that the set of dims that are dynamic are the same between
+                        # the wrapper tensor and any inner tensors.
+                        # We can revisit this if this assumption does not hold
+                        # for any important subclasses later.
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
+                    )
             else:
                 assert dynamic_dims is None
                 assert constraint_dims is None
@@ -474,8 +483,15 @@ class MetaConverter:
                             # so we can insert some special processing on ctx
                             attrs, ctx = t.__tensor_flatten__()
                             transformed_tensors_dict = {}
+                            orig_shape_env = None
                             for attr in attrs:
                                 inner_t = getattr(t, attr)
+                                if orig_shape_env is None:
+                                    orig_shape_env = (
+                                        inner_t.fake_mode.shape_env
+                                        if isinstance(inner_t, FakeTensor)
+                                        else None
+                                    )
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
                                         inner_t, AttrSource(source, attr)
@@ -483,22 +499,27 @@ class MetaConverter:
                                 )
                             # We expect JaggedTensor to have a 'ragged_size' in
                             # its context
-                            assert isinstance(ctx, dict) and "ragged_size" in ctx
-                            assert (
-                                isinstance(t._size[1], torch.SymInt)
-                                and t._size[1].node.singleton_int() is not None
-                            )
-                            # Replace the eager ragged size with our freshly
-                            # allocated jagged size that has a source
-                            ctx["ragged_size"] = shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    t._size[1],
-                                    TensorPropertySource(
-                                        source, TensorProperty.SIZE, 1
+                            assert isinstance(ctx, dict)
+                            assert "ragged_size" in ctx
+                            assert isinstance(t._size[1], torch.SymInt)
+                            if orig_shape_env is shape_env:
+                                # It's already fake and the shape envs line up, reuse the old size
+                                # Do not assert singleton_int; it may already
+                                # be a variable
+                                ctx["ragged_size"] = t._size[1]
+                            else:
+                                assert t._size[1].node.singleton_int() is not None
+                                # Replace the eager ragged size with our freshly
+                                # allocated jagged size that has a source
+                                ctx["ragged_size"] = shape_env.create_symintnode(
+                                    shape_env.create_symbol(
+                                        t._size[1],
+                                        TensorPropertySource(
+                                            source, TensorProperty.SIZE, 1
+                                        ),
                                     ),
-                                ),
-                                hint=t._size[1],
-                            )
+                                    hint=t._size[1],
+                                )
                             r = type(t).__tensor_unflatten__(
                                 transformed_tensors_dict, ctx
                             )

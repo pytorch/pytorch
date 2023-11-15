@@ -2851,8 +2851,7 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    @common_utils.parametrize("type_fn", [type, lambda obj: obj.__class__])
-    def test_access_class_method_from_user_class(self, type_fn):
+    def test_access_class_method_from_user_class(self):
         class A:
             @classmethod
             def func(cls):
@@ -2860,10 +2859,18 @@ def forward(self, x):
 
         def f(x):
             a = A()
-            return x.sum() + type_fn(a).func().sum()
+            return x.sum() + type(a).func().sum()
 
         gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
         self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+
+        def f_correct(x):
+            a = A()
+            return x.sum() + a.__class__.func().sum()
+
+        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
+
+        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
