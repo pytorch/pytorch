@@ -21,10 +21,10 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from sympy.printing.printer import Printer
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
@@ -371,6 +371,10 @@ class PythonPrinter(ExprPrinter):
     def _print_Max(self, expr):
         assert len(expr.args) >= 2
         return f"max({', '.join(map(self._print, expr.args))})"
+
+    def _print_Min(self, expr):
+        assert len(expr.args) >= 2
+        return f"min({', '.join(map(self._print, expr.args))})"
 
 
 class OpOverrides:

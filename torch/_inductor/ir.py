@@ -2084,6 +2084,9 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
+        end = sympy.Min(end, new_size[dim])
+        start = sympy.Min(start, end)
+
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
         if is_storage_and_layout(x):
