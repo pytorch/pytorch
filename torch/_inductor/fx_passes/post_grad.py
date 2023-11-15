@@ -594,7 +594,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
         else:
             break
 
-    for out in tuple(graph.nodes)[-1].args[0]:
+    for out in next(iter(reversed(graph.nodes))).args[0]:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 

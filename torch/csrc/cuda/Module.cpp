@@ -12,6 +12,8 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
+
 #endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -665,6 +667,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str time_us_s = "time_us";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -780,6 +783,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           te.addr_;
       trace_entry[size_s] = te.size_;
       trace_entry[stream_s] = int64_t(te.stream_);
+      trace_entry[time_us_s] = te.time_.t_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -1354,7 +1358,12 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
+#else
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+#endif
 #endif
   Py_RETURN_NONE;
 }

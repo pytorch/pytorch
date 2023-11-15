@@ -2,20 +2,23 @@
 import functools
 import importlib
 import itertools
-import os
 import sys
 import unittest
 
 import torch
 from torch import nn
+from torch._dynamo.testing import load_test_module
 from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
-
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import (
+    check_model,
+    check_model_cuda,
+    copy_tests,
+    HAS_CPU,
+    HAS_CUDA,
+    skipCUDAIf,
+)
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -25,19 +28,17 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-from inductor.test_inductor_freezing import TestCase
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+TestCase = load_test_module(__file__, "inductor.test_inductor_freezing").TestCase
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
 
 class BinaryFoldingTemplate(TestCase):
-    @unittest.skipIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
+    @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):
