@@ -517,6 +517,18 @@ def forward(self, x_1):
         # you're unlikely to get other equalities like this on the
         # unbacked SymInts.)
 
+    def test_unbacked_substitution(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 == i1 * 4))
+        self.assertExpectedInline(str(i0), """4*i1""")
+
+        i2 = shape_env.create_unbacked_symint()
+        i3 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i2 * 4 == i3))
+        self.assertExpectedInline(str(i3), """4*i2""")
+
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
@@ -604,18 +616,18 @@ def forward(self, x_1):
 
         self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
+    def forward(self, a_1: "f32[s0, s1]", b_1: "f32[s2, s1]"):
         # No stacktrace found for following nodes
-        sym_size_int: Sym(s0) = torch.ops.aten.sym_size.int(a_1, 0)
-        sym_size_int_1: Sym(s2) = torch.ops.aten.sym_size.int(b_1, 0)
-        add: Sym(s0 + s2) = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-        sym_size_int_2: Sym(s1) = torch.ops.aten.sym_size.int(a_1, 1)
-        sym_size_int_3: Sym(s1) = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
-        add_1: Sym(2*s1) = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_int: "Sym(s0)" = torch.ops.aten.sym_size.int(a_1, 0)
+        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(b_1, 0)
+        add: "Sym(s0 + s2)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+        sym_size_int_2: "Sym(s1)" = torch.ops.aten.sym_size.int(a_1, 1)
+        sym_size_int_3: "Sym(s1)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: "Sym(2*s1)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
+        new_empty: "f32[s0 + s2, 2*s1]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
-        getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
+        getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
+        getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")

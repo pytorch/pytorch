@@ -1,5 +1,6 @@
-import os
+import os  # noqa: C101
 import sys
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -565,6 +566,11 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx = None
 
+    # If set to True, it will ensure that only GEMM ops capable of
+    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
+    # are enabled for the CUTLASS backend.
+    cutlass_only_evt_capable_ops: bool = False
+
 
 # create a directory containing lots of debug information
 class trace:
@@ -615,8 +621,10 @@ _save_config_ignore = {
     "trace.upload_tar",
 }
 
+if TYPE_CHECKING:
+    from torch._dynamo.config_typing import *  # noqa: F401, F403
 
-from .._dynamo.config_utils import install_config_module
+from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

@@ -38,7 +38,7 @@ basic_gnn_sage,pass,0
 
 
 
-cm3leon_generate,pass,5
+cm3leon_generate,pass,4
 
 
 
@@ -94,7 +94,7 @@ hf_Reformer,pass,5
 
 
 
-hf_T5_generate,pass,21
+hf_T5_generate,pass,20
 
 
 
@@ -243,6 +243,10 @@ tts_angular,pass,2
 
 
 vgg16,pass,0
+
+
+
+vision_maskrcnn,pass,18
 
 
 
