@@ -133,9 +133,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func,
-            (tensor_x,),
-            input_kwargs={"b": torch.tensor(5.0)},
+            func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -303,7 +301,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model = torchvision.models.resnet18(weights=None).eval()
         dummy_input = torch.randn(1, 3, 224, 224)
 
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(model, (dummy_input,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            model,
+            (dummy_input,),
+        )
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : "
@@ -358,9 +359,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(1, 4)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicAdd(),
-            (x, y),
-            additional_test_inputs=[((input_x, input_y),)],
+            DynamicAdd(), (x, y), additional_test_inputs=[((input_x, input_y),)]
         )
 
     def test_matmul(self):
@@ -374,9 +373,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(2, 4, 4)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicMatMul(),
-            (x, y),
-            additional_test_inputs=[((input_x, input_y),)],
+            DynamicMatMul(), (x, y), additional_test_inputs=[((input_x, input_y),)]
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -428,14 +425,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         d3 = torch.tensor([3])
         d4 = torch.tensor([4])
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(),
-            (d1, d4),
-            additional_test_inputs=[((d3, d4),)],
+            Squeeze(), (d1, d4), additional_test_inputs=[((d3, d4),)]
         )
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            Squeeze(),
-            (d3, d4),
-            additional_test_inputs=[((d1, d3),)],
+            Squeeze(), (d3, d4), additional_test_inputs=[((d1, d3),)]
         )
 
     def test_slice(self):
@@ -467,9 +460,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MutationModel(),
-            (torch.randn(12),),
-            has_mutation=True,
+            MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
     def test_arange(self):
@@ -591,8 +582,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x + y + z
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            NoneInputModel(),
-            (torch.randn(1, 2), None, torch.randn(1, 2)),
+            NoneInputModel(), (torch.randn(1, 2), None, torch.randn(1, 2))
         )
 
     def test_operator_with_data_dependent_output(self):
@@ -905,9 +895,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         exported_program = torch.export.export(Model(), args=(x,))
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            exported_program,
-            (x,),
-            skip_dynamic_shapes_check=True,
+            exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
     def test_exported_program_as_input_from_file(self):
