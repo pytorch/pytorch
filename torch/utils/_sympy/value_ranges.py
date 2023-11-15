@@ -591,7 +591,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
     ranges = ranges or {}
 
     # If there's a tracing context, augment available constrained ranges.
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
         ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 
