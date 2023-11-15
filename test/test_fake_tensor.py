@@ -276,6 +276,15 @@ class FakeTensorTest(TestCase):
                 with self.assertRaises(RuntimeError):
                     x[[1, 1]] = y
 
+                with self.assertRaises(RuntimeError):
+                    torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), y)
+
+                # no error
+                torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
+                torch.ops.aten.index_put_(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
+
+
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
         with FakeTensorMode():
