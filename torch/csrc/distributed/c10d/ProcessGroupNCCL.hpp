@@ -313,14 +313,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class DebugInfoCallbackStorer {
+  class DebugInfoWriter {
    public:
-    DebugInfoCallbackStorer(std::string fileName);
-    virtual ~DebugInfoCallbackStorer();
-    virtual void storeTraceInfoStorer(int rank, const std::string& ncclTrace);
+    DebugInfoWriter(int rank);
+    virtual ~DebugInfoWriter();
+    virtual void write(const std::string& ncclTrace);
 
-   private:
-    std::string fileName_;
+   protected:
+    std::string filename_;
   };
 
   struct Options : Backend::Options {
@@ -516,9 +516,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void enableCollectivesTiming() override;
 
   // Provide an API for users to define their own ways to store NCCL debug info.
-  void registerDebugInfoCallbackStorer(
-      std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer>
-          callbackStorer);
+  void registerDebugInfoWriter(
+      std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> writer);
 
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
@@ -877,8 +876,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::exception_ptr watchDogException_ = nullptr;
 
   // The callback function to store NCCL debug info.
-  std::unique_ptr<ProcessGroupNCCL::DebugInfoCallbackStorer>
-      debugInfoCallbackStorer_ = nullptr;
+  std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> debugInfoWriter_ = nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
