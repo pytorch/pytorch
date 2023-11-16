@@ -2924,7 +2924,6 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-        V.graph.disable_cudagraphs_reason = ""
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
