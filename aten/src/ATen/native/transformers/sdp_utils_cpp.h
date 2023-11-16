@@ -47,7 +47,7 @@ struct sdp_params {
   bool is_causal;
 };
 
-SDPBackend select_sdp_backend_cpp(sdp_params kernel_params);
+SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
 
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
@@ -65,14 +65,14 @@ inline constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
-inline bool input_requires_grad(sdp_params params) {
+inline bool input_requires_grad(sdp_params const& params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
 }
 
-inline bool has_for_nested_inputs(sdp_params params) {
+inline bool has_for_nested_inputs(sdp_params const& params) {
   return (
       params.query.is_nested() || params.key.is_nested() ||
       params.value.is_nested());
@@ -80,7 +80,7 @@ inline bool has_for_nested_inputs(sdp_params params) {
 
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
-    sdp_params params,
+    sdp_params const& params,
     dtype_vector allowed_dtypes,
     bool debug) {
   auto query_dtype = params.query.dtype();
@@ -138,7 +138,7 @@ inline bool try_broadcast_param_size(
 }
 
 inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
-    at::Tensor param,
+    at::Tensor const& param,
     c10::string_view param_name,
     bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
@@ -174,7 +174,7 @@ inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
   return true;
 }
 
-inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
+inline bool check_for_seq_len_0_nested_tensor(sdp_params const& params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!has_for_nested_inputs(params)) {
     return true;
@@ -228,7 +228,7 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_nested_tensor(sdp_params params, bool debug) {
+inline bool check_nested_tensor(sdp_params const& params, bool debug) {
   // Return false if have nested tensor
   if (has_for_nested_inputs(params)) {
     if (debug) {
@@ -240,7 +240,7 @@ inline bool check_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_dropout(sdp_params params, bool debug) {
+inline bool check_for_dropout(sdp_params const& params, bool debug) {
   if (params.dropout > 0.0) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-zero dropout.");
@@ -250,7 +250,7 @@ inline bool check_for_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
+inline bool check_requires_grad_and_nested(sdp_params const& params, bool debug) {
   // If we fail both checks then we return false
   if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
@@ -262,7 +262,7 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_attn_mask(sdp_params params, bool debug) {
+inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   if (params.attn_mask.has_value()) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
@@ -272,7 +272,7 @@ inline bool check_for_attn_mask(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_tensor_shapes(sdp_params params, bool debug) {
+inline bool check_tensor_shapes(sdp_params const& params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
         (query_dim == 4))) {
@@ -291,7 +291,7 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
+inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
   auto seq_len = nt_tensor_impl->opt_size(2);
   if (!seq_len.has_value()) {
@@ -306,7 +306,7 @@ inline bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
   return true;
 }
 
-inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
+inline bool check_batch_size_and_num_heads(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
   auto q_batch_size = params.query.sym_size(0);
@@ -373,7 +373,7 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
+inline bool check_nonzero_sequence_lengths(sdp_params const& params, bool debug) {
   if (has_for_nested_inputs(params)){
     // Currently we do not support any masking with NestedTensors
     // This is checked in validate_sdpa_input so this filter func
@@ -394,7 +394,7 @@ inline bool check_nonzero_sequence_lengths(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
+inline bool check_last_dim_stride_equals_1(sdp_params const& params, bool debug) {
   if (has_for_nested_inputs(params)){
     // The stride checking for NestedTensors is done within the kernel
     // And .contiguous will be called if needed
@@ -431,7 +431,7 @@ inline bool check_last_dim_stride_equals_1(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
+inline bool check_runtime_disabled_flash(sdp_params const& params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
@@ -443,7 +443,7 @@ inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
+inline bool check_runtime_disabled_mem_efficient(sdp_params const& params, bool debug) {
   // We check the global context to see if user has explicitly turned of
   // mem_efficient sdp kernels
   if (!at::globalContext().userEnabledMemEfficientSDP()) {

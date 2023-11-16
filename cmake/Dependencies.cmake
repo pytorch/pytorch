@@ -432,9 +432,9 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   # ---[ Caffe2 uses cpuinfo library in the thread pool
-  # ---[ But it doesn't support s390x and thus not used on s390x
+  # ---[ But it doesn't support s390x/powerpc and thus not used on s390x/powerpc
   if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
     add_library(cpuinfo SHARED IMPORTED)
     find_library(CPUINFO_LIBRARY cpuinfo)
@@ -633,14 +633,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Revert to whatever it was before
     set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
-
-    # Workaround for https://github.com/pytorch/pytorch/issues/47292
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
-      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
-      # Fails with internal compiler error
-      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
-      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
-    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -814,6 +806,9 @@ if(USE_FBGEMM)
       set(FBGEMM_LIBRARY_TYPE "shared" CACHE STRING "")
     else()
       set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    endif()
+    if(USE_ASAN)
+      set(USE_SANITIZER "address,undefined" CACHE STRING "-fsanitize options for FBGEMM")
     endif()
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
     set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -1255,7 +1250,7 @@ if(USE_ROCM)
     endif()
 
     list(APPEND HIP_CXX_FLAGS -fPIC)
-    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
     list(APPEND HIP_CXX_FLAGS -DUSE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
@@ -1291,7 +1286,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)

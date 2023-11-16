@@ -4225,6 +4225,10 @@ class TestSparseUnaryUfuncs(TestCase):
 class TestSparseMaskedReductions(TestCase):
     exact_dtype = True
 
+    fp16_low_precision_list = {
+        'masked.prod',
+    }
+
     @ops(sparse_masked_reduction_ops)
     def test_future_empty_dim(self, device, dtype, op):
         """Currently, `dim=()` in reductions operations means "reduce over
@@ -4263,7 +4267,12 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual.layout, torch.sparse_coo)
 
             expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
-            self.assertEqual(actual, expected)
+            atol = None
+            rtol = None
+            if op.name in self.fp16_low_precision_list and dtype == torch.half:
+                atol = 1e-5
+                rtol = 2e-3
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestSparseMeta(TestCase):
@@ -5079,7 +5088,7 @@ class TestSparseAny(TestCase):
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
-    def test_as_sparse_gradcheck(self, layout, masked, fast_mode):
+    def test_as_sparse_gradcheck(self, layout, device, masked, fast_mode):
         gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
         sparse_compressed_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
 
@@ -5099,6 +5108,7 @@ class TestSparseAny(TestCase):
                 continue
             for x in self.generate_simple_inputs(
                     layout,
+                    device=device,
                     dtype=torch.float64,
                     # TODO: fix gh-104868  to enable batched samples:
                     enable_batch=layout not in sparse_compressed_layouts,

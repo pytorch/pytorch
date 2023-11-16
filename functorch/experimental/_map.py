@@ -35,7 +35,7 @@ class MapWrapper(HigherOrderOperator):
 
 
 map = MapWrapper("map", _deprecated_global_ns=True)
-map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
+map_impl = HigherOrderOperator("map_impl")
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,

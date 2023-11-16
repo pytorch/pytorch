@@ -128,7 +128,7 @@ def report_compile_source_on_error():
             tb.tb_next = tb_next
             tb_next = tb
 
-        raise exc.with_traceback(tb_next)
+        raise exc.with_traceback(tb_next)  # noqa: TRY200
 
 def shorten_filename(fn, *, base=None):
     """

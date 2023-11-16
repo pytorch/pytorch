@@ -243,7 +243,7 @@ class TuningProcessPool:
             EXIT_HANDLER_REGISTERED = True
             import atexit
 
-            atexit.register(lambda: self.terminate())
+            atexit.register(self.terminate)
 
     def get_device_list(self) -> List[Optional[int]]:
         """
@@ -354,9 +354,18 @@ class TensorMeta:
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(node.get_size()),
-            strides=V.graph.sizevars.size_hints(node.get_stride()),
-            offset=V.graph.sizevars.size_hint(node.get_layout().offset),
+            sizes=V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            strides=V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            offset=V.graph.sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
     def to_tensor(self) -> torch.Tensor:

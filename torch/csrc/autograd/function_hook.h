@@ -52,6 +52,14 @@ struct TORCH_API PostAccumulateGradHook {
         std::string("not yet implemented for compiled autograd: ") +
         typeid(*this).name());
   }
+
+  virtual void apply_with_saved(
+      Variable&,
+      torch::dynamo::autograd::SwapSavedVariables&) {
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
+  }
 };
 
 } // namespace autograd

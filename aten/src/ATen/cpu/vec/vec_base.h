@@ -61,8 +61,7 @@
 #define int_vector __m256i
 #endif // CPU_CAPABILITY_AVX512
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
@@ -71,9 +70,7 @@ struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
       std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value ||
-      std::is_same<T, at::Float8_e5m2>::value ||
-      std::is_same<T, at::Float8_e4m3fn>::value> {
+      std::is_same<T, at::BFloat16>::value> {
 };
 
 template<typename T>
@@ -1048,8 +1045,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (const auto i : c10::irange(n)) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
@@ -1079,4 +1075,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
   }
 }
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

@@ -6,7 +6,7 @@ Tensor Parallelism - torch.distributed.tensor.parallel
 
 Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
 (`DTensor <https://github.com/pytorch/pytorch/blob/main/torch/distributed/_tensor/README.md>`__)
-and provides several parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
+and provides several parallelism styles: Rowwise and Colwise Parallelism.
 
 .. warning ::
     Tensor Parallelism APIs are experimental and subject to change.
@@ -27,23 +27,32 @@ Tensor Parallelism supports the following parallel styles:
 .. autoclass:: torch.distributed.tensor.parallel.style.ColwiseParallel
   :members:
 
+.. warning::
+    We are deprecating the styles below and will remove them soon:
+
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
   :members:
-
-.. warning ::
-    Sequence Parallelism are still in experimental and no evaluation has been done.
 
 .. autoclass:: torch.distributed.tensor.parallel.style.SequenceParallel
   :members:
 
 Since Tensor Parallelism is built on top of DTensor, we need to specify the
-input and output placement of the module with DTensors so it can expectedly
-interacts with the module before and after. The followings are functions
-used for input/output preparation:
+DTensor layout of the input and output of the module so it can interact with
+the module parameters and module afterwards. Users can achieve this by specifying
+the ``input_layouts`` and ``output_layouts`` which annotate inputs as DTensors
+and redistribute the outputs, if needed.
+
+If users only want to annotate the DTensor layout for inputs/outputs and no need to
+distribute its parameters, the following classes can be used in the ``parallelize_plan``
+of ``parallelize_module``:
 
 
 .. currentmodule:: torch.distributed.tensor.parallel.style
+.. autofunction::  PrepareModuleInput
+.. autofunction::  PrepareModuleOutput
 
+.. warning::
+    We are deprecating the methods below and will remove them soon:
 .. autofunction::  make_input_replicate_1d
 .. autofunction::  make_input_reshard_replicate
 .. autofunction::  make_input_shard_1d
@@ -52,6 +61,7 @@ used for input/output preparation:
 .. autofunction::  make_output_reshard_tensor
 .. autofunction::  make_output_shard_1d
 .. autofunction::  make_output_tensor
+
 
 Currently, there are some constraints which makes it hard for the ``MultiheadAttention``
 module to work out of box for Tensor Parallelism, so we recommend users to try ``ColwiseParallel``
