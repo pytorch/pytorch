@@ -649,9 +649,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
-  // Check the writeDebugInfo_ flag and if it is true, return false directly.
-  // If not, we first set the flag to be true and return true as well.
-  bool tryWriteDebugInfo();
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
