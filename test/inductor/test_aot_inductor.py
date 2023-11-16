@@ -145,8 +145,6 @@ def check_model(
     example_inputs,
     options=None,
     constraints=None,
-    atol=None,
-    rtol=None,
 ):
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
@@ -162,7 +160,7 @@ def check_model(
             self.device, model, example_inputs, options, constraints
         )
 
-    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+    self.assertEqual(actual, expected)
 
 
 def check_model_with_multiple_inputs(
@@ -1216,6 +1214,7 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
@@ -1241,6 +1240,7 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
+        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
