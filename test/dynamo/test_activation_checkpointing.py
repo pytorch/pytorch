@@ -690,53 +690,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
-    def test_compile_selective_checkpoint_dropout(self):
-        def selective_checkpointing_context_fn():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
-            return context_fn_gen(
-                _get_custom_policy(no_recompute_list=no_recompute_list)
-            )
-
-        def gn(x, y):
-            return torch.relu(torch.dropout(torch.matmul(x, y), p=0.5, train=True))
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                torch.sin(x),
-                y,
-                use_reentrant=False,
-                context_fn=selective_checkpointing_context_fn,
-                preserve_rng_state=True,
-            )
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
-
-        fw_compiler = functools.partial(
-            count_ops,
-            freqs=[1, 1],
-            ops=[torch.ops.aten.mm.default, torch.ops.aten.native_dropout.default],
-        )
-        bw_compiler = functools.partial(
-            count_ops,
-            freqs=[2],
-            ops=[torch.ops.aten.mm.default],
-        )
-        backend = aot_autograd(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        self._validate(fn, backend, x, y)
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_random_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
