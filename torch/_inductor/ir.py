@@ -3445,7 +3445,6 @@ class ExternKernel(InputsKernel):
         if maybe_free_unbacked_symbols(example_output):
             example_output = V.graph.current_node.meta["val"]
 
-
         return example_output, tensor_args, non_tensor_args, unflatten_args
 
     @classmethod
