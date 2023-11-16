@@ -12,6 +12,7 @@ import threading
 import traceback
 import types
 import warnings
+from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -265,18 +266,21 @@ def innermost_fn(fn):
 config_cache = threading.local()
 
 
+@dataclass
+class ConfigAndHash:
+    config: Dict[str, Any]
+    hash: bytes
+
+
 def _maybe_init_guarded_config_cache():
     if not hasattr(config_cache, "saved_config_and_hash"):
-        config_cache.saved_config_and_hash: Optional[  # type: ignore[misc]
-            Tuple[Dict[str, Any], bytes]
-        ] = None
+        # Optional[ConfigAndHash]
+        config_cache.saved_config_and_hash = None
 
 
 @contextlib.contextmanager
 def restore_guarded_dynamo_config(
-    first_ctx: bool,
-    saved_config: Dict[str, Any],
-    saved_config_hash: bytes,
+    first_ctx: bool, saved_config_and_hash: ConfigAndHash
 ):
     _maybe_init_guarded_config_cache()
     # Set exactly once from top-level compile
@@ -284,9 +288,10 @@ def restore_guarded_dynamo_config(
     try:
         if first_ctx and config_cache.saved_config_and_hash is None:
             is_top_level = True
-            config_cache.saved_config_and_hash = saved_config, saved_config_hash
+            config_cache.saved_config_and_hash = saved_config_and_hash
             log.debug(
-                "Setting top-level compile config hash: %s", saved_config_hash.hex()
+                "Setting top-level compile config hash: %s",
+                saved_config_and_hash.hash.hex(),
             )
         else:
             log.debug("Ignoring inner dynamo compile config and hash")
@@ -295,7 +300,7 @@ def restore_guarded_dynamo_config(
         if is_top_level:
             log.debug(
                 "Unsetting top-level compile config hash: %s",
-                config_cache.saved_config_and_hash[1].hex(),
+                config_cache.saved_config_and_hash.hash.hex(),
             )
             config_cache.saved_config_and_hash = None
 
@@ -307,14 +312,13 @@ def _get_config_and_hash(dynamic=None):
         updates = {"assume_static_by_default": False}
     else:
         updates = {"automatic_dynamic_shapes": False, "assume_static_by_default": True}
-
-    return config.get_config_and_hash_with_updates(updates)
+    return ConfigAndHash(*config.get_config_and_hash_with_updates(updates))
 
 
 def get_saved_else_current_config_hash() -> bytes:
     _maybe_init_guarded_config_cache()
     if config_cache.saved_config_and_hash is not None:
-        return config_cache.saved_config_and_hash[1]
+        return config_cache.saved_config_and_hash.hash
     else:
         return config.get_hash()
 
@@ -350,10 +354,10 @@ class _TorchDynamoContext:
 
     def save_and_hash_config(self):
         # save current value of dynamo configs
-        self.saved_config, self.saved_config_hash = _get_config_and_hash(self.dynamic)
+        self.saved_config_and_hash = _get_config_and_hash(self.dynamic)
         log.debug(
             "Saving dynamo config and hash for new compiled object(s). Hash: %s",
-            self.saved_config_hash.hex(),
+            self.saved_config_and_hash.hash.hex(),
         )
 
     def __enter__(self):
@@ -371,7 +375,7 @@ class _TorchDynamoContext:
         self.backend_ctx.__enter__()
         if self.save_config:
             self.dynamo_config_ctx = restore_guarded_dynamo_config(
-                self.first_ctx, self.saved_config, self.saved_config_hash
+                self.first_ctx, self.saved_config_and_hash
             )
             self.dynamo_config_ctx.__enter__()
 
@@ -464,7 +468,7 @@ class _TorchDynamoContext:
             backend_ctx.__enter__()
             if self.save_config:
                 dynamo_config_ctx = restore_guarded_dynamo_config(
-                    self.first_ctx, self.saved_config, self.saved_config_hash
+                    self.first_ctx, self.saved_config_and_hash
                 )
                 dynamo_config_ctx.__enter__()
             try:
@@ -722,7 +726,9 @@ def optimize(
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
             detect when sizes vary and generate dynamic kernels upon recompile.
-
+        save_config: If True, recompiling this function will first restore the dynamo config
+            at the time when `optimize` was first called, for the duration of the compilation
+            process.
     Example Usage::
 
         @torch._dynamo.optimize()

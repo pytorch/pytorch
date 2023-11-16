@@ -85,6 +85,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
@@ -230,14 +231,13 @@ def has_tensor_in_frame(frame):
         if has_tensor(value):
             return True
 
-    if config.verbose:
-        log.debug(
-            "skipping because no torch.* %s \
-                %s %s",
-            frame.f_code.co_name,
-            frame.f_code.co_filename,
-            frame.f_code.co_firstlineno,
-        )
+    log.debug(
+        "skipping because no torch.* %s \
+            %s %s",
+        frame.f_code.co_name,
+        frame.f_code.co_filename,
+        frame.f_code.co_firstlineno,
+    )
 
     return False
 
@@ -403,13 +403,18 @@ def convert_frame_assert(
 
 
 def _patch_config_if_changed():
+    """
+    Will return {} if the ambient config is the same as the compile-time.
+    Else, returns the full compile-time config.
+    """
     patch: Dict[str, Any] = {}
     eval_frame = torch._dynamo.eval_frame
     eval_frame._maybe_init_guarded_config_cache()
     if eval_frame.config_cache.saved_config_and_hash is None:
         return patch
 
-    saved_config, saved_config_hash = eval_frame.config_cache.saved_config_and_hash
+    saved = eval_frame.config_cache.saved_config_and_hash
+    saved_config, saved_config_hash = saved.config, saved.hash
     current_config_hash = config.get_hash()
     assert current_config_hash is not None
 

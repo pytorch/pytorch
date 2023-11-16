@@ -105,6 +105,9 @@ CLOSURE_VARS = {
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
+    "___applicable_config_hash": (
+        lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
+    ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
