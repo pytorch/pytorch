@@ -479,7 +479,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             # TODO: Support kwargs
-            (ret_val, _), ret_graph, ret_lifted_freevars = speculate_subgraph(
+            (
+                (ret_val, ret_treespec),
+                ret_graph,
+                ret_lifted_freevars,
+            ) = speculate_subgraph(
                 tx,
                 args[ix],
                 operands,
@@ -489,19 +493,33 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "cond",
                 source_target=self.value,
                 manually_set_subgraph_inputs=False,
+                should_flatten_outputs=True,
             )
 
-            if not isinstance(ret_val, TensorVariable):
+            if not only_consist_of(ret_val, (TensorVariable,)):
                 unimplemented(
-                    "Expected branch to return a single tensor",
+                    "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
                 )
-            return ret_val, ret_graph, ret_lifted_freevars
+            return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
-        (true_r, true_graph, true_lifted_freevars) = speculate_branch(True)
+        (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
+            True
+        )
         true_nn_modules = tx.copy_graphstate().output.nn_modules
 
-        (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
+        (
+            false_r,
+            false_treespec,
+            false_graph,
+            false_lifted_freevars,
+        ) = speculate_branch(False)
         false_nn_modules = tx.copy_graphstate().output.nn_modules
+
+        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            true_treespec, false_treespec
+        )
+        if not same_treespec.as_python_constant():
+            unimplemented("Expected branches to return the same pytree structure.")
 
         def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
             shared_freevars = true_lifted_freevars.keys() & false_lifted_freevars.keys()
@@ -584,12 +602,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_node,
             shared + unique_true + unique_false,
         )
-        # TODO: assert that the true/false return values are
-        # consistent
-        example_value = true_r.as_proxy().node.meta["example_value"]
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            true_r.as_proxy(),
+        )
 
         # Store the invocation as a call
-        return wrap_fx_proxy(
+        flat_variable = wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
@@ -597,7 +617,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=tuple(p_args),
                 kwargs={},
             ),
-            example_value=example_value,
+            example_value=flat_example_value,
+        )
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        flat_list_variable = BuiltinVariable(list).call_function(
+            tx, [flat_variable], {}
+        )
+        return (
+            _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, true_treespec)
+            if true_treespec
+            else flat_variable
         )
 
 

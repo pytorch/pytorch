@@ -1485,6 +1485,9 @@ class BuiltinVariable(VariableTracker):
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
 
+        if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
+            return ConstantVariable.create(op(left.value, right.value))
+
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid

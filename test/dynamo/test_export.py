@@ -3649,7 +3649,8 @@ def forward(self, pred, x):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
-    return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
+    getitem = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )
 
         self.assertExpectedInline(
@@ -3666,7 +3667,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
     cos_2 = d_true_branch.cos();  d_true_branch = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
-    return add_3""",
+    return (add_3,)""",
         )
 
         self.assertExpectedInline(
@@ -3683,7 +3684,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add_1 = add + sin_1;  add = sin_1 = None
     sin_2 = c_false_branch.sin();  c_false_branch = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
-    return add_2""",
+    return (add_2,)""",
         )
 
     @unittest.skipIf(
@@ -3984,7 +3985,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 def forward(self, arg0_1, arg1_1, arg2_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
         self.assertExpectedInline(
@@ -3993,7 +3994,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, arg0_1, arg1_1, arg2_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
     def test_export_nn_module_stack_patched_module(self):
