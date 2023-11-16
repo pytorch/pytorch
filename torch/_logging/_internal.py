@@ -166,7 +166,7 @@ DEFAULT_LOGGING = {
 
 def set_logs(
     *,
-    all: int = DEFAULT_LOG_LEVEL,
+    all: Optional[int] = None,
     dynamo: Optional[int] = None,
     aot: Optional[int] = None,
     dynamic: Optional[int] = None,
@@ -759,12 +759,15 @@ def _init_logs(log_file_name=None):
     # First, reset all known (registered) loggers to NOTSET, so that they
     # respect their parent log level
     for log_qname in log_registry.get_log_qnames():
+        # But not the top level torch level: this defaults to WARNING so
+        # that our log messages don't leak to the lower levels
+        if log_qname == "torch":
+            continue
         log = logging.getLogger(log_qname)
         log.setLevel(logging.NOTSET)
 
     # Now, for all loggers which the user requested to have non-standard
-    # logging behavior (and torch, because we always toggle torch), modify
-    # their log levels
+    # logging behavior, modify their log levels
     for log_qname, level in log_state.get_log_level_pairs():
         log = logging.getLogger(log_qname)
         log.setLevel(level)

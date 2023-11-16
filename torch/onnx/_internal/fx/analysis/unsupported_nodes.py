@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict
+from typing import Dict, Optional
 
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
 @dataclasses.dataclass
 class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
-    unsupported_op_to_target_mapping: Dict[str, Dict[str, str]]
+    unsupported_op_to_target_mapping: Dict[str, Dict[str, Optional[str]]]
 
 
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
@@ -26,7 +26,10 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
         normalized_op_targets_map = {
             # Make error message more precise by adding dtype information.
             # e.g.  Unsupported FX nodes: {'call_function': ['aten.mul.Tensor(complex)']}
-            op: [f"{node}({dtype})" for node, dtype in targets.items()]
+            op: [
+                f"{node}({dtype})" if dtype is not None else node
+                for node, dtype in targets.items()
+            ]
             for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
         }
 
@@ -54,7 +57,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 level is `ERROR`.
         """
 
-        op_to_target_mapping: Dict[str, Dict[str, str]] = {}
+        op_to_target_mapping: Dict[str, Dict[str, Optional[str]]] = {}
         for node in self.module.graph.nodes:
             if node.op == "call_function":
                 try:
@@ -78,7 +81,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                         )
                     else:
                         op_to_target_mapping.setdefault(node.op, {}).setdefault(
-                            str(node.target), ""
+                            str(node.target), None
                         )
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
