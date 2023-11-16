@@ -160,7 +160,7 @@ def check_model(
             self.device, model, example_inputs, options, constraints
         )
 
-    self.assertEqual(actual, expected)
+    self.assertTrue(same(actual, expected))
 
 
 def check_model_with_multiple_inputs(
