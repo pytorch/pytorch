@@ -716,7 +716,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def gn(x, y):
             return torch.sigmoid(
                 torch.matmul(
-                    torch.matmul(torch.dropout(torch.sigmoid(x), p=0.5, train=True), y),
+                    torch.dropout(torch.matmul(torch.sigmoid(x), y), p=0.5, train=True),
                     y,
                 )
             )
@@ -730,8 +730,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
 
         fw_compiler = functools.partial(
             count_ops,
@@ -744,8 +745,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         bw_compiler = functools.partial(
             count_ops,
-            freqs=[4, 0],
-            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
+            # NOTE: This unit test expects `dropout` to be recomputed.
+            # If in the future there is change to the partitioner that causes `dropout` to not be recomputed,
+            # the partitioner should expose an API for user to control what ops must be recomputed,
+            # so that we can ask the partitioner to always recompute this `dropout` op
+            # so that this unit test can still work.
+            freqs=[4, 0, 1],
+            ops=[
+                torch.ops.aten.mm.default,
+                torch.ops.aten.sigmoid.default,
+                torch.ops.aten.native_dropout.default,
+            ],
         )
         backend = aot_autograd(
             fw_compiler=fw_compiler,
