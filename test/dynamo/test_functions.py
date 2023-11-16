@@ -19,7 +19,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
-from torch._dynamo.utils import same
+from torch._dynamo.utils import ifdynstaticdefault, same
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -1023,6 +1023,41 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return None
         elif tensor.is_contiguous(memory_format=torch.contiguous_format):
             return tensor + 1
+
+    def test_is_contiguous_frame_counts(self):
+        data = [
+            torch.rand(10),
+            torch.rand(2, 3, 32, 32).contiguous(memory_format=torch.channels_last),
+            torch.rand(10)[::2],
+            torch.rand(12),
+            torch.rand(2, 3, 24, 24).contiguous(memory_format=torch.channels_last),
+            torch.rand(50)[::2],
+            torch.rand(2, 3, 32, 32)[:, :, 2:-2, 3:-3],
+        ]
+        # dynamo should recompile for all inputs in static shapes mode
+        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7]
+        # dynamo should recompile for items 0, 1, 2, 6 in dynamic shapes mode
+        expected_frame_counts_dynamic = [1, 2, 3, 3, 3, 3, 4]
+        expected_frame_counts = ifdynstaticdefault(
+            expected_frame_counts_static, expected_frame_counts_dynamic
+        )
+        dynamic = ifdynstaticdefault(False, True)
+
+        def func(x):
+            if x.is_contiguous():
+                return x + 1
+            elif x.is_contiguous(memory_format=torch.channels_last):
+                return x + 2
+            else:
+                return x + 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
+
+        assert cnt.frame_count == 0
+        for i, x in enumerate(data):
+            cfunc(x)
+            assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
     def test_list_slice_assignment(x):
