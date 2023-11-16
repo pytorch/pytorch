@@ -3582,8 +3582,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager")
 
-        x = torch.ones(5, 1, 3, 4)
-        x2 = torch.ones(5, 1, 2, 3)
+        x = torch.ones(5, 1, 2, 3)
+        x2 = torch.ones(5, 1, 3, 4)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x2), opt_fn(x2))
 
