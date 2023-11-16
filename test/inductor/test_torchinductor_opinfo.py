@@ -223,8 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
     "view_as_complex": {f16},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
 }
 
 
@@ -239,8 +237,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
     "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
 }
 
