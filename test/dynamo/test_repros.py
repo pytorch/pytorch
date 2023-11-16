@@ -852,8 +852,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             False,
         )
         # (dynamic shapes, static shapes)
-        self.assertIn(cnt.frame_count, (4, 7))
-        self.assertIn(cnt.op_count, (83, 127))
+        self.assertIn(cnt.frame_count, (5, 7))
+        self.assertIn(cnt.op_count, (106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
