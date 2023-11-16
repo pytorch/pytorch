@@ -259,7 +259,8 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
 
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Compute the dot product between a vector ``v`` and the Jacobian of the given function at the point given by the inputs.
+    r"""Function that computes the dot product between a vector ``v`` and the
+    Jacobian of the given function at the point given by the inputs.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -317,6 +318,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.4225, 2.3340]),
          (tensor([2., 2.]), tensor([3., 3.])))
     """
+
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vjp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
@@ -354,7 +356,8 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def jvp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Compute the dot product between the Jacobian of the given function at the point given by the inputs and a vector ``v``.
+    r"""Function that computes the dot product between  the Jacobian of
+    the given function at the point given by the inputs and a vector ``v``.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -414,6 +417,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
          tensor([5., 5.]))
 
     """
+
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
@@ -577,7 +581,7 @@ def jacobian(
     vectorize=False,
     strategy="reverse-mode",
 ):
-    r"""Compute the Jacobian of a given function.
+    r"""Function that computes the Jacobian of a given function.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -834,7 +838,7 @@ def hessian(
     vectorize=False,
     outer_jacobian_strategy="reverse-mode",
 ):
-    r"""Compute the Hessian of a given scalar function.
+    r"""Function that computes the Hessian of a given scalar function.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -919,6 +923,7 @@ def hessian(
           tensor([[6., 0.],
                   [0., 6.]])))
     """
+
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
     assert outer_jacobian_strategy in (
         "forward-mode",
@@ -965,7 +970,8 @@ def hessian(
 
 
 def vhp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Compute the dot product between vector ``v`` and Hessian of a  given scalar function at a specified point.
+    r"""Function that computes the dot product between a vector ``v`` and the
+    Hessian of a given scalar function at the point given by the inputs.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -1019,6 +1025,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
          (tensor([0., 0.]),
           tensor([6., 6.])))
     """
+
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vhp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
@@ -1066,7 +1073,8 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def hvp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Compute the dot product between the scalar function's Hessian and a vector ``v`` at a specified point.
+    r"""Function that computes the dot product between the Hessian of a given scalar
+    function and a vector ``v`` at the point given by the inputs.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -1129,6 +1137,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         much faster with the current implementation.
 
     """
+
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hvp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)

@@ -47,8 +47,7 @@ def _register_default_handlers() -> None:
 
 def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
     """
-    Obtain a reference to a :py:class`RendezvousHandler`.
-
+    This method is used to obtain a reference to a :py:class`RendezvousHandler`.
     Custom rendezvous handlers can be registered by
 
     ::

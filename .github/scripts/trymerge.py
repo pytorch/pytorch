@@ -1927,8 +1927,7 @@ def merge(
     ignore_current: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit()["oid"]
-    pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
-    print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
+    print(f"Attempting merge of {initial_commit_sha}")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
         gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])

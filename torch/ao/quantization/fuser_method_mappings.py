@@ -15,8 +15,7 @@ __all__ = [
 ]
 
 def fuse_conv_bn(is_qat, conv, bn):
-    r"""Return the fused the conv and bn modules.
-    Given the conv and bn modules, fuses them and returns the fused module
+    r"""Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
         is_qat: a flag for whether we are using quantization aware training fusion
@@ -53,9 +52,7 @@ def fuse_conv_bn(is_qat, conv, bn):
         return nn.utils.fuse_conv_bn_eval(conv, bn)
 
 def fuse_conv_bn_relu(is_qat, conv, bn, relu):
-    r"""Return the fused conv and bv modules.
-
-    Given the conv and bn modules, fuses them and returns the fused module
+    r"""Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
         is_qat: a flag for whether we are using quantization aware training fusion
@@ -102,8 +99,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             raise NotImplementedError(f"Cannot fuse eval modules: {(conv, bn, relu)}")
 
 def fuse_linear_bn(is_qat, linear, bn):
-    r"""Return the fused linear and bn modules.
-    Given the linear and bn modules, fuses them and returns the fused module
+    r"""Given the linear and bn modules, fuses them and returns the fused module
 
     Args:
         is_qat: a flag for whether we are using quantization aware training fusion
@@ -132,8 +128,7 @@ def fuse_linear_bn(is_qat, linear, bn):
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
 def fuse_convtranspose_bn(is_qat, convt, bn):
-    r"""Return the fused ConvTranspose and bn modules.
-    Given ConvTranspose and bn modules, fuses them and returns the fused module
+    r"""Given ConvTranspose and bn modules, fuses them and returns the fused module
 
     Args:
         convt: Module instance of type ConvTransposeNd
@@ -156,8 +151,7 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
         return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
 
 def _sequential_wrapper2(sequential):
-    """Return a sequential wrapped that for is_qat and two modules.
-    Given a sequential class for two modules, return a function that takes
+    """ Given a sequential class for two modules, return a function that takes
     is_qat, and then two modules as argument, that ignores the is_qat flag
     and always returns the sequential that combines the two input modules
     """
@@ -185,11 +179,9 @@ _DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = 
 }
 
 def get_fuser_method(op_list, additional_fuser_method_mapping=None):
-    """Get fuser method for the given list of module types.
-
-    Get fuser method for the given list of module types,
+    ''' Get fuser method for the given list of module types,
     return None if fuser method does not exist
-    """
+    '''
     if additional_fuser_method_mapping is None:
         additional_fuser_method_mapping = {}
     all_mappings = get_combined_dict(_DEFAULT_OP_LIST_TO_FUSER_METHOD,
@@ -210,8 +202,7 @@ def _reverse3(f):
     return reversed
 
 def _get_valid_patterns(op_pattern):
-    """Return a list of valid patterns generated from the op_pattern.
-
+    """
     Returns a list of valid patterns generated from the op_pattern,
     since MatchAllNode can match all types of nodes,
     e.g. pattern (torch.nn.Conv2d, torch.add) should also be able to match keys like
@@ -244,9 +235,7 @@ def _get_valid_patterns(op_pattern):
 def get_fuser_method_new(
         op_pattern: Pattern,
         fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]]):
-    """Get fuser method.
-
-    This will be made default after we deprecate the get_fuser_method
+    """ This will be made default after we deprecate the get_fuser_method
     Would like to implement this first and have a separate PR for deprecation
     """
     op_patterns = _get_valid_patterns(op_pattern)

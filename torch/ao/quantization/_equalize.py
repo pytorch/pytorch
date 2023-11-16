@@ -44,21 +44,24 @@ def get_module_bias(module):
         return module[0].bias
 
 def max_over_ndim(input, axis_list, keepdim=False):
-    """Apply 'torch.max' over the given axes."""
+    ''' Applies 'torch.max' over the given axises
+    '''
     axis_list.sort(reverse=True)
     for axis in axis_list:
         input, _ = input.max(axis, keepdim)
     return input
 
 def min_over_ndim(input, axis_list, keepdim=False):
-    """Apply 'torch.min' over the given axes."""
+    ''' Applies 'torch.min' over the given axises
+    '''
     axis_list.sort(reverse=True)
     for axis in axis_list:
         input, _ = input.min(axis, keepdim)
     return input
 
 def channel_range(input, axis=0):
-    """Find the range of weights associated with a specific channel."""
+    ''' finds the range of weights associated with a specific channel
+    '''
     size_of_tensor_dim = input.ndim
     axis_list = list(range(size_of_tensor_dim))
     axis_list.remove(axis)
@@ -70,12 +73,10 @@ def channel_range(input, axis=0):
     return maxs - mins
 
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
-    """Scale the range of Tensor1.output to equal Tensor2.input.
-
-    Given two adjacent tensors', the weights are scaled such that
+    ''' Given two adjacent tensors', the weights are scaled such that
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
-    """
+    '''
     if type(module1) not in _all_supported_types or type(module2) not in _all_supported_types:
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
@@ -116,9 +117,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     set_module_weight(module2, weight2)
 
 def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
-    """Equalize modules until convergence is achieved.
-
-    Given a list of adjacent modules within a model, equalization will
+    ''' Given a list of adjacent modules within a model, equalization will
     be applied between each pair, this will repeated until convergence is achieved
 
     Keeps a copy of the changing modules from the previous iteration, if the copies
@@ -135,7 +134,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
         threshold: a number used by the converged function to determine what degree
             similarity between models is necessary for them to be called equivalent
         inplace: determines if function is inplace or not
-    """
+    '''
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -157,16 +156,14 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     return model
 
 def converged(curr_modules, prev_modules, threshold=1e-4):
-    """Test whether modules are converged to a specified threshold.
-
-    Tests for the summed norm of the differences between each set of modules
+    ''' Tests for the summed norm of the differences between each set of modules
     being less than the given threshold
 
     Takes two dictionaries mapping names to modules, the set of names for each dictionary
     should be the same, looping over the set of names, for each name take the difference
     between the associated modules in each dictionary
 
-    """
+    '''
     if curr_modules.keys() != prev_modules.keys():
         raise ValueError("The keys to the given mappings must have the same set of names of modules")
 

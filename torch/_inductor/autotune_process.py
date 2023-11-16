@@ -243,7 +243,7 @@ class TuningProcessPool:
             EXIT_HANDLER_REGISTERED = True
             import atexit
 
-            atexit.register(self.terminate)
+            atexit.register(lambda: self.terminate())
 
     def get_device_list(self) -> List[Optional[int]]:
         """

@@ -1968,21 +1968,21 @@ def bucketize(
 
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
+        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
+        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
+        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
     )
     return args, kwargs
 
@@ -3089,7 +3089,6 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (

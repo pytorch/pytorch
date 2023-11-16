@@ -60,7 +60,7 @@ class ParallelWorkersTest(unittest.TestCase):
         workspace.ResetWorkspace()
 
         queue = create_queue()
-        dummy_worker = create_worker(queue, str)
+        dummy_worker = create_worker(queue, lambda worker_id: str(worker_id))
         worker_coordinator = parallel_workers.init_workers(dummy_worker)
         worker_coordinator.start()
 
@@ -102,7 +102,7 @@ class ParallelWorkersTest(unittest.TestCase):
         workspace.ResetWorkspace()
 
         queue = create_queue()
-        dummy_worker = create_worker(queue, str)
+        dummy_worker = create_worker(queue, lambda worker_id: str(worker_id))
         workspace.FeedBlob('data', 'not shutdown')
 
         def shutdown_fun():

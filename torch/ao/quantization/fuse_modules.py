@@ -1,3 +1,4 @@
+
 import copy
 
 import torch.nn as nn
@@ -35,9 +36,7 @@ def _set_module(model, submodule_key, module):
     setattr(cur_mod, tokens[-1], module)
 
 def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
-    r"""Return a list of known fuse modules.
-
-    Returns a list of modules that fuses the operations specified
+    r"""Returns a list of modules that fuses the operations specified
      in the input module list.
 
     Fuses only the following sequence of modules:
@@ -102,7 +101,7 @@ def _fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse
     return model
 
 def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
-    r"""Fuse a list of modules into a single module.
+    r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
     conv, bn
@@ -165,7 +164,8 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         fuse_custom_config_dict=fuse_custom_config_dict)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
-    """QAT version for `fuse_modules`."""
+    """ QAT version for `fuse_modules`
+    """
     return _fuse_modules(
         model,
         modules_to_fuse,

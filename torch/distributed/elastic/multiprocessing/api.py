@@ -63,7 +63,9 @@ def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
 
 
 def _get_kill_signal() -> signal.Signals:
-    """Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows."""
+    """
+    Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows.
+    """
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -71,7 +73,9 @@ def _get_kill_signal() -> signal.Signals:
 
 
 def _get_default_signal() -> signal.Signals:
-    """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
+    """
+    Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows.
+    """
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -103,6 +107,7 @@ class Std(IntFlag):
     def from_str(cls, vm: str) -> Union["Std", Dict[int, "Std"]]:
         """
         Example:
+
         ::
 
          from_str("0") -> Std.NONE
@@ -141,6 +146,7 @@ def to_map(
     method that converts a value or mapping into a mapping.
 
     Example:
+
     ::
 
      to_map(Std.OUT, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
@@ -159,7 +165,8 @@ def to_map(
 @dataclass
 class RunProcsResult:
     """
-    Results of a completed run of processes started with ``start_processes()``. Returned by ``PContext``.
+    Results of a completed run of processes started with ``start_processes()``.
+    Returned by ``PContext``.
 
     Note the following:
 
@@ -181,9 +188,9 @@ class RunProcsResult:
 
 class PContext(abc.ABC):
     """
-    The base class that standardizes operations over a set of processes that are launched via different mechanisms.
-
-    The name ``PContext`` is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
+    The base class that standardizes operations over a set of processes
+    that are launched via different mechanisms. The name ``PContext``
+    is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
 
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
@@ -222,7 +229,9 @@ class PContext(abc.ABC):
         self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
-        """Start processes using parameters defined in the constructor."""
+        """
+        Start processes using parameters defined in the constructor.
+        """
         signal.signal(signal.SIGTERM, _terminate_process_handler)
         signal.signal(signal.SIGINT, _terminate_process_handler)
         if not IS_WINDOWS:
@@ -234,13 +243,15 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def _start(self) -> None:
-        """Start processes using strategy defined in a particular context."""
+        """
+        Start processes using strategy defined in a particular context.
+        """
         raise NotImplementedError()
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
         """
-        Poll the run status of the processes running under this context.
+        Polls the run status of the processes running under this context.
         This method follows an "all-or-nothing" policy and returns
         a ``RunProcessResults`` object if either all processes complete
         successfully or any process fails. Returns ``None`` if
@@ -250,7 +261,7 @@ class PContext(abc.ABC):
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
-        Wait for the specified ``timeout`` seconds, polling every ``period`` seconds
+        Waits for the specified ``timeout`` seconds, polling every ``period`` seconds
         for the processes to be done. Returns ``None`` if the processes are still running
         on timeout expiry. Negative timeout values are interpreted as "wait-forever".
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
@@ -273,6 +284,7 @@ class PContext(abc.ABC):
         received signal. If child processes will not terminate in the timeout time, the process will send
         the SIGKILL.
         """
+
         if timeout == 0:
             return self._poll()
 
@@ -290,7 +302,9 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
-        """Return pids of processes mapped by their respective local_ranks."""
+        """
+        Returns pids of processes mapped by their respective local_ranks
+        """
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -360,7 +374,9 @@ def _wrap(
 
 
 class MultiprocessContext(PContext):
-    """``PContext`` holding worker processes invoked as a function."""
+    """
+    ``PContext`` holding worker processes invoked as a function.
+    """
 
     def __init__(
         self,
@@ -583,7 +599,9 @@ class SubprocessHandler:
 
 
 class SubprocessContext(PContext):
-    """``PContext`` holding worker processes invoked as a binary."""
+    """
+    ``PContext`` holding worker processes invoked as a binary.
+    """
 
     def __init__(
         self,
