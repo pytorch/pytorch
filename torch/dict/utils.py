@@ -1293,6 +1293,8 @@ def _getitem_batch_size(batch_size, index):
         >>> _getitem_batch_size([4, 3, 2, 1], idx)
         torch.Size([1, 4, 3, 2, 1, 1])
     """
+    from functorch import dim as ftdim
+
     if not isinstance(index, tuple):
         if isinstance(index, int):
             return batch_size[1:]
