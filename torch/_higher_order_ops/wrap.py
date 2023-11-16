@@ -147,7 +147,7 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             kwargs["preserve_rng_state"] = False
             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
-            # for specific nodes in _CachingTorchDispatchMode.
+            # for specific nodes in _CachedTorchDispatchMode.
             gmod = self.tag_nodes(gmod)
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():
