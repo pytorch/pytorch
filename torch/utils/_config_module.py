@@ -178,7 +178,9 @@ class ConfigModule(ModuleType):
         """Hashes the configs that are not compile_ignored, along with updates"""
         if any(k in self._compile_ignored_keys for k in updates):
             raise ValueError("update keys cannot be @compile_ignored")
-        cfg = dict(self._config)
+        cfg = {
+            k: v for k, v in self._config.items() if k not in self._compile_ignored_keys
+        }
         cfg.update(updates)
         hashed = self._get_hash(cfg)
         return cfg, hashed
