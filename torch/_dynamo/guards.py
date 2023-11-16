@@ -50,7 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
@@ -114,7 +114,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
     "inf": float("inf"),
-    "__load_module": lambda name: importlib.import_module(name),
+    "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy":
@@ -187,7 +187,7 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Type[object]], str],
+        id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         local_scope: Dict[str, object],
@@ -466,6 +466,20 @@ class GuardBuilder(GuardBuilderBase):
         """things like torch.add and user defined functions"""
         if guard.is_local():
             return self.ID_MATCH(guard)
+
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = [
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                ]
+                self._produce_guard_code(guard, code)
+            else:
+                self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -1054,20 +1068,12 @@ class CheckFunctionManager:
                 return converted
 
             dynamic_dims_sizes = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "size"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "stride"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
                 for t in tensor_check_examples
             ]
 

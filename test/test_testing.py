@@ -2291,7 +2291,8 @@ class TestImports(TestCase):
         out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
 
-    @unittest.skipUnless(IS_LINUX, "Initialize early for on-demand profiling")
+    @unittest.skipIf(TEST_WITH_ROCM, "On-demand profiling early init not supported on ROCm")
+    @unittest.skipIf(not IS_LINUX, "On-demand profiling not supported outside of Linux")
     def test_libkineto_profiler_is_initialized(self) -> None:
         # Check that the profiler is initialized at import time.
         out = self._check_python_output("""import sys; import torch;

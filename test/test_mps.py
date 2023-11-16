@@ -7998,6 +7998,33 @@ class TestNLLLoss(TestCaseMPS):
         helper(torch.log)
         helper(torch.cos)
 
+    def test_unary_ops_storage_offset_strided(self):
+        def helper(shape, op, inplace, dtype=torch.float32):
+            # test in-place with storage_offset
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            mps_x = cpu_x.detach().clone().to('mps')
+            y = op(mps_x[1])
+            cpu_y = op(cpu_x[1])
+            self.assertEqual(y, cpu_y)
+
+
+            # See https://github.com/pytorch/pytorch/issues/100764
+            if not inplace:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.detach().clone().to('mps')
+                cpu_y = torch.empty(shape, device='cpu', dtype=dtype).t()
+                mps_y = cpu_y.detach().clone().to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+
+
+        helper((5, 5), torch.exp, False)
+        helper((5, 5), torch.cos, False)
+        helper((5, 5), torch.neg, False)
+        helper((5, 5), torch.tanh, False)
+        helper((5, 5), torch.tanh_, True)
+
     def test_atan2(self):
         def helper(shape):
             input_cpu = torch.randn(shape)
