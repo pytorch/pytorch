@@ -16,6 +16,7 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+    - [Cherry Picking Reverts](#cherry-picking-reverts)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
@@ -132,8 +133,8 @@ them:
   * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
   * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
-* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@master#@release/2.0# $i; done`
-  * Example: https://github.com/pytorch/pytorch/commit/51b42d98d696a9a474bc69f9a4c755058809542f
+* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`
+  * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
@@ -211,6 +212,11 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+### Cherry Picking Reverts
+
+If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+
+Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 
 ## Promoting RCs to Stable
 

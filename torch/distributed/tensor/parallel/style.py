@@ -476,11 +476,11 @@ class ColwiseParallel(ParallelStyle):
             )
 
         super().__init__(
+            _prepare_input=prepare_input_fn,
+            _prepare_output=prepare_output_fn,
             input_layouts=input_layouts,
             output_layouts=output_layouts,
             use_local_output=use_local_output,
-            _prepare_input=prepare_input_fn,
-            _prepare_output=prepare_output_fn,
         )
 
     @staticmethod
@@ -570,11 +570,14 @@ class PrepareModuleInput(ParallelStyle):
         for input, input_layout, output_layout in zip(
             inputs, input_layouts, output_layouts  # type: ignore[arg-type]
         ):
-            results.append(
-                _redistribute_per_both_layouts(
-                    input, input_layout, output_layout, device_mesh
+            if input_layout is None:
+                results.append(input)
+            else:
+                results.append(
+                    _redistribute_per_both_layouts(
+                        input, input_layout, output_layout, device_mesh
+                    )
                 )
-            )
         return tuple(results)
 
 

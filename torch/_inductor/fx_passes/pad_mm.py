@@ -8,12 +8,7 @@ from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import (
-    inference_graph,
-    Match,
-    register_replacement,
-    training_graph,
-)
+from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
 
 aten = torch.ops.aten
 
@@ -453,12 +448,11 @@ def _pad_mm_init():
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
-        args = [*args, *workaround.values()]
         register_replacement(
             pattern,
             replacement,
             args,
-            training_graph,
+            joint_fwd_bwd,
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
@@ -467,7 +461,7 @@ def _pad_mm_init():
             pattern,
             replacement,
             args,
-            inference_graph,
+            fwd_only,
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,

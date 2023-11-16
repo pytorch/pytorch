@@ -81,7 +81,7 @@ class ComputeNormForBlobs(NetModifier):
 
                 if modify_output_record:
                     output_field_name = str(blob) + self._field_name_suffix
-                    output_scalar = schema.Scalar((np.float, (1,)), norm)
+                    output_scalar = schema.Scalar((np.float64, (1,)), norm)
 
                     if net.output_record() is None:
                         net.set_output_record(

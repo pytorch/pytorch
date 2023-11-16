@@ -26,6 +26,22 @@
             std::to_string(actual_size));                         \
   } while (0)
 
+// AOTInductor uses at::addmm_out, which doesn't supports
+// arguments that requires gradient. For this reason, we
+// enforce no_grad context for run APIs.
+//
+// A RAII, thread local (!) guard that enables or disables grad mode upon
+// construction, and sets it back to the original value upon destruction.
+struct AOTINoGradGuard {
+  AOTINoGradGuard() : prev_mode(aoti_torch_grad_mode_is_enabled()) {
+    aoti_torch_grad_mode_set_enabled(false);
+  }
+  ~AOTINoGradGuard() {
+    aoti_torch_grad_mode_set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 extern "C" {
 
 AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -79,6 +95,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
 
   auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
     container->run(
         input_handles,
         output_handles,
@@ -149,14 +166,19 @@ AOTIRuntimeError AOTInductorModelCreate(
       auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
       auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
 
-      for (auto const& kv : *input_map) {
-        constant_map->emplace(kv.first, kv.second);
-      }
-
       auto model = new torch::aot_inductor::AOTInductorModel(
           constant_map,
           ""
       );
+
+      if (input_map) {
+        for (auto const& kv : *input_map) {
+          constant_map->emplace(kv.first, kv.second);
+        }
+      } else {
+        model->load_constants(/*is_cpu*/true);
+      }
+
       *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
   })
 }
@@ -167,11 +189,12 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles) {
   auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-      model->run_impl(
-          input_handles,
-          output_handles,
-          (torch::aot_inductor::DeviceStreamType)nullptr,
-          nullptr);
+    AOTINoGradGuard guard;
+    model->run_impl(
+        input_handles,
+        output_handles,
+        (torch::aot_inductor::DeviceStreamType)nullptr,
+        nullptr);
   })
 }
 
@@ -202,6 +225,8 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
 #define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
+  CACHE_TORCH_DTYPE(float8_e5m2);
+  CACHE_TORCH_DTYPE(float8_e4m3fn);
   CACHE_TORCH_DTYPE(bfloat16);
   CACHE_TORCH_DTYPE(float16);
   CACHE_TORCH_DTYPE(float32);

@@ -26,6 +26,7 @@ from torch.distributed._tensor.placement_types import (
 )
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -148,7 +149,7 @@ def _dispatch_with_local_tensors(
 def _update_specs_for_redistribute(args, target_schema, redistribute):
     # Code adapted from pack_args_kwargs_with_local_tensor
     flatten_args, args_tree_spec = tree_flatten(args)
-    flatten_args_schema, _ = tree_flatten(target_schema.args_schema)
+    flatten_args_schema = pytree.tree_leaves(target_schema.args_schema)
 
     specs: Dict[
         torch.Tensor,
@@ -179,7 +180,7 @@ def _update_specs_for_redistribute(args, target_schema, redistribute):
 # node.
 def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> None:
     flat_args, args_tree_spec = tree_flatten(node.args)
-    flat_args_schema, _ = tree_flatten(op_schema.args_schema)
+    flat_args_schema = pytree.tree_leaves(op_schema.args_schema)
 
     def is_sym_int_or_int(arg: Union[int, torch.fx.Node]) -> bool:
         if isinstance(arg, torch.fx.Node):
@@ -283,7 +284,7 @@ def factory_with_sizes_rule(
     kwargs: Dict[str, Any],
     default_mesh: DeviceMesh,
 ) -> DTensor:
-    flat_args = tree_flatten(args)[0]
+    flat_args = pytree.arg_tree_leaves(*args)
     assert not any(isinstance(a, DTensor) for a in flat_args), (
         f"Not expect DTensor argument for factory op, but got {node.target} "
         f"with arguments {args}."
@@ -373,7 +374,11 @@ def _get_dtensor_dispatch_graph(
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
-        if any(a.is_shard() for a in tree_flatten(args)[0] if isinstance(a, DSymInt)):
+        if any(
+            a.is_shard()
+            for a in pytree.arg_tree_leaves(*args)
+            if isinstance(a, DSymInt)
+        ):
             if op_overload in VIEW_SYM_INT_CONSUMERS:
                 assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
                 node_to_obj[node] = VIEW_SYM_INT_CONSUMERS[op_overload](node, args)
@@ -591,7 +596,7 @@ def _rebuild_graph(
         # Map DT's dispatch graph input placeholder nodes to the ones in
         # local traced graph. It uses index-based accessing, which is
         # brittle, just for testing purpose.
-        flatten_args, _ = tree_flatten(node.args)
+        flatten_args = pytree.arg_tree_leaves(*node.args)
         i, value_remap = 0, {}
         for dtn in traced_dispatch.graph.nodes:
             if dtn.op == OP.PLACEHOLDER:

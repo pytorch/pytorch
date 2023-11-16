@@ -93,8 +93,11 @@ class _PyTreeExtensionContext:
         # All 'ModelOutput' subclasses are defined under module 'modeling_outputs'.
         named_model_output_classes = inspect.getmembers(
             modeling_outputs,
-            lambda x: inspect.isclass(x)
-            and issubclass(x, modeling_outputs.ModelOutput),
+            lambda x: (
+                inspect.isclass(x)
+                and issubclass(x, modeling_outputs.ModelOutput)
+                and x is not modeling_outputs.ModelOutput
+            ),
         )
 
         for _, class_type in named_model_output_classes:

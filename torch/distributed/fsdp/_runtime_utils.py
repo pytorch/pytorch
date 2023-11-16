@@ -1,7 +1,6 @@
 import functools
 import logging
 from enum import auto, Enum
-from itertools import chain
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
@@ -37,7 +36,7 @@ from torch.distributed.utils import (
     _p_assert,
     _to_kwargs,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
@@ -1456,12 +1455,9 @@ def _register_post_backward_reshard_only_hook(
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_list, _ = tree_flatten(args)
-        kwargs_list, _ = tree_flatten(kwargs)
+        args_flat = pytree.arg_tree_leaves(*args, **kwargs)
         inp_tensors = [
-            obj
-            for obj in chain(args_list, kwargs_list)
-            if torch.is_tensor(obj) and obj.requires_grad
+            obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(

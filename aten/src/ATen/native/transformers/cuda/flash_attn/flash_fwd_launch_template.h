@@ -299,6 +299,9 @@ void run_mha_fwd_hdim224(Flash_fwd_params &params, cudaStream_t stream) {
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {
@@ -327,6 +330,9 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
         &max_smem_per_sm, cudaDevAttrMaxSharedMemoryPerMultiprocessor, device);
     status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         BOOL_SWITCH(params.is_causal, Is_causal, [&] {

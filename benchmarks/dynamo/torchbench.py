@@ -59,6 +59,10 @@ USE_SMALL_BATCH_SIZE = {
     "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
 }
 
+INFERENCE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 32,
+}
+
 DETECTRON2_MODELS = {
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -84,6 +88,8 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
@@ -374,6 +380,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        elif (
+            batch_size is None
+            and not is_training
+            and model_name in INFERENCE_SMALL_BATCH_SIZE
+        ):
+            batch_size = INFERENCE_SMALL_BATCH_SIZE[model_name]
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:

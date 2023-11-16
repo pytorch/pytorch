@@ -114,6 +114,7 @@ class SharedQuantizationSpec(QuantizationSpecBase):
     Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
     """
 
+    # the edge or node to share observer or fake quant instances with
     edge_or_node: EdgeOrNode
 
 
@@ -145,6 +146,11 @@ class QuantizationAnnotation:
     # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR
     output_qspec: Optional[QuantizationSpecBase] = None
+
+    # For a Node: node1 and edge: (node1, node2), since they are observing the same
+    # Tensor, we may want to implicitly share observers, this flag allows people to
+    # turn off this behavior for the output of the node
+    allow_implicit_sharing: bool = True
 
     # whether the node is annotated or not
     _annotated: bool = False

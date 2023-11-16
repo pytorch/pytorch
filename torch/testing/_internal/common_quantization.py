@@ -2585,6 +2585,13 @@ class TestHelperModules:
             w = torch.cat([z, y])
             return w
 
+    class ThreeAdd(torch.nn.Module):
+        def forward(self, x1, x2, x3, x4):
+            y = x1 + x2
+            z = x3 + x4
+            w = y + z
+            return w
+
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
             super().__init__()

@@ -192,11 +192,13 @@ ReluCompileError:""",
 
     @skipIf(not TEST_Z3, "z3 not installed")
     @torch._dynamo.config.patch(
-        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         assume_static_by_default=False,
+        suppress_errors=False,
+    )
+    @torch.fx.experimental._config.patch(
+        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
         translation_validation_no_bisect=True,
-        suppress_errors=False,
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
@@ -262,10 +264,12 @@ Failed Source Expressions:
 
     @skipIf(not TEST_Z3, "z3 not installed")
     @torch._dynamo.config.patch(
-        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         assume_static_by_default=False,
-        translation_validation=True,
         suppress_errors=False,
+    )
+    @torch.fx.experimental._config.patch(
+        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
+        translation_validation=True,
     )
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
@@ -280,7 +284,7 @@ Failed Source Expressions:
             """\
 translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
 
-Failure ocurred while running node:
+Failure occurred while running node:
     %split : [num_users=1] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
