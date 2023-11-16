@@ -87,6 +87,7 @@ if __name__ == "__main__":
 
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
+        f.write("__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip']\n")
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
