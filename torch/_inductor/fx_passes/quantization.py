@@ -456,6 +456,9 @@ def _register_quantization_unary_fusion():
         UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
             generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default)
         ),
+        UnaryAttr("gelu", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_unary(qlinear_pt2e_pattern, aten.gelu.default)
+        ),
     }
 
     for unary_attr, patterns in linear_unary_replace_patterns.items():
