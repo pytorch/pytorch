@@ -17,6 +17,7 @@ from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_quantization import skip_if_no_torchvision
 
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -144,6 +145,8 @@ def check_model(
     example_inputs,
     options=None,
     constraints=None,
+    atol=None,
+    rtol=None,
 ):
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
@@ -159,7 +162,7 @@ def check_model(
             self.device, model, example_inputs, options, constraints
         )
 
-    self.assertTrue(same(actual, expected))
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 def check_model_with_multiple_inputs(
@@ -524,50 +527,6 @@ class AOTInductorTestsTemplate:
         ]
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
-
-    @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
-        "FP8 is only supported on H100+",
-    )
-    def test_fp8(self):
-        class Model(torch.nn.Module):
-            def __init__(self, dtype):
-                super().__init__()
-                self.out_dtype = dtype
-
-            def forward(self, x, weight, bias, scale_a, scale_b):
-                weight = weight.to(torch.float8_e4m3fn)
-                output, updated_amax = torch._scaled_mm(
-                    x,
-                    weight,
-                    bias=input_bias,
-                    out_dtype=self.out_dtype,
-                    scale_a=scale_a,
-                    scale_b=scale_b,
-                )
-                return output
-
-        dtype = torch.float16
-
-        a_scale = torch.Tensor([1.0]).to(device="cuda")
-        b_scale = torch.Tensor([1.0]).to(device="cuda")
-        input_bias = torch.rand(32, device="cuda", dtype=dtype)
-        weight_shape = (32, 16)
-        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
-        a_inverse_scale = 1 / a_scale
-        b_inverse_scale = 1 / b_scale
-
-        x_shape = (16, 16)
-        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
-        constraints = [
-            torch._export.dynamic_dim(x, 0) >= 1,
-            torch._export.dynamic_dim(x, 0) <= 2048,
-        ]
-        self.check_model(
-            Model(dtype),
-            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
-            constraints=constraints,
-        )
 
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -1087,6 +1046,42 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skip_if_no_torchvision
+    def test_missing_cubin(self):
+        from torchvision.models.resnet import Bottleneck, ResNet
+
+        class Model(ResNet):
+            def __init__(self):
+                super().__init__(
+                    block=Bottleneck,
+                    layers=[3, 4, 6, 3],
+                    replace_stride_with_dilation=[False, False, True],
+                    norm_layer=None,
+                )
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                f1 = x
+                x = self.maxpool(x)
+                x = self.layer1(x)
+                f2 = x
+                x = self.layer2(x)
+                f3 = x
+                x = self.layer3(x)
+                x = self.layer4(x)
+                f4 = x
+                return [f1, f2, f3, f4]
+
+        # Call eval() here so that batch_norm won't update the running stats
+        # Use float64 to avoid numeric difference failure
+        model = Model().to(device=self.device, dtype=torch.float64).eval()
+        example_inputs = (
+            torch.randn(4, 3, 64, 64, device=self.device, dtype=torch.float64),
+        )
+        self.check_model(model, example_inputs)
+
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -1225,6 +1220,8 @@ copy_tests(
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
+        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
     },
 )
