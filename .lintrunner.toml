@@ -182,6 +182,8 @@ code = 'MYPYINDUCTOR'
 include_patterns = [
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
+    'torch/_C/_dynamo/**/*.pyi',
+    'torch/_C/_inductor/**/*.pyi',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -194,7 +196,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-inductor.ini',
-    '--code=MYPYNOFOLLOW',
+    '--code=MYPYINDUCTOR',
     '--',
     '@{{PATHSFILE}}'
 ]
