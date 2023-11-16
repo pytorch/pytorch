@@ -4,6 +4,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
+from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
 from . import external_utils
@@ -125,7 +126,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses = set()
+traceable_tensor_subclasses: Set[Type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -141,9 +142,6 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
 
-# [@compile_ignored: debug] Show a warning for every specialization
-print_specializations = False
-
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
@@ -151,7 +149,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist = {}
+skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -266,40 +264,11 @@ allow_rnn = False
 # [@compile_ignored: runtime_behaviour]
 error_on_recompile = False
 
-# reports why guards fail. Useful to identify the guards failing frequently and
-# causing recompilations.
-# [@compile_ignored: debug]
-report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
-
-# [@compile_ignored: debug] Whether to report all guard failures or just the first one that fails
-report_all_guard_failures = False
+# [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
+report_guard_failures = True
 
 # [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
-
-# [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
-translation_validation = (
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
-)
-# Timeout (in milliseconds) for z3 finding a solution.
-# [@compile_ignored: debug]
-translation_validation_timeout = int(
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
-)
-# Disables bisection for translation validation.
-#
-# Translation validation bisection is enabled by default, if translation validation
-# is also enabled. This should help finding guard simplification issues. However,
-# since validation uses Z3 for bisecting, it might take a lot of time.
-#
-# Set this configuration option so as to avoid bisecting.
-# [@compile_ignored: debug]
-translation_validation_no_bisect = (
-    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
-)
-# Checks whether replaying ShapeEnv events on a freshly constructed one yields
-# the a ShapeEnv with the same state. This should be used only in testing.
-check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
@@ -361,11 +330,6 @@ capture_func_transforms = True
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
-# wraps (un)equalities with 'Not' class after recording the correct expression
-# in the FX graph. This should incorrectly construct the divisible and replacement
-# lists, and incorrectly issue guards.
-inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
-
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
     "requires_grad",
@@ -383,6 +347,9 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
-from .config_utils import install_config_module
+if TYPE_CHECKING:
+    from .config_typing import *  # noqa: F401, F403
+
+from torch.utils._config_module import install_config_module
 
 install_config_module(sys.modules[__name__])

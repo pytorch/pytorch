@@ -282,8 +282,6 @@ class X86InductorQuantizer(Quantizer):
         if annotate_output:
             conv_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -320,14 +318,13 @@ class X86InductorQuantizer(Quantizer):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
 
         if annotate_output:
-            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                # TODO<leslie> Remove the annotate of output
-                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
+                _is_output_of_quantized_pattern=True,
             )
         else:
-            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map, _annotated=True
             )
 
@@ -479,7 +476,7 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
             )
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -534,7 +531,7 @@ class X86InductorQuantizer(Quantizer):
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -571,6 +568,7 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -605,6 +603,7 @@ class X86InductorQuantizer(Quantizer):
             bn_output_node.meta[
                 QUANT_ANNOTATION_KEY
             ] = _X86InductorQuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -661,8 +660,6 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
             )
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -703,8 +700,6 @@ class X86InductorQuantizer(Quantizer):
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -729,8 +724,6 @@ class X86InductorQuantizer(Quantizer):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -957,10 +950,9 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([unary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 _annotated=True,
+                _is_output_of_quantized_pattern=True,
             )
 
     def validate(self, model: torch.fx.GraphModule) -> None:

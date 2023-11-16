@@ -28,6 +28,8 @@ class BoundVars:
         self.loop_body = loop_body
         self.replacement_vals = {
             k: ValueRanges(0, upper_bound(v) - 1)
+            if (isinstance(v, int) or v.is_number)
+            else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
