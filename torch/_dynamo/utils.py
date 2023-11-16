@@ -2254,10 +2254,6 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
     return result
 
 
-def is_guard_failure_reporting_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
-
-
 def get_static_address_type(t):
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)

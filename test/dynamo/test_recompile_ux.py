@@ -9,6 +9,8 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
+import torch._logging
+
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
     # TODO(whc) dynamo actually recompiles one more time than the cache limit
@@ -231,8 +233,8 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
         )
 
     @torch._dynamo.config.patch("cache_size_limit", 32)
-    @torch._dynamo.config.patch("report_all_guard_failure_checks", True)
     def test_multiple_guard_fails_report_all(self):
+        torch._logging.set_logs(recompiles_verbose=True)
         failure_reasons = []
 
         def guard_fail_fn(failure):
@@ -263,8 +265,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
             """\
 len(L['x']) == 3
 L['x'][0] == 4
-L['x'][1] == 5
-L['x'][2] == 6""",
+L['x'][1] == 5""",
         )
 
         failure_reasons.clear()
@@ -274,12 +275,12 @@ L['x'][2] == 6""",
             """\
 len(L['x']) == 2
 L['x'][0] == 7
-L['x'][1] == 8
 len(L['x']) == 3
-L['x'][0] == 4
-L['x'][1] == 5
-L['x'][2] == 6""",
+L['x'][0] == 4""",
         )
+
+        # reset logging state
+        torch._logging.set_logs()
 
 
 # TODO(jansel): these pass with pytest, but not with pytorch CI
