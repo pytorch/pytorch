@@ -346,10 +346,10 @@ class SizeVarAllocator:
         rv = self.size_hint(right)
         if lv <= rv:
             self.guard_leq(left, right)
-            return lv
+            return left
         else:
             self.guard_leq(right, left)
-            return rv
+            return right
 
     def evaluate_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
