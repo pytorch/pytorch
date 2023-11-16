@@ -163,7 +163,7 @@ def emit_metric(
             # We still raise the ValueErrors outside this try block since those indicate improperly configured metrics
             warn(f"Error uploading metric {metric_name} to DynamoDB: {e}")
             warn("Full metrics:")
-            for k, v in enumerate(metrics):
+            for k, v in metrics.items():
                 warn(f"  {k}: {v}")
             return
     else:
