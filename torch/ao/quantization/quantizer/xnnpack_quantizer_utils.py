@@ -597,11 +597,11 @@ def _annotate_adaptive_avg_pool2d(
 
 def _get_qspec_for_node(node: Node, qspec: QuantizationSpec, gm: torch.fx.GraphModule):
     if node.op == "get_attr":
-        tensor = getattr(gm, node.target)
+        tensor = getattr(gm, node.target)  # type: ignore[arg-type]
         # torch.histc works until this upper bound
         HISTC_UPPER_BOUND = 3.4028235e15
         if tensor.numel() == 1 and tensor.item() > HISTC_UPPER_BOUND:
-            obs_ctr = qspec.observer_or_fake_quant_ctr.p.func
+            obs_ctr = qspec.observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr]
             # TODO: ideally we can check is_qat flag instead of checking the type of observers here
             # we can do this after we move is_qat flag to quantizer
             # for scalar value we'll use MinMaxObserver instead of HistogramObserver
@@ -617,6 +617,7 @@ def _get_qspec_for_node(node: Node, qspec: QuantizationSpec, gm: torch.fx.GraphM
             )
             return new_qspec
     return qspec
+
 
 @register_annotator("add_relu")
 def _annotate_add_relu(
@@ -668,6 +669,7 @@ def _annotate_add_relu(
             _annotated=True,
         )
     return annotated_partitions
+
 
 @register_annotator("add")
 def _annotate_add(
