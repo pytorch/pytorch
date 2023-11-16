@@ -5,6 +5,7 @@ import time
 from queue import Empty
 
 import numpy as np
+import pandas as pd
 
 import torch
 import torch.multiprocessing as mp
@@ -16,8 +17,11 @@ class FrontendWorker(mp.Process):
     throughput and latency of those requests as well as GPU utilization.
     """
 
-    def __init__(self, request_queue, response_queue, batch_size, num_iters=10):
+    def __init__(
+        self, metrics_dict, request_queue, response_queue, batch_size, num_iters=10
+    ):
         super().__init__()
+        self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.warmup_event = mp.Event()
@@ -45,15 +49,12 @@ class FrontendWorker(mp.Process):
         self.poll_gpu = False
 
         response_times = np.array(response_times)
-        print(f"Warmup latency: {warmup_response_time:.5f} s")
-        print(
-            f"Average latency (exclude warmup): {response_times.mean():.5f} +/- {response_times.std():.5f} s"
-        )
-        print(f"Max latency: {response_times.max():.5f} s")
-        print(f"Min latency: {response_times.min():.5f} s")
-        print(
-            "Throughput (exclude warmup): "
-            f"{(self.num_iters * self.batch_size) / response_times.sum():.5f} samples per second"
+        self.metrics_dict["warmup_latency"] = warmup_response_time
+        self.metrics_dict["average_latency"] = response_times.mean()
+        self.metrics_dict["max_latency"] = response_times.max()
+        self.metrics_dict["min_latency"] = response_times.min()
+        self.metrics_dict["throughput"] = (
+            self.num_iters * self.batch_size / response_times.sum()
         )
 
     def _run_gpu_utilization(self):
@@ -84,7 +85,8 @@ class FrontendWorker(mp.Process):
             if gpu_utilization != "N/A":
                 gpu_utilizations.append(float(gpu_utilization))
             time.sleep(0.1)
-        print(f"Average GPU utilization: {np.array(gpu_utilizations).mean():.5f}")
+
+        self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
 
     def _send_requests(self):
         """
@@ -128,10 +130,16 @@ class BackendWorker(mp.Process):
     """
 
     def __init__(
-        self, request_queue, response_queue, model_dir=".", compile_model=True
+        self,
+        metrics_dict,
+        request_queue,
+        response_queue,
+        model_dir=".",
+        compile_model=True,
     ):
         super().__init__()
         self.device = "cuda:0"
+        self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.model_dir = model_dir
@@ -155,7 +163,7 @@ class BackendWorker(mp.Process):
             mmap=True,
             map_location=self.device,
         )
-        print(f"torch.load() time: {time.time() - start_load_time:.5f} s")
+        self.metrics_dict["torch_load_time"] = time.time() - start_load_time
         m.load_state_dict(state_dict, assign=True)
         m.eval()
 
@@ -163,9 +171,7 @@ class BackendWorker(mp.Process):
             start_compile_time = time.time()
             m.compile()
             end_compile_time = time.time()
-            print(
-                f"m.compile() time (not actual first compilation): {end_compile_time - start_compile_time:.5f} s"
-            )
+            self.metrics_dict["m_compile_time"] = end_compile_time - start_compile_time
         return m
 
     def run(self):
@@ -190,7 +196,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_iters", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--model_dir", type=str, default=".")
-    parser.add_argument("--compile", type=bool, default=True)
+    parser.add_argument(
+        "--compile", default=True, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument("--output_file", type=str, default="output.csv")
     args = parser.parse_args()
 
     downloaded_checkpoint = False
@@ -211,11 +220,20 @@ if __name__ == "__main__":
         request_queue = mp.Queue()
         response_queue = mp.Queue()
 
+        manager = mp.Manager()
+        metrics_dict = manager.dict()
+        metrics_dict["batch_size"] = args.batch_size
+        metrics_dict["compile"] = args.compile
+
         frontend = FrontendWorker(
-            request_queue, response_queue, args.batch_size, num_iters=args.num_iters
+            metrics_dict,
+            request_queue,
+            response_queue,
+            args.batch_size,
+            num_iters=args.num_iters,
         )
         backend = BackendWorker(
-            request_queue, response_queue, args.model_dir, args.compile
+            metrics_dict, request_queue, response_queue, args.model_dir, args.compile
         )
 
         frontend.start()
@@ -223,6 +241,14 @@ if __name__ == "__main__":
 
         frontend.join()
         backend.join()
+
+        metrics_dict = {k: [v] for k, v in metrics_dict._getvalue().items()}
+        output = pd.DataFrame.from_dict(metrics_dict, orient="columns")
+        output_file = "./results/" + args.output_file
+        is_empty = not os.path.isfile(output_file)
+
+        with open(output_file, "a+", newline="") as file:
+            output.to_csv(file, header=is_empty, index=False)
 
     finally:
         # Cleanup checkpoint file if we downloaded it

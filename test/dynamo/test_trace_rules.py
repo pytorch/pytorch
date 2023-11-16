@@ -79,6 +79,7 @@ ignored_torch_name_rule_set = {
     "torch.package.package_exporter.PackageExporter",
     "torch.serialization._opener",
     "torch.sparse.check_sparse_tensor_invariants",
+    "torch.utils._config_module.ContextDecorator",
     "torch.utils._contextlib._DecoratorContextManager",
     "torch.utils._device.DeviceContext",
     "torch.utils._python_dispatch.TorchDispatchMode",

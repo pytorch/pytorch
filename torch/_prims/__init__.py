@@ -271,7 +271,7 @@ def _make_prim(
 
     """
 
-    prim.define(schema)
+    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -1231,7 +1231,7 @@ def _broadcast_in_dim_meta(
 
         return x
 
-    reduce(lambda acc, x: _greater_than_reduce(acc, x), broadcast_dimensions, -1)
+    reduce(_greater_than_reduce, broadcast_dimensions, -1)
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):

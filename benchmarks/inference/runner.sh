@@ -1,11 +1,12 @@
 #!/bin/bash
 
-batch_size_values=(1 32 64 128 256)
-compile_values=(True False)
-
 benchmark_script="server.py"
 checkpoint_file="resnet18-f37072fd.pth"
 downloaded_checkpoint=false
+num_iters=10
+
+batch_size_values=(1 32 64 128 256)
+compile_values=(true false)
 
 if [ -f $checkpoint_file ]; then
   echo "Checkpoint exists."
@@ -13,15 +14,24 @@ else
   downloaded_checkpoint=true
   echo "Downloading checkpoint..."
   wget https://download.pytorch.org/models/resnet18-f37072fd.pth
-  echo "============================================================================="
 fi
 
-echo "Starting benchmark..."
 for batch_size in "${batch_size_values[@]}"; do
   for compile in "${compile_values[@]}"; do
-      echo "Running benchmark with batch_size=$batch_size, compile=$compile..."
-      python -W ignore "$benchmark_script" --batch_size "$batch_size" --compile "$compile"
-      echo "============================================================================="
+    echo "Running benchmark for batch size ${batch_size} and compile=${compile}..."
+    output_file="output_${batch_size}_${compile}.csv"
+    if [ -e "./results/$output_file" ]; then
+      rm "./results/$output_file"
+    fi
+    for i in $(seq 1 $num_iters); do
+      if [ "$compile" = true ]; then
+        python -W ignore "$benchmark_script" --batch_size "$batch_size" --output_file "$output_file" --compile
+      else
+        python -W ignore "$benchmark_script" --batch_size "$batch_size" --output_file "$output_file" --no-compile
+      fi
+    done
+    python process_metrics.py --csv "$output_file"
+    rm "./results/$output_file"
   done
 done
 
