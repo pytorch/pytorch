@@ -60,19 +60,19 @@ class TestDTensorOptimizer(DTensorTestBase):
         inputs,
     ):
         # run forward/backward/optim for original model
-        optim.zero_grad()
         out = model(inputs)
         loss = out.sum()
         loss.backward()
         optim.step()
+        optim.zero_grad(set_to_none=False)
 
         # run forward/backward/optim for distributed model
-        dist_optim.zero_grad()
         dist_out = dist_model(inputs)
         # dist_out = dist_out.redistribute(placements=[Replicate()] * mesh.ndim)
         dist_loss = dist_out.sum()
         dist_loss.backward()
         dist_optim.step()
+        dist_optim.zero_grad(set_to_none=False)
 
         # check that the optimizer update parameters with same numerics
         for p1, p2 in zip(model.parameters(), dist_model.parameters()):
