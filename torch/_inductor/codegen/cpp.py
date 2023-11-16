@@ -1692,15 +1692,16 @@ class CppVecKernel(CppKernel):
         assert "buf" in name
         assert mode is None
         assert isinstance(value, CppCSEVariable), value
+        dtype = V.graph.get_dtype(name)
         if not value.is_vec:
-            value = self.cse.generate(self.compute, f"at::vec::Vectorized<float>({value})")
+            value = self.cse.generate(self.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({value})")
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
         self.stores.writeline(
             DeferredLine(
                 name,
-                self.get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
+                self.get_vec_store_line(value, var, index, dtype),
             )
         )
 
