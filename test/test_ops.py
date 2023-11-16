@@ -265,7 +265,7 @@ class TestCommon(TestCase):
             TEST_WITH_TORCHINDUCTOR and
             op.formatted_name == 'signal_windows_exponential' and
             dtype == torch.float64 and 'cuda' in device
-           ):   # noqa
+           ):   # noqa: PGH004
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
         # Sets the default dtype to NumPy's default dtype of double
