@@ -39,6 +39,30 @@ namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
+DebugInfoWriter::DebugInfoWriter(int rank) {
+  const char* fileName = parseEnvVarString(
+      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
+  filename_ = c10::str(std::string(fileName), rank);
+}
+
+DebugInfoWriter::~DebugInfoWriter() = default;
+
+void DebugInfoWriter::write(const std::string& ncclTrace) {
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename_, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Wrote finished ";
+}
+
 namespace {
 
 #if defined(NCCL_MAJOR) && \
@@ -908,30 +932,6 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
   return true;
 }
 
-ProcessGroupNCCL::DebugInfoWriter::DebugInfoWriter(int rank) {
-  const char* fileName = parseEnvVarString(
-      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(std::string(fileName), rank);
-}
-
-ProcessGroupNCCL::DebugInfoWriter::~DebugInfoWriter() = default;
-
-void ProcessGroupNCCL::DebugInfoWriter::write(const std::string& ncclTrace) {
-  // Open a file for writing. The ios::binary flag is used to write data as
-  // binary.
-  std::ofstream file(filename_, std::ios::binary);
-
-  // Check if the file was opened successfully.
-  if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
-    return;
-  }
-
-  file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Wrote finished ";
-}
-
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -1209,13 +1209,13 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-bool ProcessGroupNCCL::checkAndModifyCheckDumpingDebugInfo() {
-  std::lock_guard<std::mutex> lock(checkDumpingDebugInfoMutex_);
-  if (!dumpingDebugInfo_) {
+bool ProcessGroupNCCL::tryWriteDebugInfo() {
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
+  if (writeDebugInfo_) {
     return false;
   }
   // If we have not dumped the debugInfo return true and set the flag to false
-  dumpingDebugInfo_ = false;
+  writeDebugInfo_ = true;
   return true;
 }
 
@@ -1313,7 +1313,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::registerDebugInfoWriter(
-    std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> writer) {
+    std::unique_ptr<DebugInfoWriter> writer) {
   TORCH_CHECK_WITH(
       DistBackendError,
       debugInfoWriter_ == nullptr,
@@ -1331,8 +1331,8 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
     auto ncclTrace = dump_nccl_trace();
     if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
-      std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<ProcessGroupNCCL::DebugInfoWriter>(rank_);
+      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
+          std::make_unique<DebugInfoWriter>(rank_);
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
@@ -1374,7 +1374,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   std::thread debugInfoStoreThread;
 
   // Store debug info to storage. (By default to local disk)
-  if (checkAndModifyCheckDumpingDebugInfo()) {
+  if (tryWriteDebugInfo()) {
     debugInfoStoreThread =
         std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
   }
@@ -1540,16 +1540,16 @@ void ProcessGroupNCCL::workCleanupLoop() {
             // abort process immediately.
             collectiveDebugInfoMode_.store(true);
             // Store debug info to storage. (By default to local disk)
-            auto dumpingDebugInfo = checkAndModifyCheckDumpingDebugInfo();
+            auto dumpingDebugInfo = tryWriteDebugInfo();
             if (dumpingDebugInfo) {
               debugInfoStoreThread =
                   std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
             }
             auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
-            if (dumpingDebugInfo && !debugInfoStoreThread.joinable()) {
+            if (dumpingDebugInfo && debugInfoStoreThread.joinable()) {
               std::this_thread::sleep_for(
-                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 20));
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
             }
             // At this point, we either have already waited for
             // `kWatchdogThreadSleepMillis * 20` or the thread has finished so
