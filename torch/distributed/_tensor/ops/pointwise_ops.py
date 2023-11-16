@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List
+from typing import List, Tuple
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -12,11 +12,13 @@ from torch.distributed._tensor.op_schema import (
     PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
+    TupleStrategy,
 )
 
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
+    is_tensor_partial,
     map_placements_after_broadcast,
     normalize_dim,
     register_op_strategy,
@@ -510,8 +512,108 @@ for op in linear_pointwise_ops:
         linear_pointwise_strategy
     )
 
-
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
+    )
+
+
+# TODO: add all for_each ops
+for_each_ops = [
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_maximum_.List,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_neg_.default,
+    aten._foreach_neg.default,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+]
+
+for_each_linearity_ops = [
+    aten._foreach_add_.Scalar,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+]
+
+
+def foreach_list_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+) -> StrategyType:
+    """
+    for each list op stratgy mostly follow the same logic as pointwise strategy
+    except that it handles list of tensors instead, and normally we don't need to
+    handle implicit broadcasting
+    """
+
+    def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
+        first_arg = args_schema[0]
+        assert isinstance(first_arg, TupleStrategy)
+        strategy_len = len(first_arg.childs)
+        tuple_strategies: List[TupleStrategy] = []
+        for arg in args_schema:
+            if isinstance(arg, TupleStrategy):
+                # every tuple strategy should have the same length
+                assert len(arg.childs) == strategy_len
+                tuple_strategies.append(arg)
+            elif isinstance(arg, OpStrategy):
+                raise RuntimeError("foreach list op only supports tuple strategy!")
+        return tuple_strategies
+
+    args_strategies = args_tuple_strategies(op_schema.args_schema)
+
+    # foreach op should follow the first arg strategy
+    follow_strategy = args_strategies[0]
+
+    foreach_strategy_list = []
+    for idx, child_strtgy in enumerate(follow_strategy.childs):
+        assert isinstance(child_strtgy, OpStrategy)
+
+        strategies = []
+        for strtgy in child_strtgy.strategies:
+            spec_to_follow = strtgy.output_spec
+            if not linearity:
+                assert not is_tensor_partial(
+                    spec_to_follow
+                ), f"{op_schema.op} does not support operation on partial tensor!"
+
+            redistribute_costs: List[List[float]] = []
+
+            for arg_strtgy in args_strategies:
+                child_strtgy = arg_strtgy.childs[idx]
+                assert isinstance(child_strtgy, OpStrategy)
+                redistribute_costs.append(
+                    generate_redistribute_costs(child_strtgy, spec_to_follow)
+                )
+            strategies.append(
+                PlacementStrategy(
+                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                )
+            )
+
+        foreach_strategy_list.append(OpStrategy(strategies))
+
+    tup_strategy = TupleStrategy(foreach_strategy_list)
+    return tup_strategy
+
+
+def foreach_list_linear_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    """
+    for each list op stratgy that supports linearity
+    """
+    return foreach_list_strategy(mesh, op_schema, linearity=True)
+
+
+for op in for_each_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        foreach_list_strategy
+    )
+
+for op in for_each_linearity_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        foreach_list_linear_strategy
     )

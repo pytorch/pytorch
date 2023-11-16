@@ -13,6 +13,7 @@ from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
+    tree_flatten,
     UnflattenFunc,
 )
 
@@ -20,21 +21,59 @@ from torch.utils._pytree import (
 SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
+@torch._dynamo.disable
+def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    flat_args, _ = tree_flatten(args)
+    return _check_input_constraints_for_graph(
+        self.graph,
+        range_constraints=self.range_constraints,
+        equality_constraints=self.equality_constraints,
+    )(*flat_args)
+
+
+def _check_input_constraints_for_graph(
+    graph: torch.fx.Graph, range_constraints, equality_constraints
+):
+    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+        _AddRuntimeAssertionsForConstraintsPass,
+    )
+
+    def inner(*args):
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
+        for p in graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            range_constraints,
+            equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
+
+    return inner
+
+
 def register_dataclass_as_pytree_node(
-    typ: Any,
+    cls: Any,
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    serialized_type_name: Optional[str] = None,
     return_none_fields: bool = False,
 ) -> None:
     assert dataclasses.is_dataclass(
-        typ
-    ), f"Only dataclasses can be registered with this function: {typ}"
+        cls
+    ), f"Only dataclasses can be registered with this function: {cls}"
 
-    serialized_type = f"{typ.__module__}.{typ.__name__}"
-    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = typ
+    serialized_type = f"{cls.__module__}.{cls.__name__}"
+    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = cls
 
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
         flattened = []
@@ -47,7 +86,7 @@ def register_dataclass_as_pytree_node(
                 flat_names.append(name)
             else:
                 none_names.append(name)
-        return flattened, (typ, flat_names, none_names)
+        return flattened, (cls, flat_names, none_names)
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
@@ -68,7 +107,7 @@ def register_dataclass_as_pytree_node(
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
-            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
+            f"Both to_dumpable_context and from_dumpable_context for {cls} must "
             "be None or registered."
         )
 
@@ -84,9 +123,10 @@ def register_dataclass_as_pytree_node(
     )
 
     _register_pytree_node(
-        typ,
+        cls,
         flatten_fn,
         unflatten_fn,
+        serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )

@@ -308,9 +308,17 @@ class FunctionalTensorMode(TorchDispatchMode):
         )
         assert is_excluded or not is_included
 
-        # If no outputs are our functional subclass, then don't try to fix up aliasing
-        if not any(
-            isinstance(x, FunctionalTensor) for x in pytree.tree_leaves(outs_wrapped)
+        if (
+            # If no outputs are our functional subclass, then don't try to fix up aliasing
+            not any(
+                isinstance(x, FunctionalTensor)
+                for x in pytree.tree_leaves(outs_wrapped)
+            )
+            # Since lift_fresh lifts its argument into a functional tensor, we can skip the
+            # aliasing correction step. Otherwise, we would be setting the storage of a
+            # lifted tensor to that of an unlifted tensor.
+            # Ref: https://github.com/pytorch/pytorch/issues/111506
+            or func == torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
@@ -372,8 +380,8 @@ def dispatch_functionalize(func):
         func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
         func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
 
-        flattened_wrapped_args = pytree.tree_leaves(func_args)
-        flattened_wrapped_kwargs = pytree.tree_leaves(func_kwargs)
+        flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
+        flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
