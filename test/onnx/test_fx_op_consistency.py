@@ -451,6 +451,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
     ),
     xfail(
+        # NOTE: this is a temporary skip, see https://github.com/pytorch/pytorch/issues/113808.
+        "nn.functional.celu",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Celu", "float16"),
+    ),
+    xfail(
         "nn.functional.conv1d",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
@@ -478,6 +484,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
+    ),
+    xfail(
+        "rsub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
     ),
     xfail(
         "scatter_add",
@@ -521,6 +534,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "stft",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "sub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
     ),
     xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -593,12 +613,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         or (sample.kwargs.get("divisor_override") is not None),
         reason="ONNX doesn't support divisor_override argument",
     ),
-    xfail(
-        # NOTE: this is a temporary skip, see https://github.com/pytorch/pytorch/issues/113808.
-        "nn.functional.celu",
-        matcher=lambda sample: sample.input.dtype == torch.float16,
-        reason=onnx_test_common.reason_onnx_does_not_support("Celu", "float16"),
-    ),
     skip(
         "nn.functional.conv1d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
@@ -636,14 +650,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
     ),
     xfail(
-        "rsub",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Mul", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
         "scatter_add",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: Rank(0) input will lead ORT failed due to different rank(result) in if-else branch",
@@ -653,14 +659,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         # ONNX has not include_self parameter and default is include_self=True mode
         matcher=lambda sample: sample.kwargs.get("include_self") is False,
         reason="ONNX does't support include_self=False option",
-    ),
-    xfail(
-        "sub",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Mul", "uint8, int8, int16"
-        ),
     ),
     xfail(
         "unflatten",
