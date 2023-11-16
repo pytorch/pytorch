@@ -1027,6 +1027,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_is_contiguous_frame_counts(self):
         data = [
             torch.rand(10),
+            torch.rand(2, 3, 32, 32),
             torch.rand(2, 3, 32, 32).contiguous(memory_format=torch.channels_last),
             torch.rand(10)[::2],
             torch.rand(12),
@@ -1035,9 +1036,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             torch.rand(2, 3, 32, 32)[:, :, 2:-2, 3:-3],
         ]
         # dynamo should recompile for all inputs in static shapes mode
-        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7]
+        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7, 8]
         # dynamo should recompile for items 0, 1, 2, 6 in dynamic shapes mode
-        expected_frame_counts_dynamic = [1, 2, 3, 3, 3, 3, 4]
+        expected_frame_counts_dynamic = [1, 2, 3, 4, 4, 4, 4, 5]
         expected_frame_counts = ifdynstaticdefault(
             expected_frame_counts_static, expected_frame_counts_dynamic
         )
@@ -1056,7 +1057,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         assert cnt.frame_count == 0
         for i, x in enumerate(data):
-            cfunc(x)
+            expected = func(x)
+            output = cfunc(x)
+            self.assertTrue(same(output, expected))
             assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
