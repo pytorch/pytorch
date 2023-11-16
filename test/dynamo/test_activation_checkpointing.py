@@ -124,25 +124,35 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                     msg="Gradient mismatch between torch.compile and eager versions",
                 )
 
-    def _compare_orig_and_checkpointed_fns(self, orig_fn, checkpointed_fn, *args, fullgraph=True):
+    def _compare_orig_and_checkpointed_fns(
+        self, orig_fn, checkpointed_fn, *args, fullgraph=True
+    ):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
 
         # Run original version
         cloned_args_orig_fn = []
         for arg in args:
-            cloned_args_orig_fn.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args_orig_fn.append(
+                arg.clone().detach().requires_grad_(arg.requires_grad)
+            )
         torch.manual_seed(0)
-        compiled_orig_fn = torch.compile(orig_fn, fullgraph=fullgraph, backend="inductor")
+        compiled_orig_fn = torch.compile(
+            orig_fn, fullgraph=fullgraph, backend="inductor"
+        )
         result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
         result_orig_fn.sum().backward()
 
         # Run checkpointed version
         cloned_args_checkpointed_fn = []
         for arg in args:
-            cloned_args_checkpointed_fn.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+            cloned_args_checkpointed_fn.append(
+                arg.clone().detach().requires_grad_(arg.requires_grad)
+            )
         torch.manual_seed(0)
-        compiled_checkpointed_fn = torch.compile(checkpointed_fn, fullgraph=fullgraph, backend="inductor")
+        compiled_checkpointed_fn = torch.compile(
+            checkpointed_fn, fullgraph=fullgraph, backend="inductor"
+        )
         result_checkpointed_fn = compiled_checkpointed_fn(*cloned_args_checkpointed_fn)
         result_checkpointed_fn.sum().backward()
 
@@ -151,7 +161,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             result_checkpointed_fn,
             msg="Output mismatch between the original version and the checkpointed version of the same function",
         )
-        for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(cloned_args_orig_fn, cloned_args_checkpointed_fn):
+        for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
+            cloned_args_orig_fn, cloned_args_checkpointed_fn
+        ):
             self.assertEqual(
                 cloned_arg_orig_fn.grad,
                 cloned_arg_checkpointed_fn.grad,
@@ -702,7 +714,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def gn(x, y):
             return torch.sigmoid(
-                torch.matmul(torch.matmul(torch.dropout(torch.sigmoid(x), p=0.5, train=True), y), y)
+                torch.matmul(
+                    torch.matmul(torch.dropout(torch.sigmoid(x), p=0.5, train=True), y),
+                    y,
+                )
             )
 
         def fn(x, y):
@@ -720,7 +735,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops,
             freqs=[2, 2, 1],
-            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default, torch.ops.aten.native_dropout.default],
+            ops=[
+                torch.ops.aten.mm.default,
+                torch.ops.aten.sigmoid.default,
+                torch.ops.aten.native_dropout.default,
+            ],
         )
         bw_compiler = functools.partial(
             count_ops,
