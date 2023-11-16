@@ -221,7 +221,6 @@ xfail_not_implemented = {
     "aten::trace_backward",
     "aten::triplet_margin_loss",
     "aten::unflatten_dense_tensors",
-    "aten::unsafe_chunk",
     "aten::vander",
     "aten::var.correction_names",
     "aten::var.names_dim",
