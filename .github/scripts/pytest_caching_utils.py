@@ -149,7 +149,7 @@ def _get_s3_key_prefix(
     prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
 
     if sha:
-        sha += f"/{sha}"
+        prefix += f"/{sha}"
     if test_config:
         prefix += f"/{sanitize_for_s3(test_config)}"
     if shard:
