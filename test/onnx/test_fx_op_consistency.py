@@ -787,6 +787,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "native_batch_norm",
         "dot",
         "logit",
+        "rsub",
         "sub",
     ]
 
