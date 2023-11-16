@@ -21,7 +21,6 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
-from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -119,10 +118,18 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
-        return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
-            + "@triton.jit"
+
+        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        return textwrap.dedent(
+            f"""
+            @template(
+                num_stages={self.num_stages},
+                num_warps={self.num_warps},
+                triton_meta={triton_meta!r},
+                inductor_meta={inductor_meta!r},
+            )
+            @triton.jit
+            """
         )
 
     def def_kernel(self, *argnames):
@@ -706,6 +713,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
     ):
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:

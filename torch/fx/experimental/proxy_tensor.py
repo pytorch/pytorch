@@ -29,7 +29,8 @@ from torch.utils._python_dispatch import (
     _push_mode,
 )
 
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
+from .sym_node import SymNode
+from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
@@ -169,13 +170,13 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -575,7 +576,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
         self._allow_fake_constant = _allow_fake_constant
-        self.is_inside_mode = False
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
@@ -768,6 +768,9 @@ def make_fx(f,
 
     @functools.wraps(f)
     def wrapped(*args):
+        # Avoid importing sympy at a module level
+        from .symbolic_shapes import ShapeEnv
+
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()

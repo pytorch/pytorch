@@ -11,6 +11,7 @@
 #include <torch/extension.h>
 
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
@@ -49,9 +50,18 @@ void abs_kernel(::at::TensorIteratorBase& iter) {
 
 } // namespace
 
+void quantize_tensor_per_tensor_affine_privateuse1(
+    const at::Tensor& rtensor,
+    at::Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+    // do nothing
+}
+
 namespace at::native {
 
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_PRIVATEUSE1_DISPATCH(quantize_tensor_per_tensor_affine_stub, &quantize_tensor_per_tensor_affine_privateuse1);
 
 } // namespace at::native
 struct CustomBackendMetadata : public c10::BackendMeta {
@@ -342,6 +352,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
+  m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
 }
 
 void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {

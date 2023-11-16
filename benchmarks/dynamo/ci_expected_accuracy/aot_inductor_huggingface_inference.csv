@@ -46,11 +46,11 @@ CamemBert,pass,0
 
 
 
-DebertaForMaskedLM,fail_to_run,0
+DebertaForMaskedLM,pass,0
 
 
 
-DebertaForQuestionAnswering,fail_to_run,0
+DebertaForQuestionAnswering,pass,0
 
 
 
@@ -58,7 +58,7 @@ DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
-DebertaV2ForQuestionAnswering,fail_to_run,0
+DebertaV2ForQuestionAnswering,pass,0
 
 
 
