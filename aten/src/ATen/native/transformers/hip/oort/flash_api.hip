@@ -64,7 +64,7 @@
 #include <c10/util/Exception.h>
 
 // OORT headers
-#include <ATen/native/transformers/hip/oort/kernels/attn_fwd.h>
+#include <oort/attn_fwd.h>
 
 namespace pytorch_flash {
 
