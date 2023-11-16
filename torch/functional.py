@@ -44,12 +44,10 @@ __all__ = [
 ]
 
 
-def broadcast_tensors(*tensors):
-    r"""
+def broadcast_tensors(*tensors): # noqa D400
+    r"""broadcast_tensors(*tensors) -> List of Tensors
+
     Broadcasts the given tensors according to :ref:`broadcasting-semantics`.
-
-    broadcast_tensors(*tensors) -> List of Tensors
-
 
     Args:
         *tensors: any number of tensors of the same type
@@ -78,12 +76,10 @@ def broadcast_tensors(*tensors):
     return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
 
 
-def broadcast_shapes(*shapes):
-    r"""
+def broadcast_shapes(*shapes): # noqa D400
+    r"""broadcast_shapes(*shapes) -> Size
+
     Similar to :func:`broadcast_tensors` but for shapes.
-
-    broadcast_shapes(*shapes) -> Size
-
 
     This is equivalent to
     ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
@@ -145,7 +141,9 @@ def broadcast_shapes(*shapes):
 def split(
     tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
 ) -> Tuple[Tensor, ...]:
-    r"""Split tensor into chunks. Each chunk is a view of the original tensor.
+    r"""Split the tensor into chunks.
+
+    Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
@@ -194,13 +192,11 @@ def split(
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args: Any) -> Tensor:
-    r"""
+def einsum(*args: Any) -> Tensor: # noqa D400
+    r"""einsum(equation, *operands) -> Tensor
+
     Sum the product of the elements of the input :attr:`operands`.
-
     The sum is taken along dimensions specified using a notation based on the Einstein summation convention.
-
-    einsum(equation, *operands) -> Tensor
 
     Einsum allows computing many common multi-dimensional linear algebraic array operations by representing them
     in a short-hand format based on the Einstein summation convention, given by :attr:`equation`. The details of
@@ -760,11 +756,10 @@ else:
 
 def _unique_impl(input: Tensor, sorted: bool = True,
                  return_inverse: bool = False, return_counts: bool = False,
-                 dim: Optional[int] = None) -> _unique_impl_out:
-    r"""
-    Return the unique elements of the input tensor.
+                 dim: Optional[int] = None) -> _unique_impl_out: # noqa D400
+    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> Tuple[Tensor, Tensor, Tensor]
 
-    unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> Tuple[Tensor, Tensor, Tensor]
+    Return the unique elements of the input tensor.
 
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
@@ -1218,7 +1213,9 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
 
 
 def cartesian_prod(*tensors: Tensor) -> Tensor:
-    """Do cartesian product of the given sequence of tensors. The behavior is similar to python's `itertools.product`.
+    """Compute the cartesian product of the given sequence of tensors.
+
+    The behavior is similar to python's `itertools.product`.
 
     Args:
         *tensors: any number of 1 dimensional tensors.
@@ -1594,7 +1591,6 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)

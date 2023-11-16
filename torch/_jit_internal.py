@@ -1,5 +1,5 @@
 """
-weak_srcipt annotation exists here to avoid circular dependency issues.
+The ``weak_srcipt`` annotation exists here to avoid circular dependency issues.
 
 The weak_script annotation needs to be here instead of inside torch/jit/ so it can be used in other places in torch
 / (namely torch.nn) without running into circular dependency problems.
@@ -162,11 +162,12 @@ def createResolutionCallbackFromEnv(lookup_base):
     return lambda expr: parseExpr(expr, lookup_base)
 
 
-def createResolutionCallbackFromFrame(frames_up: int = 0):
+def createResolutionCallbackFromFrame(frames_up: int = 0): # noqa D400
     """
-    Return the value of the variable in the scope of the caller of the calling function given a string variable name.
+    Create a function which returns a string variable's value, given its name, from the scope of the caller's caller.
 
-    Calling function is the function which called createResolutionCallbackFromFrame (by default)
+    Returns the value of the variable in the scope of the caller of the function which called
+    createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside TorchScript fragments.
 
