@@ -1712,7 +1712,11 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             # TODO: just store the whole policy here
             tx.output.tracked_fakes.append(
-                TrackedFake(fake_e, source, policy.constraint_sizes if policy is not None else None)
+                TrackedFake(
+                    fake_e,
+                    source,
+                    policy.constraint_sizes if policy is not None else None,
+                )
             )
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
