@@ -475,6 +475,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
+    @requires_cuda()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -500,9 +501,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device="cuda")
+        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
@@ -523,9 +523,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        if torch.cuda.is_available():
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @requires_cuda()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -568,9 +568,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device="cuda")
+        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
@@ -592,9 +591,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        if torch.cuda.is_available():
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @requires_cuda()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -621,9 +620,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device="cuda")
+        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
@@ -641,9 +639,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        if torch.cuda.is_available():
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @requires_cuda()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @unittest.skip(
         "In-place op support in selective checkpointing + torch.compile "
@@ -676,9 +674,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device="cuda")
+        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
@@ -696,9 +693,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        if torch.cuda.is_available():
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
+    @requires_cuda()
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -734,9 +731,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True, device="cuda")
+        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
@@ -767,8 +763,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         self._validate(fn, backend, x, y)
-        if torch.cuda.is_available():
-            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -787,9 +782,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=_invalid_context_gen,
             )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops,
