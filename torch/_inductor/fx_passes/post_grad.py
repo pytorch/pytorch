@@ -979,7 +979,10 @@ def cannot_be_moved_to_cuda(node):
 
     # only move ops to inductor lowerings for now,
     # fallback ops may have weird cpu/cuda incompatibilities
-    return node.target in torch._inductor.lowering.fallbacks
+    return (
+        node.target not in torch._inductor.lowering.lowerings
+        or node.target in torch._inductor.lowering.fallbacks
+    )
 
 
 def get_node_device(node: fx.Node) -> Optional[torch.device]:
