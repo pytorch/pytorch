@@ -125,7 +125,9 @@ def download_pytest_cache(
 
     for downloaded_zip in downloads:
         # Unzip into random folder, then merge with the current cache
-        cache_dir_for_shard = temp_dir / UNZIPPED_CACHES / os.urandom(16).hex() / PYTEST_CACHE_DIR_NAME
+        cache_dir_for_shard = (
+            temp_dir / UNZIPPED_CACHES / os.urandom(16).hex() / PYTEST_CACHE_DIR_NAME
+        )
 
         unzip_folder(downloaded_zip, cache_dir_for_shard)
         print(f"Merging cache from {downloaded_zip}")
