@@ -727,6 +727,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 x,
                 y,
                 use_reentrant=False,
+                # Regardless of whether `preserve_rng_state` is True or False,
+                # we will always preserve RNG state when using `torch.compile`.
+                # Setting to True here just to show that True works.
+                preserve_rng_state=True,
                 context_fn=selective_checkpointing_context_fn,
             )
 
