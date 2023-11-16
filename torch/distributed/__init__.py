@@ -75,7 +75,10 @@ if is_available():
                 old_stdin = sys.stdin
                 sys.stdin = open(0)
             try:
-                breakpoint(header=f"\n!!! ATTENTION !!!\n\nType 'up' to get to the frame that called dist.breakpoint(rank={rank})\n")
+                breakpoint(header=(
+                    "\n!!! ATTENTION !!!\n\n"
+                    f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
+                ))  # type: ignore[call-arg]
             finally:
                 if old_stdin is not None:
                     sys.stdin.close()

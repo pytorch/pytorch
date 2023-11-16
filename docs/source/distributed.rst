@@ -859,7 +859,7 @@ Distributed components raise custom Exception types derived from `RuntimeError`:
 
 If you are running single node training, it may be convenient to interactively breakpoint your script.  We offer a way to conveniently breakpoint a single rank:
 
-.. autofunction:: breakpoint
+.. autofunction:: torch.distributed.breakpoint
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
