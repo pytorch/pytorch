@@ -500,7 +500,7 @@ def compile_fx_inner(
 
             if "cuda" in compiled_graph.device_types:
                 perf_hint_log.warning(
-                    "skipping cudagraphs due to %s,", cudagraph_fail_reasons
+                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
                 )
 
     # cudagraphs does its own aligning of inputs
@@ -624,7 +624,7 @@ def fx_codegen_and_compile(
 
             if graph.disable_cudagraphs:
                 perf_hint_log.warning(
-                    "skipping cudagraphs due to %s,", V.graph.disable_cudagraphs_reason
+                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
                 )
                 BoxedBool.disable(cudagraphs)
 
