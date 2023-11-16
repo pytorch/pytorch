@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import sys
 import unittest
 
 import torch
@@ -10,16 +11,24 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    check_model_cuda,
-    requires_cuda,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
+
+try:
+    try:
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+    except ImportError:
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 bin_ops_under_test = [
@@ -608,6 +617,7 @@ class ForeachTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(skip_rocm=True)
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+        run_tests(needs="filelock")

@@ -261,13 +261,11 @@ class FakeTensorConverter:
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
-    def __init__(self, parent=None):
+    def __init__(self):
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
-
-        self.parent = parent
 
     def add_constant_storage_mapping(self, fake_tensor):
         # when you have a constant, aliased tensor:
@@ -325,37 +323,15 @@ class FakeTensorConverter:
     def from_real_tensor(
         self,
         fake_mode,
-        orig_t,
+        t,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         *,
         source=None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
     ):
-        if make_constant:
-            assert not isinstance(orig_t, FakeTensor)
-
-        if self.parent is not None:
-            # Avoid mixing modes NYI (actually, we can probably make
-            # a fake tensor that gets run in the wrong ambient fake tensor
-            # mode swap the modes properly)
-            with unset_fake_temporarily():
-                t = self.parent.from_real_tensor(
-                    fake_mode.parent,
-                    orig_t,
-                    make_constant=make_constant,
-                    shape_env=shape_env,
-                    ignore_subclass=ignore_subclass,
-                    source=source,
-                    dynamic_dims=dynamic_dims,
-                    constraint_dims=constraint_dims,
-                    memoized_only=memoized_only,
-                )
-        else:
-            t = orig_t
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -381,42 +357,17 @@ class FakeTensorConverter:
                     fake_mode,
                     make_meta_t(),
                     existing_device,
-                    constant=orig_t if make_constant else None,
+                    constant=t if make_constant else None,
                 )
 
         out = self.meta_converter(
             t,
             shape_env=shape_env,
             callback=mk_fake_tensor,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
         )
-        # This is a bit tricky.  We make use of FakeTensorMode as a persistent
-        # mapping so that we can remap real tensors to the same corresponding
-        # fake tensor if we ask for a remapping.  This remapping is currently
-        # load bearing in the Dynamo-AOTAutograd interaction, where
-        # AOTAutograd will try to refakeify real tensors to "fetch" the fake
-        # tensors that Dynamo created.
-        #
-        # However, FakeTensorMode doesn't actually hold a strong reference to
-        # fake tensors!  This is to break the reference cycle
-        # FakeTensorMode -> memo table -(weak)-> FakeTensor -> FakeTensorMode.
-        # So it's actually pretty easy to lose the reference.  Dynamo ensures
-        # the fakes don't go dead by saving them in TrackedFakes, but when
-        # you have chained two modes together, you can easily lose the
-        # fake tensor from the parent tensor.  This puts a strong reference to
-        # the parent on the child, so that their lifetimes are tied.
-        #
-        # If we eventually refactor AOTAutograd to use a separate, non-weak
-        # dict to lookup fake tensors from real tensors, this attribute would
-        # still be useful so that when we fakeify a tensor, we can get what
-        # the original fake (prior to any mutation was).  The alternative is
-        # to rewrite all fakeification call sites in Dynamo to manually do
-        # the first fakeify, and then the second fakeify.
-        if self.parent is not None:
-            out._orig_fake = t
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
@@ -449,7 +400,6 @@ class FakeTensorConverter:
         *,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
@@ -460,7 +410,6 @@ class FakeTensorConverter:
             t,
             make_constant,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
@@ -753,7 +702,6 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 
 
 # takes in multiple-devices, dont default to default device handling
-@register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -763,7 +711,6 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 
 
 # same with multi_device_op_default, but return the input
-@register_op_impl(aten.index_put_.default)
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
@@ -775,6 +722,27 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten.index_put.default)
+@register_op_impl(aten.index_put_.default)
+def index_put_impl(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values = new_kwargs["values"]
+    self_device = new_kwargs["input"].fake_device
+    torch._check(
+        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
+    )
+
+    out = run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    if func is aten.index_put_.default:
+        return new_kwargs["input"]
+    else:
+        return out
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -1174,7 +1142,6 @@ class FakeTensor(torch.Tensor):
             )
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
-        assert not isinstance(constant, FakeTensor)
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
@@ -1369,13 +1336,10 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
-        parent=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
-        self.fake_tensor_converter = FakeTensorConverter(
-            parent.fake_tensor_converter if parent is not None else None
-        )
+        self.fake_tensor_converter = FakeTensorConverter()
         if static_shapes is not None:
             self.static_shapes = static_shapes
         else:
@@ -1407,17 +1371,6 @@ class FakeTensorMode(TorchDispatchMode):
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
-
-        # The parent fake tensor mode lets you specify a fake tensor mode that
-        # you should fakeify any real tensors through first, before you
-        # fakeify them again here.  This is most useful if you have an
-        # immutable fake tensor mode you've created to keep track of the
-        # initial memoized fakeifications of real tensors; you can then
-        # chain fresh fake tensor modes off of the original fake tensor
-        # mode to reuse all of the properties you set, while having a
-        # completely distinct universe of fake tensors which you can mutate to
-        # your hearts content.
-        self.parent = parent
 
         self.shape_env = shape_env
 
@@ -1919,7 +1872,6 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         *,
         static_shapes=None,
-        ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
@@ -1939,7 +1891,6 @@ class FakeTensorMode(TorchDispatchMode):
             self,
             tensor,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
