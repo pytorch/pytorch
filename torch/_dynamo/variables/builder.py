@@ -1534,7 +1534,7 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     if any(isinstance(s, SymInt) for s in e.size()):
-        return FreshCreateSymbolPolicy(
+        return FreshCreateSymbolicPolicy(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
@@ -1698,8 +1698,8 @@ def wrap_to_fake_tensor_and_record(
             "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
-            policy.dynamic_sizes,
-            policy.constraint_sizes,
+            policy.dynamic_sizes if policy is not None else None,
+            policy.constraint_sizes if policy is not None else Non,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
