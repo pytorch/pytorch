@@ -603,7 +603,17 @@ class LargeProtobufONNXProgramSerializer:
 
 
 class ONNXProgram:
-    """An in-memory representation of a PyTorch model that has been exported to ONNX."""
+    """An in-memory representation of a PyTorch model that has been exported to ONNX.
+
+    Args:
+        model_proto: The exported ONNX model as an :py:obj:`onnx.ModelProto`.
+        input_adapter: The input adapter used to convert PyTorch inputs into ONNX inputs.
+        output_adapter: The output adapter used to convert PyTorch outputs into ONNX outputs.
+        diagnostic_context: Context object for the SARIF diagnostic system responsible for logging errors and metadata.
+        fake_context: The fake context used for symbolic tracing.
+        export_exception: The exception that occurred during export, if any.
+        model_signature: The model signature for the exported ONNX graph.
+    """
 
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
@@ -671,13 +681,16 @@ class ONNXProgram:
     def model_signature(self) -> Optional[torch.export.ExportGraphSignature]:
         """The model signature for the exported ONNX graph.
 
-        This information is relevant because ONNX specification often differs from PyTorch's,
-        resulting in a ONNX graph with input and output schema different from the actual PyTorch model implementation.
+        This information is relevant because ONNX specification often differs from PyTorch's, resulting
+        in a ONNX graph with input and output schema different from the actual PyTorch model implementation.
         By using the model signature, the users can understand the inputs and outputs differences
         and properly execute the model in ONNX Runtime.
 
-        Note: Model signature is only available when the ONNX graph was exported from a
+        NOTE: Model signature is only available when the ONNX graph was exported from a
         :class:`torch.export.ExportedProgram` object.
+
+        NOTE: Any transformation done to the model that changes the model signature must be accompanied
+        by updates to this model signature as well through :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`.
 
         Example:
 
