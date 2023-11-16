@@ -1486,7 +1486,7 @@ class BuiltinVariable(VariableTracker):
                 return ConstantVariable.create(False)
 
         if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
-            return ConstantVariable.create(op(left.value, right.value))
+            return ConstantVariable.create(op(left.fn, right.fn))
 
         _unimplemented()
 
