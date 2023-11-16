@@ -6,9 +6,7 @@
 
 namespace torch::inductor {
 
-AOTIModelRunner::AOTIModelRunner(
-    const char* model_path,
-    const ConstantMap& const_map) {
+AOTIModelRunner::AOTIModelRunner(const char* model_path) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_path);
   TORCH_CHECK(model_so_, "Failed to load model: ", model_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
@@ -19,12 +17,8 @@ AOTIModelRunner::AOTIModelRunner(
       model_so_->sym("AOTInductorModelGetNumOutputs"));
   run_func_ = reinterpret_cast<decltype(run_func_)>(
       model_so_->sym("AOTInductorModelRun"));
-  update_constants_map_func_ =
-      reinterpret_cast<decltype(update_constants_map_func_)>(
-          model_so_->sym("AOTInductorModelUpdateConstantsMap"));
 
-  AOTI_RUNTIME_ERROR_CODE_CHECK(
-      create_func_(&model_handle_, (AOTInductorConstantMapHandle)&const_map));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(&model_handle_, nullptr));
 }
 
 AOTIModelRunner::~AOTIModelRunner() {
@@ -48,11 +42,6 @@ std::vector<at::Tensor> AOTIModelRunner::run(std::vector<at::Tensor> inputs) {
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
-}
-
-void AOTIModelRunner::update_constants_map(const ConstantMap& const_map) {
-  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constants_map_func_(
-      model_handle_, (AOTInductorConstantMapHandle)&const_map));
 }
 
 } // namespace torch::inductor

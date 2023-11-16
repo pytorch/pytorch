@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::ReduceSum_1"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,7 +19,7 @@ graph {
   node {
     input: "onnx::Cast_0"
     output: "onnx::ReduceSum_2"
-    name: "Cast_1"
+    name: "Cast_2"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -31,7 +31,7 @@ graph {
     input: "onnx::ReduceSum_2"
     input: "onnx::ReduceSum_1"
     output: "3"
-    name: "ReduceSum_2"
+    name: "ReduceSum_3"
     op_type: "ReduceSum"
     attribute {
       name: "keepdims"

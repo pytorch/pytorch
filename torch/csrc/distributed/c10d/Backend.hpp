@@ -99,7 +99,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -366,8 +369,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
-  void emitCollectiveStart(const Work& work);
-  void emitCollectiveEnd(const Work& work);
 
   const int rank_;
   const int size_;

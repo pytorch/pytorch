@@ -4,16 +4,12 @@ import unittest
 import torch
 from functorch.experimental import control_flow
 from torch import Tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-
-from torch._export.verifier import (
-    SpecViolationError,
-    Verifier,
-    ATenDialectVerifier,
-
-)
 from torch._export import export
+
+from torch._export.verifier import SpecViolationError, Verifier
+from torch.export.exported_program import InputKind, InputSpec, TensorArgument
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
@@ -24,7 +20,7 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(100), torch.randn(100)))
 
         verifier = Verifier()
-        verifier(ep.graph_module)
+        verifier.check(ep)
 
     def test_verifier_call_module(self) -> None:
         class M(torch.nn.Module):
@@ -39,7 +35,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(gm)
+            verifier._check_graph_module(gm)
 
     def test_verifier_no_functional(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -52,7 +48,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(ep.graph_module)
+            verifier.check(ep)
 
     def test_verifier_higher_order(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -69,7 +65,7 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(3, 3), torch.randn(3, 3)))
 
         verifier = Verifier()
-        verifier(ep.graph_module)
+        verifier.check(ep)
 
     def test_verifier_nested_invalid_module(self) -> None:
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -90,22 +86,7 @@ class TestVerifier(TestCase):
 
         verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            verifier(ep.graph_module)
-
-    def test_aten_verifier_wrong_op(self) -> None:
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return torch.ops.aten._add_relu(x, x)
-
-        m = TestModel()
-        egm = torch.fx.symbolic_trace(m)
-        verifier = ATenDialectVerifier()
-        with self.assertRaises(SpecViolationError):
-            verifier(egm)
-        self.assertFalse(verifier.is_valid(egm))
+            verifier.check(ep)
 
     def test_ep_verifier_basic(self) -> None:
         class M(torch.nn.Module):
@@ -126,7 +107,14 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(100), torch.randn(100)))
 
         # Parameter doesn't exist in the state dict
-        ep.graph_signature.parameters.append("bad_param")
+        ep.graph_signature.input_specs.insert(
+            0,
+            InputSpec(
+                kind=InputKind.PARAMETER,
+                arg=TensorArgument(name="arg0_1"),
+                target="bad_param"
+            )
+        )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()
 
@@ -141,7 +129,7 @@ class TestVerifier(TestCase):
         # because there are an incorrect number of placeholder nodes
         ep.state_dict["bad_param"] = torch.nn.Parameter(torch.randn(100))
         with self.assertRaisesRegex(
-            SpecViolationError, "not found in the exported program's parameter list"
+            SpecViolationError, "the number of inputs specified by the graph signature"
         ):
             ep._validate()
 
@@ -152,14 +140,21 @@ class TestVerifier(TestCase):
         ep = export(f, (torch.randn(100), torch.randn(100)))
 
         # Buffer doesn't exist in the state dict
-        ep.graph_signature.buffers.append("bad_buffer")
+        ep.graph_signature.input_specs.insert(
+            0,
+            InputSpec(
+                kind=InputKind.BUFFER,
+                arg=TensorArgument(name="arg0_1"),
+                target="bad_buffer"
+            )
+        )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()
 
         # Incorrect number of placeholder nodes
         ep.state_dict["bad_buffer"] = torch.randn(100)
         with self.assertRaisesRegex(
-            SpecViolationError, "not found in the exported program's buffer list"
+            SpecViolationError, "the number of inputs specified by the graph signature"
         ):
             ep._validate()
 
@@ -209,17 +204,13 @@ class TestVerifier(TestCase):
         ep = export(M(), (torch.tensor(5.0), torch.tensor(6.0)))
 
         output_node = list(ep.graph.nodes)[-1]
-        with ep.graph.inserting_before(output_node):
-            additional_output_node = ep.graph.call_function(
-                torch.add, args=(output_node.args[0][0], output_node.args[0][0])
-            )
-            output_node.args = (
-                (
-                    output_node.args[0][0],
-                    additional_output_node,
-                    output_node.args[0][1],
-                ),
-            )
+        output_node.args = (
+            (
+                output_node.args[0][0],
+                list(ep.graph.nodes)[0],
+                output_node.args[0][1],
+            ),
+        )
 
         with self.assertRaisesRegex(SpecViolationError, "Number of output nodes"):
             ep._validate()

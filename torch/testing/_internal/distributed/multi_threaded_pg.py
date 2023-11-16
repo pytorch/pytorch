@@ -21,7 +21,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 """
 TODO:
@@ -35,7 +35,7 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 
 
 def flatten_list(lst):
-    return tree_flatten(lst)[0]
+    return pytree.tree_leaves(lst)
 
 
 def ret_work(ret):
@@ -401,11 +401,6 @@ class WorldData:
 class ThreadLocalWorld:
     _world = threading.local()
 
-    def __init__(self):
-        self.enable_collectives_timing = False
-        self._hook_state = dist.distributed_c10d._HookState()
-
-
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
@@ -459,9 +454,6 @@ class ThreadLocalWorld:
     def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
         return self._get_world().pg_default_device
 
-    @property
-    def pg_hook_state(self) -> dist.distributed_c10d._HookState:
-        return self._hook_state
 
 _old_pg_world = None
 _ctx_manager = None

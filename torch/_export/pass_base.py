@@ -273,7 +273,10 @@ class _ExportPassBase(PassBase):
 
         def extract_input(node: torch.fx.Node) -> Optional[FakeTensor]:
             if "val" in node.meta:
-                return node.meta["val"]
+                fake = node.meta["val"]
+                if hasattr(fake, "constant") and fake.constant is not None:
+                    return fake.constant
+                return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
                 assert self.fake_tensor_mode is not None
                 return FakeTensor(
@@ -416,6 +419,7 @@ class _ExportPassBase(PassBase):
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
             dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:
+            fake_tensor_mode.allow_non_fake_inputs = True
             self.tracer.fake_tensor_mode = fake_tensor_mode
             dispatcher_mode = enable_python_dispatcher()  # type: ignore[assignment]
         self.fake_tensor_mode = self.tracer.fake_tensor_mode
