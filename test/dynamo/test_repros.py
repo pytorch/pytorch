@@ -852,8 +852,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             False,
         )
         # (dynamic shapes, static shapes)
-        self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (106, 127))
+        self.assertIn(cnt.frame_count, (4, 7))
+        self.assertIn(cnt.op_count, (83, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -916,6 +916,55 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.sub(1, alpha=2)
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
+
+    # https://github.com/pytorch/pytorch/issues/113010
+    def test_out_overload_non_contiguous(self):
+        def f(x, y):
+            return torch.abs(x, out=y.T)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        x_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = f_compiled(x_test, y_test)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(y_ref, y_test)
+
+    # https://github.com/pytorch/pytorch/issues/109053
+    def test_view_dtype_overload(self):
+        def f(x):
+            return x.view(torch.int32)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x1 = torch.ones(4, requires_grad=True)
+        out_ref = f(x1)
+        out_test = f_compiled(x1)
+        self.assertEqual(out_ref, out_test)
+
+        x2 = torch.ones(4, requires_grad=False)
+        out_ref = f(x2)
+        out_test = f_compiled(x2)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/90552
+    def test_intermediate_leaf_requires_grad(self):
+        def f(x):
+            leaf = torch.ones(2, requires_grad=True)
+            return leaf, leaf * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        leaf, out = f(x)
+        leaf_test, out_test = f_compiled(x)
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(leaf.grad, leaf_test.grad)
 
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
