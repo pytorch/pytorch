@@ -509,7 +509,7 @@ def run_test(
         return 0
 
     if is_cpp_test:
-        stepcurrent_key = test_file
+        stepcurrent_key = f"{test_file}_{os.urandom(8).hex()}"
     else:
         unittest_args.extend(
             [
@@ -517,7 +517,7 @@ def run_test(
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
