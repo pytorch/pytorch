@@ -244,7 +244,6 @@ include_patterns = [
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/csrc/**/*.cpp',
-    'torch/csrc/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -255,6 +254,7 @@ exclude_patterns = [
     '**/*CUDA*',
     '**/cuda/*pp',
     'aten/src/ATen/core/TensorImpl_test.cpp',
+    'c10/test/**/*.h',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
