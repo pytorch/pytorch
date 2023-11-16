@@ -79,17 +79,7 @@ class MultiKernelState:
             ]
         )
 
-        # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a differnt py file for
-        # multi-kernel. This makes cache implementation straightforward since
-        # we can decide cache file name based on multi-kernel py file name
-        # directly.
-        subkernel_hashes = "\n".join(
-            f"# subkernel{i} code hash: {kernel.code_hash}"
-            for i, kernel in enumerate(kernels)
-        )
         src_code = f"""
-{subkernel_hashes}
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
 {kernel_call_def_code}
     multi_kernel_call.run_with_argless_kernels([call0, call1])
@@ -132,11 +122,12 @@ class MultiKernel:
             kernels
         )
 
-    def call_kernel(self):
+    def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
         for the multi-kernel.
         """
+        assert kernel_name == self.kernel_name
         call_args_list = [kernel.get_call_args() for kernel in self.kernels]
         all_call_args: Dict[
             Any, None
@@ -158,6 +149,21 @@ class MultiKernel:
             grid,
             V.graph.scheduler.current_device.index,
         )
+
+    def codegen_nan_check(self):
+        pass
+
+    @property
+    def removed_buffers(self):
+        return set.intersection(*[k.removed_buffers for k in self.kernels])
+
+    @property
+    def inplaced_to_remove(self):
+        return set.intersection(*[k.inplaced_to_remove for k in self.kernels])
+
+    @property
+    def warn_mix_layout(self):
+        pass
 
 
 class MultiKernelCall:

@@ -860,7 +860,6 @@ class TritonKernel(Kernel):
             return index
 
         self.simplify_indexing = simplify_indexing
-        self.code_hash = None
 
     def should_use_persistent_reduction(self):
         """
@@ -873,7 +872,6 @@ class TritonKernel(Kernel):
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         if config.triton.multi_kernel:
-            # TODO: this need to be finer tested and tuned
             threshold *= 16
         last_numel = self.numels[-1]
         if not isinstance(last_numel, (int, sympy.Integer)):
@@ -2542,7 +2540,6 @@ class TritonScheduling(BaseScheduling):
             "mutations": mutations,
             "index_dtype": index_dtype,
         }
-        # V.graph.save_state()
         kernel = TritonKernel(
             *kernel_args,
             **kernel_kwargs,
@@ -2555,13 +2552,9 @@ class TritonScheduling(BaseScheduling):
 
         kernel_name = self.define_kernel(src_code, node_schedule)
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-        self.codegen_comment(node_schedule)
         kernel.kernel_name = kernel_name
-        kernel.code_hash = code_hash(src_code)
 
-        multi_kernel = None
         if kernel.persistent_reduction and config.triton.multi_kernel:
-            # V.graph.restore_state()
             kernel2 = TritonKernel(
                 *kernel_args,
                 **kernel_kwargs,
@@ -2572,26 +2565,24 @@ class TritonScheduling(BaseScheduling):
                 src_code2 = kernel2.codegen_kernel()
             kernel_name2 = self.define_kernel(src_code2, node_schedule)
             kernel2.kernel_name = kernel_name2
-            kernel2.code_hash = code_hash(src_code2)
 
-            multi_kernel = MultiKernel([kernel, kernel2])
+            final_kernel = MultiKernel([kernel, kernel2])
+        else:
+            final_kernel = kernel  # type: ignore[assignment]
 
-        with V.set_kernel_handler(kernel):
+        with V.set_kernel_handler(final_kernel):
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
                     node.mark_run()
 
-        if multi_kernel:
-            multi_kernel.call_kernel()
-        else:
-            kernel.call_kernel(kernel_name)
-            kernel.codegen_nan_check()
-
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-
+        self.codegen_comment(node_schedule)
+        final_kernel.call_kernel(final_kernel.kernel_name)
+        final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
-            kernel.warn_mix_layout(kernel_name)
+            final_kernel.warn_mix_layout(kernel_name)
+
+        V.graph.removed_buffers |= final_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
         if (
             V.graph.wrapper_code.supports_intermediate_hooks
