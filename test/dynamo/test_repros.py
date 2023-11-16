@@ -3609,6 +3609,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
 
+    def test_dynamic_shapes_double_not_equal(self):
+        # https://github.com/pytorch/pytorch/issues/113393
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        torch.compile(fn, backend="eager")(torch.ones(5, 1, 3, 4))
+        torch.compile(fn, backend="eager")(torch.ones(5, 1, 2, 3))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

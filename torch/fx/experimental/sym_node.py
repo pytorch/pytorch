@@ -824,7 +824,7 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env.create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+        return SymNode(out, self.shape_env, pytype, pytype(out_hint), fx_node=fx_node)
 
     def unary_magic_impl(self):
         from torch.fx.experimental.symbolic_shapes import safe_expand
