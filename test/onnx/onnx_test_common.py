@@ -214,7 +214,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
         has_mutation: bool = False,
-        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -236,8 +235,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
-            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
-                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
