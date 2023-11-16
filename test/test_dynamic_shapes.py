@@ -396,6 +396,12 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
 
+    def test_sym_mod_float(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 4)
+        r = s0 % 2.0
+        self.assertEqual(r, 0.0)
+
     def test_sym_floor(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
