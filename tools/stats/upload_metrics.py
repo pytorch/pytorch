@@ -162,6 +162,9 @@ def emit_metric(
             # We don't want to fail the job if we can't upload the metric.
             # We still raise the ValueErrors outside this try block since those indicate improperly configured metrics
             warn(f"Error uploading metric {metric_name} to DynamoDB: {e}")
+            warn("Full metrics:")
+            for k, v in enumerate(metrics):
+                warn(f"  {k}: {v}")
             return
     else:
         print(f"Not emitting metrics for {metric_name}. Boto wasn't imported.")
