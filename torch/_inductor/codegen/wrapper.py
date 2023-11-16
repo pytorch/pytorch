@@ -1322,13 +1322,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
         self.header.splice(
             f"""
-            static int64_t align(int64_t nbytes) {{
+            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
             """
@@ -2167,11 +2169,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         new_int_args.extend([str(a) for a in arg])
                 else:
                     assert isinstance(
-                        arg_type.getElementType(), static_arg_types
+                        arg_type.getElementType(), static_arg_types  # type: ignore[arg-type]
                     ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
             else:
                 assert isinstance(
-                    arg_type, static_arg_types
+                    arg_type, static_arg_types  # type: ignore[arg-type]
                 ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
 
         for arg, arg_type in zip(raw_args, arg_types):
@@ -2323,28 +2325,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
-        if (
-            config.aot_inductor.abi_compatible
-            and not is_legacy_abi
-            and isinstance(type_, torch.OptionalType)
-        ):
-            if val is None:
-                return "nullptr"
-            if isinstance(val, (bool, int, str, float)):
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
-                return f"&{var_name}"
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                return f"&{self.val_to_arg_str(val)}"
-
-        return self.val_to_arg_str(val)
-
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            if config.aot_inductor.abi_compatible:
-                return "0"  # nullptr is not available in C
+            # TODO: add abi-compatible support
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
@@ -2369,8 +2353,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            # FIXME handle embedded optional types?
-            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
+            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"
@@ -2519,16 +2502,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(
-                arg,
-                (
-                    sympy.Integer,
-                    sympy.Expr,
-                    sympy.Symbol,
-                    SymbolicCallArg,
-                ),
-            ):
+            if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Expr):
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
