@@ -2,15 +2,13 @@ import functools
 import itertools
 import logging
 import operator
-from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from collections import defaultdict, namedtuple
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Expr
 
 import torch
 import torch._inductor as inductor
-import torch.utils._pytree as pytree
-from torch import fx
 from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
@@ -19,6 +17,7 @@ from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -89,8 +88,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
-
-    move_constructors_to_cuda(gm.graph)
 
     fake_tensor_updater.incremental_update()
 
@@ -955,168 +952,3 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
 )
 def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
-
-
-def allows_mixed_devices(op):
-    return op in (
-        aten.index.Tensor,
-        aten.index_put.default,
-        aten.index_put_.default,
-        aten.copy.default,
-        aten.copy_.default,
-        aten.slice_scatter.default,
-    )
-
-
-def cannot_be_moved_to_cuda(node):
-    if node.target == "output":
-        return True
-
-    if not isinstance(
-        node.target, torch._ops.OpOverload
-    ) and node.target.namespace not in ("prims", "aten"):
-        return True
-
-    # only move ops to inductor lowerings for now,
-    # fallback ops may have weird cpu/cuda incompatibilities
-    return node.target in torch._inductor.lowering.fallbacks
-
-
-def get_node_device(node: fx.Node) -> Optional[torch.device]:
-    ten = node.meta.get("val")
-    return None if not isinstance(ten, torch.Tensor) else ten.device
-
-
-def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
-    """
-    Get the number of cpu inputs to a node
-    """
-    cpu_indeg: Dict[fx.Node, int] = Counter()
-
-    for node in graph.nodes:
-        cpu_count = 0
-
-        def add_cpu_inp(node):
-            nonlocal cpu_count
-            device = get_node_device(node)
-            cpu_count += device is not None and device.type == "cpu"
-
-        pytree.tree_map_only(torch.fx.Node, add_cpu_inp, (node.args, node.kwargs))
-
-        if cpu_count:
-            cpu_indeg[node] = cpu_count
-
-    return cpu_indeg
-
-
-def move_constructors_to_cuda(graph):
-    """
-    Moves intermediary tensors which are constructed on the cpu to cuda when safe
-    """
-    if not torch.backends.cuda.is_built():
-        return
-
-    cuda_devices = set()
-    constructors = []
-
-    for node in graph.nodes:
-        device = get_node_device(node)
-        if device and device.type == "cuda":
-            cuda_devices.add(device)
-
-        if not isinstance(
-            node.target, torch._ops.OpOverload
-        ) or node.target.namespace not in ("prims", "aten"):
-            continue
-
-        if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
-            continue
-
-        if not node.kwargs.get("device") == torch.device("cpu"):
-            continue
-
-        constructors.append(node)
-
-    # not handling multiple cuda devices initially
-    if not constructors or len(cuda_devices) != 1:
-        return
-
-    movable_constructors = find_movable_constructors(graph, constructors)
-
-    for node in movable_constructors:
-        kwargs = node.kwargs.copy()
-        kwargs["device"] = next(iter(cuda_devices))
-        node.kwargs = kwargs
-
-
-def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node]:
-    """
-    Starting from the cpu constructors, iterate through the graph and test that all of their
-    downstream uses can safely be moved to cpu.
-    """
-    cpu_indeg: Dict[fx.Node, int] = get_cpu_indeg_count(graph)
-
-    # which constructors cannot be moved to cuda
-    cannot_move_to_cuda: Set[fx.Node] = set()
-
-    # For any node in the graph, which constructors does it have a dependency on
-    constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
-
-    # if a cpu node has a dependency on two different cpu constructors,
-    # then if either constructor cannot be moved to cuda, the other cannot as well.
-    # In this case any node with a dependency on one will have a dependency on the other
-    equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {c: {c} for c in constructors}
-
-    def make_dependencies_equivalent(
-        set1: Set[fx.Node], set2: Set[fx.Node]
-    ) -> Set[fx.Node]:
-        # could use union find but not worth complexity here
-        set1.update(set2)
-        for obj in set1:
-            equal_constructor_sets[obj] = set1
-        return set1
-
-    queue: List[fx.Node] = list(constructors)
-
-    for c in queue:
-        constructor_dependencies[c].add(c)
-
-    while queue:
-        node = queue.pop()
-        dependencies = constructor_dependencies[node]
-
-        for user in node.users:
-            if cannot_be_moved_to_cuda(user):
-                cannot_move_to_cuda.update(dependencies)
-                break
-
-            # this node was used on a op which takes in multiple devices and output a cuda
-            # tensor. we can convert its cpu input to cuda without making further changes
-            node_device = get_node_device(user)
-            if (
-                allows_mixed_devices(user.target)
-                and node_device
-                and node_device.type == "cuda"
-            ):
-                del cpu_indeg[user]
-            else:
-                # otherwise, we should continue look at its downstream uses
-                cpu_indeg[user] -= 1
-                if cpu_indeg[user] == 0:
-                    del cpu_indeg[user]
-                    queue.append(user)
-
-            unioned_set = make_dependencies_equivalent(
-                dependencies, constructor_dependencies[user]
-            )
-            constructor_dependencies[user] = unioned_set
-
-    for node in cpu_indeg:
-        if constructor_dependencies[node]:
-            cannot_move_to_cuda.update(constructor_dependencies[node])
-
-    all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
-    for constructor in cannot_move_to_cuda:
-        all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
-
-    return set(constructors) - all_cannot_move_to_cuda
