@@ -4234,7 +4234,7 @@
 - func: _native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: _batch_norm_legit_cpu
-    CUDA: _batch_norm_legit_cuda
+    CUDA: _batch_norm_legit_cuda  # cudnn_batch_norm
     MPS: _batch_norm_legit_mps
     MkldnnCPU: _mkldnn_batch_norm_legit
   autogen: _native_batch_norm_legit_functional

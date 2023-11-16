@@ -26,6 +26,8 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
+#include <ATen/ops/cudnn_batch_norm.h>
+
 namespace at::native {
 
 namespace {
@@ -458,6 +460,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   auto save_mean = at::empty({n_input}, options);
   auto save_invstd = at::empty({n_input}, options);
 
+  printf("ANDREW calling batch_norm_cuda\n");
+
   at::native::batch_norm_cuda_out(
       self,
       weight_opt,
@@ -474,7 +478,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
-  return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
+  printf("ANDREW calling batch_norm_legit_cuda\n");
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  Tensor output, save_mean, save_var, reserve;
+  std::tie(output, save_mean, save_var, reserve) =
+      at::cudnn_batch_norm(self, weight, bias_opt, running_mean, running_var,
+                           train, momentum, epsilon);
+  return std::tuple<Tensor, Tensor, Tensor>(output, save_mean, save_var);
+  // return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double epsilon) {

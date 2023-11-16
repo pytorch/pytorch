@@ -752,6 +752,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
+  printf("ANDREW calling batch_norm_cpu\n");
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -803,6 +804,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
+  printf("ANDREW calling batch_norm_legit_cpu");
   return batch_norm_cpu(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
 }
 
