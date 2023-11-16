@@ -693,6 +693,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_compile_selective_checkpoint_random_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
+                torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
             return context_fn_gen(
@@ -718,13 +719,13 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         fw_compiler = functools.partial(
             count_ops,
-            freqs=[1],
-            ops=[torch.ops.aten.native_dropout.default],
+            freqs=[2, 2, 1],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default, torch.ops.aten.native_dropout.default],
         )
         bw_compiler = functools.partial(
             count_ops,
-            freqs=[1],
-            ops=[torch.ops.aten.native_dropout.default],
+            freqs=[4, 0],
+            ops=[torch.ops.aten.mm.default, torch.ops.aten.sigmoid.default],
         )
         backend = aot_autograd(
             fw_compiler=fw_compiler,
