@@ -1699,7 +1699,7 @@ def wrap_to_fake_tensor_and_record(
             source.name(),
             tuple(e.shape),
             policy.dynamic_sizes if policy is not None else None,
-            policy.constraint_sizes if policy is not None else Non,
+            policy.constraint_sizes if policy is not None else None,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
