@@ -116,7 +116,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
     "inf": float("inf"),
-    "__load_module": lambda name: importlib.import_module(name),
+    "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy":
@@ -1318,12 +1318,7 @@ def get_and_maybe_log_recompilation_reason(
     code = frame.f_code
 
     # at least one of "recompiles" or "recompiles_verbose" is enabled
-    do_recompiles_log = (
-        is_recompiles_enabled() and recompiles_log.isEnabledFor(logging.DEBUG)
-    ) or (
-        is_recompiles_verbose_enabled()
-        and recompiles_verbose_log.isEnabledFor(logging.DEBUG)
-    )
+    do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
 
     if do_recompiles_log or config.error_on_recompile:
         if is_recompiles_verbose_enabled():
@@ -1341,10 +1336,10 @@ def get_and_maybe_log_recompilation_reason(
             f"{textwrap.indent(guard_failure_details, '    ')}"
         )
         if do_recompiles_log:
-            if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
-            else:
+            if is_recompiles_verbose_enabled():
                 recompiles_verbose_log.debug(message)
+            else:
+                recompiles_log.debug(message)
         if config.error_on_recompile:
             raise exc.RecompileError(message)
 

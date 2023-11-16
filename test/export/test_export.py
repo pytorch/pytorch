@@ -11,6 +11,7 @@ from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -1307,6 +1308,40 @@ class TestExport(TestCase):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+    def test_lifted_constants(self) -> None:
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 2)
+        self.assertEqual(len(ep.tensor_constants), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 1)
+        self.assertEqual(len(ep.tensor_constants), 2)
+
+        inp = (torch.randn(1),)
+        self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep(*inp), transform(*inp)))
+
+        unlifted = ep.module()
+        self.assertTrue(torch.allclose(ep(*inp), unlifted(*inp)))
+
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -1547,6 +1582,75 @@ def forward(self, arg0_1):
         # This is actually correct because how make_fx modifies the buffer since
         # there is no functionalization.
         self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
+
+    def test_export_with_fake_tensor_inputs(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+    def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        # Manualy set the fake_device of fake tensors.
+        x.fake_device = torch.device('cuda:0')
+        for n, p in model.named_parameters():
+            p.fake_device = torch.device('cuda:0')
+
+        # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
+        # doesn't quite work well with aot_autograd right now due to some logic fails
+        # the check in call getDeviceGuardImpl in InputMetadata.
+        x.requires_grad = False
+        for n, p in model.named_parameters():
+            p.requires_grad = False
+
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
 
 
 if __name__ == '__main__':
