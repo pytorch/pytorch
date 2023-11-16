@@ -142,8 +142,10 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
+        "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
+        "linalg.vector_norm",
         "scatter_add",
         "scatter_reduce",
         "square",
@@ -529,9 +531,9 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
+        in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Gemm", "uint8, int8, int16, int32, int64"
         ),
     ),
     skip(
@@ -556,14 +558,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
-    ),
-    xfail(
-        "native_batch_norm",
-        matcher=lambda sample: sample.args[4]
-        and (
-            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
-        ),  # Edge case with training=True and mean being 1d tensor of single element.
-        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",

@@ -47,6 +47,7 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
+    get_prediction_confidences,
     get_test_prioritizations,
 )
 
@@ -508,7 +509,7 @@ def run_test(
         return 0
 
     if is_cpp_test:
-        stepcurrent_key = test_file
+        stepcurrent_key = f"{test_file}_{os.urandom(8).hex()}"
     else:
         unittest_args.extend(
             [
@@ -516,7 +517,7 @@ def run_test(
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -1806,7 +1807,17 @@ def main():
                 test_stats["num_total_tests"] = num_tests
 
                 print_to_stderr("Emiting td_test_failure_stats")
-                emit_metric("td_test_failure_stats", test_stats)
+                emit_metric(
+                    "td_test_failure_stats",
+                    {
+                        **test_stats,
+                        "confidence_ratings": get_prediction_confidences(
+                            selected_tests
+                        ),
+                        "failure": str(test),
+                        "tests": selected_tests,
+                    },
+                )
 
     if len(all_failures):
         for _, err in all_failures:

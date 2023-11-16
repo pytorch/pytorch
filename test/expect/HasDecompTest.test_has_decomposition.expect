@@ -200,9 +200,12 @@ aten::_foreach_div.Scalar
 aten::_foreach_div.ScalarList
 aten::_foreach_div.ScalarList_out
 aten::_foreach_div.Scalar_out
+aten::_foreach_div.Tensor
+aten::_foreach_div.Tensor_out
 aten::_foreach_div_.List
 aten::_foreach_div_.Scalar
 aten::_foreach_div_.ScalarList
+aten::_foreach_div_.Tensor
 aten::_foreach_erf
 aten::_foreach_erf.out
 aten::_foreach_erf_
@@ -883,6 +886,7 @@ aten::lu_unpack.out
 aten::masked_scatter
 aten::masked_scatter.out
 aten::masked_scatter_
+aten::masked_scatter_backward
 aten::masked_select
 aten::masked_select.out
 aten::matmul_backward

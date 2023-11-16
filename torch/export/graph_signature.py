@@ -304,6 +304,17 @@ class ExportGraphSignature:
             and isinstance(s.target, str)
         }
 
+    # A dictionary mapping graph input node names to lifted tensor constants.
+    @property
+    def inputs_to_lifted_tensor_constants(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CONSTANT_TENSOR
+            and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
+
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
         loss_output = None
@@ -344,7 +355,7 @@ class ExportGraphSignature:
         if assertion_dep_token is None:
             return
         assert len(assertion_dep_token) == 1
-        assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+        assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
         assert (
             len(self.user_outputs) + len(self.buffers_to_mutate)
             == assertion_dep_token_index
