@@ -96,9 +96,9 @@ class SymNode:
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
         if hint is not None:
-            assert type(hint) is not pytype, (
-                f"Cannot create SymNode of type {pytype} with "
-                f"incompatible hint of type {type(hint)}"
+            assert type(hint) is pytype, (
+                "Cannot create SymNode of type "
+                f"{pytype} with incompatible hint of type {type(hint)}"
             )
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
