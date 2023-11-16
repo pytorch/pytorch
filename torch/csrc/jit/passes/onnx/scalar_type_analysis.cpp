@@ -161,8 +161,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
             at::typeMetaToScalarType(at::get_default_dtype());
         switch (scalar_type) {
           case at::kDouble:
-          case at::kFloat:
-            // floating-point numbers wrapped as float32/float64 tensors are
+            // floating-point numbers wrapped as double tensors are
             // considered to have default type, instead of double.
             typesFromScalars.emplace_back(default_scalar_type);
             break;
@@ -203,33 +202,23 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
-        } else if (auto scalar_type = get_scalar_type(input)) {
-          auto tensor_type = input->type()->castRaw<TensorType>();
-          // get_scalar_type returns non-null value already guarantees
-          // that the input has a valid tensor_type.
-          TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
-          // ONNX model track shape related computes that were done in pytorch
-          // by python numbers as tensor computes. This is the only way for ONNX
-          // to track them properly since ONNX only has tensor type, otherwise
-          // the computation result will be tracked statically as constant, and
-          // the model won't work for another input that differs in shape.
-
-          // Now for type promotion logic, scalars should be treated differently
-          // with tensors. More info regarding type promotion logic commented at
-          // `emplace_type_from_scalar`. Here we filter out rank 0 tensors and
-          // run it with `emplace_type_from_scalar` to determine if they are
-          // considered scalars for type promotion.
-
-          // NOTE that this might introduce regression that a REAL 0-rank tensor
-          // is now being recognized as scalar. The downside is the model will
-          // drop in accuracy for these cases as certain computations will
-          // happen in lower precision data types.
-          auto rank = tensor_type->dim();
-          if (rank && rank.value() == 0) {
-            emplace_type_from_scalar(scalar_type.value());
-          } else {
-            typesFromTensors.emplace_back(scalar_type.value());
+        } else if (nkind == prim::Param) {
+          // ONNX doesn't support scalar as graph input. When
+          // seeing a scalar input, we convert its expected type to tensor.
+          if (auto scalar_type = get_scalar_type(input)) {
+            auto tensor_type = input->type()->castRaw<TensorType>();
+            // get_scalar_type returns non-null value already guarantees
+            // that the input has a valid tensor_type.
+            TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
+            auto rank = tensor_type->dim();
+            if (rank && rank.value() == 0) {
+              emplace_type_from_scalar(scalar_type.value());
+            } else {
+              typesFromTensors.emplace_back(scalar_type.value());
+            }
           }
+        } else if (auto scalar_type = get_scalar_type(input)) {
+          typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
