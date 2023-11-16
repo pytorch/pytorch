@@ -2318,7 +2318,6 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     )
 
 def check_module_str(ref_str, module_str):
-    breakpoint()
     return ref_str == module_str
 
 def attrs_code_object(code_obj):

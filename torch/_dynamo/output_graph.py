@@ -1025,7 +1025,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
-        breakpoint()
+        # breakpoint()
         self.install_global(name, compiled_fn)
         import pickle
         with open("hack_comp.pkl", 'wb') as file:
