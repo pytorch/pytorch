@@ -11,7 +11,7 @@ import logging
 import os
 import unittest
 import warnings
-from enum import Enum
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -65,9 +65,8 @@ pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
 
 class TorchModelType(Enum):
-    UNDEFINED = 0
-    TORCH_NN_MODULE = 1
-    TORCH_EXPORT_EXPORTEDPROGRAM = 2
+    TORCH_NN_MODULE = auto()
+    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
