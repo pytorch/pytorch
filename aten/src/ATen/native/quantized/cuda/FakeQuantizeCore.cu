@@ -145,7 +145,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
       gpu_kernel(iter_mask,
         [=] GPU_LAMBDA (const SelfType input_val, const float scale, const scalar_t zero_point) -> bool {
           const float inv_scale = 1.0f / scale;
-          const auto qval = std::lrint(input_val * inv_scale + zero_point);
+          const auto qval = std::round(input_val * inv_scale + zero_point);
           return ((quant_min <= qval) && (qval <= quant_max));
       });
 
@@ -153,8 +153,8 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
       gpu_kernel(iter,
         [=] GPU_LAMBDA (const SelfType input_val, const float scale, const scalar_t zero_point) -> SelfType {
           const float inv_scale = 1.0f / scale;
-          const auto qval = std::lrint(input_val * inv_scale + zero_point);
-          const auto bounded_qval = fminf(quant_max, fmaxf(quant_min, qval));
+          const auto qval = std::round(input_val * inv_scale + zero_point);
+          const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
           return (bounded_qval - zero_point) * scale;
       });
     });
@@ -164,7 +164,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
     gpu_kernel(iter_mask,
       [=] GPU_LAMBDA (const SelfType input_val, const float scale, const int64_t zero_point) -> bool {
         const float inv_scale = 1.0f / scale;
-        const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale)) + zero_point;
+        const auto qval = std::round(input_val * inv_scale + zero_point);
         return ((quant_min <= qval) && (qval <= quant_max));
     });
 
@@ -172,8 +172,8 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
     gpu_kernel(iter,
       [=] GPU_LAMBDA (const SelfType input_val, const float scale, const int64_t zero_point) -> SelfType {
         const float inv_scale = 1.0f / scale;
-        const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale)) + zero_point;
-        const auto bounded_qval = std::min(quant_max, std::max(quant_min, qval));
+        const auto qval = std::round(input_val * inv_scale + zero_point);
+        const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
         return (bounded_qval - zero_point) * scale;
     });
   }

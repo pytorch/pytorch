@@ -2669,21 +2669,16 @@ void _fake_quant_per_channel_cachemask_cpu_helper(
       // write mask
       cpu_kernel(iter_mask, [=](SelfType self, float scale, scalar_t zero_point) -> bool {
         float inv_scale = 1.0f / scale;
-        const auto qval = std::lrintf(zero_point + (self * inv_scale));
+        const auto qval = std::round(zero_point + (self * inv_scale));
         return ((quant_min <= qval) && (qval <= quant_max));
       });
 
       // write fake_quant
       cpu_kernel(iter, [=](SelfType self, float scale, scalar_t zero_point) -> SelfType {
         float inv_scale = 1.0f / scale;
-        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        return (std::fmin(
-                    std::fmax(
-                        std::lrintf(zero_point + self * inv_scale),
-                        quant_min),
-                    quant_max) -
-                zero_point) *
-            scale;
+        const auto qval = std::round(self * inv_scale + zero_point);
+        const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
+        return (bounded_qval - zero_point) * scale;
       });
     });
 
@@ -2691,22 +2686,16 @@ void _fake_quant_per_channel_cachemask_cpu_helper(
       // write mask
       cpu_kernel(iter_mask, [=](SelfType self, float scale, int32_t zero_point) -> bool {
         float inv_scale = 1.0f / scale;
-        const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
+        const auto qval = std::round(zero_point + (self * inv_scale));
         return ((quant_min <= qval) && (qval <= quant_max));
       });
 
       // write fake_quant
       cpu_kernel(iter, [=](SelfType self, float scale, int32_t zero_point) -> SelfType {
         float inv_scale = 1.0f / scale;
-        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        return (std::fmin(
-                    std::fmax(
-                        static_cast<int64_t>(
-                            zero_point + std::nearbyint(self * inv_scale)),
-                        quant_min),
-                    quant_max) -
-                zero_point) *
-            scale;
+        const auto qval = std::round(self * inv_scale + zero_point);
+        const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
+        return (bounded_qval - zero_point) * scale;
       });
   }
 
