@@ -4,8 +4,9 @@ import subprocess
 import sys
 
 import torch
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.codecache import PyCodeCache
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestTritonWrapper(TestCase):
@@ -48,6 +49,5 @@ class TestTritonWrapper(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests(triton=True)
+    if HAS_CUDA:
+        run_tests()

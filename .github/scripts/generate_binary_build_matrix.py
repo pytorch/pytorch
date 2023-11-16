@@ -272,7 +272,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = FULL_PYTHON_VERSIONS + ["3.12"]
 
     if arches is None:
         # Define default compute archivectures
