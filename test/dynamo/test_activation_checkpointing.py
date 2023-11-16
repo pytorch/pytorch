@@ -493,7 +493,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
                 gn,
-                torch.sin(x),
+                x,
                 y,
                 use_reentrant=False,
                 context_fn=selective_checkpointing_context_fn,
@@ -523,7 +523,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
         if torch.cuda.is_available():
-            self._validate(fn, "inductor", x, y)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -561,7 +561,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
                 gn,
-                torch.sin(x),
+                x,
                 y,
                 use_reentrant=False,
                 context_fn=selective_checkpointing_context_fn,
@@ -592,7 +592,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
         if torch.cuda.is_available():
-            self._validate(fn, "inductor", x, y)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -614,7 +614,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
                 gn,
-                torch.sin(x),
+                x,
                 y,
                 use_reentrant=False,
                 context_fn=selective_checkpointing_context_fn,
@@ -641,7 +641,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
         if torch.cuda.is_available():
-            self._validate(fn, "inductor", x, y)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @unittest.skip(
@@ -669,7 +669,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
                 gn,
-                torch.sin(x),
+                x,
                 y,
                 use_reentrant=False,
                 context_fn=selective_checkpointing_context_fn,
@@ -696,7 +696,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
         if torch.cuda.is_available():
-            self._validate(fn, "inductor", x, y)
+            self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
@@ -766,7 +766,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
                 gn,
-                torch.sin(x),
+                x,
                 y,
                 use_reentrant=False,
                 context_fn=_invalid_context_gen,
