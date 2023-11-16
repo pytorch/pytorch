@@ -503,11 +503,33 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     ]
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_cpu_training(self):
+        """Tests FSDP training on CPU."""
+        torch.manual_seed(0)
+        gloo_pg = dist.new_group(backend="gloo")
+        for ss in [
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+            ShardingStrategy.HYBRID_SHARD,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
+        ]:
+            model = MyModel()
+            fsdp = FSDP(
+                model,
+                auto_wrap_policy=always_wrap_policy,
+                process_group=gloo_pg,
+                device_id=torch.device("cpu"),
+            )
+            inp = torch.randn(2, 2)
+            fsdp(inp, inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
         # Move me to MT test once warning logging and backward collective issue
         # is resolved.
         """Tests that passing a CPU module to FSDP preserves that the wrapped
-        module is on CPU after FSDP initialization, albeit after loging a
+        module is on CPU after FSDP initialization, albeit after logging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
         torch.cuda.set_device(self.rank)
         regex = "passed-in `module` is on CPU"

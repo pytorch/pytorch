@@ -5,7 +5,7 @@ from torch import Tensor
 from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
                         _capturable_doc, _differentiable_doc, _foreach_doc, _fused_doc,
-                        _maximize_doc)
+                        _maximize_doc, _view_as_real)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['Adam', 'adam']
@@ -132,7 +132,7 @@ class Adam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -279,9 +279,9 @@ def adam(params: List[Tensor],
          eps: float,
          maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
+
     See :class:`~torch.optim.Adam` for details.
     """
-
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -495,14 +495,10 @@ def _multi_tensor_adam(params: List[Tensor],
 
         # Handle complex parameters
         if has_complex:
-            for i in range(len(device_params)):
-                if torch.is_complex(device_params[i]):
-                    device_params[i] = torch.view_as_real(device_params[i])
-                    device_grads[i] = torch.view_as_real(device_grads[i])
-                    device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
-                    device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                    if len(device_max_exp_avg_sqs) > 0:
-                        device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
+            if amsgrad:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
+            else:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
