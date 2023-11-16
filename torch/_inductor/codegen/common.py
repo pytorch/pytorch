@@ -1005,6 +1005,7 @@ class Kernel(CodeGen):
             @staticmethod
             def indirect_indexing(var, size, check=True):
                 # Skip CSE since this doesn't return an expression
+
                 if var.bounds.lower < 0:
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(

@@ -1307,9 +1307,6 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def check_bounds(self, expr, size):
-        breakpoint()
-
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
 
@@ -1997,7 +1994,6 @@ class CppVecKernelChecker(CppVecKernel):
         self.vec_dtype: torch.dtype = torch.float32
 
     def disable_vec(self, msg=None):
-        print(msg)
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
