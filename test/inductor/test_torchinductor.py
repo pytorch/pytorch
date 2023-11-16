@@ -4957,7 +4957,7 @@ class CommonTemplate:
             [
                 torch.randn([1, 4]),
                 torch.randn([1, 2]),
-            ]
+            ],
         )
 
     def test_slice_scatter4(self):
@@ -4969,7 +4969,7 @@ class CommonTemplate:
             [
                 torch.randn([1, 9]),
                 torch.randn([1, 3]),
-            ]
+            ],
         )
 
     def test_scatter1(self):
