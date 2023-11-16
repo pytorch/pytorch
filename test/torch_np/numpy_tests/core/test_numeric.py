@@ -1838,7 +1838,7 @@ class TestClip(TestCase):
         actual = np.clip(arr, amin, amax)
         assert_equal(actual, expected)
 
-    @xpassIfTorchDynamo  # (reason="np.maximum(..., dtype=) needs implementing")
+    @skip  # hypothesis hynp.from_dtype fails on CI (versions?)
     @given(
         data=st.data(),
         arr=hynp.arrays(
