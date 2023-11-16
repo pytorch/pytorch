@@ -3199,6 +3199,7 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertIs(pinned, pinned.pin_memory())
             self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    @torch.compiler.disable
     def _validate_nt(self, nt, device, dtype, layout, requires_grad, dim, batch_size):
         # Validate a bunch of properties after NT construction.
         device = torch.device(device)
@@ -3300,8 +3301,15 @@ class TestNestedTensorSubclass(NestedTestCase):
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_jagged_view_from_values_offsets(self, device, dtype, requires_grad):
-        values = torch.randn(10, 5, device=device, dtype=dtype, requires_grad=requires_grad)
+    @parametrize("values_is_view", [False, True])
+    def test_jagged_view_from_values_offsets(self, device, dtype, requires_grad, values_is_view):
+        if values_is_view:
+            # make values a view of base
+            base = torch.randn(
+                2, 3, 4, 5, 6, device=device, dtype=dtype, requires_grad=requires_grad)
+            values = base.flatten(0, -2)
+        else:
+            values = torch.randn(10, 5, device=device, dtype=dtype, requires_grad=requires_grad)
         offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
 
         nt = nested_view_from_values_offsets(values, offsets)
@@ -3310,14 +3318,19 @@ class TestNestedTensorSubclass(NestedTestCase):
         expected_batch_size = offsets.shape[0] - 1
         self._validate_nt(
             nt, device, dtype, torch.jagged, requires_grad, expected_dim, expected_batch_size)
-        # ensure NT is a proper view of values
-        self.assertTrue(nt._is_view() and nt._base is values)
+        # ensure NT is a proper view
+        expected_base = base if values_is_view else values
+        self.assertTrue(nt._is_view() and nt._base is expected_base)
 
         if requires_grad:
-            # Make sure grads flow back into values.
+            # Make sure grads flow back
             (nt * 2).backward(torch.ones_like(nt))
-            self.assertTrue(values.grad is not None)
-            self.assertEqual(values.grad, torch.ones_like(values) * 2)
+            if values_is_view:
+                self.assertTrue(base.grad is not None)
+                self.assertEqual(base.grad, torch.ones_like(base) * 2)
+            else:
+                self.assertTrue(values.grad is not None)
+                self.assertEqual(values.grad, torch.ones_like(values) * 2)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
