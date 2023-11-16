@@ -134,7 +134,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!ParameterClass)
     return nullptr;
 
-#if defined(USE_KINETO) && defined(__linux__)
+#if defined(USE_KINETO) && defined(__linux__) && !defined(USE_ROCM)
   // Initialize the Kineto profilers, if they have not already.
   // DO NOT REMOVE, this is needed for on-demand profiling.
   if (!libkineto::api().isProfilerRegistered()) {

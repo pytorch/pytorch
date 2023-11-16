@@ -368,7 +368,10 @@ def check_model(
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
                 assert correct_val.size() == actual_val.size()
-                assert correct_val.stride() == actual_val.stride()
+                strides_equal, _ = torch._prims_common.check_significant_strides(
+                    correct_val, actual_val
+                )
+                assert strides_equal
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
@@ -3178,6 +3181,19 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_var_correction(self):
+        def fn(x):
+            dim = -1
+            return (
+                torch.var(x, dim=dim, correction=1.3),
+                torch.var(x, dim=dim, correction=3),
+                torch.var(x, dim=dim, correction=10),
+            )
+
+        self.common(fn, (torch.randn([2, 8]),))
+        # Unrolled reduction
+        self.common(fn, (torch.randn([2, 4]),))
+
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
         @torch._dynamo.optimize("inductor", nopython=True)
@@ -3639,6 +3655,13 @@ class CommonTemplate:
             fn_2,
             (
                 torch.randn([1, 3, 3, 16]),
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
+        self.common(
+            fn_2,
+            (
                 torch.ones([0]),
                 torch.randn([1, 3, 3, 16]),
             ),
