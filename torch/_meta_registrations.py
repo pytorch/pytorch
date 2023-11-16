@@ -57,22 +57,19 @@ def elementwise_meta(
     type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,
 ):
     # Perform type promotion, as this is expected from prim_metafunction
-    compute_dtype, result_dtype = utils.elementwise_dtypes(
+    _, result_dtype = utils.elementwise_dtypes(
         *args,
         type_promotion_kind=type_promotion,
     )
-    args = [_maybe_convert_to_dtype(x, compute_dtype) for x in args]
+    args = [_maybe_convert_to_dtype(x, result_dtype) for x in args]
 
     # Broadcast
     args = _maybe_broadcast(*args)
 
     # Perform prim checks
-    type_promotion_prim = getattr(
-        ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, type_promotion.name
+    return _prim_elementwise_meta(
+        *args, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
-    result = _prim_elementwise_meta(*args, type_promotion=type_promotion_prim)
-
-    return _maybe_convert_to_dtype(result, result_dtype)
 
 
 def toRealValueType(dtype):
