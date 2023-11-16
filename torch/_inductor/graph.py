@@ -78,8 +78,6 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     }
     if cuda:
         supported_dtype.add(torch.float16)
-        supported_dtype.add(torch.float8_e4m3fn)
-        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -715,7 +713,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
-            log.debug("lowering %s %s", LazyString(lambda: n.format_node()), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
         origins = {n}
         if n.op == "call_function":

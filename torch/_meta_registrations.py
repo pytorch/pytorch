@@ -3622,7 +3622,7 @@ def shift_dtype_check(fn_name, self, val):
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     element_wise = elementwise_meta(
-        self, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     # Annoying edgecase
     if self.dim() == 0 and isinstance(other, torch.Tensor):
@@ -3636,7 +3636,7 @@ def meta_rshifts(self, other):
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     element_wise = elementwise_meta(
-        self, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     # Annoying edgecase
     if self.dim() == 0 and isinstance(other, torch.Tensor):

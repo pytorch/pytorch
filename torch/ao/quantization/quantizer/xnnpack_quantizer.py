@@ -247,8 +247,8 @@ def _get_not_module_type_or_name_filter(
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     STATIC_QAT_ONLY_OPS = [
-        "conv2d_bn_relu",
-        "conv2d_bn",
+        "conv_bn_relu",
+        "conv_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
