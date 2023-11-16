@@ -12,7 +12,6 @@ from torch._dynamo.utils import same
 from torch._dynamo.testing import CompileCounter
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import skipRocmIfTorchInductor
 from torch.testing._internal.common_distributed import (
     DynamoDistributedSingleProcTestCase,
     DynamoDistributedMultiProcTestCase,
@@ -89,7 +88,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -132,7 +130,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_eager_allreduce_inductor_wait(self):
 
         def eager_func(a, b, c, d, *, tag, ranks, group_size):
@@ -210,7 +207,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_allreduce_input_buffer_reuse(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -259,7 +255,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_allgather_output_buffer_reuse(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -285,7 +280,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -312,7 +306,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_allgather_into_tensor_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -344,7 +337,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @skipRocmIfTorchInductor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
@@ -376,7 +368,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_all_to_all_single_inductor(self):
         def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
             input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
@@ -424,7 +415,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_all_to_all_single_inductor_output_split_sizes_none(self):
         def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
             input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
@@ -463,7 +453,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
         def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
             output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
@@ -505,7 +494,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @skipRocmIfTorchInductor
     def test_all_to_all_single_inductor_split_sizes_none(self):
         def example(inp, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
