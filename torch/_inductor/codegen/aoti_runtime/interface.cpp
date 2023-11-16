@@ -234,6 +234,8 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
 #define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
+  CACHE_TORCH_DTYPE(float8_e5m2);
+  CACHE_TORCH_DTYPE(float8_e4m3fn);
   CACHE_TORCH_DTYPE(bfloat16);
   CACHE_TORCH_DTYPE(float16);
   CACHE_TORCH_DTYPE(float32);
