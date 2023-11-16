@@ -2901,10 +2901,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
+    @torch._dynamo.config.patch(verbose=True)
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
-
-        torch._dynamo.config.verbose = True
 
         @torch._dynamo.optimize(counter)
         def f(x):
