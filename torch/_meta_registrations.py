@@ -3621,29 +3621,17 @@ def shift_dtype_check(fn_name, self, val):
 @register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
-    element_wise = elementwise_meta(
+    return elementwise_meta(
         self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
-    element_wise = elementwise_meta(
+    return elementwise_meta(
         self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta(aten.zero.default)
