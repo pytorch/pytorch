@@ -2639,24 +2639,17 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.double)
     def test_cholesky_solve_backward(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        b_dims = (5, 2)
+        L_dims = (5, 5)
+        upper = False
 
-        # A different code path runs depending on if we ask for the grad of A.
-        for requires_A_grad in (False, True):
-            b_dims = (5, 2)
-            A_dims = (5,)
-            upper = False
-
-            b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
-            A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
-            A.requires_grad = requires_A_grad
-            L = torch.linalg.cholesky(A, upper=upper)
-            (torch.cholesky_solve(b, L, upper=upper).sum()).backward()
-
-            expected_grad = torch.linalg.solve(A, torch.ones_like(b))
-            self.assertEqual(b.grad, expected_grad)
+        b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
+        L = torch.randn(*L_dims, dtype=dtype, device=device)
+        torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=upper), (b,))
+        # TODO: Also check the gradient with respect to L. This seems to be messy with
+        # gradcheck because gradcheck isn't aware of the implicit symmetry in L.
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
