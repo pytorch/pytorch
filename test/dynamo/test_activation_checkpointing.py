@@ -60,7 +60,6 @@ def count_ops(
     return gm
 
 
-
 class _InvalidContext:
     def __init__(self):
         pass
@@ -109,8 +108,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         expected.sum().backward()
 
         torch.manual_seed(0)
-        compiled_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
-        result = compiled_fn(*cloned_args)
+        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
@@ -128,9 +126,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     def _compare_orig_and_checkpointed_fns(self, orig_fn, checkpointed_fn, *args, fullgraph=True):
         # The original version and the checkpointed version of the same function
-        # should produce the same results and the same gradients under torch.compile.
+        # should produce the same outputs and the same gradients under torch.compile.
 
-        # Original version
+        # Run original version
         cloned_args_orig_fn = []
         for arg in args:
             cloned_args_orig_fn.append(arg.clone().detach().requires_grad_(arg.requires_grad))
@@ -139,7 +137,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
         result_orig_fn.sum().backward()
 
-        # Checkpointed version
+        # Run checkpointed version
         cloned_args_checkpointed_fn = []
         for arg in args:
             cloned_args_checkpointed_fn.append(arg.clone().detach().requires_grad_(arg.requires_grad))
@@ -749,7 +747,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             )
 
         def gn(x, y):
-            return torch.relu(torch.dropout(torch.sigmoid(x), p=0.5, train=True)) + y
+            return torch.sigmoid(
+                torch.matmul(torch.matmul(torch.dropout(torch.sigmoid(x), p=0.5, train=True), y), y)
+            )
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
