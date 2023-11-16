@@ -298,7 +298,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert sig.return_annotation in (sig.empty, out_type)
+        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+            sig.empty,
+            out_type,
+        )
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]

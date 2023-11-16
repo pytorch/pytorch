@@ -326,7 +326,6 @@ class FakeTensorConverter:
         t,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         *,
         source=None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
@@ -365,7 +364,6 @@ class FakeTensorConverter:
             t,
             shape_env=shape_env,
             callback=mk_fake_tensor,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
@@ -402,7 +400,6 @@ class FakeTensorConverter:
         *,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
@@ -413,7 +410,6 @@ class FakeTensorConverter:
             t,
             make_constant,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
@@ -599,10 +595,10 @@ def nonzero(fake_mode, func, arg):
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
-            free_symbols,
+            has_free_symbols,
         )
 
-        if not free_symbols(arg.numel()):
+        if not has_free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
@@ -635,10 +631,10 @@ def masked_select(fake_mode, func, self, mask):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import (
         _constrain_range_for_size,
-        free_symbols,
+        has_free_symbols,
     )
 
-    if not free_symbols(arg.numel()):
+    if not has_free_symbols(arg.numel()):
         if arg.numel() >= 2:
             maxval = int(arg.numel())
 
@@ -706,7 +702,6 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 
 
 # takes in multiple-devices, dont default to default device handling
-@register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -716,7 +711,6 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 
 
 # same with multi_device_op_default, but return the input
-@register_op_impl(aten.index_put_.default)
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
@@ -728,6 +722,27 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten.index_put.default)
+@register_op_impl(aten.index_put_.default)
+def index_put_impl(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values = new_kwargs["values"]
+    self_device = new_kwargs["input"].fake_device
+    torch._check(
+        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
+    )
+
+    out = run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    if func is aten.index_put_.default:
+        return new_kwargs["input"]
+    else:
+        return out
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -1634,6 +1649,13 @@ class FakeTensorMode(TorchDispatchMode):
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations:
+            if func in (
+                aten._nested_tensor_from_tensor_list.default,
+                aten._nested_tensor_from_tensor_list.out,
+            ):
+                raise UnsupportedOperatorException(
+                    "torch.compile does not support strided NestedTensor"
+                )
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out != NotImplemented:
@@ -1850,7 +1872,6 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         *,
         static_shapes=None,
-        ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
@@ -1870,7 +1891,6 @@ class FakeTensorMode(TorchDispatchMode):
             self,
             tensor,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,

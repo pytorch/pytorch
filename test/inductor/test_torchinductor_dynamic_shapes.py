@@ -170,6 +170,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
+    def test_adaptive_max_pool3d_with_indices(self, device):
+        x = 5
+        y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
+
+        def fn(x, y):
+            return torch.nn.functional.adaptive_max_pool3d_with_indices(
+                output_size=x, input=y, return_indices=True
+            )
+
+        opt_f = self.compile_fn(fn)
+        r = fn(x, y)
+        opt_r = opt_f(x, y)
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -355,6 +369,15 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
 
+    def test_sym_stride_lowering(self, device):
+        def fn(x):
+            s0 = (x + 1).stride(0)
+            return x * s0
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+        self.assertEqual(fn(a), cfn(a))
+
     def test_abs(self, device):
         def fn(x, y):
             y0, y1 = y.shape
@@ -399,6 +422,26 @@ class TestInductorDynamic(TestCase):
             return x / torch.ones(3)
 
         test(div)
+
+    def test_symbolic_storage_offset(self, device):
+        # Make sure that nn.Parameters with unaligned storage_offset works
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(
+                    torch.rand((20,), device=device).as_strided((4, 4), (4, 1), 3)
+                )
+
+            def forward(self, x):
+                return self.x + x
+
+        mod = MyModule()
+
+        x = torch.rand((4, 4), device=device)
+        expected = mod(x)
+        opt_mod = torch.compile(mod)
+        actual = opt_mod(x)
+        self.assertEqual(expected, actual)
 
     @onlyCPU
     def test_sub_constant_folding(self, device):

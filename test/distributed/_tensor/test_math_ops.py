@@ -16,27 +16,43 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistMathOpsTest(DTensorTestBase):
-    @with_comms
-    def test_sum(self):
+    def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
-
         shard_spec = [Shard(0)]
 
-        tensor_to_sum = torch.randn(12, 8, 8)
+        tensor = torch.randn(12, 8, 8)
+        dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
-        mat1 = distribute_tensor(tensor_to_sum, device_mesh, shard_spec)
+        op = getattr(tensor, op_str)
+        op_dt = getattr(dtensor, op_str)
 
         keep_dim_or_not = [True, False, None]
-        for dim in range(tensor_to_sum.ndim):
+        for dim in range(tensor.ndim):
             for keep_dim in keep_dim_or_not:
-                sum_args = (dim, keep_dim) if keep_dim is not None else (dim,)
-                dim_sumed_tensor = tensor_to_sum.sum(*sum_args)
-                dt_dim_sumed_tensor = mat1.sum(*sum_args).full_tensor()
-                self.assertEqual(dt_dim_sumed_tensor, dim_sumed_tensor)
+                args = (dim, keep_dim) if keep_dim is not None else (dim,)
+                if op_str in ("max", "min"):
+                    # min and max return a tuple when dim specified
+                    dim_reduced_tensor, _ = op(*args)
+                    dt_reduced, _ = op_dt(*args)
+                else:
+                    dim_reduced_tensor = op(*args)
+                    dt_reduced = op_dt(*args)
+                dt_dim_reduced_tensor = dt_reduced.full_tensor()
+                self.assertEqual(dt_dim_reduced_tensor, dim_reduced_tensor)
 
-        full_sumed_tensor = tensor_to_sum.sum()
-        dt_sum = mat1.sum().full_tensor()
-        self.assertEqual(dt_sum, full_sumed_tensor)
+        full_reduced_tensor = op()
+        dt_full_reduced = op_dt().full_tensor()
+        self.assertEqual(dt_full_reduced, full_reduced_tensor)
+
+    @with_comms
+    def test_linear_op_reductions(self):
+        for op_str in ("all", "sum", "prod", "max", "min"):
+            self.linear_op_reductions(op_str)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_mean(self):
+        self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
