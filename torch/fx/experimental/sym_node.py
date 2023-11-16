@@ -344,6 +344,16 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
+    def guard(self, file, line):
+        if self.is_int():
+            return self.guard_int(file, line)
+        elif self.is_float():
+            return self.guard_float(file, line)
+        elif self.is_bool():
+            return self.guard_bool(file, line)
+        else:
+            raise AssertionError(f"unrecognized type {self.pytype}")
+
     def expect_true(self, file, line):
         if self.has_hint():
             # OK to generate guards
@@ -777,6 +787,7 @@ def _make_node_magic(method, func):
 
     def binary_magic_impl(self, other):
         from torch.fx.experimental.symbolic_shapes import safe_expand
+        import sympy
 
         op = method_to_operator(method)
 
@@ -793,6 +804,14 @@ def _make_node_magic(method, func):
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
         assert isinstance(other, SymNode)
+
+        # Sympy will incorrectly conclude that Mod(s0, 2.0) can never equal
+        # 0.0.  So if we attempt to do a modulus with float, just force
+        # specialization and stop trying to symbolically reason about it
+        if method == "mod" and (self.pytype is float or other.pytype is float):
+            out = self.guard("", 0) % other.guard("", 0)
+            return SymNode(sympy.sympify(out), self.shape_env, type(out), out)
+
         # TODO: consider constant prop here
         try:
             out = func(self.expr, other.expr)
