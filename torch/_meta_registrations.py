@@ -12,7 +12,7 @@ from torch._decomp import (
     meta_table,
 )
 from torch._ops import OpOverload
-from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
+from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     corresponding_complex_dtype,
     corresponding_real_dtype,
@@ -24,6 +24,7 @@ from torch._prims_common import (
 )
 
 from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
     _maybe_resize_out,
     _resize_output_check,
     _safe_copy_out,
@@ -49,6 +50,26 @@ def register_meta(op):
         return fn
 
     return wrapper
+
+
+def elementwise_meta(
+    *args,
+    type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,
+):
+    # Perform type promotion, as this is expected from prim_metafunction
+    _, result_dtype = utils.elementwise_dtypes(
+        *args,
+        type_promotion_kind=type_promotion,
+    )
+    args = [_maybe_convert_to_dtype(x, result_dtype) for x in args]
+
+    # Broadcast
+    args = _maybe_broadcast(*args)
+
+    # Perform prim checks
+    return _prim_elementwise_meta(
+        *args, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 def toRealValueType(dtype):
@@ -3575,8 +3596,8 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
 
 @register_meta([aten.round.default, aten.round.decimals])
 def meta_round(self, **kwargs):
-    return _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
 
 
@@ -3600,29 +3621,17 @@ def shift_dtype_check(fn_name, self, val):
 @register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
-    element_wise = _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
-    element_wise = _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta(aten.zero.default)
@@ -5909,8 +5918,8 @@ def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
     def _f(x):
-        return _elementwise_meta(
-            x, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        return elementwise_meta(
+            x, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
 
     return _f
@@ -5920,9 +5929,8 @@ def _create_binary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
     def _f(x, y):
-        x, y = _maybe_broadcast(x, y)
-        return _elementwise_meta(
-            x, y, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        return elementwise_meta(
+            x, y, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
 
     return _f
