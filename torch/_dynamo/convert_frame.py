@@ -674,6 +674,8 @@ def _placeholder_remote_fetch(unique_frame_id, frame):
         # breakpoint()
         check_fn = CheckFunctionManager.guard_fn_from_pycode(guard_code, frame.f_globals)
         code_obj = types.CodeType(*attributes)
+        check_fn(frame.f_locals)
+        breakpoint()
         return code_obj, check_fn
     except Exception as e:
         # breakpoint()
@@ -696,25 +698,26 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
         try:
             # breakpoint()
             # Cache miss, check remote
-            # remote_code, remote_guards = _placeholder_remote_fetch("my_frame", frame)
+            remote_code, remote_guards = _placeholder_remote_fetch("my_frame", frame)
             # breakpoint()
-            # if remote_code and remote_guards:
+            if remote_code and remote_guards:
                 # pickle.dumps((name, compiled_fn), "hack_comp.pkl")
-                # with open("hack_comp.pkl", 'rb') as file:
-                #     serialized = file.read()
+                breakpoint()
+                with open("hack_comp.pkl", 'rb') as file:
+                    serialized = file.read()
 
-                # name, compiled_fn = pickle.loads(serialized)
-                # # breakpoint()
-                # frame.f_globals[name] = compiled_fn
-                # result = GuardedCode(remote_code, remote_guards)
-            # else:
-            result = inner_convert(frame, cache_entry, hooks, frame_state)
+                name, compiled_fn = pickle.loads(serialized)
                 # breakpoint()
-                # code_attrs = attrs_code_object(result.code)
-                # # func_attrs = attrs_function(result.check_fn)
-                # guard_py_code = result.check_fn.pycode
-                # # breakpoint()
-                # _placeholder_remote_write("my_frame", code_attrs, guard_py_code)
+                frame.f_globals[name] = compiled_fn
+                result = GuardedCode(remote_code, remote_guards)
+            else:
+                result = inner_convert(frame, cache_entry, hooks, frame_state)
+                # breakpoint()
+                code_attrs = attrs_code_object(result.code)
+                # func_attrs = attrs_function(result.check_fn)
+                guard_py_code = result.check_fn.pycode
+                # breakpoint()
+                _placeholder_remote_write("my_frame", code_attrs, guard_py_code)
 
             counters["frames"]["ok"] += 1
             return result
