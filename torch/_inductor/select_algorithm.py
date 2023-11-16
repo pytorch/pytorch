@@ -27,7 +27,6 @@ from .codegen.common import (
     KernelTemplate,
     PrimitiveInfoType,
 )
-from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -762,6 +761,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
     ):
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
