@@ -298,14 +298,12 @@ class ndarray:
 
     def resize(self, *new_shape, refcheck=False):
         a = self.tensor
-        # TODO(Lezcano) This is not done in-place
         # implementation of ndarray.resize.
         # NB: differs from np.resize: fills with zeros instead of making repeated copies of input.
         if refcheck:
             raise NotImplementedError(
                 f"resize(..., refcheck={refcheck} is not implemented."
             )
-
         if new_shape in [(), (None,)]:
             return
 
@@ -325,10 +323,10 @@ class ndarray:
             # shrink
             ret = a[:new_numel].reshape(new_shape)
         else:
-            b = torch.zeros(new_numel)
+            b = torch.zeros(new_numel, dtype=a.dtype)
             b[: a.numel()] = a
             ret = b.reshape(new_shape)
-        self.tensor = ret
+        self.tensor.set_(ret)
 
     def view(self, dtype):
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
