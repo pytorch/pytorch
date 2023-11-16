@@ -34,7 +34,6 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
-from .allowed_functions import _disallowed_function_ids
 from .utils import getfile
 
 from .variables.functions import (
@@ -326,10 +325,10 @@ def check_file(filename, is_inlined_call=False):
 
 @dataclasses.dataclass
 class FunctionInfo:
-    py_obj: object
-    name: str
+    py_obj: Optional[object]
+    name: Optional[str]
     filename: str
-    code: types.CodeType
+    code: Optional[types.CodeType]
 
 
 """
@@ -378,7 +377,7 @@ def check_verbose(obj, is_inlined_call=False):
     elif isinstance(obj, types.CodeType):
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
-        fi = FunctionInfo(obj, obj.__name__, getfile(obj), obj.__code__)
+        fi = FunctionInfo(obj, obj.__name__, getfile(obj), obj.__code__)  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
     # Go through function based skip/inline rules.
@@ -392,9 +391,6 @@ def check_verbose(obj, is_inlined_call=False):
             return SkipResult(True, "patched init cannot be inlined.")
         elif fi.name == "__torch_function__":
             return SkipResult(False, "allow inlining __torch_function__")
-        # TODO: remove this after allowed_function refactor is done.
-        elif fi.py_obj is not None and id(fi.py_obj) in _disallowed_function_ids:
-            return SkipResult(True, f"inlining disallowed: {fi.py_obj}")
 
     # Go through file based skip/inline rules.
     return check_file(fi.filename, is_inlined_call)
