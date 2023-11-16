@@ -919,40 +919,45 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(fn, (nt,), (nt3,), True)
 
     def _get_views(self):
-        # There are three cases to consider here based on the logic in
-        # meta_utils.py
-        #
-        # (1) basic case:
-        # view is not a leaf and has the same requires grad as its basic case
-        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
-        self.assertEqual(x.is_leaf, False)
-        yield x.unsqueeze(-1)
+        # Test all cases with both an NT base and a dense base
+        for base_is_nt in [False, True]:
+            # There are three cases to consider here based on the logic in
+            # meta_utils.py
+            #
+            # (1) basic case:
+            # view is not a leaf and has the same requires grad as its basic case
+            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+            x = x.clone() if base_is_nt else x
+            self.assertEqual(x.is_leaf, False)
+            yield x.unsqueeze(-1)
 
-        # (2) leaf view case:
-        # the view has to be a leaf (w/ requires_grad True or requires_grad False)
-        # base w/ requires_grad True or requires_grad False
-        for requires_grad_1, requires_grad_2 in itertools.product(
-            [True, False], repeat=2
-        ):
-            x, _ = self._get_jagged_tensor(
-                ((2, 3, 4), 3), None, requires_grad=requires_grad_1
-            )
+            # (2) leaf view case:
+            # the view has to be a leaf (w/ requires_grad True or requires_grad False)
+            # base w/ requires_grad True or requires_grad False
+            for requires_grad_1, requires_grad_2 in itertools.product(
+                [True, False], repeat=2
+            ):
+                x, _ = self._get_jagged_tensor(
+                    ((2, 3, 4), 3), None, requires_grad=requires_grad_1
+                )
+                x = x.clone() if base_is_nt else x
+                with torch.no_grad():
+                    x_view = x.unsqueeze(-1)
+                    # The issue is this doesn't quite work
+                    x_view.requires_grad_(requires_grad_2)
+                yield x_view
+
+            # (3) obscure case:
+            # view is not a leaf (implies requires_grad True)
+            # base w/ requires_grad False)
+            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
+            x = x.clone() if base_is_nt else x
+            # intermediate leaf view
             with torch.no_grad():
                 x_view = x.unsqueeze(-1)
-                # The issue is this doesn't quite work
-                x_view.requires_grad_(requires_grad_2)
-            yield x_view
-
-        # (3) obscure case:
-        # view is not a leaf (implies requires_grad True)
-        # base w/ requires_grad False)
-        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
-        # intermediate leaf view
-        with torch.no_grad():
-            x_view = x.unsqueeze(-1)
-        x_view.requires_grad_(True)
-        x_view_view = x_view.unsqueeze(-1)
-        yield x_view_view
+            x_view.requires_grad_(True)
+            x_view_view = x_view.unsqueeze(-1)
+            yield x_view_view
 
     def test_inputs_to_compiled_fn_are_views(self):
         for nt_view in self._get_views():
