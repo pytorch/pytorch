@@ -4968,7 +4968,7 @@ class CommonTemplate:
             fn,
             [
                 torch.randn([1, 9]),
-                torch.randn([1, 2]),
+                torch.randn([1, 3]),
             ]
         )
 
