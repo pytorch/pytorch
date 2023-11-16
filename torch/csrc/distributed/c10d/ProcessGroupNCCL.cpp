@@ -39,6 +39,30 @@ namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
+DebugInfoWriter::DebugInfoWriter(int rank) {
+  const char* fileName = parseEnvVarString(
+      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
+  filename_ = c10::str(std::string(fileName), rank);
+}
+
+DebugInfoWriter::~DebugInfoWriter() = default;
+
+void DebugInfoWriter::write(const std::string& ncclTrace) {
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename_, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Wrote finished ";
+}
+
 namespace {
 
 #if defined(NCCL_MAJOR) && \
@@ -908,30 +932,6 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
   return true;
 }
 
-ProcessGroupNCCL::DebugInfoWriter::DebugInfoWriter(int rank) {
-  const char* fileName = parseEnvVarString(
-      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(std::string(fileName), rank);
-}
-
-ProcessGroupNCCL::DebugInfoWriter::~DebugInfoWriter() = default;
-
-void ProcessGroupNCCL::DebugInfoWriter::write(const std::string& ncclTrace) {
-  // Open a file for writing. The ios::binary flag is used to write data as
-  // binary.
-  std::ofstream file(filename_, std::ios::binary);
-
-  // Check if the file was opened successfully.
-  if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
-    return;
-  }
-
-  file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Wrote finished ";
-}
-
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -1302,7 +1302,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::registerDebugInfoWriter(
-    std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> writer) {
+    std::unique_ptr<DebugInfoWriter> writer) {
   TORCH_CHECK_WITH(
       DistBackendError,
       debugInfoWriter_ == nullptr,
@@ -1320,8 +1320,8 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
     auto ncclTrace = dump_nccl_trace();
     if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
-      std::unique_ptr<ProcessGroupNCCL::DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<ProcessGroupNCCL::DebugInfoWriter>(rank_);
+      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
+          std::make_unique<DebugInfoWriter>(rank_);
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
