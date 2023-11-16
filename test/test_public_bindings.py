@@ -259,6 +259,7 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.common_distributed",
             "torch.testing._internal.common_fsdp",
             "torch.testing._internal.dist_utils",
+            "torch.testing._internal.distributed.common_state_dict",
             "torch.testing._internal.distributed._shard.sharded_tensor",
             "torch.testing._internal.distributed._shard.test_common",
             "torch.testing._internal.distributed._tensor.common_dtensor",
