@@ -824,12 +824,15 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
+        if pytype is not None and hint is not None:
+            hint = pytype(hint)
+
         # Create a FX node that corresponds to the operation being applied to
         # this node.
         fx_node, _ = self.shape_env.create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, pytype(out_hint), fx_node=fx_node)
+        return SymNode(out, self.shape_env, pytype, hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
         from torch.fx.experimental.symbolic_shapes import safe_expand
