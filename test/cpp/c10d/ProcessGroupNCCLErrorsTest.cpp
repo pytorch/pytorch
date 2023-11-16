@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
@@ -363,13 +364,13 @@ std::string readTraceFromFile(const std::string& filename, size_t size) {
 }
 
 // Extend the nested class outside the parent class
-class TestDebugInfoWriter : public c10d::ProcessGroupNCCL::DebugInfoWriter {
+class TestDebugInfoWriter : public c10d::DebugInfoWriter {
  public:
   TestDebugInfoWriter() : DebugInfoWriter(0) {}
 
   void write(const std::string& ncclTrace) override {
     traces_.assign(ncclTrace.begin(), ncclTrace.end());
-    c10d::ProcessGroupNCCL::DebugInfoWriter::write(ncclTrace);
+    c10d::DebugInfoWriter::write(ncclTrace);
   }
 
   std::vector<uint8_t>& getTraces() {
