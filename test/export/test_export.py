@@ -1653,5 +1653,17 @@ def forward(self, arg0_1):
         check_device_and_fake_mode()
 
 
+    def test_export_graph_with_no_inputs(self):
+        # We saw this pattern when users want to export
+        # a graph that initlizes the states of a model.
+        def f():
+            return torch.randn(3, 4), torch.randn(3, 4)
+
+        ep = torch.export.export(f, ())
+        a, b = ep()
+        self.assertEqual(a.size(), torch.Size([3, 4]))
+        self.assertEqual(b.size(), torch.Size([3, 4]))
+
+
 if __name__ == '__main__':
     run_tests()
