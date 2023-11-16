@@ -1893,7 +1893,7 @@ class TestTestParametrizationDeviceType(TestCase):
             '{}.test_two_things_default_names_x_1_y0_{}',
             '{}.test_two_things_default_names_x1_y_0_5_{}',
             '{}.test_two_things_default_names_x2_y2_{}')
-                                     )
+        )
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
