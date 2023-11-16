@@ -12,5 +12,6 @@ class Stateful(Protocol):
         ...
 
 
+#TODO: Evaluate AppState vs `checkpoint.metadata.State_DICT_TYPE`
 T = TypeVar("T", bound=Stateful)
 AppState = Dict[str, T]
