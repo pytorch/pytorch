@@ -2645,11 +2645,13 @@ class TestLinalg(TestCase):
         L_dims = (5, 5)
         upper = False
 
-        b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
-        L = torch.randn(*L_dims, dtype=dtype, device=device)
-        torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=upper), (b,))
-        # TODO: Also check the gradient with respect to L. This seems to be messy with
-        # gradcheck because gradcheck isn't aware of the implicit symmetry in L.
+        for test_L_grad in (False, True):
+            b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
+            L = torch.randn(*L_dims, dtype=dtype, device=device, requires_grad=test_L_grad)
+            if test_L_grad:
+                torch.autograd.gradcheck(lambda b, L: torch.cholesky_solve(b, torch.tril(L), upper=upper), (b, L))
+            else:
+                torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=upper), (b,))
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
