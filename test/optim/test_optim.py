@@ -795,10 +795,9 @@ class TestOptim(TestCase):
             st_state = state[0]
             mt_state = state[1]
 
+            assert_eq_kwargs = {}
             if reduced_precision:
                 assert_eq_kwargs = {'atol': 1e-5, 'rtol': 1e-4}
-            else:
-                assert_eq_kwargs = {}
 
             for st_p, mt_p in zip(res[0], res[1]):
                 self.assertEqual(st_p, mt_p, **assert_eq_kwargs)

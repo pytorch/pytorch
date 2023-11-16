@@ -35,16 +35,6 @@ class SparseAdam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
-        super().__setstate__(state)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float)
-
     @torch.no_grad()
     def step(self, closure=None):
         """Perform a single optimization step.
@@ -80,7 +70,7 @@ class SparseAdam(Optimizer):
 
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = torch.tensor(0.0, dtype=torch.float)
+                        state['step'] = 0
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
