@@ -156,6 +156,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         result_checkpointed_fn = compiled_checkpointed_fn(*cloned_args_checkpointed_fn)
         result_checkpointed_fn.sum().backward()
 
+        # Check that outputs and gradients are equal
         self.assertEqual(
             result_orig_fn,
             result_checkpointed_fn,
