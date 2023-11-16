@@ -1581,7 +1581,7 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Translate the provided arg into a form suitable for caching at FakeTensor
         dispatch, i.e., convert unhashable types like lists & dicts into tuples and
-        # convert FakeTensors into metadata. Raises _UnhashableDispatchArg to signal
+        convert FakeTensors into metadata. Raises _UnhashableDispatchArg to signal
         unsupported cases that should bypass caching.
         """
         if isinstance(arg, (list, tuple)):
@@ -1601,9 +1601,8 @@ class FakeTensorMode(TorchDispatchMode):
                 raise _UnhashableDispatchArg("constant attribute")
             return extract_tensor_metadata(arg)
         elif isinstance(arg, torch.Tensor):
-            if not len(arg.size()) == 0 or (
-                len(arg.size()) == 1 and arg.size()[0] == 0
-            ):
+            size = arg.size()
+            if not (len(size) == 0 or (len(size) == 1 and size[0] == 0)):
                 raise _UnhashableDispatchArg("real tensor")
             return extract_tensor_metadata(arg)
         else:
