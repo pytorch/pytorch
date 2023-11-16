@@ -342,7 +342,7 @@ def xfail_if_model_type_is_exportedprogram(reason: str):
 
     import onnx_test_common
 
-    def skip_dec(func):
+    def xfail_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             if (
@@ -356,7 +356,7 @@ def xfail_if_model_type_is_exportedprogram(reason: str):
 
         return wrapper
 
-    return skip_dec
+    return xfail_dec
 
 
 def xfail_if_model_type_is_not_exportedprogram(reason: str):
@@ -371,7 +371,7 @@ def xfail_if_model_type_is_not_exportedprogram(reason: str):
 
     import onnx_test_common
 
-    def skip_dec(func):
+    def xfail_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             if (
@@ -385,7 +385,7 @@ def xfail_if_model_type_is_not_exportedprogram(reason: str):
 
         return wrapper
 
-    return skip_dec
+    return xfail_dec
 
 
 def flatten(x):
