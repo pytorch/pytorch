@@ -2643,15 +2643,14 @@ class TestLinalg(TestCase):
     def test_cholesky_solve_backward(self, device, dtype):
         b_dims = (5, 2)
         L_dims = (5, 5)
-        upper = False
 
         for test_L_grad in (False, True):
             b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
             L = torch.randn(*L_dims, dtype=dtype, device=device, requires_grad=test_L_grad)
             if test_L_grad:
-                torch.autograd.gradcheck(lambda b, L: torch.cholesky_solve(b, torch.tril(L), upper=upper), (b, L))
+                torch.autograd.gradcheck(lambda b, L: torch.cholesky_solve(b, torch.tril(L), upper=False), (b, L))
             else:
-                torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=upper), (b,))
+                torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
