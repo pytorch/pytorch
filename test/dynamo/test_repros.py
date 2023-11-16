@@ -15,7 +15,6 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
 from functools import wraps
 from typing import List
 
@@ -918,6 +917,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
 
+    # https://github.com/pytorch/pytorch/issues/113010
+    def test_out_overload_non_contiguous(self):
+        def f(x, y):
+            return torch.abs(x, out=y.T)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        x_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = f_compiled(x_test, y_test)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(y_ref, y_test)
+
+    # https://github.com/pytorch/pytorch/issues/109053
+    def test_view_dtype_overload(self):
+        def f(x):
+            return x.view(torch.int32)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x1 = torch.ones(4, requires_grad=True)
+        out_ref = f(x1)
+        out_test = f_compiled(x1)
+        self.assertEqual(out_ref, out_test)
+
+        x2 = torch.ones(4, requires_grad=False)
+        out_ref = f(x2)
+        out_test = f_compiled(x2)
+        self.assertEqual(out_ref, out_test)
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
@@ -941,27 +974,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
-
-    # https://github.com/pytorch/pytorch/issues/111603
-    def test_tuple_enum_as_key_dict(self):
-        class MyEnum(Enum):
-            A = "a"
-
-        class SomeModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x) -> torch.Tensor:
-                return self.linear(x[MyEnum.A])
-
-        x = {MyEnum.A: torch.rand(8, 1)}
-        model_pytorch = SomeModel()
-        model = torch.compile(model_pytorch)
-        # Executing twice works
-        model(x)
-        y = model(x)
-        self.assertEqual(y, model_pytorch(x))
 
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):

@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -57,14 +57,14 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_keys_getitem,
-    dict_keys_repr,
+    dict_const_keys,
+    dict_const_keys_repr,
+    dict_param_key_ids,
     guard_failures,
     is_guard_failure_reporting_enabled,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -106,10 +106,10 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___tensor_to_id": tensor_to_id,
+    "___dict_param_key_ids": dict_param_key_ids,
+    "___dict_const_keys": dict_const_keys,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
-    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
@@ -189,7 +189,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[object], ReferenceType[object]],
+        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
@@ -270,7 +270,7 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def TYPE_MATCH(self, guard: Guard) -> None:
+    def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
@@ -312,7 +312,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
             )
 
         ref = self.arg_ref(guard)
@@ -518,21 +518,22 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
+        param_key_ids = set(dict_param_key_ids(value))
+        const_keys = set(dict_const_keys(value))
+        const_keys_repr = dict_const_keys_repr(
+            const_keys, local=is_from_local_source(guard.originating_source)
         )
-        if any_tensor:
-            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
+        if param_key_ids:
+            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
         else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
+            code.append(f"set({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
