@@ -1,8 +1,6 @@
 name: nightly
 
 on:
-  # DEBUG: REMOVE BEFORE LANDING
-  pull_request:
   schedule:
     - cron: 0 0 * * *
   push:
@@ -19,24 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # docs-build:
-  #   name: docs build
-  #   uses: ./.github/workflows/_linux-build.yml
-  #   with:
-  #     build-environment: linux-jammy-py3.8-gcc11
-  #     docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+  docs-build:
+    name: docs build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
 
-  # docs-push:
-  #   name: docs push
-  #   uses: ./.github/workflows/_docs.yml
-  #   needs: docs-build
-  #   with:
-  #     build-environment: linux-jammy-py3.8-gcc11
-  #     docker-image: ${{ needs.docs-build.outputs.docker-image }}
-  #     push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
-  #     run-doxygen: true
-  #   secrets:
-  #     GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+  docs-push:
+    name: docs push
+    uses: ./.github/workflows/_docs.yml
+    needs: docs-build
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.docs-build.outputs.docker-image }}
+      push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+      run-doxygen: true
+    secrets:
+      GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-vision-commit-hash:
     runs-on: ubuntu-latest
@@ -46,16 +44,23 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+      - name: update-vision-commit-hash
+        uses: ./.github/actions/update-commit-hash
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: vision
+          branch: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
-      # - name: update-vision-commit-hash
-      #   uses: ./.github/actions/update-commit-hash
-      #   if: ${{ github.event_name == 'schedule' }}
-      #   with:
-      #     repo-name: vision
-      #     branch: main
-      #     updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-      #     pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-
+  update-executorch-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - name: update-executorch-commit-hash
         uses: ./.github/actions/update-commit-hash
         if: ${{ github.event_name == 'schedule' }}
