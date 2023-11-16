@@ -299,7 +299,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check_file(filename, allow_torch=False):
+def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -308,7 +308,7 @@ def check_file(filename, allow_torch=False):
             False,
             "inlined according skipfiles.LEGACY_MOD_INLINELIST",
         )
-    if allow_torch and is_torch_inline_allowed(filename):
+    if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
             "inlined according skipfiles.MOD_INLINELIST",
@@ -358,12 +358,15 @@ There are mainly three call sites of check/check_verbose:
       and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
 
-allow_torch is used to indicate whether we are checking the MOD_INLINELIST (torch modules), we only do this check when
-f2 is not skipped.
+`is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
+or not (f3 is not inlined call if f2 is skipped). Inside of the `check_verbose` function, there are more rules
+to be checked if this `is_inlined_call`.
+The reason to have this flag is that if the upper level function call (e.g, f2) is skipped,
+we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
 
-def check_verbose(obj, allow_torch=False):
+def check_verbose(obj, is_inlined_call=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
@@ -384,18 +387,21 @@ def check_verbose(obj, allow_torch=False):
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
-    elif fi.name == "__torch_function__":
-        breakpoint()
-        return SkipResult(False, "allow inlining __torch_function__")
-    elif fi.py_obj is not None and id(fi.py_obj) in _disallowed_function_ids:
-        return SkipResult(True, f"inlining disallowed: {fi.py_obj}")
+    if is_inlined_call:
+        if fi.name == "patched_init":
+            return SkipResult(True, "patched init cannot be inlined.")
+        elif fi.name == "__torch_function__":
+            return SkipResult(False, "allow inlining __torch_function__")
+        # TODO: remove this after allowed_function refactor is done.
+        elif fi.py_obj is not None and id(fi.py_obj) in _disallowed_function_ids:
+            return SkipResult(True, f"inlining disallowed: {fi.py_obj}")
 
     # Go through file based skip/inline rules.
-    return check_file(fi.filename, allow_torch)
+    return check_file(fi.filename, is_inlined_call)
 
 
-def check(obj, allow_torch=False):
-    return check_verbose(obj, allow_torch).skipped
+def check(obj, is_inlined_call=False):
+    return check_verbose(obj, is_inlined_call).skipped
 
 
 # skip common third party libs
