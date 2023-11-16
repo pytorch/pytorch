@@ -56,11 +56,6 @@ class TestFSDPFineTune(FSDPTest):
                 for param in seq[i * 2].parameters(recurse=True):
                     param.requires_grad = requires_grad
 
-    @classmethod
-    @skip_if_lt_x_gpu(2)
-    def _run(cls, rank, test_name, file_name, pipe):
-        super()._run(rank, test_name, file_name, pipe)
-
     @skip_if_lt_x_gpu(2)
     def test_backward_reshard_hooks(self):
         """
