@@ -1025,7 +1025,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
+        breakpoint()
         self.install_global(name, compiled_fn)
+        import pickle
+        with open("hack_comp.pkl", 'wb') as file:
+            pickle.dump((name, compiled_fn), file)
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

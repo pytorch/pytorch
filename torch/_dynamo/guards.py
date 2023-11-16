@@ -1016,7 +1016,10 @@ class CheckFunctionManager:
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        if config.generate_interpreter_agnostic_code:
+            code_parts = []
+        else:
+            code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
             extra = ""
@@ -1173,6 +1176,7 @@ class CheckFunctionManager:
         guard_fn.global_scope = {
             "G": builder.scope["G"],
         }
+        guard_fn.pycode = pycode
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
@@ -1202,6 +1206,44 @@ class CheckFunctionManager:
             return self._weakrefs[id(obj)]
         return None
 
+
+    @staticmethod
+    def guard_fn_from_pycode(pycode, global_scope):
+        # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
+        guards_log.debug("GUARDS:")
+
+        tensor_check_names = None
+        check_tensors_fn = None
+        check_tensors_verbose_fn = None
+
+        global_state = convert_frame.initial_global_state
+        if global_state is None:
+            # we should only hit this case in NopTests()
+            global_state = convert_frame.GlobalStateGuard()
+        closure_vars = {
+            "___guarded_code": None,
+            "___check_tensors": check_tensors_fn,
+            "___check_tensors_verbose": check_tensors_verbose_fn,
+            "___check_global_state": global_state.check,
+            "tensor_check_names": tensor_check_names,
+            **SYMPY_INTERP,
+            **CLOSURE_VARS,
+        }
+
+
+        out: Dict[str, Any] = dict()
+        exec(pycode, global_scope, out)
+        guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        guard_fn.closure_vars = closure_vars
+        # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
+        # guard_fn.code_parts = code_parts
+        # Grab only G, but preserve "G" because guards access it as "G"
+        guard_fn.global_scope = {
+            "G": global_scope,
+        }
+        guard_fn.pycode = pycode
+        # guard_fn.guard_fail_fn = guard_fail_fn
+        return guard_fn
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer

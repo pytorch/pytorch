@@ -351,7 +351,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+            # new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
             return new_mod
         assert callable(fn)
