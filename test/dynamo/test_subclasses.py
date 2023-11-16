@@ -984,6 +984,22 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             )
             out = compile_fn(nt_view)
 
+    def test_inputs_to_compiled_fn_are_views_with_extra_symints(self):
+        nt1, _ = self._get_jagged_tensor(((1, 3, 2), 4, 3), None)
+        nt2, _ = self._get_jagged_tensor(((1, 3, 2), 4, 3), None)
+
+        nt1_view = nt1.select(2, 1)
+        nt2_view = nt2.select(2, 1)
+
+        def fn(x, y):
+            # guard on the stride
+            if x.stride()[0] == y.stride()[0]:
+                pass
+            return x.clone()
+
+        fn_compiled = torch.compile(fn, backend="aot_eager")
+        out = fn_compiled(nt1_view, nt2_view)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

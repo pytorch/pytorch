@@ -2564,33 +2564,60 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, Tensorlike)
-            sources_and_tensors = [(source, t)]
-            if is_traceable_wrapper_subclass(t):
-                # If our placeholder is a tensor subclass, then the "true" symints
-                # come from the subclass's inner tensors.
-                attrs, _ = t.__tensor_flatten__()
+
+            def get_sources_and_tensors(source, t):
+                sources_and_tensors = []
+                # Given a "base" source and tensor, find the right set of sources and
+                # tensors to track symints for.
                 from torch._dynamo.source import AttrSource
-                inner_sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
-                if t.is_nested:
-                    # For NestedTensors we need to track BOTH symints on the outer
-                    # tensor and tensor because we'd like to guard on the ragged
-                    # size but the symint representing ragged size is not in terms
-                    # of the symints on the inner tensors.
-                    sources_and_tensors.extend(inner_sources_and_tensors)
+
+                if is_traceable_wrapper_subclass(t):
+                    # If our placeholder is a tensor subclass, then the "true" symints
+                    # come from the subclass's inner tensors.
+                    attrs, _ = t.__tensor_flatten__()
+
+                    inner_sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
+                    if t.is_nested:
+                        # For NestedTensors we need to track BOTH symints on the outer
+                        # tensor and tensor because we'd like to guard on the ragged
+                        # size but the symint representing ragged size is not in terms
+                        # of the symints on the inner tensors.
+                        sources_and_tensors.extend([(source, t)])
+                        sources_and_tensors.extend(inner_sources_and_tensors)
+                    else:
+                        # For other tensor subclasses, only track the symints from
+                        # the inner tensors
+                        sources_and_tensors.extend(inner_sources_and_tensors)
                 else:
-                    # For other tensor subclasses, only track the symints from
-                    # the inner tensors
-                    sources_and_tensors = inner_sources_and_tensors
+                    sources_and_tensors.extend([(source, t)])
+
+                if t.is_nested and t._is_view():
+                    # We need to track symints on the base as well for NestedTensor views
+                    # because NT views are metafied in a different way than normal tensors.
+                    #
+                    # Ordinarily, the base is metafied with static DimDynamic so that
+                    # symints are not created for the sizes/strides of the base. Instead,
+                    # the symintification happens during view replay! This is possible
+                    # because as_strided conveniently sets the sizes/strides/storage_offsets
+                    # of the resulting tensor to symint values.
+                    #
+                    # However, NT and any other subclass that does not support as_strided
+                    # must rely instead on view_func to do this replaying. In this case,
+                    # the base must be metafied with dynamic DimDynamic and thus have
+                    # symints allocated, which then need to be tracked.
+                    sources_and_tensors.extend(get_sources_and_tensors(AttrSource(source, "_base"), t._base))
+                return sources_and_tensors
+
+            sources_and_tensors = get_sources_and_tensors(source, t)
 
             for src, curr_t in sources_and_tensors:
                 for i, ss in enumerate(curr_t.size()):
                     property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                    track_symint(property_source, ss, constraint[i])
-                if not t.is_nested:
-                    for i, ss in enumerate(curr_t.stride()):
-                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
-                    track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
-
+                    constraint_i = constraint[i] if i < len(constraint) else None
+                    track_symint(property_source, ss, constraint_i)
+                for i, ss in enumerate(curr_t.stride()):
+                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
