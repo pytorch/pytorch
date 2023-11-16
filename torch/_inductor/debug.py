@@ -496,8 +496,12 @@ class DebugFormatter:
         import json
 
         def build_node_info(node: ir.IRNode):
+            if hasattr(node, "name"):
+                node_name = node.name
+            else:
+                node_name = ""
             node_info = {
-                "name": name,
+                "name": node_name,
                 "type": type(node).__name__,
             }
             try:
@@ -525,6 +529,7 @@ class DebugFormatter:
             return node_info
 
         general_properties = {
+            "op_name" : name,
             "cuda_device_name": torch.cuda.get_device_name(),
             "cuda_device_count": torch.cuda.device_count(),
             "input_nodes": [build_node_info(node) for node in input_nodes],
