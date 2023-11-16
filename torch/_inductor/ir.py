@@ -6234,6 +6234,11 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
+            def check_bounds(self, index, size):
+                index = add_index(index, "other")
+                size = add_index(size, "other")
+                self._inner.check_bounds(index, size)
+
             def bucketize(
                 self,
                 values,
@@ -6265,15 +6270,19 @@ class LoopBodyBlock:
                     "call_module", name, (mask_proxy, other_proxy), {}
                 )
 
-            @staticmethod
-            def check_bounds(index_proxy, size):
-                var_size = self.body.add_indirect(size)
+            # @staticmethod
+            # def check_bounds(index, size):
+            #     breakpoint()
+            #     var = self.body.add_indirect(size)
 
-                def check(index):
-                    V.ops.check_bounds(index, size)
+            #     def set_indirect(index):
+            #         V.ops.check_bounds(index, size)
+            #         # self.body.replace_indirect(
+            #         #     var, V.ops.check_bounds(index, size)
+            #         # )
 
-                name = self.body.add_submodule(check, "check_bounds")
-                return tracer.create_proxy("call_module", name, (index_proxy,), {})
+            #     name = self.body.add_submodule(set_indirect, "check_bounds")
+            #     return tracer.create_proxy("call_module", name, (index,), {})
 
             @staticmethod
             def indirect_indexing(index_proxy, size, check=True):

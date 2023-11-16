@@ -254,8 +254,13 @@ class IndexPropagation:
         # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
         #     for SymPy expressions, so we don't want to repeat idx too much
 
+        # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
+            # If we are turning a indirect indexing into direct, we need to wrap it.
             index = index.value.expr
-            return index + Where(index >= 0, 0, size)
+            result = index + Where(index >= 0, 0, size)
+            self._inner.check_bounds(result, size)
+
+            return index
 
         return self.fallback("indirect_indexing", (index, size, check), {}).value

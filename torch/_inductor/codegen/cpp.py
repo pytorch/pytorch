@@ -43,6 +43,7 @@ from .common import (
     DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
+    IndirectAssertLine,
     Kernel,
     KernelArgs,
     OpOverrides,
@@ -1079,6 +1080,31 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
+    def check_bounds(expr, size):
+        code = IndentedBuffer()
+
+        var = V.kernel.cse.newvar()
+        expr = cexpr(V.kernel.rename_indexing(expr))
+        code.writeline(f"auto {var} = {expr};")
+
+        mask = None  # is there a mask for var?
+        code.writeline(
+            IndirectAssertLine(
+                V.kernel.assert_line,
+                V.kernel.assert_function,
+                var,
+                mask,
+                V.kernel.indirect_max_sizes,
+            )
+        )
+
+        map_key = (var, mask)
+        V.kernel.indirect_max_sizes[map_key] = (size, V.kernel.index_to_str(size))
+
+        V.kernel.compute.splice(code)
+        return var
+
+    @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
 
@@ -1587,6 +1613,9 @@ class CppVecKernel(CppKernel):
             )
         self.stores.writeline(DeferredLine(name, line))
 
+    # def check_bounds(self, expr, size):
+    #     breakpoint()
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
             "max",
@@ -1922,6 +1951,7 @@ class CppVecKernelChecker(CppVecKernel):
         self.vec_dtype: torch.dtype = torch.float32
 
     def disable_vec(self, msg=None):
+        print("msg", msg)
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
@@ -2273,6 +2303,11 @@ class CppVecKernelChecker(CppVecKernel):
                     opt_ctx.is_most_inner_loop_irrevelant = tiling_var_irrelevant
                     tmp_var = self.cse.newvar()
                     return tmp_var
+
+            @staticmethod
+            def check_bounds(expr, size):
+                tmp_var = self.cse.newvar()
+                return tmp_var
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
