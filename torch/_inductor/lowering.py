@@ -2333,7 +2333,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(end - start + (step - 1), step)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
