@@ -2016,7 +2016,7 @@ class ShapeEnv:
         # TODO: This should be DYNAMIC, using DUCK for BC
         dynamic_strides = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
 
-        assert len(dynamic_dims) == dim
+        assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
