@@ -110,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -244,14 +244,22 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname == dynamo_qname:
-                self.assertEqual(logger.level, logging.INFO)
+            if logger_qname in dynamo_qnames:
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                )
             else:
-                self.assertEqual(logger.level, logging.DEBUG)
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
