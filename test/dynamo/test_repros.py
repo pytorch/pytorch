@@ -3580,8 +3580,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return x.cos()
             return x.sin()
 
-        torch.compile(fn, backend="eager")(torch.ones(5, 1, 3, 4))
-        torch.compile(fn, backend="eager")(torch.ones(5, 1, 2, 3))
+        opt_fn = torch.compile(fn, backend="eager")
+
+        x = torch.ones(5, 1, 3, 4)
+        x2 = torch.ones(5, 1, 2, 3)
+        self.assertEqual(
+            fn(x),
+            opt_fn(x)
+        )
+        self.assertEqual(
+            fn(x2),
+            opt_fn(x2)
+        )
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):

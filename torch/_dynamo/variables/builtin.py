@@ -1509,6 +1509,10 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return ConstantVariable.create(
+                a.as_python_constant() or b.as_python_constant()
+            )
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
