@@ -21,10 +21,10 @@ from typing import (
 )
 
 import sympy
+from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from sympy.printing.printer import Printer
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
