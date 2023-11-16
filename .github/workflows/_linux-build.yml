@@ -116,6 +116,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''

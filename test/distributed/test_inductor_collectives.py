@@ -52,6 +52,42 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_broadcast_inductor(self):
+        """
+        Testing if broadcast works correctly when using inductor
+        """
+
+        def example(tensor, src, *, tag, ranks, group_size):
+            res = torch.ops.c10d_functional.broadcast(tensor, src, tag, ranks, group_size)
+            res = torch.ops.c10d_functional.wait_tensor(res)
+            return res
+
+        def compile(func, example_inputs):
+            graph = make_fx(func)(*example_inputs)
+            return inductor_compile_fx(graph, example_inputs)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            t = torch.randn(4, 4, device="cuda")
+            inputs = (
+                t if self.rank == 0 else torch.zeros(4, 4, device="cuda"),
+                0
+            )
+            eager_out = example(*inputs)
+            self.assertTrue(same(t, eager_out))
+
+            compiled_func = compile(example, inputs)
+            compiled_out = compiled_func(*inputs)
+            self.assertTrue(same(eager_out, compiled_out))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -83,6 +119,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    def test_c10d_functional_tagged_pt2_compliant(self):
+        op = torch.ops._c10d_functional.all_reduce.default
+        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+        op = torch.ops.c10d_functional.all_reduce.default
+        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -331,9 +373,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -370,8 +413,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -412,8 +455,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=None") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -444,8 +487,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=None") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -521,9 +564,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("buf1 = _wait_tensor(buf1)") \
-            .check("buf3 = buf1") \
-            .check("buf4 = empty") \
-            .check("return (buf1, buf4") \
+            .check("buf4 = buf1") \
+            .check("buf5 = empty") \
+            .check("return (buf1, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -554,16 +597,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # wait_tensors before they are returned from the graph.
         FileCheck() \
             .check("buf0 = empty(") \
-            .check("buf4 = empty(") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf4") \
+            .check("buf5 = empty(") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("buf1 = _wait_tensor(buf1)") \
-            .check("buf3 = buf1") \
-            .check("return (buf1, buf4, buf5") \
+            .check("buf4 = buf1") \
+            .check("return (buf1, buf5, buf6") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
