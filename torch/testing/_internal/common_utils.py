@@ -468,6 +468,8 @@ class parametrize(_TestParametrizer):
         # Can't use isinstance as it would cause a circular import
         elif type(value).__name__ in {'OpInfo', 'ModuleInfo'}:
             return value.formatted_name
+        elif isinstance(value, (int, float, str)):
+            return f"{name}_{str(value).replace('.', '_')}"
         else:
             return f"{name}{idx}"
 
