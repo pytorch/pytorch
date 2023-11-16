@@ -30,16 +30,19 @@ class PackedLinearWeightDynamicBackward
                     c10::detail::intrusive_target_default_null_type<
                         LinearPackedParamsBase>> const&,
                 bool)>();
-    auto output = op.redispatch(
-        DispatchKeySet({DispatchKey::CPU}), input, packed_weight, reduce_range);
-    auto input_contig = input.contiguous();
     // Calculate statistics for quantization of input Tensor
     float x_min = 0;
     float x_max = 0;
     if (input.numel() > 0) {
+      auto input_contig = input.contiguous();
       x_min = input_contig.min().item<float>();
       x_max = input_contig.max().item<float>();
     }
+    auto output = op.redispatch(
+        DispatchKeySet({DispatchKey::CPU}),
+        std::move(input),
+        packed_weight,
+        reduce_range);
     auto q_params = quant_utils::ChooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
@@ -147,7 +150,7 @@ at::Tensor packed_linear_weight_grad(
     const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
     bool reduce_range) {
   return PackedLinearWeightDynamicBackward::apply(
-      input, packed_weight, reduce_range);
+      std::move(input), packed_weight, reduce_range);
 }
 } // namespace
 

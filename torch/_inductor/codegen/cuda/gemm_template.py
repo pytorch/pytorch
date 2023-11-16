@@ -479,7 +479,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if b_layout is not None:
             new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)
         if c_layout is not None:
-            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
+            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(c_layout)
         if d_layout is not None:
             new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
         return new_op
