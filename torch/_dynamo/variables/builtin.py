@@ -11,13 +11,7 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
-from ..exc import (
-    AttributeMutationError,
-    unimplemented,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
+from ..exc import AttributeMutationError, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
@@ -487,6 +481,15 @@ class BuiltinVariable(VariableTracker):
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
 
+        if has_constant_handler:
+            # constant fold
+            return variables.ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable
@@ -606,6 +609,14 @@ class BuiltinVariable(VariableTracker):
         if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(args[0].fn))
 
+        if self.fn is round and len(args) > 0 and isinstance(args[0], SymNodeVariable):
+            raise UserError(
+                UserErrorType.STANDARD_LIBRARY,
+                "Calling round() on symbolic value is not supported. "
+                "You can use floor() to implement this functionality",
+                case_name="dynamic_shape_round",
+            )
+
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
         if len(kwargs) == 0 and len(args) == 2:
@@ -623,42 +634,13 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                if not has_constant_handler:
-                    log.warning(
-                        "incorrect arg count %s %s and no constant handler",
-                        handler,
-                        exc,
-                    )
                 handler = None
 
         if handler:
-            try:
-                result = handler(tx, *args, **kwargs)
-                if result is not None:
-                    return result
-            except Unsupported as exc:
-                if not has_constant_handler:
-                    raise
-                # Actually, we will handle this just fine
-                exc.remove_from_stats()
+            result = handler(tx, *args, **kwargs)
+            if result is not None:
+                return result
 
-        if has_constant_handler:
-            # constant fold
-            return variables.ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-
-        if self.fn is round:
-            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
-                raise UserError(
-                    UserErrorType.STANDARD_LIBRARY,
-                    "Calling round() on symbolic value is not supported. "
-                    "You can use floor() to implement this functionality",
-                    case_name="dynamic_shape_round",
-                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -734,6 +716,9 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
+                assert not all(
+                    isinstance(i, variables.ConstantVariable) for i in [a, b]
+                )
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
@@ -757,13 +742,6 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, variables.ConstantVariable
-        ):
-            if self.fn is max:
-                return variables.ConstantVariable.create(max(a.value, b.value))
-            else:
-                return variables.ConstantVariable.create(min(a.value, b.value))
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
@@ -1379,23 +1357,15 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         if (
-            all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
-                for x in [left, right]
-            )
+            all(isinstance(x, NNModuleVariable) for x in [left, right])
             and op in supported_const_comparison_ops.values()
         ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
+            return ConstantVariable.create(
+                op(
+                    tx.output.get_submodule(left.module_key),
+                    tx.output.get_submodule(right.module_key),
+                )
             )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
-            return ConstantVariable.create(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
@@ -1467,9 +1437,6 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
-            return ConstantVariable.create(op(left.value, right.value))
-
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
@@ -1490,6 +1457,7 @@ class BuiltinVariable(VariableTracker):
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
+        assert not (isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable))
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
@@ -1505,6 +1473,7 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
+        assert not (isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable))
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
