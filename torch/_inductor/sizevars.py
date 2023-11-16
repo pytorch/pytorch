@@ -344,14 +344,10 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
-            return self.guard_equals(left, right)
-        elif lv < rv:
-            self.guard_lt(left, right)
-            return left
+        if lv <= rv:
+            return self.guard_leq(left, right)
         else:
-            self.guard_lt(right, left)
-            return right
+            return self.guard_leq(right, left)
 
     def evaluate_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
