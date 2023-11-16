@@ -59,7 +59,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
             except BaseException as ex:
                 result.set_exception(ex)
 
-        rref_fut.then(lambda fut: _wrap_rref_type_cont(fut))
+        rref_fut.then(_wrap_rref_type_cont)
         return result
 
 # This class manages proxied RPC API calls for RRefs. It is entirely used from

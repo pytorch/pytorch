@@ -15,7 +15,7 @@ class TORCH_API SerializationStorageContext {
       delete;
   SerializationStorageContext(const SerializationStorageContext&) = delete;
 
-  uint64_t getOrAddStorage(c10::Storage storage) {
+  uint64_t getOrAddStorage(const c10::Storage& storage) {
     if (!hasStorage(storage)) {
       uint64_t size = storage_id_map_.size();
       storage_id_map_[storage] = size;
@@ -23,7 +23,7 @@ class TORCH_API SerializationStorageContext {
     return storage_id_map_[storage];
   }
 
-  bool hasStorage(c10::Storage storage) {
+  bool hasStorage(const c10::Storage& storage) {
     return storage_id_map_.find(storage) != storage_id_map_.end();
   }
 
@@ -62,9 +62,9 @@ class TORCH_API DeserializationStorageContext {
       const DeserializationStorageContext&) = delete;
   DeserializationStorageContext(const DeserializationStorageContext&) = delete;
 
-  void addStorage(const std::string& name, c10::Storage storage) {
+  void addStorage(std::string name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
-    name_storage_map_.insert({name, storage});
+    name_storage_map_.emplace(std::move(name), std::move(storage));
   }
 
   bool hasStorage(const std::string& name) {
