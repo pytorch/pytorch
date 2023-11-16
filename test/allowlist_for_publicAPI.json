@@ -1033,8 +1033,7 @@
     "Number",
     "Sequence",
     "Tuple",
-    "Union",
-    "Optional"
+    "Union"
   ],
   "torch.utils.benchmark.utils.compare": [
     "Colorize",

@@ -35,6 +35,7 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
 Device = Optional[Union[_device, str, _int]]
+del Optional
 
 # Storage protocol implemented by ${Type}StorageBase classes
 
