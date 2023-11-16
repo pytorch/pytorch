@@ -934,7 +934,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
   // for calculation and subsequently reshape the output back.
   auto input_contig =
-      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)});
+      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
   TORCH_CHECK(input_contig.is_contiguous(), "Expect qlinear input to be contiguous.");
 
   auto src = at::native::itensor_from_tensor(input_contig);
