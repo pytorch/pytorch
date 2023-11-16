@@ -3427,6 +3427,19 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        example_out_li = (
+            [example_output]
+            if not isinstance(example_output, (list, tuple))
+            else example_output
+        )
+        for t in example_out_li:
+            if isinstance(t, torch.Tensor) and t.is_sparse:
+                V.graph.disable_cudagraphs = True
+                msg = "sparsity not handled. Please file issue for sparse inference weights."
+                if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+                    msg = f"{msg} Found from : \n {stack_trace}"
+                V.graph.disable_cudagraphs_reason = msg
+
         # TODO: Unconditionally do this, not just when example_output has
         # unbacked symbols
         if maybe_free_unbacked_symbols(example_output):
