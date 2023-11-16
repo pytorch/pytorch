@@ -14,7 +14,11 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.nested._internal.nested_tensor import (
+    jagged_from_list,
+    jagged_from_tensor_and_lengths,
+    ViewBufferFromNested,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -799,6 +803,19 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             )
         return jagged_from_list(out, offsets)
 
+    def _get_nc_jagged_tensor(self, inner_dim, starts, lengths, requires_grad=True):
+        # Makes a jagged tensor with N constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        max_dim = (starts + lengths).max()
+        values_tensor = torch.randn(
+            starts.shape[0],
+            max_dim.item(),
+            inner_dim,
+            requires_grad=requires_grad,
+            dtype=torch.float64,
+        )
+        return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
+
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
         compile_count = [0]
 
@@ -855,14 +872,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         def fn1(nt1, nt2):
             return (nt1 + nt2).sin().cos()
 
-        compiled_f = torch.compile(
-            fn1, fullgraph=True, backend="aot_eager", dynamic=True
-        )
+        compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
         out = compiled_f(nt, nt2)
         out_buffer = ViewBufferFromNested.apply(out)
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-        out_ref = compiled_f(nt, nt2)
+        out_ref = fn1(nt, nt2)
         out_buffer_ref = ViewBufferFromNested.apply(out_ref)
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 
