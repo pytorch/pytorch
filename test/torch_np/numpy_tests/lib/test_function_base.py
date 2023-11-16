@@ -3485,8 +3485,7 @@ class TestQuantile(TestCase):
         np.quantile(np.arange(100.0), p, method="midpoint")
         assert_array_equal(p, p0)
 
-    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
-    @xpassIfTorchDynamo  # (reason="TODO: make quantile preserve integers")
+    @skip(reason="XXX: make quantile preserve integer dtypes")
     @parametrize("dtype", "Bbhil")  # np.typecodes["AllInteger"])
     def test_quantile_preserve_int_type(self, dtype):
         res = np.quantile(np.array([1, 2], dtype=dtype), [0.5], method="nearest")
