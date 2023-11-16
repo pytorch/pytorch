@@ -1,7 +1,13 @@
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Set
 from warnings import warn
+
+from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
+    TD_HEURISTIC_PREVIOUSLY_FAILED,
+)
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -11,6 +17,8 @@ from tools.testing.target_determination.heuristics.utils import (
     python_test_file_to_test_name,
 )
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+
 
 class PreviouslyFailedInPR(HeuristicInterface):
     def __init__(self, **kwargs: Dict[str, Any]):
@@ -19,7 +27,7 @@ class PreviouslyFailedInPR(HeuristicInterface):
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
         # Tests must always be returned in a deterministic order.
         # Otherwise it breaks our test sharding logic
-        critical_tests = sorted(_get_previously_failing_tests())
+        critical_tests = sorted(get_previous_failures())
         test_rankings = TestPrioritizations(
             tests_being_ranked=tests, high_relevance=critical_tests
         )
@@ -27,8 +35,19 @@ class PreviouslyFailedInPR(HeuristicInterface):
         return test_rankings
 
     def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
-        critical_tests = _get_previously_failing_tests()
+        critical_tests = get_previous_failures()
         return {test: 1 for test in critical_tests if test in tests}
+
+
+def get_previous_failures() -> Set[str]:
+    path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED
+    if not os.path.exists(path):
+        print(f"could not find path {path}")
+        return set()
+    with open(path) as f:
+        return python_test_file_to_test_name(
+            _parse_prev_failing_test_files(json.load(f))
+        )
 
 
 def _get_previously_failing_tests() -> Set[str]:

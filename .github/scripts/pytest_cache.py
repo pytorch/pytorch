@@ -39,6 +39,9 @@ def parse_args() -> argparse.Namespace:
         help="A unique job identifier that should be the same for all runs of job",
     )
     parser.add_argument(
+        "--test_config", required="--upload" in sys.argv, help="The test config"
+    )  # Only required for upload
+    parser.add_argument(
         "--shard", required="--upload" in sys.argv, help="The shard id"
     )  # Only required for upload
 
@@ -84,6 +87,7 @@ def main() -> None:
             pr_identifier=pr_identifier,
             repo=repo,
             job_identifier=args.job_identifier,
+            test_config=args.test_config,
             shard=args.shard,
             cache_dir=cache_dir,
             bucket=args.bucket,
