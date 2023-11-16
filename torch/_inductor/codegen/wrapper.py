@@ -1519,11 +1519,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in chain(
-            self.src_to_kernel.values(),
-            self.user_defined_kernel_cache.values(),
-            V.graph.const_kernels,
-        ):
+        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel.update(self.user_defined_kernel_cache.values())
+        declare_kernel.update(V.graph.const_kernels)
+        for kernel in declare_kernel:
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
