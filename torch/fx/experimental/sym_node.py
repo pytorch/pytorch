@@ -62,7 +62,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float]],
+        hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
     ):
@@ -95,6 +95,8 @@ class SymNode:
         # unbacked symint that a hint was now possible, but as we added more
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
+        if hint is not None:
+            assert type(hint) is self.pytype, "Cannot create SymNode with incompatible hint"
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
