@@ -745,7 +745,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         bw_compiler = functools.partial(
             count_ops,
-            # NOTE: This unit test expects `dropout` to be recomputed.
+            # NOTE: This unit test expects `dropout` to be recomputed (notice the count for `native_dropout` is 1).
             # If in the future there is change to the partitioner that causes `dropout` to not be recomputed,
             # the partitioner should expose an API for user to control what ops must be recomputed,
             # so that we can ask the partitioner to always recompute this `dropout` op
