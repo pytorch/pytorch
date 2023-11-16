@@ -1911,7 +1911,7 @@ def create_functionalized_fn(
             # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
             #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
             #   require an extra round of tracing though, so it's more efficient to do in-line here.
-            assert isinstance(args, tuple) and len(args) == 2 and isinstance(args[0], list)
+            assert isinstance(args, tuple) and len(args) == 2 and isinstance(args[0], (list, tuple))
             # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
             primals_before = args[0]
             primals_after = pytree.tree_map(from_fun, f_args[0])
