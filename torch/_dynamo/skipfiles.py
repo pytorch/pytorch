@@ -34,6 +34,7 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from .allowed_functions import _disallowed_function_ids
 from .utils import getfile
 
 from .variables.functions import (
@@ -158,6 +159,7 @@ def _module_dir(m: types.ModuleType):
 FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
+    "torch._tensor._convert",
 }
 
 
@@ -322,6 +324,14 @@ def check_file(filename, allow_torch=False):
         return SkipResult(False, "inlined by default")
 
 
+@dataclasses.dataclass
+class FunctionInfo:
+    py_obj: object
+    name: str
+    filename: str
+    code: types.CodeType
+
+
 """
 This is the main entry point to determine whether an object (function) should be inlined or skipped.
 Let's illustrate the logic with an example:
@@ -357,21 +367,31 @@ def check_verbose(obj, allow_torch=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
-        filename = obj.get_filename()
-        obj = obj.get_code()
+        try:
+            py_obj = obj.get_function()
+        except NotImplementedError:
+            py_obj = None
+        fi = FunctionInfo(py_obj, obj.get_name(), obj.get_filename(), obj.get_code())
     elif isinstance(obj, types.CodeType):
-        filename = obj.co_filename
+        fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
-        filename = getfile(obj)
-        obj = obj.__code__  # type: ignore[union-attr]  # FIXME Add MethodType.__code__ to typeshed
+        fi = FunctionInfo(obj, obj.__name__, getfile(obj), obj.__code__)
     else:
-        filename = getfile(obj)
-    if obj in get_func_inlinelist():
+        fi = FunctionInfo(obj, None, getfile(obj), None)
+    # Go through function based skip/inline rules.
+    if fi.code in get_func_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
-    return check_file(filename, allow_torch)
+    elif fi.name == "__torch_function__":
+        breakpoint()
+        return SkipResult(False, "allow inlining __torch_function__")
+    elif fi.py_obj is not None and id(fi.py_obj) in _disallowed_function_ids:
+        return SkipResult(True, f"inlining disallowed: {fi.py_obj}")
+
+    # Go through file based skip/inline rules.
+    return check_file(fi.filename, allow_torch)
 
 
 def check(obj, allow_torch=False):
