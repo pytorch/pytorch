@@ -242,7 +242,9 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
