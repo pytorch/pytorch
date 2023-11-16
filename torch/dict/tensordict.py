@@ -45,7 +45,7 @@ from .utils import (
     _is_tensorclass,
     _LOCK_ERROR,
     _NON_STR_KEY_ERR,
-    _NON_STR_KEY_TUPLE_ERR,
+    _NON_STR_KEY_TUPLE_ERR,_getitem_batch_size,
     _parse_to,
     _set_item,
     _set_max_batch_size,
@@ -639,73 +639,30 @@ class TensorDict(TensorDictBase):
         return tuple(out)
 
     def split(self, split_size: int | list[int], dim: int = 0) -> list[TensorDictBase]:
-        batch_sizes = []
-        if self.batch_dims == 0:
-            raise RuntimeError("TensorDict with empty batch size is not splittable")
-        if not (-self.batch_dims <= dim < self.batch_dims):
-            raise IndexError(
-                f"Dimension out of range (expected to be in range of [-{self.batch_dims}, {self.batch_dims - 1}], but got {dim})"
-            )
+        # we must use slices to keep the storage of the tensors
+        batch_size = self.batch_size
         if dim < 0:
-            dim += self.batch_dims
+            dim = len(batch_size) + dim
         if isinstance(split_size, int):
-            rep, remainder = divmod(self.batch_size[dim], split_size)
-            rep_shape = torch.Size(
-                [
-                    split_size if idx == dim else size
-                    for (idx, size) in enumerate(self.batch_size)
-                ]
-            )
-            batch_sizes = [rep_shape for _ in range(rep)]
-            if remainder:
-                batch_sizes.append(
-                    torch.Size(
-                        [
-                            remainder if dim_idx == dim else dim_size
-                            for (dim_idx, dim_size) in enumerate(self.batch_size)
-                        ]
-                    )
-                )
-        elif isinstance(split_size, list) and all(
-            isinstance(element, int) for element in split_size
-        ):
-            if sum(split_size) != self.batch_size[dim]:
-                raise RuntimeError(
-                    f"Split method expects split_size to sum exactly to {self.batch_size[dim]} (tensor's size at dimension {dim}), but got split_size={split_size}"
-                )
-            for i in split_size:
-                batch_sizes.append(
-                    torch.Size(
-                        [
-                            i if dim_idx == dim else dim_size
-                            for (dim_idx, dim_size) in enumerate(self.batch_size)
-                        ]
-                    )
-                )
+            idx0 = 0
+            idx1 = split_size
+            split_sizes = [slice(idx0, idx1)]
+            while idx1 <= batch_size[dim]:
+                idx0 = idx1
+                idx1 += split_size
+                split_sizes.append(slice(idx0, idx1))
         else:
-            raise TypeError(
-                "split(): argument 'split_size' must be int or list of ints"
-            )
-        dictionaries = [{} for _ in range(len(batch_sizes))]
-        for key, item in self.items():
-            split_tensors = torch.split(item, split_size, dim)
-            for idx, split_tensor in enumerate(split_tensors):
-                dictionaries[idx][key] = split_tensor
-        names = None
-        if self._has_names():
-            names = copy(self.names)
-        return [
-            TensorDict(
-                dictionaries[i],
-                batch_sizes[i],
-                device=self.device,
-                names=names,
-                _run_checks=False,
-                _is_shared=self.is_shared(),
-                _is_memmap=self.is_memmap(),
-            )
-            for i in range(len(dictionaries))
-        ]
+            if len(split_size) == 0:
+                raise RuntimeError("Insufficient number of elements in split_size.")
+            idx0 = 0
+            idx1 = split_size[0]
+            split_sizes = [slice(idx0, idx1)]
+            for idx in split_size[1:]:
+                idx0 = idx1
+                idx1 += idx
+                split_sizes.append(slice(idx0, idx1))
+        index = (slice(None),) * dim
+        return tuple(self[index + (ss,)] for ss in split_sizes)
 
     def memmap_like(self, prefix: str | None = None) -> T:
         def save_metadata(data: TensorDictBase, filepath, metadata=None):
@@ -2483,88 +2440,6 @@ class _TensorDictKeysView:
         leaves_only = f"leaves_only={self.leaves_only}"
         return f"{self.__class__.__name__}({list(self)},\n{indent(include_nested, 4 * ' ')},\n{indent(leaves_only, 4 * ' ')})"
 
-
-def _getitem_batch_size(batch_size, index):
-    """Given an input shape and an index, returns the size of the resulting indexed tensor.
-
-    This function is aimed to be used when indexing is an
-    expensive operation.
-    Args:
-        shape (torch.Size): Input shape
-        items (index): Index of the hypothetical tensor
-
-    Returns:
-        Size of the resulting object (tensor or tensordict)
-
-    Examples:
-        >>> idx = (None, ..., None)
-        >>> torch.zeros(4, 3, 2, 1)[idx].shape
-        torch.Size([1, 4, 3, 2, 1, 1])
-        >>> _getitem_batch_size([4, 3, 2, 1], idx)
-        torch.Size([1, 4, 3, 2, 1, 1])
-    """
-    if not isinstance(index, tuple):
-        if isinstance(index, int):
-            return batch_size[1:]
-        if isinstance(index, slice) and index == slice(None):
-            return batch_size
-        index = (index,)
-    # index = convert_ellipsis_to_idx(index, batch_size)
-    # broadcast shapes
-    shapes_dict = {}
-    look_for_disjoint = False
-    disjoint = False
-    bools = []
-    for i, idx in enumerate(index):
-        boolean = False
-        if isinstance(idx, (range, list)):
-            shape = len(idx)
-        elif isinstance(idx, (torch.Tensor, np.ndarray)):
-            if idx.dtype == torch.bool or idx.dtype == np.dtype("bool"):
-                shape = torch.Size([idx.sum()])
-                boolean = True
-            else:
-                shape = idx.shape
-        elif isinstance(idx, slice):
-            look_for_disjoint = not disjoint and (len(shapes_dict) > 0)
-            shape = None
-        else:
-            shape = None
-        if shape is not None:
-            if look_for_disjoint:
-                disjoint = True
-            shapes_dict[i] = shape
-        bools.append(boolean)
-    bs_shape = None
-    if shapes_dict:
-        bs_shape = torch.broadcast_shapes(*shapes_dict.values())
-    out = []
-    count = -1
-    for i, idx in enumerate(index):
-        if idx is None:
-            out.append(1)
-            continue
-        count += 1 if not bools[i] else idx.ndim
-        if i in shapes_dict:
-            if bs_shape is not None:
-                if disjoint:
-                    # the indices will be put at the beginning
-                    out = list(bs_shape) + out
-                else:
-                    # if there is a single tensor or similar, we just extend
-                    out.extend(bs_shape)
-                bs_shape = None
-            continue
-        elif isinstance(idx, (int, ftdim.Dim)):
-            # could be spared for efficiency
-            continue
-        elif isinstance(idx, slice):
-            batch = batch_size[count]
-            out.append(len(range(*idx.indices(batch))))
-    count += 1
-    if batch_size[count:]:
-        out.extend(batch_size[count:])
-    return torch.Size(out)
 
 
 def _set_tensor_dict(  # noqa: F811

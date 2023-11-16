@@ -1272,3 +1272,86 @@ class Buffer(Tensor, metaclass=_ParameterMeta):
         )
 
     __torch_function__ = _disabled_torch_function_impl
+
+
+def _getitem_batch_size(batch_size, index):
+    """Given an input shape and an index, returns the size of the resulting indexed tensor.
+
+    This function is aimed to be used when indexing is an
+    expensive operation.
+    Args:
+        shape (torch.Size): Input shape
+        items (index): Index of the hypothetical tensor
+
+    Returns:
+        Size of the resulting object (tensor or tensordict)
+
+    Examples:
+        >>> idx = (None, ..., None)
+        >>> torch.zeros(4, 3, 2, 1)[idx].shape
+        torch.Size([1, 4, 3, 2, 1, 1])
+        >>> _getitem_batch_size([4, 3, 2, 1], idx)
+        torch.Size([1, 4, 3, 2, 1, 1])
+    """
+    if not isinstance(index, tuple):
+        if isinstance(index, int):
+            return batch_size[1:]
+        if isinstance(index, slice) and index == slice(None):
+            return batch_size
+        index = (index,)
+    # index = convert_ellipsis_to_idx(index, batch_size)
+    # broadcast shapes
+    shapes_dict = {}
+    look_for_disjoint = False
+    disjoint = False
+    bools = []
+    for i, idx in enumerate(index):
+        boolean = False
+        if isinstance(idx, (range, list)):
+            shape = len(idx)
+        elif isinstance(idx, (torch.Tensor, np.ndarray)):
+            if idx.dtype == torch.bool or idx.dtype == np.dtype("bool"):
+                shape = torch.Size([idx.sum()])
+                boolean = True
+            else:
+                shape = idx.shape
+        elif isinstance(idx, slice):
+            look_for_disjoint = not disjoint and (len(shapes_dict) > 0)
+            shape = None
+        else:
+            shape = None
+        if shape is not None:
+            if look_for_disjoint:
+                disjoint = True
+            shapes_dict[i] = shape
+        bools.append(boolean)
+    bs_shape = None
+    if shapes_dict:
+        bs_shape = torch.broadcast_shapes(*shapes_dict.values())
+    out = []
+    count = -1
+    for i, idx in enumerate(index):
+        if idx is None:
+            out.append(1)
+            continue
+        count += 1 if not bools[i] else idx.ndim
+        if i in shapes_dict:
+            if bs_shape is not None:
+                if disjoint:
+                    # the indices will be put at the beginning
+                    out = list(bs_shape) + out
+                else:
+                    # if there is a single tensor or similar, we just extend
+                    out.extend(bs_shape)
+                bs_shape = None
+            continue
+        elif isinstance(idx, (int, ftdim.Dim)):
+            # could be spared for efficiency
+            continue
+        elif isinstance(idx, slice):
+            batch = batch_size[count]
+            out.append(len(range(*idx.indices(batch))))
+    count += 1
+    if batch_size[count:]:
+        out.extend(batch_size[count:])
+    return torch.Size(out)

@@ -502,7 +502,7 @@ def _setitem(self, item: NestedKey, value: Any) -> None:  # noqa: D417
         raise ValueError(f"Invalid indexing arguments: {item}.")
 
     if not is_tensorclass(value) and not isinstance(
-        value, (TensorDictBase, numbers.Number, Tensor, MemmapTensor)
+        value, (TensorDictBase, numbers.Number, Tensor)
     ):
         raise ValueError(
             f"__setitem__ only supports tensorclasses, tensordicts,"
@@ -847,7 +847,7 @@ def __eq__(self, other: object) -> bool:
 
     """
     if not is_tensor_collection(other) and not isinstance(
-        other, (dict, numbers.Number, Tensor, MemmapTensor)
+        other, (dict, numbers.Number, Tensor)
     ):
         return False
     if is_tensorclass(other):
@@ -904,7 +904,7 @@ def __ne__(self, other: object) -> bool:
 
     """
     if not is_tensor_collection(other) and not isinstance(
-        other, (dict, numbers.Number, Tensor, MemmapTensor)
+        other, (dict, numbers.Number, Tensor)
     ):
         return True
     if is_tensorclass(other):

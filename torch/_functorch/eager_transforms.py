@@ -1262,7 +1262,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                         )
                     output, aux = output
 
-                if not isinstance(output, torch.Tensor):
+                if not isinstance(output, (torch.Tensor, torch.dict.TensorDictBase)):
                     raise RuntimeError('grad_and_value(f)(*args): Expected f(*args) '
                                        f'to return a Tensor, got {type(output)}')
                 if output.dim() != 0:

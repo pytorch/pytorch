@@ -10,15 +10,21 @@ from typing import Any, Callable, Iterator, OrderedDict, Sequence
 
 from functorch import dim as ftdim
 
-from tensordict.utils import erase_cache, IndexType, NestedKey
-
 import torch
 from torch import multiprocessing as mp, nn, Tensor
 from torch.utils._pytree import tree_map
 from ._torch_func import TD_HANDLED_FUNCTIONS
 from .base import _is_tensor_collection, CompatibleType, NO_DEFAULT, TensorDictBase
 from .tensordict import _SubTensorDict, TensorDict
-from .utils import _LOCK_ERROR, as_decorator, Buffer, lock_blocked
+from .utils import (
+    _LOCK_ERROR,
+    as_decorator,
+    Buffer,
+    erase_cache,
+    IndexType,
+    lock_blocked,
+    NestedKey,
+)
 
 
 def _apply_leaves(data, fn):
