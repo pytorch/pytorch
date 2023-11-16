@@ -3089,6 +3089,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
+            and src.get_device().type == torch.device("cuda").type
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (

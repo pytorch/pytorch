@@ -1,5 +1,3 @@
-# mypy: disable-error-code="method-assign"
-
 from __future__ import annotations
 
 import contextlib
@@ -112,7 +110,7 @@ def _reset_guarded_backend_cache():
 
 
 @contextlib.contextmanager
-def backend_cache_wrapper(callback: DynamoCallback):
+def backend_cache_wrapper(callback: CompilerFn):
     _maybe_init_guarded_backend_cache()
 
     # callback is False for RunOnlyContext. RunOnlyContext is used
@@ -172,9 +170,6 @@ class OptimizedModule(torch.nn.Module):
     Wraps the original nn.Module object and later patches its
     forward method to optimized self.forward method.
     """
-
-    _torchdynamo_orig_callable: Callable[..., Any]
-    get_compiler_config: Callable[[], Any]
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
@@ -355,7 +350,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config
+            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
             return new_mod
         assert callable(fn)
@@ -854,7 +849,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
-    guards: _guards.GuardsSet
+    guards: Set[_guards.Guard]
     # NB: Do not add new fields without overriding __iter__; people are
     # destructuring so it is BC-breaking
 
@@ -1147,7 +1142,7 @@ def export(
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
 
-        def guard_export_print(guards: _guards.GuardsSet):
+        def guard_export_print(guards: Set[_guards.Guard]):
             nonlocal out_guards
             assert (
                 out_guards is None
@@ -1488,7 +1483,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            opt.step.hooked = True  # type: ignore[attr-defined]
+            opt.step.hooked = True
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
