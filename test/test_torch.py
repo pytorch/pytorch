@@ -9636,6 +9636,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t.stride(dim=None), torch.Size([3, 1]))
         self.assertEqual(t.t().stride(), torch.Size([1, 3]))
 
+    def test_invalid_arg_error_handling(self) -> None:
+        """ Tests that errors from old TH functions are propagated back """
+        for invalid_val in [-1, 2**65]:
+            self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
