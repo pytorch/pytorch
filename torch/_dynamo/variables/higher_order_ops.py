@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -79,6 +79,18 @@ def only_consist_of(var, types):
     if isinstance(var, ConstDictVariable):
         return all(only_consist_of(item, types) for item in var.items.values())
     return False
+
+
+# A more read-able syntax sugar for creating a UserFunctionVariable for f
+# and run call_function on it. Make it return a function to preserve the calling
+# convention of the original f.
+def _make_inlined(tx, f):
+    assert isinstance(f, Callable)
+
+    def inline_call(*args, **kwargs):
+        return UserFunctionVariable(f).call_function(tx, args, kwargs)
+
+    return inline_call
 
 
 def validate_args_and_maybe_create_graph_inputs(
@@ -225,9 +237,9 @@ def speculate_subgraph(
             treespec = None
             if should_flatten_outputs:
                 # Flatten the speculated subgraph output.
-                tree_flatten = UserFunctionVariable(pytree.tree_flatten)
-                tree_flatten_output = tree_flatten.call_function(tx, [output], {})
-                output, treespec = tree_flatten_output.unpack_var_sequence(tx)
+                output, treespec = _make_inlined(tx, pytree.tree_flatten)(
+                    output
+                ).unpack_var_sequence(tx)
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
                 output = BuiltinVariable(tuple).call_function(tx, [output], {})
@@ -944,9 +956,8 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Trace into tree_flatten with the list of batch_input_args.
-        tree_flatten = UserFunctionVariable(pytree.tree_flatten)
-        flat_args, arg_spec = tree_flatten.call_function(
-            tx, [ListVariable(batch_input_args)], {}
+        flat_args, arg_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(batch_input_args)
         ).unpack_var_sequence(tx)
 
         # Transform in_dims into a list if it's not an integer literal.
@@ -956,12 +967,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else BuiltinVariable(list).call_function(tx, [in_dims], {})
         )
 
-        # Trace into broadcast_to_and_flatten with the transformed in_dims.
-        broadcast_to_and_flatten = UserFunctionVariable(
-            pytree._broadcast_to_and_flatten
-        )
-        broadcasted_in_dims = broadcast_to_and_flatten.call_function(
-            tx, [in_dims_v, arg_spec], {}
+        # Trace into _broadcast_to_and_flatten with the transformed in_dims.
+        broadcasted_in_dims = _make_inlined(tx, pytree._broadcast_to_and_flatten)(
+            in_dims_v, arg_spec
         )
 
         # We want to pass unbatched input to speculate subgraph.
@@ -984,7 +992,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Ban ops like `stride`, `storage_offset` in the traced functions.
         # NOTE: We are conservatively banning more ops (vmap should be able
         #       to handle a few of them).
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
             _, body_graph, body_lifted_freevars = speculate_subgraph(
@@ -992,8 +999,8 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 fn,
                 # Returns a ListVariable, since that's where we started flattening.
                 # However, we really want to pass the inner Python list as argument.
-                tree_unflatten.call_function(
-                    tx, [ListVariable(unbatched_input_args), arg_spec], {}
+                _make_inlined(tx, pytree.tree_unflatten)(
+                    ListVariable(unbatched_input_args), arg_spec
                 ).unpack_var_sequence(tx),
                 {},
                 graph_checkpoint,
@@ -1242,8 +1249,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
-        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1327,8 +1333,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
-        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
