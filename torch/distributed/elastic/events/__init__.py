@@ -41,8 +41,7 @@ _events_loggers: Dict[str, logging.Logger] = {}
 
 def _get_or_create_logger(destination: str = "null") -> logging.Logger:
     """
-    Construct python logger based on the destination type or extends if provided.
-
+    Constructs python logger based on the destination type or extends if provided.
     Available destination could be found in ``handlers.py`` file.
     The constructed logger does not propagate messages to the upper level loggers,
     e.g. root logger. This makes sure that a single event can be processed once.

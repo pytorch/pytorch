@@ -268,12 +268,12 @@ def _write_files_from_queue(
 
             if torch.cuda.is_available() and inflight_threshhold > 0:
                 loader = _OverlappingCpuLoader(
-                    planner.resolve_data,
+                    lambda x: planner.resolve_data(x),
                     inflight_threshhold=inflight_threshhold,
                 )
             else:
                 loader = _SerialCpuLoader(
-                    planner.resolve_data,
+                    lambda x: planner.resolve_data(x),
                 )
 
             tensor_w = [

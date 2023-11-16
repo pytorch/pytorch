@@ -1909,19 +1909,11 @@ add_docstr_all(
     r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements drawn from the PDF (probability density function):
+Fills :attr:`self` tensor with elements drawn from the exponential distribution:
 
 .. math::
 
-    f(x) = \lambda e^{-\lambda x}, x > 0
-
-.. note::
-  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`)
-  implying that zero can be sampled from the exponential distribution.
-  However, :func:`torch.Tensor.exponential_` does not sample zero,
-  which means that its actual support is the interval (0, :math:`\inf`).
-
-  Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
+    f(x) = \lambda e^{-\lambda x}
 """,
 )
 
@@ -2114,12 +2106,8 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
+    f(X=k) = (1 - p)^{k - 1} p
 
-.. note::
-  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`, whereas
-  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
-  hence draws samples in :math:`\{0, 1, \ldots\}`.
 """,
 )
 
@@ -6049,7 +6037,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    f(x) = \dfrac{1}{\text{to} - \text{from}}
+    P(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 

@@ -46,19 +46,19 @@ def get_method_name(depth=2):
 
 
 Token = Any
-"""Represent an opaque fencing token used by the rendezvous backend."""
+"""Represents an opaque fencing token used by the rendezvous backend."""
 
 class RendezvousBackend(ABC):
-    """Represent a backend that holds the rendezvous state."""
+    """Represents a backend that holds the rendezvous state."""
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Get the name of the backend."""
+        """Gets the name of the backend."""
 
     @abstractmethod
     def get_state(self) -> Optional[Tuple[bytes, Token]]:
-        """Get the rendezvous state.
+        """Gets the rendezvous state.
 
         Returns:
             A tuple of the encoded rendezvous state and its fencing token or
@@ -75,7 +75,7 @@ class RendezvousBackend(ABC):
     def set_state(
         self, state: bytes, token: Optional[Token] = None
     ) -> Optional[Tuple[bytes, Token, bool]]:
-        """Set the rendezvous state.
+        """Sets the rendezvous state.
 
         The new rendezvous state is set conditionally:
 
@@ -110,7 +110,7 @@ class RendezvousBackend(ABC):
 
 
 class RendezvousTimeout:
-    """Hold the timeout configuration of a rendezvous.
+    """Holds the timeout configuration of a rendezvous.
 
     Args:
         join:
@@ -152,22 +152,22 @@ class RendezvousTimeout:
 
     @property
     def join(self) -> timedelta:
-        """Get the join timeout."""
+        """Gets the join timeout."""
         return self._join
 
     @property
     def last_call(self) -> timedelta:
-        """Get the last call timeout."""
+        """Gets the last call timeout."""
         return self._last_call
 
     @property
     def close(self) -> timedelta:
-        """Get the close timeout."""
+        """Gets the close timeout."""
         return self._close
 
     @property
     def heartbeat(self) -> timedelta:
-        """Get the keep-alive heartbeat timeout."""
+        """Gets the keep-alive heartbeat timeout."""
         return self._heartbeat
 
     def _set_timeouts(self, **timeouts: Optional[timedelta]):
@@ -181,7 +181,7 @@ class RendezvousTimeout:
 
 @dataclass(repr=False, eq=False, frozen=True)
 class RendezvousSettings:
-    """Hold the settings of the rendezvous.
+    """Holds the settings of the rendezvous.
 
     Attributes:
         run_id:
@@ -210,7 +210,7 @@ class RendezvousSettings:
 
 @dataclass(eq=True, order=True, frozen=True)
 class _NodeDesc:
-    """Describe a node in the rendezvous.
+    """Describes a node in the rendezvous.
 
     Attributes:
         addr:
@@ -230,7 +230,7 @@ class _NodeDesc:
 
 
 class _NodeDescGenerator:
-    """Generate node descriptors.
+    """Generates node descriptors.
 
     A node descriptor is a combination of an FQDN, a process id, and an auto-
     incremented integer that uniquely identifies a node in the rendezvous.
@@ -257,7 +257,7 @@ class _NodeDescGenerator:
 
 
 class _RendezvousState:
-    """Hold the state of a rendezvous.
+    """Holds the state of a rendezvous.
 
     Attributes:
         round:
@@ -310,16 +310,16 @@ def _remove_participant_epilogue(state: _RendezvousState, settings: RendezvousSe
 
 
 class _RendezvousStateHolder(ABC):
-    """Hold the shared rendezvous state synced with other nodes."""
+    """Holds the shared rendezvous state synced with other nodes."""
 
     @property
     @abstractmethod
     def state(self) -> _RendezvousState:
-        """Get the local state."""
+        """Gets the local state."""
 
     @abstractmethod
     def sync(self) -> Optional[bool]:
-        """Read or writes the latest state.
+        """Reads or writes the latest state.
 
         Returns:
             A boolean value indicating whether the local state, in case marked
@@ -328,11 +328,11 @@ class _RendezvousStateHolder(ABC):
 
     @abstractmethod
     def mark_dirty(self) -> None:
-        """Mark the local state as dirty."""
+        """Marks the local state as dirty."""
 
 
 class _BackendRendezvousStateHolder(_RendezvousStateHolder):
-    """Hold the rendezvous state synced with other nodes via a backend.
+    """Holds the rendezvous state synced with other nodes via a backend.
 
     Args:
         backend:
@@ -529,7 +529,7 @@ class _RendezvousContext:
 
 
 class _RendezvousOpExecutor(ABC):
-    """Execute rendezvous operations."""
+    """Executes rendezvous operations."""
 
     @abstractmethod
     def run(
@@ -537,7 +537,7 @@ class _RendezvousOpExecutor(ABC):
         state_handler: Callable[[_RendezvousContext, float], _Action],
         deadline: float,
     ) -> None:
-        """Execute a rendezvous operation.
+        """Executes a rendezvous operation.
 
         An operation is run inside a state machine and is expected to transition
         the rendezvous from one state to another.
@@ -553,7 +553,7 @@ class _RendezvousOpExecutor(ABC):
 
 
 class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
-    """Execute rendezvous operations using a shared state.
+    """Executes rendezvous operations using a shared state.
 
     Args:
         node:
@@ -768,7 +768,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
 
 
 def _should_keep_alive(ctx: _RendezvousContext) -> bool:
-    """Determine whether a keep-alive heartbeat should be sent."""
+    """Determines whether a keep-alive heartbeat should be sent."""
     try:
         last_heartbeat = ctx.state.last_heartbeats[ctx.node]
     except KeyError:
@@ -778,7 +778,7 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
 
 
 class _RendezvousExitOp:
-    """Represent a rendezvous exit operation."""
+    """Represents a rendezvous exit operation."""
 
     def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
         if ctx.node in ctx.state.participants:
@@ -789,7 +789,7 @@ class _RendezvousExitOp:
 
 
 class _RendezvousJoinOp:
-    """Represent a rendezvous join operation."""
+    """Represents a rendezvous join operation."""
 
     def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
         state = ctx.state
@@ -854,7 +854,7 @@ class _RendezvousJoinOp:
 
 
 class _RendezvousCloseOp:
-    """Represent a rendezvous close operation."""
+    """Represents a rendezvous close operation."""
 
     def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
         if ctx.state.closed:
@@ -865,7 +865,7 @@ class _RendezvousCloseOp:
 
 
 class _RendezvousKeepAliveOp:
-    """Represent a rendezvous keep-alive update operation."""
+    """Represents a rendezvous keep-alive update operation."""
 
     def __call__(self, ctx: _RendezvousContext, deadline: float) -> _Action:
         if _should_keep_alive(ctx):
@@ -876,7 +876,7 @@ class _RendezvousKeepAliveOp:
 
 
 class DynamicRendezvousHandler(RendezvousHandler):
-    """Represent a handler that sets up a rendezvous among a set of nodes."""
+    """Represents a handler that sets up a rendezvous among a set of nodes."""
 
     # Static
     _node_desc_generator = _NodeDescGenerator()
@@ -901,7 +901,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         local_addr: Optional[str] = None,
         timeout: Optional[RendezvousTimeout] = None,
     ):
-        """Create a new :py:class:`DynamicRendezvousHandler`.
+        """Creates a new :py:class:`DynamicRendezvousHandler`.
 
         Args:
             run_id:
@@ -994,7 +994,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
     @property
     def settings(self) -> RendezvousSettings:
-        """Get the settings of the rendezvous."""
+        """Gets the settings of the rendezvous."""
         return self._settings
 
     def get_backend(self) -> str:
@@ -1201,7 +1201,8 @@ def _get_timeout(params: RendezvousParameters, key: str) -> Optional[timedelta]:
 def create_handler(
     store: Store, backend: RendezvousBackend, params: RendezvousParameters
 ) -> DynamicRendezvousHandler:
-    """Create a new :py:class:`DynamicRendezvousHandler` from the specified parameters.
+    """Creates a new :py:class:`DynamicRendezvousHandler` from the specified
+    parameters.
 
     Args:
         store:

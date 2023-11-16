@@ -1603,20 +1603,20 @@ class Scheduler:
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the first kernel"
+                log.debug(
+                    "Skip fusion because of register spilling of the first kernel"
                 )
                 return False
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the second kernel"
+                log.debug(
+                    "Skip fusion because of register spilling of the second kernel"
                 )
                 return False
             ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the fused kernel"
+                log.debug(
+                    "Skip fusion because of register spilling of the fused kernel"
                 )
                 return False
         except CompilationError as e:
@@ -1626,17 +1626,17 @@ class Scheduler:
             else:
                 raise
 
-        if fusion_log.isEnabledFor(logging.DEBUG):
+        if log.isEnabledFor(logging.DEBUG):
             if ms_fused < ms1 + ms2:
-                fusion_log.debug(
-                    "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                log.debug(
+                    "Fusing %s with %s cause %sx speedup",
                     node1.get_names(),
                     node2.get_names(),
                     green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
                 )
             else:
-                fusion_log.debug(
-                    "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                log.debug(
+                    "Fusing %s with %s cause %sx slowdown",
                     node1.get_names(),
                     node2.get_names(),
                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
@@ -1939,7 +1939,7 @@ class Scheduler:
             return False
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].ancestors:
-                fusion_log.debug(
+                log.debug(
                     "cannot fuse (vert:2): intermediate nodes between node1 & node2"
                 )
                 return False

@@ -497,7 +497,6 @@ class _ValgrindWrapper:
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
                     capture_output=True,
-                    check=False,
                 ).returncode
 
         self._build_type: Optional[str] = None

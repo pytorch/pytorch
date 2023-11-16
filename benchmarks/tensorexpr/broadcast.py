@@ -268,18 +268,18 @@ def register_broadcast_ops():
         ["div", lambda a, b: a / (b + 1e-4)],
         [
             "pow",
-            torch.pow,
-            np.power,
+            lambda a, b: torch.pow(a, b),
+            lambda a, b: np.power(a, b),
         ],  # no fuson triggered
-        ["max", torch.max, np.maximum],
-        ["min", torch.min, np.minimum],
+        ["max", lambda a, b: torch.max(a, b), lambda a, b: np.maximum(a, b)],
+        ["min", lambda a, b: torch.min(a, b), lambda a, b: np.minimum(a, b)],
     ]
 
     unary_op_list = [
-        ["erf", torch.erf, np.erf],
-        ["exp", torch.exp, np.exp],
-        ["sin", torch.sin, np.sin],
-        ["cos", torch.cos, np.cos],
+        ["erf", lambda x: torch.erf(x), lambda x: np.erf(x)],
+        ["exp", lambda x: torch.exp(x), lambda x: np.exp(x)],
+        ["sin", lambda x: torch.sin(x), lambda x: np.sin(x)],
+        ["cos", lambda x: torch.cos(x), lambda x: np.cos(x)],
     ]
 
     for split_input, binary_op in itertools.product([True, False], binary_op_list):

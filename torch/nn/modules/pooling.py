@@ -36,7 +36,8 @@ class _MaxPoolNd(Module):
 
 
 class MaxPool1d(_MaxPoolNd):
-    r"""Applies a 1D max pooling over an input signal composed of several input planes.
+    r"""Applies a 1D max pooling over an input signal composed of several input
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`
     and output :math:`(N, C, L_{out})` can be precisely described as:
@@ -94,7 +95,8 @@ class MaxPool1d(_MaxPoolNd):
 
 
 class MaxPool2d(_MaxPoolNd):
-    r"""Applies a 2D max pooling over an input signal composed of several input planes.
+    r"""Applies a 2D max pooling over an input signal composed of several input
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -167,7 +169,8 @@ class MaxPool2d(_MaxPoolNd):
 
 
 class MaxPool3d(_MaxPoolNd):
-    r"""Applies a 3D max pooling over an input signal composed of several input planes.
+    r"""Applies a 3D max pooling over an input signal composed of several input
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -488,7 +491,8 @@ class _AvgPoolNd(Module):
 
 
 class AvgPool1d(_AvgPoolNd):
-    r"""Applies a 1D average pooling over an input signal composed of several input planes.
+    r"""Applies a 1D average pooling over an input signal composed of several
+    input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`,
     output :math:`(N, C, L_{out})` and :attr:`kernel_size` :math:`k`
@@ -554,7 +558,8 @@ class AvgPool1d(_AvgPoolNd):
 
 
 class AvgPool2d(_AvgPoolNd):
-    r"""Applies a 2D average pooling over an input signal composed of several input planes.
+    r"""Applies a 2D average pooling over an input signal composed of several input
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -608,7 +613,6 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
-
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_2_t
@@ -633,7 +637,8 @@ class AvgPool2d(_AvgPoolNd):
 
 
 class AvgPool3d(_AvgPoolNd):
-    r"""Applies a 3D average pooling over an input signal composed of several input planes.
+    r"""Applies a 3D average pooling over an input signal composed of several input
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -694,7 +699,6 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
-
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_3_t
@@ -762,7 +766,6 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
-
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
 
@@ -834,7 +837,6 @@ class FractionalMaxPool3d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
-
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
     kernel_size: _size_3_t
@@ -887,7 +889,8 @@ class _LPPoolNd(Module):
 
 
 class LPPool1d(_LPPoolNd):
-    r"""Applies a 1D power-average pooling over an input signal composed of several input planes.
+    r"""Applies a 1D power-average pooling over an input signal composed of several input
+    planes.
 
     On each window, the function computed is:
 
@@ -928,7 +931,8 @@ class LPPool1d(_LPPoolNd):
 
 
 class LPPool2d(_LPPoolNd):
-    r"""Applies a 2D power-average pooling over an input signal composed of several input planes.
+    r"""Applies a 2D power-average pooling over an input signal composed of several input
+    planes.
 
     On each window, the function computed is:
 

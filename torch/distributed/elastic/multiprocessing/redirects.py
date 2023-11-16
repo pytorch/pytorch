@@ -49,9 +49,9 @@ _VALID_STD = {"stdout", "stderr"}
 @contextmanager
 def redirect(std: str, to_file: str):
     """
-    Redirect ``std`` (one of ``"stdout"`` or ``"stderr"``) to a file in the path specified by ``to_file``.
-
-    This method redirects the underlying std file descriptor (not just python's ``sys.stdout|stderr``).
+    Redirects ``std`` (one of ``"stdout"`` or ``"stderr"``) to a file
+    in the path specified by ``to_file``. This method redirects the
+    underlying std file descriptor (not just python's ``sys.stdout|stderr``).
     See usage for details.
 
     Directory of ``dst_filename`` is assumed to exist and the destination file
@@ -76,6 +76,7 @@ def redirect(std: str, to_file: str):
      print("stdout restored")
 
     """
+
     if std not in _VALID_STD:
         raise ValueError(
             f"unknown standard stream <{std}>, must be one of {_VALID_STD}"

@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 class ErrorHandler:
     """
-    Write the provided exception object along with some other metadata about
+    Writes the provided exception object along with some other metadata about
     the error in a structured way in JSON format to an error file specified by the
     environment variable: ``TORCHELASTIC_ERROR_FILE``. If this environment
     variable is not set, then simply logs the contents of what would have been
@@ -33,16 +33,14 @@ class ErrorHandler:
 
     def _get_error_file_path(self) -> Optional[str]:
         """
-        Return the error file path.
-
-        May return ``None`` to have the structured error be logged only.
+        Returns the error file path. May return ``None`` to have the
+        structured error be logged only.
         """
         return os.environ.get("TORCHELASTIC_ERROR_FILE", None)
 
     def initialize(self) -> None:
         """
-        Call prior to running code that we wish to capture errors/exceptions.
-
+        Called prior to running code that we wish to capture errors/exceptions.
         Typically registers signal/fault handlers. Users can override this
         function to add custom initialization/registrations that aid in
         propagation/information of errors/signals/exceptions/faults.
@@ -53,7 +51,9 @@ class ErrorHandler:
             warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}")
 
     def _write_error_file(self, file_path: str, error_msg: str) -> None:
-        """Write error message to the file."""
+        """
+        Writes error message to the file.
+        """
         try:
             with open(file_path, "w") as fp:
                 fp.write(error_msg)
@@ -62,11 +62,11 @@ class ErrorHandler:
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Write a structured information about the exception into an error file in JSON format.
-
-        If the error file cannot be determined, then logs the content
+        Writes a structured information about the exception into an error file in
+        JSON format. If the error file cannot be determined, then logs the content
         that would have been written to the error file.
         """
+
         file = self._get_error_file_path()
         if file:
             data = {
@@ -87,7 +87,9 @@ class ErrorHandler:
         rootcause_error: Dict[str, Any],
         error_code: int = 0,
     ):
-        """Modify the rootcause_error read from the file, to correctly set the exit code."""
+        """
+        Modify the rootcause_error read from the file, to correctly set the exit code.
+        """
         if "message" not in rootcause_error:
             log.warning(
                 "child error file (%s) does not have field `message`. \n"
@@ -104,7 +106,9 @@ class ErrorHandler:
             rootcause_error["message"]["errorCode"] = error_code
 
     def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
-        """Dump parent error file from child process's root cause error and error code."""
+        """
+        Dumps parent error file from child process's root cause error and error code.
+        """
         with open(rootcause_error_file) as fp:
             rootcause_error = json.load(fp)
             # Override error code since the child process cannot capture the error code if it

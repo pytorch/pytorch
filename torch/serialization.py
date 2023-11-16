@@ -1320,11 +1320,7 @@ def _get_restore_location(map_location):
 
 class StorageType:
     def __init__(self, name):
-        self._dtype = _get_dtype_from_pickle_storage_type(name)
-
-    @property
-    def dtype(self):
-        return self._dtype
+        self.dtype = _get_dtype_from_pickle_storage_type(name)
 
     def __str__(self):
         return f'StorageType(dtype={self.dtype})'

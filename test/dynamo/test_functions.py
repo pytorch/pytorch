@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     skipIfRocm,
 )
+from torch.testing._internal.inductor_utils import requires_cuda
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
