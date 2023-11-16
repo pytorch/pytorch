@@ -12,6 +12,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -42,7 +43,6 @@ import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
-from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -130,7 +130,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -233,7 +233,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -245,7 +247,7 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
 
 
 def convert_shape_to_symint(
-    lst: List[Union[int, sympy.Expr]]
+    lst: Iterable[Union[int, sympy.Expr]]
 ) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
@@ -616,7 +618,11 @@ instance_descriptor = collections.namedtuple(
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+        cache_dir = os.path.join(
+            tempfile.gettempdir(),
+            "torchinductor_" + sanitized_username,
+        )
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -1098,118 +1104,6 @@ def red_text(msg):
 
 def blue_text(msg):
     return _color_text(msg, "blue")
-
-
-@functools.lru_cache(None)
-def python_type_to_schema_type():
-    from . import ir
-
-    PYTHON_TYPE_TO_SCHEMA_TYPE = {
-        torch.dtype: "int",
-        torch.device: "Device",
-        bool: "bool",
-        float: "float",
-        ir.TensorBox: "Tensor",
-    }
-    return PYTHON_TYPE_TO_SCHEMA_TYPE
-
-
-def may_get_optional_schema_type(schema_type, is_optional_arg):
-    return f"Optional[{schema_type}]" if is_optional_arg else schema_type
-
-
-def type_match(arg, arg_type, is_optional_arg):
-    if isinstance(arg, immutable_list):
-        if all(
-            isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
-            for x in arg
-        ):
-            may_optional_schema_type = may_get_optional_schema_type(
-                "List[int]", is_optional_arg
-            )
-            return may_optional_schema_type == str(arg_type)
-        else:
-            # TODO: add support here
-            return False
-
-    if arg.__class__ in python_type_to_schema_type():
-        schema_type = python_type_to_schema_type()[arg.__class__]
-        may_optional_schema_type = may_get_optional_schema_type(
-            schema_type, is_optional_arg
-        )
-        return may_optional_schema_type == str(arg_type)
-
-    # TODO: add support here
-    return False
-
-
-# torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
-def schema_match(schema, args, kwargs):
-    min_args = 0
-    max_pos_args = 0
-    for argument in schema.arguments:
-        if not argument.has_default_value():
-            min_args += 1
-        if not argument.kwarg_only:
-            max_pos_args += 1
-
-    nargs = len(args)
-    remaining_kwargs = len(kwargs)
-    arg_pos = 0
-
-    def args_error_message(nargs, max_pos_args, min_args):
-        if min_args != max_pos_args:
-            return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
-        else:
-            return f"takes {max_pos_args} positional arguments but {nargs} were given"
-
-    def is_optional(arg):
-        return "Optional" in str(arg.type)
-
-    def allow_none(arg):
-        return is_optional(arg) or arg.has_default_value()
-
-    assert len(args) <= max_pos_args, args_error_message(
-        len(args), max_pos_args, min_args
-    )
-
-    for argument in schema.arguments:
-        obj = None
-        is_kwd = False
-        if arg_pos < nargs:
-            if argument.kwarg_only:
-                return False
-            obj = args[arg_pos]
-        elif kwargs:
-            if argument.name in kwargs:
-                obj = kwargs[argument.name]
-                is_kwd = True
-
-        if obj is None and not allow_none(argument):
-            return False
-
-        if obj is not None:
-            expected_type = argument.type
-            if not type_match(obj, expected_type, is_optional(argument)):
-                return False
-
-        if not is_kwd:
-            arg_pos += 1
-        elif (obj is None and is_optional(argument)) or obj is not None:
-            remaining_kwargs -= 1
-
-    if remaining_kwargs > 0:
-        return False
-
-    return True
-
-
-def try_find_schema(schemas, args, kwargs):
-    for schema in schemas:
-        if schema_match(schema, args, kwargs):
-            return schema
-
-    return None
 
 
 @functools.lru_cache(None)

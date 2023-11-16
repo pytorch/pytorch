@@ -146,8 +146,9 @@ def cprofile_wrapper(func):
                 ],
                 stdout=subprocess.PIPE,
             )
-            subprocess.run(
-                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
             )
             print(f"Generated SVG from profile at {str(svg_path)}")
         except FileNotFoundError:
@@ -635,7 +636,7 @@ def clone_input(x, *, dtype=None):
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -668,7 +669,7 @@ def clone_input(x, *, dtype=None):
             # performing the operation.
             return torch_clone(x)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return result
 
 
@@ -739,7 +740,7 @@ def torchscript(model, example_inputs, verbose=False):
 def getfile(obj):
     try:
         return inspect.getfile(obj)
-    except TypeError:
+    except (TypeError, OSError):
         return None
 
 
@@ -1286,7 +1287,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReasons"] = list()
+graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = list()
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -1305,7 +1306,7 @@ class CompileProfiler:
     def __init__(self):
         self.frame_count = 0
         self.op_count = 0
-        self.backend_ctx_ctor = lambda: disable_cache_limit()
+        self.backend_ctx_ctor = disable_cache_limit
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
@@ -1932,6 +1933,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
@@ -1972,7 +1975,9 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
+    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+        higher_order_ops.tag_activation_checkpoint
+    )
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
