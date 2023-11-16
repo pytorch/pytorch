@@ -9,7 +9,7 @@ import torch._inductor.utils
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
 
 from torch.utils._triton import has_triton
 
@@ -120,6 +120,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(skip_rocm=True)
+    if not TEST_WITH_ROCM:
+        run_tests()
