@@ -1777,7 +1777,13 @@ def main():
             )
             metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
-                test_batch.sharded_tests, test_directory, options, [{"test": str(f.test), "message": f.message} for f in test_batch.failures]
+                test_batch.sharded_tests,
+                test_directory,
+                options,
+                [
+                    {"test": str(f.test), "message": f.message}
+                    for f in test_batch.failures
+                ],
             )
             metrics_dict[f"{test_batch.name}_failures"] = [
                 str(x.test) for x in test_batch.failures
