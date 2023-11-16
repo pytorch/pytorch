@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/native/StridedRandomAccessor.h>
+#include <c10/macros/Macros.h>
 
 #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
 

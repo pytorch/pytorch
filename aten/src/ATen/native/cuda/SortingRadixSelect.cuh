@@ -2,6 +2,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/AsmUtils.cuh>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
@@ -295,8 +296,11 @@ __device__ scalar_t findPattern(
     }
   }
 
-  // should not get here
+  // should not get here 
+  // disable for ROCM platform as this caused build issue.
+#if !defined(USE_ROCM)
   CUDA_KERNEL_ASSERT(false);
+#endif
   return static_cast<scalar_t>(0);
 }
 
