@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional
 
 import torch._C
 import torch.fx
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 import torch.nn
 import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
@@ -520,6 +521,26 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
+
+        def diff_meta(tensor_vars1, tensor_vars2):
+            assert all(
+                isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2
+            )
+            all_diffs = []
+            for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
+                # We check the meta data associated with meta["example_value"]
+                meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
+                meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
+                if meta1 != meta2:
+                    all_diffs.append((f"pair{i}:", meta1, meta2))
+            return all_diffs
+
+        if diffs := diff_meta(
+            true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
+        ):
+            unimplemented(
+                f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
+            )
 
         def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
             shared_freevars = true_lifted_freevars.keys() & false_lifted_freevars.keys()
