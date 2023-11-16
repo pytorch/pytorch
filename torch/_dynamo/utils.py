@@ -1933,6 +1933,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
