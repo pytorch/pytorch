@@ -1680,10 +1680,25 @@ class ExpandView(BaseView):
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
+        is_unbacked = V.graph.sizevars.shape_env.is_unbacked_symint
         for i in range(len(new_size)):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
+            elif (
+                old_size[i] is None
+                or old_size[i] == 1
+                or is_unbacked(old_size[i])
+            ):
+                pass
+            elif is_unbacked(new_size[i]):
+                # Assume equal, take backed symint
+                # TODO: This may be unsound
+                new_size[i] == old_size[i]
+            else:
+                # Guard equal
+                new_size[i] = V.graph.sizevars.guard_equals(
+                    old_size[i], new_size[i])
         return new_size
 
     @classmethod
