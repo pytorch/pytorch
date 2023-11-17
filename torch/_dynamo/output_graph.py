@@ -1032,13 +1032,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
-        backend_fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=old_fake_mode.shape_env,
-        )
-        # TODO(voz): Ostensibily, this should be scoped and
-        # restore back to old_fake_mode, but doing so currently violates
-        # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-        self.tracing_context.fake_mode = backend_fake_mode
+        if self.export:
+            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            backend_fake_mode = old_fake_mode
+        else:
+            backend_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=old_fake_mode.shape_env,
+            )
+            # TODO(voz): Ostensibily, this should be scoped and
+            # restore back to old_fake_mode, but doing so currently violates
+            # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            self.tracing_context.fake_mode = backend_fake_mode
+
         with self.restore_global_state(), backend_fake_mode:
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)

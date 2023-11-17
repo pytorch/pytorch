@@ -4358,12 +4358,7 @@ def create_aot_dispatcher_function(
                     # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
 
-                policy = None
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    if x in tracing_context.tensor_to_policy:
-                        policy = tracing_context.tensor_to_policy[x]
-
-                return fake_mode.from_tensor(x, static_shapes=False, policy=policy, source=policy.tensor_source)
+                return torch._dynamo.utils.to_fake_tensor(x, fake_mode)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
