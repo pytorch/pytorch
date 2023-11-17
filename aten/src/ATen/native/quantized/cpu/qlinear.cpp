@@ -935,7 +935,6 @@ static at::Tensor linear_int8_with_onednn_weight(
   // for calculation and subsequently reshape the output back.
   auto input_contig =
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-  TORCH_CHECK(input_contig.is_contiguous(), "Expect qlinear input to be contiguous.");
 
   auto src = at::native::itensor_from_tensor(input_contig);
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
