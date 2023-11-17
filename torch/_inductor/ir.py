@@ -984,7 +984,7 @@ class Reduction(Loops):
         if split == -1:
             assert input_node is not None
             new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node
+                input_node  # type: ignore[arg-type]
             )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
