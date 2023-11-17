@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional, TYPE_CHECKING
+from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
@@ -186,6 +186,8 @@ class MetaConverter:
         source: Optional[Source] = None,
         policy: Optional["CreateSymbolicPolicy"] = None,
     ):
+        from torch._subclasses.fake_tensor import FakeTensor
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -232,20 +234,26 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(
+            t, src
+        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(
-                    t,
-                    src,
-                    # Assume that the set of dims that are dynamic are the same between
-                    # the wrapper tensor and any inner tensors.
-                    # We can revisit this if this assumption does not hold
-                    # for any important subclasses later.
-                    policy=policy,
-                )
+                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
+                    # Don't reallocate the sizes; the shape envs are the same,
+                    # so reuse the old sizes/strides/etc
+                    return (t.size(), t.stride(), t.storage_offset())
+                else:
+                    return shape_env.create_symbolic_sizes_strides_storage_offset(
+                        t,
+                        src,
+                        # Assume that the set of dims that are dynamic are the same between
+                        # the wrapper tensor and any inner tensors.
+                        # We can revisit this if this assumption does not hold
+                        # for any important subclasses later.
+                        policy=policy,
+                    )
             else:
                 assert policy is None
-            return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
