@@ -335,6 +335,10 @@ def emit_view_functionalization_body(
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
+        if (c10::impl::TorchDispatchModeTLS::stack_len(true) > 0) {{
+            c10::impl::IncludeDispatchKeyGuard include_guard(DispatchKey::PreDispatch);
+            return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        }}
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
@@ -384,6 +388,10 @@ def emit_view_functionalization_body(
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         at::AutoDispatchSkipFunctionalize guard;
+        if (c10::impl::TorchDispatchModeTLS::stack_len(true) > 0) {{
+            c10::impl::IncludeDispatchKeyGuard include_guard(DispatchKey::PreDispatch);
+            return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        }}
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
@@ -400,10 +408,19 @@ def emit_view_functionalization_body(
       {return_type} tmp_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
-        if (reapply_views) {{
-          tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        if (c10::impl::TorchDispatchModeTLS::stack_len(true) > 0) {{
+            c10::impl::IncludeDispatchKeyGuard include_guard(DispatchKey::PreDispatch);
+            if (reapply_views) {{
+                tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+            }} else {{
+                tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+            }}
         }} else {{
-          tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+            if (reapply_views) {{
+                tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+            }} else {{
+                tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+            }}
         }}
       }}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(

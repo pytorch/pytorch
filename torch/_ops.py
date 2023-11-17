@@ -331,7 +331,6 @@ class HigherOrderOperator(OperatorBase):
             with _pop_mode_temporarily() as mode:
                 return handler(mode, *args, **kwargs)
 
-
         if functionality_key in mode_stack_per_key():
             # The place to handle DispatchKey.PreDispatch
             curr_stack = mode_stack_per_key()[functionality_key]
@@ -438,15 +437,6 @@ def temporarily_pop_mode(mode_stack):
         yield top_mode
     finally:
         mode_stack.append(top_mode)
-
-
-@contextlib.contextmanager
-def temporarily_pop_mode_pre_dispatch():
-    top_mode = torch._C._pop_torch_dispatch_stack(None, True)
-    try:
-        yield top_mode
-    finally:
-        torch._C._push_on_torch_dispatch_stack(top_mode, True)
 
 
 def mode_stack_per_key():
@@ -627,8 +617,15 @@ class OpOverload(OperatorBase):
             ):
 
                 def handler(*args, **kwargs):
-                    # This logic is meant to be a python parallel of handle_torch_function_no_python_arg_parser.
-                    with temporarily_pop_mode_pre_dispatch() as curr_mode:
+                    @contextlib.contextmanager
+                    def _temporarily_pop_modes_from_pre_dispatch():
+                        top_mode = torch._C._pop_torch_dispatch_stack(None, True)
+                        try:
+                            yield top_mode
+                        finally:
+                            torch._C._push_on_torch_dispatch_stack(top_mode, True)
+
+                    with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
                         assert hasattr(curr_mode, "__torch_dispatch__")
                         overload_types = []
                         args_flattened, _ = torch.utils._pytree.tree_flatten(
