@@ -200,9 +200,12 @@ aten::_foreach_div.Scalar
 aten::_foreach_div.ScalarList
 aten::_foreach_div.ScalarList_out
 aten::_foreach_div.Scalar_out
+aten::_foreach_div.Tensor
+aten::_foreach_div.Tensor_out
 aten::_foreach_div_.List
 aten::_foreach_div_.Scalar
 aten::_foreach_div_.ScalarList
+aten::_foreach_div_.Tensor
 aten::_foreach_erf
 aten::_foreach_erf.out
 aten::_foreach_erf_
