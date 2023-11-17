@@ -454,7 +454,7 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     # @lint-ignore TXT2
-    '--pattern=	',
+    '--pattern=    ',
     '--linter-name=TABS',
     '--error-name=saw some tabs',
     '--replace-pattern=s/\t/    /',

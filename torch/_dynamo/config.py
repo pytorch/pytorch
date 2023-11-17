@@ -351,6 +351,6 @@ _experimental_support_context_fn_in_torch_utils_checkpoint = False
 if TYPE_CHECKING:
     from .config_typing import *  # noqa: F401, F403
 
-from torch.utils._config_module import install_config_module 
+from torch.utils._config_module import install_config_module
 
 install_config_module(sys.modules[__name__])

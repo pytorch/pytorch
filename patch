@@ -33,21 +33,21 @@ index 00f73596805..495303d4063 100644
 @@ -409,7 +409,8 @@ def _patch_config_if_changed():
      if eval_frame.config_cache.saved_config_and_hash is None:
          return patch
- 
+
 -    saved_config, saved_config_hash = eval_frame.config_cache.saved_config_and_hash
 +    saved = eval_frame.config_cache.saved_config_and_hash
 +    saved_config, saved_config_hash = saved.config, saved.hash
      current_config_hash = config.get_hash()
      assert current_config_hash is not None
- 
+
 diff --git a/torch/_dynamo/eval_frame.py b/torch/_dynamo/eval_frame.py
 index d3679e63030..1061c00371c 100644
 --- a/torch/_dynamo/eval_frame.py
 +++ b/torch/_dynamo/eval_frame.py
 @@ -265,11 +265,15 @@ def innermost_fn(fn):
  config_cache = threading.local()
- 
- 
+
+
 +@dataclass
 +class ConfigAndHash:
 +    config: Dict[str, Any]
@@ -60,8 +60,8 @@ index d3679e63030..1061c00371c 100644
 -            Tuple[Dict[str, Any], bytes]
 -        ] = None
 +        config_cache.saved_config_and_hash: Optional[ConfigAndHash] = None
- 
- 
+
+
  @contextlib.contextmanager
 @@ -284,7 +288,9 @@ def restore_guarded_dynamo_config(
      try:
@@ -82,7 +82,7 @@ index d3679e63030..1061c00371c 100644
 +                config_cache.saved_config_and_hash.hash.hex(),
              )
              config_cache.saved_config_and_hash = None
- 
+
 @@ -314,7 +320,7 @@ def _get_config_and_hash(dynamic=None):
  def get_saved_else_current_config_hash() -> bytes:
      _maybe_init_guarded_config_cache()
@@ -91,7 +91,7 @@ index d3679e63030..1061c00371c 100644
 +        return config_cache.saved_config_and_hash.hash
      else:
          return config.get_hash()
- 
+
 diff --git a/torch/_dynamo/guards.py b/torch/_dynamo/guards.py
 index 2575165c186..0bbd2d99edd 100644
 --- a/torch/_dynamo/guards.py
@@ -113,7 +113,7 @@ index e55df5e324d..e659f4f942f 100644
 @@ -172,6 +172,10 @@ class ConfigModule(ModuleType):
              lines.append(f"{mod}.{k} = {v!r}")
          return "\n".join(lines)
- 
+
 +    def _get_hash(self, config: Dict[str, Any]) -> bytes:
 +        string_to_hash = repr(sorted(config.items()))
 +        return hashlib.md5(string_to_hash.encode("utf-8")).digest()
