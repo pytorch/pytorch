@@ -1,0 +1,123 @@
+diff --git a/third_party/cutlass b/third_party/cutlass
+index 44c704eae85..6f47420213f 160000
+--- a/third_party/cutlass
++++ b/third_party/cutlass
+@@ -1 +1 @@
+-Subproject commit 44c704eae85da352d277d6f092f41412772f70e4
++Subproject commit 6f47420213f757831fae65c686aa471749fa8d60
+diff --git a/third_party/fbgemm b/third_party/fbgemm
+index d4eec11d72a..70c6e83c29f 160000
+--- a/third_party/fbgemm
++++ b/third_party/fbgemm
+@@ -1 +1 @@
+-Subproject commit d4eec11d72a2280cdf22b77561ba9b6f594cdd7e
++Subproject commit 70c6e83c29f67278751abd0e28433c50743ccbe9
+diff --git a/third_party/kineto b/third_party/kineto
+index a30ca3f9509..49e854d805d 160000
+--- a/third_party/kineto
++++ b/third_party/kineto
+@@ -1 +1 @@
+-Subproject commit a30ca3f9509c2cfd28561abbca51328f0bdf9014
++Subproject commit 49e854d805d916b2031e337763928d2f8d2e1fbf
+diff --git a/third_party/onnx b/third_party/onnx
+index ccde5da8138..0c296085f9f 160000
+--- a/third_party/onnx
++++ b/third_party/onnx
+@@ -1 +1 @@
+-Subproject commit ccde5da81388ffa770ca98b64e07f803ad089414
++Subproject commit 0c296085f9f65f0f8ef7aec7b9eed55faf37dc40
+diff --git a/torch/_dynamo/convert_frame.py b/torch/_dynamo/convert_frame.py
+index 00f73596805..495303d4063 100644
+--- a/torch/_dynamo/convert_frame.py
++++ b/torch/_dynamo/convert_frame.py
+@@ -409,7 +409,8 @@ def _patch_config_if_changed():
+     if eval_frame.config_cache.saved_config_and_hash is None:
+         return patch
+ 
+-    saved_config, saved_config_hash = eval_frame.config_cache.saved_config_and_hash
++    saved = eval_frame.config_cache.saved_config_and_hash
++    saved_config, saved_config_hash = saved.config, saved.hash
+     current_config_hash = config.get_hash()
+     assert current_config_hash is not None
+ 
+diff --git a/torch/_dynamo/eval_frame.py b/torch/_dynamo/eval_frame.py
+index d3679e63030..1061c00371c 100644
+--- a/torch/_dynamo/eval_frame.py
++++ b/torch/_dynamo/eval_frame.py
+@@ -265,11 +265,15 @@ def innermost_fn(fn):
+ config_cache = threading.local()
+ 
+ 
++@dataclass
++class ConfigAndHash:
++    config: Dict[str, Any]
++    hash: bytes
++
++
+ def _maybe_init_guarded_config_cache():
+     if not hasattr(config_cache, "saved_config_and_hash"):
+-        config_cache.saved_config_and_hash: Optional[  # type: ignore[misc]
+-            Tuple[Dict[str, Any], bytes]
+-        ] = None
++        config_cache.saved_config_and_hash: Optional[ConfigAndHash] = None
+ 
+ 
+ @contextlib.contextmanager
+@@ -284,7 +288,9 @@ def restore_guarded_dynamo_config(
+     try:
+         if first_ctx and config_cache.saved_config_and_hash is None:
+             is_top_level = True
+-            config_cache.saved_config_and_hash = saved_config, saved_config_hash
++            config_cache.saved_config_and_hash = ConfigAndHash(
++                saved_config, saved_config_hash
++            )
+             log.debug(
+                 "Setting top-level compile config hash: %s", saved_config_hash.hex()
+             )
+@@ -295,7 +301,7 @@ def restore_guarded_dynamo_config(
+         if is_top_level:
+             log.debug(
+                 "Unsetting top-level compile config hash: %s",
+-                config_cache.saved_config_and_hash[1].hex(),
++                config_cache.saved_config_and_hash.hash.hex(),
+             )
+             config_cache.saved_config_and_hash = None
+ 
+@@ -314,7 +320,7 @@ def _get_config_and_hash(dynamic=None):
+ def get_saved_else_current_config_hash() -> bytes:
+     _maybe_init_guarded_config_cache()
+     if config_cache.saved_config_and_hash is not None:
+-        return config_cache.saved_config_and_hash[1]
++        return config_cache.saved_config_and_hash.hash
+     else:
+         return config.get_hash()
+ 
+diff --git a/torch/_dynamo/guards.py b/torch/_dynamo/guards.py
+index 2575165c186..0bbd2d99edd 100644
+--- a/torch/_dynamo/guards.py
++++ b/torch/_dynamo/guards.py
+@@ -105,6 +105,9 @@ CLOSURE_VARS = {
+     "___skip_backend_check": (
+         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
+     ),
++    "___applicable_config_hash": (
++        lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex(),
++    ),
+     "___odict_getitem": collections.OrderedDict.__getitem__,
+     "___dict_param_key_ids": dict_param_key_ids,
+     "___dict_const_keys": dict_const_keys,
+diff --git a/torch/utils/_config_module.py b/torch/utils/_config_module.py
+index e55df5e324d..e659f4f942f 100644
+--- a/torch/utils/_config_module.py
++++ b/torch/utils/_config_module.py
+@@ -172,6 +172,10 @@ class ConfigModule(ModuleType):
+             lines.append(f"{mod}.{k} = {v!r}")
+         return "\n".join(lines)
+ 
++    def _get_hash(self, config: Dict[str, Any]) -> bytes:
++        string_to_hash = repr(sorted(config.items()))
++        return hashlib.md5(string_to_hash.encode("utf-8")).digest()
++
+     def get_hash(self) -> bytes:
+         """Hashes the configs that are not compile_ignored"""
+         if self._is_dirty or self._hash_digest is None:
