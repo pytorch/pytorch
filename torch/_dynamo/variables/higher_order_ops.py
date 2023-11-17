@@ -7,7 +7,6 @@ from typing import Callable, Dict, List, Optional
 
 import torch._C
 import torch.fx
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 import torch.nn
 import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
@@ -17,6 +16,7 @@ from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import (

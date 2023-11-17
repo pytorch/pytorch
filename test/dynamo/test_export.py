@@ -1695,7 +1695,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for mod in mods:
             x = torch.randn(2, 2)
             out_graph, guards = torch._dynamo.export(mod)(x)
-            self.assertExpectedInline(out_graph.code.strip(), """\
+            self.assertExpectedInline(
+                out_graph.code.strip(),
+                """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
@@ -1706,26 +1708,33 @@ def forward(self, x):
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_2 = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem_2], self._out_spec)""")
-            self.assertExpectedInline(out_graph.cond_true_0.code.strip(), """\
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_true_0.code.strip(),
+                """\
 def forward(self, l_x_):
     l_x__1 = l_x_
     add = l_x__1 + l_x__1;  l_x__1 = None
-    return (add,)""")
-            self.assertExpectedInline(out_graph.cond_false_0.code.strip(), """\
+    return (add,)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_false_0.code.strip(),
+                """\
 def forward(self, l_x_):
     l_x__1 = l_x_
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
-    return (getitem,)""")
+    return (getitem,)""",
+            )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile"
+                "Cond doesn't work unless it is captured completely with torch.compile",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile"
+                "Cond doesn't work unless it is captured completely with torch.compile",
             ):
                 # True branch and false branch return tensors of different shape
                 test_x = torch.randn(3, 2)
