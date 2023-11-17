@@ -2851,11 +2851,11 @@ class CppScheduling(BaseScheduling):
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
-        args_num = self.get_num_args()
+        args_num = self._get_scheduled_num_args()
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
             self._set_flush_status(True)
 
-    def get_num_args(self):
+    def _get_scheduled_num_args(self):
         return self.kernel_group.get_num_args()
 
     def ready_to_flush(self):
