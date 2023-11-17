@@ -602,6 +602,41 @@ class LargeProtobufONNXProgramSerializer:
             )
 
 
+class ONNXRuntimeOptions:
+    """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    Attributes:
+        session_options: ONNX Runtime session options.
+        execution_providers: ONNX Runtime execution providers to use during model execution.
+        execution_provider_options: ONNX Runtime execution provider options.
+    """
+
+    import onnxruntime  # type: ignore[import]
+
+    session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None
+    """ONNX Runtime session options."""
+
+    execution_providers: Optional[Sequence[str | tuple[str, dict[Any, Any]]]] = None
+    """ONNX Runtime execution providers to use during model execution."""
+
+    execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None
+    """ONNX Runtime execution provider options."""
+
+    @_beartype.beartype
+    def __init__(
+        self,
+        *,
+        session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None,
+        execution_providers: Optional[
+            Sequence[str | tuple[str, dict[Any, Any]]]
+        ] = None,
+        execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None,
+    ):
+        self.session_options = session_options
+        self.execution_providers = execution_providers
+        self.execution_provider_options = execution_provider_options
+
+
 class ONNXProgram:
     """An in-memory representation of a PyTorch model that has been exported to ONNX.
 
@@ -643,7 +678,9 @@ class ONNXProgram:
         self._fake_context = fake_context
         self._export_exception = export_exception
 
-    def __call__(self, *args: Any, options=None, **kwargs: Any) -> Any:
+    def __call__(
+        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+    ) -> Any:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
@@ -657,8 +694,8 @@ class ONNXProgram:
         import onnxruntime  # type: ignore[import]
 
         onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
-        options = options or {}
-        providers = options.get("providers", onnxruntime.get_available_providers())
+        options = options or ONNXRuntimeOptions()
+        providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
         ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
 
