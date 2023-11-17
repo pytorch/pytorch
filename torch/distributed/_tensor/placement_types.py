@@ -391,7 +391,7 @@ class DTensorSpec:
         super().__setattr__(attr, value)
         # Make sure to recompute the hash in case any of the hashed attributes
         # change (though we do not expect `mesh` or `placements` to change)
-        if attr in ("mesh", "placements", "tensor_meta"):
+        if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
             if self.tensor_meta is not None:
                 self._hash = hash(
                     (
