@@ -26,8 +26,10 @@ from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    CreateSymbolicPolicy,
     DimConstraint,
     DimDynamic,
+    FreshCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
@@ -1559,18 +1561,24 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
-def _automatic_dynamic(e, tx, name, static_shapes):
+# Returns a CreateSymbolicPolicy
+def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     if static_shapes:
-        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+        return FreshCreateSymbolicPolicy(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+        )
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     if any(isinstance(s, SymInt) for s in e.size()):
-        return [
-            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-            for s in e.size()
-        ], [None] * e.dim()
+        return FreshCreateSymbolicPolicy(
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.size()
+            ],
+            constraint_sizes=[None] * e.dim(),
+        )
 
     # Prep for automatic dynamic
     frame_state_entry = None
@@ -1700,7 +1708,10 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return dynamic_dims, constraint_dims
+    return FreshCreateSymbolicPolicy(
+        dynamic_sizes=dynamic_dims,
+        constraint_sizes=constraint_dims,
+    )
 
 
 def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
@@ -1714,29 +1725,33 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = None, None
+        policy = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            dynamic_dims, constraint_dims = _automatic_dynamic(
-                e, tx, source.name(), static_shapes
-            )
+            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
-            dynamic_dims,
-            constraint_dims,
+            policy.dynamic_sizes if policy is not None else None,
+            policy.constraint_sizes if policy is not None else None,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 source=source,
-                dynamic_dims=dynamic_dims,
-                constraint_dims=constraint_dims,
+                policy=policy,
             )
         )
-        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+        # TODO: just store the whole policy here
+        tx.output.tracked_fakes.append(
+            TrackedFake(
+                fake_e,
+                source,
+                policy.constraint_sizes if policy is not None else None,
+            )
+        )
         tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
