@@ -11,6 +11,7 @@ from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -1306,6 +1307,40 @@ class TestExport(TestCase):
                         actual_source_fns.append(source_names)
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
+
+    def test_lifted_constants(self) -> None:
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 2)
+        self.assertEqual(len(ep.tensor_constants), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 1)
+        self.assertEqual(len(ep.tensor_constants), 2)
+
+        inp = (torch.randn(1),)
+        self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep(*inp), transform(*inp)))
+
+        unlifted = ep.module()
+        self.assertTrue(torch.allclose(ep(*inp), unlifted(*inp)))
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
