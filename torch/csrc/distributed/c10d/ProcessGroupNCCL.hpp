@@ -649,11 +649,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
-  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
-  // If not, we first set the flag to be true and return a thread which will
-  // get and write the debug info into storage.
-  c10::optional<std::thread> tryWriteDebugInfo();
-
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -664,6 +659,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
+
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.

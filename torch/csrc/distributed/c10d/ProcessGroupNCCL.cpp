@@ -1500,7 +1500,6 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
-  std::thread debugInfoStoreThread;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
@@ -1547,7 +1546,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
               // `kWatchdogThreadSleepMillis * 30` or the thread has finished so
               // that we mark the thread detach and the dump of debug info
               // becomes "best effort".
-              debugInfoStoreThread.detach();
+              dumpingDebugInfo->detach();
             }
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
