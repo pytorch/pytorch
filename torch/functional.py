@@ -106,7 +106,7 @@ def broadcast_shapes(*shapes):
     if not torch.jit.is_tracing():
         max_len = 0
         for shape in shapes:
-            if isinstance(shape, int):
+            if isinstance(shape, (int, torch.SymInt)):
                 if max_len < 1:
                     max_len = 1
             elif isinstance(shape, (tuple, list)):
@@ -115,7 +115,7 @@ def broadcast_shapes(*shapes):
                     max_len = s
         result = [1] * max_len
         for shape in shapes:
-            if isinstance(shape, int):
+            if isinstance(shape, (int, torch.SymInt)):
                 shape = (shape,)
             if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
