@@ -762,7 +762,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
 
-    .. note:: Currently in the CUDA implementation and the CPU implementation when dim is specified,
+    .. note:: Currently in the CUDA implementation and the CPU implementation,
         `torch.unique` always sort the tensor at the beginning regardless of the `sort` argument.
         Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
         :func:`torch.unique_consecutive` which avoids the sorting.
@@ -1171,7 +1171,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims, out=out)
 
-    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+    if not isinstance(dims, (tuple, list, torch.Tensor, int, torch.SymInt)):
         raise RuntimeError("tensordot expects dims to be int or "
                            + "Tuple[List[int], List[int]] or "
                            + "List[List[int]] containing two lists, but got "
@@ -1196,7 +1196,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             dims_a = list(range(-dims_val, 0))
             dims_b = list(range(dims_val))
 
-    if isinstance(dims, int):
+    if isinstance(dims, (int, torch.SymInt)):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         if dims > min(a.dim(), b.dim()):
@@ -1597,7 +1597,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     if input.layout == torch.strided and input.device.type in \
             ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
-            if isinstance(dim, int):
+            if isinstance(dim, (int, torch.SymInt)):
                 _dim = [dim]
             else:
                 _dim = dim
@@ -1605,7 +1605,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             _dim = None  # type: ignore[assignment]
 
         if isinstance(p, str):
-            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
+            if p == "fro" and (dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2):
                 if out is None:
                     return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
                 else:
@@ -1642,7 +1642,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     # remove the overloads where dim is an int and replace with BraodcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
-        if isinstance(dim, int):
+        if isinstance(dim, (int, torch.SymInt)):
             _dim = [dim]
         else:
             _dim = dim
@@ -1750,15 +1750,15 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
         lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}")
 
     torch._check_type(
-        isinstance(shape, (int, Sequence)),
+        isinstance(shape, (int, torch.SymInt, Sequence)),
         lambda: f"expected 'shape' to be int or sequence of ints, but got {type(shape)}")
 
-    if isinstance(shape, int):
+    if isinstance(shape, (int, torch.SymInt)):
         shape = torch.Size([shape])
     else:
         for dim in shape:
             torch._check_type(
-                isinstance(dim, int),
+                isinstance(dim, (int, torch.SymInt)),
                 lambda: f"expected 'shape' sequence to only contain ints, but got {type(dim)}")
         shape = torch.Size(shape)
 

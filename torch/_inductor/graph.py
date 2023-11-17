@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
@@ -198,7 +198,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
+        self.constants: Dict[str, torch.Tensor] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -713,7 +713,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
-            log.debug("lowering %s %s", LazyString(lambda: n.format_node()), msg)
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
         origins = {n}
         if n.op == "call_function":
@@ -735,15 +735,9 @@ class GraphLowering(torch.fx.Interpreter):
                 debug("layout_constraints")
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride.int:
-                debug("sym_stride")
-                # inductor graphs can occasionally return sizes/strides,
-                # e.g. if we need to save symints for the backward graph.
-                if isinstance(n.meta["val"], torch.SymInt):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             elif is_magic_method(n.target):
+                # TODO: this is sus, it probably should be handled in the
+                # lowerings themselves similarly to sym_size/sym-stride
                 debug("is_magic_method")
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr

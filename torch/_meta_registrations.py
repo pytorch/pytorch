@@ -12,7 +12,7 @@ from torch._decomp import (
     meta_table,
 )
 from torch._ops import OpOverload
-from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
+from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     corresponding_complex_dtype,
     corresponding_real_dtype,
@@ -24,6 +24,7 @@ from torch._prims_common import (
 )
 
 from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
     _maybe_resize_out,
     _resize_output_check,
     _safe_copy_out,
@@ -49,6 +50,26 @@ def register_meta(op):
         return fn
 
     return wrapper
+
+
+def elementwise_meta(
+    *args,
+    type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND,
+):
+    # Perform type promotion, as this is expected from prim_metafunction
+    _, result_dtype = utils.elementwise_dtypes(
+        *args,
+        type_promotion_kind=type_promotion,
+    )
+    args = [_maybe_convert_to_dtype(x, result_dtype) for x in args]
+
+    # Broadcast
+    args = _maybe_broadcast(*args)
+
+    # Perform prim checks
+    return _prim_elementwise_meta(
+        *args, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 def toRealValueType(dtype):
@@ -1880,7 +1901,8 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta([aten.mm.default])
+@register_meta(aten.mm)
+@out_wrapper()
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
@@ -2161,7 +2183,8 @@ if torch._C._has_mkldnn:
         post_op_algorithm,
     ):
         output_shape = list(x.shape)
-        output_shape[-1] = w.shape[0]
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
         assert output_dtype in [torch.float32, torch.bfloat16]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
@@ -3573,8 +3596,8 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
 
 @register_meta([aten.round.default, aten.round.decimals])
 def meta_round(self, **kwargs):
-    return _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
 
 
@@ -3598,29 +3621,17 @@ def shift_dtype_check(fn_name, self, val):
 @register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
-    element_wise = _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
-    element_wise = _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # Annoying edgecase
-    if self.dim() == 0 and isinstance(other, torch.Tensor):
-        return torch.empty(
-            other.shape, device=element_wise.device, dtype=element_wise.dtype
-        )
-    return element_wise
 
 
 @register_meta(aten.zero.default)
@@ -3673,6 +3684,11 @@ def meta_masked_scatter(self, mask, source):
     self, mask = _maybe_broadcast(self, mask)
     output = torch.empty_like(self, memory_format=torch.contiguous_format)
     return meta_masked_scatter_(output, mask, source)
+
+
+@register_meta(aten.masked_scatter_backward)
+def meta_masked_scatter_backward(self, mask, sizes):
+    return self.new_empty(sizes)
 
 
 @register_meta(aten.index_put_.default)
@@ -5181,6 +5197,90 @@ def meta__scaled_dot_product_efficient_backward(
     return grad_q, grad_k, grad_v, grad_bias
 
 
+@register_meta(
+    [
+        aten._efficient_attention_forward,
+    ]
+)
+def meta__efficient_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: Optional[int],
+    dropout_p: float,
+    custom_mask_type: int,
+    compute_log_sumexp: bool = False,
+    scale: Optional[float] = None,
+    causal_diagonal: Optional[Tensor] = None,
+    seqlen_k: Optional[Tensor] = None,
+):
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (B, num_heads, logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return res, logsum_exp, seed, offset, M, N
+
+
+@register_meta(
+    [
+        aten._efficient_attention_backward,
+    ]
+)
+def meta__efficient_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    bias: Optional[Tensor],
+    cu_seqlens_q: Optional[Tensor],
+    cu_seqlens_k: Optional[Tensor],
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    logsumexp: Tensor,
+    dropout_p: float,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    custom_mask_type: int,
+    bias_requires_grad: bool,
+    scale: Optional[float] = None,
+    num_splits_key: Optional[int] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    if bias is not None:
+        assert bias is not None
+        lastDim = bias.size(-1)
+        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        new_sizes = list(bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+    else:
+        grad_bias = torch.empty((), device=query.device)
+
+    return grad_query, grad_key, grad_value, grad_bias
+
+
 @register_meta([aten._scaled_mm.default])
 def meta_scaled_mm(
     self: torch.Tensor,
@@ -5818,8 +5918,8 @@ def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
     def _f(x):
-        return _elementwise_meta(
-            x, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        return elementwise_meta(
+            x, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
 
     return _f
@@ -5829,9 +5929,8 @@ def _create_binary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
     def _f(x, y):
-        x, y = _maybe_broadcast(x, y)
-        return _elementwise_meta(
-            x, y, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        return elementwise_meta(
+            x, y, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
 
     return _f
@@ -5848,41 +5947,11 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k0)
 _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 
-_create_binary_float_meta_func(
-    [
-        aten.special_chebyshev_polynomial_t.default,
-        aten.special_chebyshev_polynomial_t.out,
-        aten.special_chebyshev_polynomial_t.n_scalar_out,
-    ]
-)
-_create_binary_float_meta_func(
-    [
-        aten.special_chebyshev_polynomial_u.default,
-        aten.special_chebyshev_polynomial_u.out,
-        aten.special_chebyshev_polynomial_u.n_scalar_out,
-    ]
-)
-_create_binary_float_meta_func(
-    [
-        aten.special_hermite_polynomial_h.default,
-        aten.special_hermite_polynomial_h.out,
-        aten.special_hermite_polynomial_h.n_scalar_out,
-    ]
-)
-_create_binary_float_meta_func(
-    [
-        aten.special_hermite_polynomial_he.default,
-        aten.special_hermite_polynomial_he.out,
-        aten.special_hermite_polynomial_he.n_scalar_out,
-    ]
-)
-_create_binary_float_meta_func(
-    [
-        aten.special_laguerre_polynomial_l.default,
-        aten.special_laguerre_polynomial_l.out,
-        aten.special_laguerre_polynomial_l.n_scalar_out,
-    ]
-)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_hermite_polynomial_h)
+_create_binary_float_meta_func(aten.special_hermite_polynomial_he)
+_create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
 
 
 # We must also trigger meta registrations from PrimTorch ref

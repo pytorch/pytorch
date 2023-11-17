@@ -409,6 +409,7 @@ from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
 
+# we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()
 
 
