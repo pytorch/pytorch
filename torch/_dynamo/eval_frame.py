@@ -604,12 +604,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     if skipfiles.check(frame.f_code)
                     else "dynamo tracing is disabled"
                 )
-                log.debug(
-                    "skipping: %s (reason: %s, file: %s)",
-                    frame.f_code.co_name,
-                    skip_reason,
-                    frame.f_code.co_filename,
-                )
+                if not is_skipfile or config.verbose:
+                    log.debug(
+                        "skipping: %s (reason: %s, file: %s)",
+                        frame.f_code.co_name,
+                        skip_reason,
+                        frame.f_code.co_filename,
+                    )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
