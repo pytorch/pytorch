@@ -602,14 +602,48 @@ class LargeProtobufONNXProgramSerializer:
             )
 
 
+class ONNXRuntimeOptions:
+    """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    Attributes:
+        session_options: ONNX Runtime session options.
+        execution_providers: ONNX Runtime execution providers to use during model execution.
+        execution_provider_options: ONNX Runtime execution provider options.
+    """
+
+    import onnxruntime  # type: ignore[import]
+
+    session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None
+    """ONNX Runtime session options."""
+
+    execution_providers: Optional[Sequence[str | tuple[str, dict[Any, Any]]]] = None
+    """ONNX Runtime execution providers to use during model execution."""
+
+    execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None
+    """ONNX Runtime execution provider options."""
+
+    @_beartype.beartype
+    def __init__(
+        self,
+        *,
+        session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None,
+        execution_providers: Optional[
+            Sequence[str | tuple[str, dict[Any, Any]]]
+        ] = None,
+        execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None,
+    ):
+        self.session_options = session_options
+        self.execution_providers = execution_providers
+        self.execution_provider_options = execution_provider_options
+
+
 class ONNXProgram:
     """An in-memory representation of a PyTorch model that has been exported to ONNX.
 
     Args:
         model_proto: The exported ONNX model as an :py:obj:`onnx.ModelProto`.
-        onnx_input_adapter: The input adapter used to convert PyTorch inputs into ONNX inputs.
-        onnx_output_adapter: The output adapter used to convert PyTorch outputs into ONNX outputs.
-        torch_output_adapter: The output adapter used to convert ONNX outputs into PyTorch outputs.
+        input_adapter: The input adapter used to convert PyTorch inputs into ONNX inputs.
+        output_adapter: The output adapter used to convert PyTorch outputs into ONNX outputs.
         diagnostic_context: Context object for the SARIF diagnostic system responsible for logging errors and metadata.
         fake_context: The fake context used for symbolic tracing.
         export_exception: The exception that occurred during export, if any.
@@ -617,9 +651,8 @@ class ONNXProgram:
     """
 
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
-    _onnx_input_adapter: Final[io_adapter.InputAdapter]
-    _onnx_output_adapter: Final[io_adapter.OutputAdapter]
-    _torch_output_adapter: Final[io_adapter.OutputAdapter]
+    _input_adapter: Final[io_adapter.InputAdapter]
+    _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
@@ -629,9 +662,8 @@ class ONNXProgram:
     def __init__(
         self,
         model_proto: onnx.ModelProto,  # type: ignore[name-defined]
-        onnx_input_adapter: io_adapter.InputAdapter,
-        onnx_output_adapter: io_adapter.OutputAdapter,
-        torch_output_adapter: io_adapter.OutputAdapter,
+        input_adapter: io_adapter.InputAdapter,
+        output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: diagnostics.DiagnosticContext,
         *,
         fake_context: Optional[ONNXFakeContext] = None,
@@ -640,14 +672,15 @@ class ONNXProgram:
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
-        self._onnx_input_adapter = onnx_input_adapter
-        self._onnx_output_adapter = onnx_output_adapter
-        self._torch_output_adapter = torch_output_adapter
+        self._input_adapter = input_adapter
+        self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
 
-    def __call__(self, *args: Any, options=None, **kwargs: Any) -> Any:
+    def __call__(
+        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+    ) -> Any:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
@@ -661,8 +694,8 @@ class ONNXProgram:
         import onnxruntime  # type: ignore[import]
 
         onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
-        options = options or {}
-        providers = options.get("providers", onnxruntime.get_available_providers())
+        options = options or ONNXRuntimeOptions()
+        providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
         ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
 
@@ -823,7 +856,7 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._onnx_input_adapter.apply(*model_args, **model_kwargs)
+        return self._input_adapter.apply(*model_args, **model_kwargs)
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
@@ -872,77 +905,7 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._onnx_output_adapter.apply(model_outputs)
-
-    def adapt_onnx_outputs_to_torch(
-        self, model_outputs: Any
-    ) -> Sequence[Union[numpy.ndarray, torch.Tensor, int, float, bool]]:
-        """Converts the exported ONNX model outputs to PyTorch model outputs format.
-
-        Due to design differences, the output format between PyTorch model and exported
-        ONNX model are often not the same. E.g., ONNX models can have extra outputs that do not exist in the original
-        PyTorch model, due to mutated buffers or models inputs. Nested constructs of tensors are allowed for
-        PyTorch model, but only flattened tensors are supported by ONNX, etc.
-
-        The actual adapting steps are associated with each individual export. It
-        depends on the PyTorch model, the particular set of model_args and model_kwargs
-        used for the export, and export options.
-
-        This method replays the adapting steps recorded during export.
-
-        Args:
-            model_outputs: The PyTorch model outputs.
-
-        Returns:
-            ONNX model outputs in PyTorch model outputs format.
-
-        Example::
-            class CustomModule(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.register_buffer("my_buffer", torch.tensor(4.0))
-
-                def forward(self, x, b):
-                    output = x + b
-                    (
-                        self.my_buffer2.add_(1.0) + self.my_buffer1
-                    )  # Mutate buffer through in-place addition
-                    return output
-
-            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
-            >>> import torch
-            >>> class CustomModule(torch.nn.Module):
-            ...    def __init__(self):
-            ...        super().__init__()
-            ...        self.register_buffer("my_buffer", torch.tensor(4.0))
-            ...    def forward(self, x, b):
-            ...        output = x + b
-            ...        self.my_buffer.add_(1.0) + 3.0 # Mutate buffer through in-place addition
-            ...        return output
-            >>> model = CustomModule()
-            >>> inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
-            >>> exported_program = torch.export.export(model, args=inputs)
-            >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
-            >>> pt_output = model(*inputs)
-            >>> pt_output
-            tensor([[1.9331, 0.2077, 0.1864],
-                    [0.9131, 0.2745, 1.6724],
-                    [0.0767, 0.8170, 0.0261]])
-            >>> ort_output = onnx_program(*inputs)
-            >>> print(ort_output)  # Note there are 2 outputs, the mutated buffer and the actual output
-            [array(6., dtype=float32), array([[-1.3944368 ,  0.19674866, -0.0490137 ],
-                [ 0.7518133 , -0.13318455, -1.2868402 ],
-                [ 0.3719321 ,  0.15569776,  2.6251755 ]], dtype=float32)]
-            >>> print(onnx_program.adapt_onnx_outputs_to_torch(ort_output))
-            [array([[-1.3944368 ,  0.19674866, -0.0490137 ],
-                [ 0.7518133 , -0.13318455, -1.2868402 ],
-                [ 0.3719321 ,  0.15569776,  2.6251755 ]], dtype=float32)]
-
-        .. warning::
-            This API is experimental and is *NOT* backward-compatible.
-
-        """
-        return self._torch_output_adapter.apply(model_outputs)
+        return self._output_adapter.apply(model_outputs)
 
     @_beartype.beartype
     def save(
@@ -1080,7 +1043,6 @@ class ONNXProgram:
             onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
-            io_adapter.OutputAdapter(),
             diagnostic_context,
             export_exception=export_exception,
         )
@@ -1088,21 +1050,13 @@ class ONNXProgram:
 
 class FXGraphExtractor(abc.ABC):
     """Abstract interface for FX graph extractor engines.
-
     This class isolates FX extraction logic from the rest of the export logic.
-    That allows a single ONNX exporter that can leverage different FX graphs.
-
-    Args:
-        onnx_input_adapter: Adapts the PyTorch model inputs to match the exported ONNX model inputs format
-        onnx_output_adapter: Adapts the PyTorch model outputs to match the exported ONNX model outputs format
-        torch_output_adapter: Adapts the ONNX model outputs to match the PyTorch model outputs format
-    """
+    That allows a single ONNX exporter that can leverage different FX graphs."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.onnx_input_adapter: io_adapter.InputAdapter = io_adapter.InputAdapter()
-        self.onnx_output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
-        self.torch_output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
+        self.input_adapter: io_adapter.InputAdapter = io_adapter.InputAdapter()
+        self.output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
 
     @abc.abstractmethod
     def generate_fx(
@@ -1207,9 +1161,8 @@ class Exporter:
 
             return torch.onnx.ONNXProgram(
                 onnx_model,
-                self.options.fx_tracer.onnx_input_adapter,
-                self.options.fx_tracer.onnx_output_adapter,
-                self.options.fx_tracer.torch_output_adapter,
+                self.options.fx_tracer.input_adapter,
+                self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
                 model_signature=getattr(
@@ -1496,27 +1449,25 @@ def common_pre_export_passes(
 
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
-    options.fx_tracer.onnx_input_adapter.append_step(io_adapter.RemoveNoneInputStep())
+    options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
 
     # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
     # Dynamo doesn't support non-tensor inputs.
-    options.fx_tracer.onnx_input_adapter.append_step(
-        io_adapter.RemoveNonTensorInputStep()
-    )
+    options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
 
     # ONNX does not support complex inputs. During graph building, all complex inputs
     # are converted to real representation inputs. Here we register this step to
     # input/output adapter.
-    options.fx_tracer.onnx_input_adapter.append_step(
+    options.fx_tracer.input_adapter.append_step(
         io_adapter.ConvertComplexToRealRepresentationInputStep()
     )
 
     # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
     # tensor, etc), we flatten the collection and register each element as output.
-    options.fx_tracer.onnx_output_adapter.append_step(io_adapter.FlattenOutputStep())
+    options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
     # Output post-processing steps should happen after `FlattenOutputStep`.
-    options.fx_tracer.onnx_output_adapter.append_step(
+    options.fx_tracer.output_adapter.append_step(
         io_adapter.ConvertComplexToRealRepresentationOutputStep()
     )
 
