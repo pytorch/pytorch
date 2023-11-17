@@ -151,11 +151,15 @@ class Verifier(metaclass=_VerifierMeta):
                 assert not any(t is object for t in ret)
                 return ret
 
+            # TODO Remove this allowlist.
+            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
+
             if not isinstance(op, _allowed_op_types()):
-                if op not in _allowed_builtin_ops():
+                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"
+                        f"Valid torch functions: {_allowed_torch_functions}"
                     )
 
             if isinstance(op, OpOverload):
