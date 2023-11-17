@@ -120,11 +120,11 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
     def test_custom_pre_pass(self):
         with config.patch(
-                # leave custom pass only in post_grad_passes()
-                pattern_matcher=False,
-                post_grad_custom_pre_pass=self._CustomPass(),
-                # define pattern match as custom post grad opt pass
-                post_grad_custom_post_pass=None,
+            # leave custom pass only in post_grad_passes()
+            pattern_matcher=False,
+            post_grad_custom_pre_pass=self._CustomPass(),
+            # define pattern match as custom post grad opt pass
+            post_grad_custom_post_pass=None,
         ):
             # init mkldnn fusion on custom_matcher
             self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_pre_pass)
@@ -137,16 +137,19 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             other_match_count = 1  # conv prepack weight
             other_match_nodes = 1  # conv prepack weight
             self._test_common(
-                mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes
+                mod,
+                (x,),
+                match_count + other_match_count,
+                match_nodes + other_match_nodes,
             )
 
     def test_custom_post_pass(self):
         with config.patch(
-                # leave custom pass only in post_grad_passes()
-                pattern_matcher=False,
-                # define pattern match as custom post grad opt pass
-                post_grad_custom_pre_pass=None,
-                post_grad_custom_post_pass=self._CustomPass()
+            # leave custom pass only in post_grad_passes()
+            pattern_matcher=False,
+            # define pattern match as custom post grad opt pass
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=self._CustomPass(),
         ):
             # init mkldnn fusion on custom_matcher
             self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_post_pass)
@@ -159,7 +162,10 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             other_match_count = 1  # conv prepack weight
             other_match_nodes = 1  # conv prepack weight
             self._test_common(
-                mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes
+                mod,
+                (x,),
+                match_count + other_match_count,
+                match_nodes + other_match_nodes,
             )
 
 

@@ -41,7 +41,9 @@ class MyModel(torch.nn.Module):
 
 
 def _run_codecache_test(start_method):
-    with torch._inductor.config.patch(start_method=start_method, compile_threads=16):
+    with torch._inductor.config.patch(
+        worker_start_method=start_method, compile_threads=16
+    ):
         AsyncCompile.warm_pool()
 
         model = MyModel().cuda()

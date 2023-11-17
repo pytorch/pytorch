@@ -589,7 +589,6 @@ class TestPatternMatcher(TestCase):
     # Turn it back on for test
     @inductor_config.patch(joint_graph_constant_folding=True)
     def test_pointless_cumsum(self):
-
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
