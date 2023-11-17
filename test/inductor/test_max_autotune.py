@@ -361,6 +361,73 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_simple(self):
+        def mm(a, b, c):
+            return (a @ b) - 3.3 * c
+
+        with config.patch(
+            {
+                "trace.enabled": True,
+                "trace.output_code": True,
+                "trace.debug_dir": os.path.abspath(
+                    os.path.dirname(__file__) + "/../../tmp/test_code/"
+                ),
+            }
+        ):
+            #  The pointwise ops seem to be pre-fused into a single Pointwise
+            self._test_max_autotune_cutlass_backend_epilogue_fusion(
+                mixed_precision=False,
+                fp16=True,
+                expected_fuse_count=1,
+                mm=mm,
+                with_bias=True,
+                m=2048,
+                n=512,
+                k=4096,
+            )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_random_mask(self):
+        def mm(a, b, c):
+            return (a @ b) * torch.relu(c)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            m=2048,
+            n=512,
+            k=4096,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_random_mask_batched(
+        self,
+    ):
+        def mm(a, b, c):
+            return (a @ b) * torch.relu(c - 0.02)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            m=2048,
+            n=512,
+            k=4096,
+            batch_size=100,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return (a @ b) * 3.3 - 1.234
