@@ -325,6 +325,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
+            aten._lazy_clone,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
             aten.lerp,
