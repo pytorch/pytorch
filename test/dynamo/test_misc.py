@@ -711,7 +711,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: "id" not in line and "lookup_backend" not in line,
+            lambda line: not any(
+                banned in line for banned in ["id", "lookup_backend", "config_hash"]
+            ),
             sorted(guard_code),
         )
         self.assertExpectedInline(
@@ -1980,6 +1982,19 @@ utils_device.CURRENT_DEVICE == None""",
         x = np.arange(8)
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
+
+    def test_trace_ndarray_frame_2(self):
+        # no tensors/ndarray as inputs in the frame
+        def fn(x):
+            print("graph break.")
+            return 2 * np.arange(x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = 8
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 1)
 
     def test_numpy_non_torch_dtype(self):
         # test that we gracefully graph break on dtypes
