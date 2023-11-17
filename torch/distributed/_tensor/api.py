@@ -91,9 +91,10 @@ class _ToTorchTensor(torch.autograd.Function):
                 grad_output, grad_spec, dtensor_spec
             )
 
-        _, tensor_stride = compute_global_tensor_info(
+        _, tensor_stride, placements = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements
         )
+        dtensor_spec.placements = placements
         return (
             DTensor(
                 grad_output,
@@ -129,7 +130,7 @@ class _FromTorchTensor(torch.autograd.Function):
             # if it's not by default run_check, we assume user is certain that each
             # rank has the same tensor shape, and we just use that to calculate the
             # global shape
-            global_shape, global_stride = compute_global_tensor_info(
+            global_shape, global_stride, placements = compute_global_tensor_info(
                 input, device_mesh, placements
             )
             tensor_shape, tensor_stride = torch.Size(global_shape), tuple(global_stride)
