@@ -4423,7 +4423,6 @@ class TestResize(TestCase):
         assert_raises(ValueError, x.resize, (5, 1))
         del y  # avoid pyflakes unused variable warning.
 
-    @xfailIfTorchDynamo  # https://github.com/pytorch/pytorch/issues/113539
     @_no_tracing
     def test_int_shape(self):
         x = np.eye(3)
@@ -4458,7 +4457,6 @@ class TestResize(TestCase):
         assert_raises(TypeError, np.eye(3).resize, order=1)
         assert_raises((NotImplementedError, TypeError), np.eye(3).resize, refcheck="hi")
 
-    @xfailIfTorchDynamo  # https://github.com/pytorch/pytorch/issues/113539
     @_no_tracing
     def test_freeform_shape(self):
         x = np.eye(3)
@@ -4468,7 +4466,6 @@ class TestResize(TestCase):
             x.resize(3, 2, 1)
         assert_(x.shape == (3, 2, 1))
 
-    @xfailIfTorchDynamo  # https://github.com/pytorch/pytorch/issues/113539
     @_no_tracing
     def test_zeros_appended(self):
         x = np.eye(3)
