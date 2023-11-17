@@ -59,27 +59,25 @@ class TestDTensorOptimizer(DTensorTestBase):
         dist_optim,
         inputs,
     ):
-        # run forward/backward/optim for original model
-        optim.zero_grad()
-        out = model(inputs)
-        loss = out.sum()
-        loss.backward()
-        optim.step()
+        for iter_idx in range(2):
+            # run forward/backward/optim for original model
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            out = model(inputs)
+            loss = out.sum()
+            loss.backward()
+            optim.step()
 
-        # run forward/backward/optim for distributed model
-        dist_optim.zero_grad()
-        dist_out = dist_model(inputs)
-        # dist_out = dist_out.redistribute(placements=[Replicate()] * mesh.ndim)
-        dist_loss = dist_out.sum()
-        dist_loss.backward()
-        dist_optim.step()
+            # run forward/backward/optim for distributed model
+            dist_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            dist_out = dist_model(inputs)
+            dist_loss = dist_out.sum()
+            dist_loss.backward()
+            dist_optim.step()
 
-        # check that the optimizer update parameters with same numerics
-        for p1, p2 in zip(model.parameters(), dist_model.parameters()):
-            # turn p2 to full replication for comparison
-            p2 = p2.redistribute(placements=[Replicate()] * mesh.ndim)
-            p2 = p2.to_local()
-            self.assertEqual(p1, p2)
+            # check that the optimizer update parameters with same numerics
+            for p1, p2 in zip(model.parameters(), dist_model.parameters()):
+                p2 = p2.full_tensor()
+                self.assertEqual(p1, p2)
 
     @with_comms
     def test_adam_1d_sharding(self):

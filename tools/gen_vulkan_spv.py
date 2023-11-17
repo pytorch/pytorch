@@ -7,14 +7,16 @@ import glob
 import os
 import re
 import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import subprocess
 import textwrap
-import yaml
 from collections import OrderedDict
-from torchgen.code_template import CodeTemplate
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+from torchgen.code_template import CodeTemplate
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
@@ -128,16 +130,20 @@ class ShaderInfo:
     bias_storage_type: str = ""
     register_for: Optional[Tuple[str, List[str]]] = None
 
+
 def getName(filePath: str) -> str:
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
+
 
 def isDescriptorLine(lineStr: str) -> bool:
     descriptorLineId = r"^layout\(set"
     return re.search(descriptorLineId, lineStr) is not None
 
+
 def isTileSizeLine(lineStr: str) -> bool:
     tile_size_id = r"^ \* TILE_SIZE = \("
     return re.search(tile_size_id, lineStr) is not None
+
 
 def findTileSizes(lineStr: str) -> List[int]:
     tile_size_id = r"^ \* TILE_SIZE = \(([0-9]+), ([0-9]+), ([0-9]+)\)"
@@ -146,9 +152,11 @@ def findTileSizes(lineStr: str) -> List[int]:
         raise AssertionError("matches is None in findTileSizes")
     return [int(matches.group(1)), int(matches.group(2)), int(matches.group(3))]
 
+
 def isWeightStorageTypeLine(lineStr: str) -> bool:
     weight_storage_id = r"^ \* WEIGHT_STORAGE = "
     return re.search(weight_storage_id, lineStr) is not None
+
 
 def getWeightStorageType(lineStr: str) -> str:
     weight_storage_id = r"^ \* WEIGHT_STORAGE = ([a-zA-Z]+_\dD)"
@@ -157,9 +165,11 @@ def getWeightStorageType(lineStr: str) -> str:
         raise AssertionError("matches is None in getWeightStorageType")
     return matches.group(1)
 
+
 def isBiasStorageTypeLine(lineStr: str) -> bool:
     weight_storage_id = r"^ \* BIAS_STORAGE = "
     return re.search(weight_storage_id, lineStr) is not None
+
 
 def getBiasStorageType(lineStr: str) -> str:
     weight_storage_id = r"^ \* BIAS_STORAGE = ([a-zA-Z]+_\dD)"
@@ -168,10 +178,14 @@ def getBiasStorageType(lineStr: str) -> str:
         raise AssertionError("matches is None in getBiasStorageType")
     return matches.group(1)
 
+
 def isRegisterForLine(lineStr: str) -> bool:
     # Check for Shader Name and a list of at least one Registry Key
-    register_for_id = r"^ \* REGISTER_FOR = \('([A-Za-z0-9_]+)'\s*,\s*\['([A-Za-z0-9_]+)'.*\]\)"
+    register_for_id = (
+        r"^ \* REGISTER_FOR = \('([A-Za-z0-9_]+)'\s*,\s*\['([A-Za-z0-9_]+)'.*\]\)"
+    )
     return re.search(register_for_id, lineStr) is not None
+
 
 def findRegisterFor(lineStr: str) -> Tuple[str, List[str]]:
     register_for_pattern = r"'([A-Za-z0-9_]+)'"
@@ -181,6 +195,7 @@ def findRegisterFor(lineStr: str) -> Tuple[str, List[str]]:
     matches_list = list(matches)
     return (matches_list[0], matches_list[1:])
 
+
 typeIdMapping = {
     r"image[123]D\b": "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
     r"sampler[123]D\b": "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
@@ -189,11 +204,12 @@ typeIdMapping = {
 }
 
 storageTypeToEnum = {
-    "TEXTURE_2D" : "api::StorageType::TEXTURE_2D",
-    "TEXTURE_3D" : "api::StorageType::TEXTURE_3D",
-    "BUFFER" : "api::StorageType::BUFFER",
+    "TEXTURE_2D": "api::StorageType::TEXTURE_2D",
+    "TEXTURE_3D": "api::StorageType::TEXTURE_3D",
+    "BUFFER": "api::StorageType::BUFFER",
     "": "api::StorageType::UNKNOWN",
 }
+
 
 def determineDescriptorType(lineStr: str) -> str:
     for identifier, typeNum in typeIdMapping.items():
@@ -202,6 +218,7 @@ def determineDescriptorType(lineStr: str) -> str:
     raise AssertionError(
         "No matching descriptor type for " + lineStr + " in determineDescriptorType"
     )
+
 
 def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     shader_info = ShaderInfo([], [], "")
@@ -220,9 +237,10 @@ def getShaderInfo(srcFilePath: str) -> ShaderInfo:
 
     return shader_info
 
+
 def genGLSLFromGLSLT(src_dir_path: str, tmp_dir_path: str) -> None:
     template_dir_path = os.path.join(src_dir_path, "templates")
-    vexs = glob.glob(os.path.join(template_dir_path, '**', '*.yaml'), recursive=True)
+    vexs = glob.glob(os.path.join(template_dir_path, "**", "*.yaml"), recursive=True)
     parameter_yaml_files = []
     for f in vexs:
         if len(f) > 1:
@@ -231,7 +249,7 @@ def genGLSLFromGLSLT(src_dir_path: str, tmp_dir_path: str) -> None:
     for params_yaml in parameter_yaml_files:
         generator.add_params_yaml(params_yaml)  # type: ignore[no-untyped-call]
 
-    vexs = glob.glob(os.path.join(src_dir_path, '**', '*.glslt'), recursive=True)
+    vexs = glob.glob(os.path.join(src_dir_path, "**", "*.glslt"), recursive=True)
     templateSrcPaths = []
     for f in vexs:
         if len(f) > 1:
@@ -258,7 +276,7 @@ def genCppH(
     templateSrcPaths = []
 
     for srcDirPath in srcDirPaths:
-        vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
+        vexs = glob.glob(os.path.join(srcDirPath, "**", "*.glsl"), recursive=True)
         for f in vexs:
             if len(f) > 1:
                 templateSrcPaths.append(f)
@@ -267,7 +285,7 @@ def genCppH(
         # Now add glsl files that are generated from templates
         genGLSLFromGLSLT(srcDirPath, tmpDirPath)
 
-    vexs = glob.glob(os.path.join(tmpDirPath, '**', '*.glsl'), recursive=True)
+    vexs = glob.glob(os.path.join(tmpDirPath, "**", "*.glsl"), recursive=True)
     for f in vexs:
         if len(f) > 1:
             templateSrcPaths.append(f)
@@ -283,17 +301,20 @@ def genCppH(
         codeTemplate = CodeTemplate.from_file(templateSrcPath)
         srcPath = tmpDirPath + "/" + name + ".glsl"
         content = codeTemplate.substitute(env)
-        with open(srcPath, 'w') as fw:
+        with open(srcPath, "w") as fw:
             fw.write(content)
 
         spvPath = tmpDirPath + "/" + name + ".spv"
         print(f"spvPath {spvPath}")
 
         cmd = [
-            glslcPath, "-fshader-stage=compute",
-            srcPath, "-o", spvPath,
+            glslcPath,
+            "-fshader-stage=compute",
+            srcPath,
+            "-o",
+            spvPath,
             "--target-env=vulkan1.0",
-            "-Werror"
+            "-Werror",
         ] + [arg for srcDirPath in srcDirPaths for arg in ["-I", srcDirPath]]
 
         print("\nglslc cmd:", cmd)
@@ -323,7 +344,9 @@ def genCppH(
     h += "extern const ShaderListing shader_infos;\n"
     h += "extern ShaderRegistry shader_registry;\n"
     h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
-    h += "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
+    h += (
+        "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
+    )
 
     h += nsend
 
@@ -341,8 +364,8 @@ def genCppH(
         name = getName(spvPath).replace("_spv", "")
 
         print(f"spvPath:{spvPath}")
-        with open(spvPath, 'rb') as fr:
-            next_bin = array.array('I', fr.read())
+        with open(spvPath, "rb") as fr:
+            next_bin = array.array("I", fr.read())
             sizeBytes = 4 * len(next_bin)
             shader_info_bin_code.append(
                 "const uint32_t {}_bin[] = {{\n{}\n}};".format(
@@ -362,7 +385,7 @@ def genCppH(
         shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
 
         shader_info_args = [
-            f"\"vulkan.{name}\"",
+            f'"vulkan.{name}"',
             f"{name}_bin",
             str(sizeBytes),
             shader_info_layouts,
@@ -373,7 +396,7 @@ def genCppH(
 
         shader_info_cpp_code.append(
             textwrap.indent(
-                "{{\"{}\",\n api::ShaderInfo(\n{})}}".format(
+                '{{"{}",\n api::ShaderInfo(\n{})}}'.format(
                     name,
                     textwrap.indent(",\n".join(shader_info_args), "     "),
                 ),
@@ -386,7 +409,7 @@ def genCppH(
             for registry_key in registry_keys:
                 shader_info_registry_code.append(
                     textwrap.indent(
-                        f"{{\"{op_name}\", {{{{\"{registry_key}\", \"{name}\"}}}}}}",
+                        f'{{"{op_name}", {{{{"{registry_key}", "{name}"}}}}}}',
                         "        ",
                     ),
                 )
@@ -421,34 +444,20 @@ def parse_arg_env(items: Dict[Any, Any]) -> Dict[Any, Any]:
 
 
 def main(argv: List[str]) -> int:
-    parser = argparse.ArgumentParser(description='')
+    parser = argparse.ArgumentParser(description="")
     parser.add_argument(
-        '-i',
-        '--glsl-paths',
-        nargs='+',
+        "-i",
+        "--glsl-paths",
+        nargs="+",
         help='List of paths to look for GLSL source files, separated by spaces. Ex: --glsl-paths "path1 path2 path3"',
-        default=['.'],
+        default=["."],
     )
+    parser.add_argument("-c", "--glslc-path", required=True, help="")
+    parser.add_argument("-t", "--tmp-dir-path", required=True, help="/tmp")
+    parser.add_argument("-o", "--output-path", required=True, help="")
     parser.add_argument(
-        '-c',
-        '--glslc-path',
-        required=True,
-        help='')
-    parser.add_argument(
-        '-t',
-        '--tmp-dir-path',
-        required=True,
-        help='/tmp')
-    parser.add_argument(
-        '-o',
-        '--output-path',
-        required=True,
-        help='')
-    parser.add_argument(
-        "--env",
-        metavar="KEY=VALUE",
-        nargs='*',
-        help="Set a number of key-value pairs")
+        "--env", metavar="KEY=VALUE", nargs="*", help="Set a number of key-value pairs"
+    )
     options = parser.parse_args()
     env = DEFAULT_ENV
     for key, value in parse_arg_env(options.env).items():
@@ -466,9 +475,15 @@ def main(argv: List[str]) -> int:
         srcDirPaths=options.glsl_paths,
         glslcPath=options.glslc_path,
         tmpDirPath=options.tmp_dir_path,
-        env=env)
+        env=env,
+    )
 
     return 0
 
-if __name__ == '__main__':
+
+def invoke_main() -> None:
     sys.exit(main(sys.argv))
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover
