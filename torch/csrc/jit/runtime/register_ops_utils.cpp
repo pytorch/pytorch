@@ -1,3 +1,11 @@
+#include <ATen/CPUGeneratorImpl.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#endif
+#ifdef USE_MPS
+#include <ATen/mps/MPSGeneratorImpl.h>
+#endif
+
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
@@ -392,4 +400,34 @@ void listSetItem(Stack& stack) {
 
   push(stack, std::move(list));
 }
+
+at::Generator make_generator_for_device(
+  c10::Device device, c10::optional<int64_t> seed) {
+  if (device.is_cpu()) {
+    if (seed.has_value()) {
+      return at::detail::createCPUGenerator(seed.value());
+    } else {
+      return at::detail::createCPUGenerator();
+    }
+#ifdef USE_CUDA
+  } else if (device.is_cuda()) {
+    auto generator = at::cuda::detail::createCUDAGenerator(device.index());
+    if (seed.has_value()) {
+      generator.set_current_seed(seed.value());
+    }
+    return generator;
+#endif
+#ifdef USE_MPS
+  } else if (device.is_mps()) {
+    if (seed.has_value()) {
+      return at::mps::detail::createMPSGenerator(seed.value());
+    } else {
+      return at::mps::detail::createMPSGenerator();
+    }
+#endif
+  } else {
+    AT_ERROR("Unsupported device for at::make_generator_for_device found: ", device.str());
+  }
+}
+
 } // namespace torch::jit
