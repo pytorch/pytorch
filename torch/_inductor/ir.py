@@ -4876,20 +4876,16 @@ def _prepare_linear_fusion_create(
     # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp#L291
     _, oc = weight.get_size()
     output_size = list(m) + [oc]
-    print("output_size is: {}".format(output_size), flush=True)
-
     req_stride_order = list(reversed(range(len(x.get_size()))))
-    output_stride = make_contiguous_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    kernel_layout = FixedLayout(
-        x.get_device(),
-        x.get_dtype(),
-        convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),
+    kernel_layout = FlexibleLayout(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        size=output_size,
     )
     constant_args: List[Any] = []
 
@@ -6040,6 +6036,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
+
+    def apply_constraint(self):
+        pass
 
 
 @dataclasses.dataclass
