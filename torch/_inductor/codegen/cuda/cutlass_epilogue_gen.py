@@ -173,10 +173,9 @@ class CutlassEVTEpilogueTypeFormatter:
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            # return f"cutlass::epilogue::fusion::Sm90SrcFetch /* :={name} */"
-            raise CUTLASSEVTOpNotImplementedError(
-                f"Operand {name} not found. Auxiliary inputs not supported yet."
-            )
+            return f"""cutlass::epilogue::fusion::Sm90EVT<
+                                cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >, 
+                                cutlass::epilogue::fusion::Sm90SrcFetch> /* :={name} as operand C, cast to accumulator dtype */"""
 
     def _op_constant(self, value, dtype):
         # Load a constant
@@ -366,9 +365,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            raise CUTLASSEVTOpNotImplementedError(
-                f"Operand {name} not found. Auxiliary inputs not supported yet."
-            )
+            return "{}"
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
