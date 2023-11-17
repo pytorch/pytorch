@@ -1,21 +1,22 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
-    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
-namespace torch {
-namespace unwind {
+#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
+    !__has_include("ext/stdio_filebuf.h")
+namespace torch::unwind {
 std::vector<void*> unwind() {
   TORCH_CHECK(
       false,
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
+#ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   TORCH_CHECK(
       false,
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
+#endif
 
 Stats stats() {
   TORCH_CHECK(
@@ -23,8 +24,7 @@ Stats stats() {
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
-} // namespace unwind
-} // namespace torch
+} // namespace torch::unwind
 
 #else
 
@@ -306,19 +306,11 @@ extern "C" void unwind_entry(std::vector<void*>* result);
 __asm__(
     ".global unwind_entry\n"
     "unwind_entry:\n"
-#ifdef __aarch64__
-    "mov x1, sp;\n"
-    "mov x2, x29;\n"
-    "b unwind_c;\n"
-#else
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
-    "jmp unwind_c;\n"
-#endif
-);
+    "jmp unwind_c;\n");
 
-namespace torch {
-namespace unwind {
+namespace torch::unwind {
 std::vector<void*> unwind() {
   std::vector<void*> frames;
   unwind_entry(&frames);
@@ -423,7 +415,7 @@ struct Symbolizer {
       frame.lineno = lineno_str == "?" ? 0 : std::stoi(lineno_str);
       frame_map_[e.queried[e.completed]] = std::move(frame);
     }
-  };
+  }
 };
 
 #ifndef FBCODE_CAFFE2
@@ -446,6 +438,5 @@ Stats stats() {
   return unwind_cache.stats();
 }
 
-} // namespace unwind
-} // namespace torch
+} // namespace torch::unwind
 #endif
