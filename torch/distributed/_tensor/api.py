@@ -239,8 +239,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         tensor_meta = TensorMeta(shape, stride, dtype)
         # deepcopy and set spec
-        if not isinstance(placements, tuple):
-            placements = tuple(placements)
         r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         r._local_tensor = local_tensor
         return r
