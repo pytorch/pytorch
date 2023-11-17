@@ -113,6 +113,12 @@ torch/utils/data/ @ejguan
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
 tools/amd_build/ @jeffdaily @jithunnair-amd
 
+# ROCm-specific files
+aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+c10/hip @jeffdaily @jithunnair-amd
+aten/src/ATen/hip @jeffdaily @jithunnair-amd
+
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
 /torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
