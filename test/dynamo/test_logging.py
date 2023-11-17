@@ -630,6 +630,7 @@ exclusions = {
     "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",

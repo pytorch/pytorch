@@ -834,10 +834,15 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
     )
     if state._comm_hook is None:  # default path
         _div_if_needed(padded_unsharded_grad, state._gradient_predivide_factor)
+        pg = (
+            handle._fake_process_group
+            if handle._use_fake_reduce
+            else state.process_group
+        )
         dist.reduce_scatter_tensor(
             new_sharded_grad,
             padded_unsharded_grad,
-            group=state.process_group,
+            group=pg,
         )
         if uses_hybrid_sharded_strategy:
             state._all_reduce_stream.wait_stream(state._post_backward_stream)
