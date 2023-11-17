@@ -1,11 +1,12 @@
 # Owner(s): ["module: inductor"]
+import functools
 import pickle
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import (
@@ -21,7 +22,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._triton import has_triton
+
+HAS_TRITON = has_triton()
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 
 class MyModel(torch.nn.Module):
@@ -89,7 +96,7 @@ class TestFxGraphCache(TestCase):
         super().setUp()
         counters.clear()
 
-    @requires_cuda()
+    @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
@@ -130,7 +137,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-    @requires_cuda()
+    @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float32, torch.float64))
@@ -475,6 +482,4 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests()
+    run_tests()
