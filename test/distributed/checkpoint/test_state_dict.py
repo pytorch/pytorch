@@ -8,7 +8,8 @@ from typing import Callable
 import torch
 import torch.distributed as dist
 from torch.distributed._composable import fully_shard, replicate
-from torch.distributed._tensor import init_device_mesh
+from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -27,13 +28,14 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_state_dict import VerifyStateDictMixin
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 from torch.utils._pytree import tree_all, tree_all_only
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -366,8 +368,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(2)
     def test_cpu_offload_full_state_dict(self) -> None:
         orig_model = CompositeParamModel(device=torch.device("cuda"))
-        orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-        copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         dist_model = FSDP(
             copy.deepcopy(orig_model),

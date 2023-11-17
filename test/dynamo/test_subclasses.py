@@ -13,7 +13,11 @@ import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    FreshCreateSymbolicPolicy,
+    ShapeEnv,
+)
 from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
@@ -332,10 +336,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 shape_env=shape_env
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 x1_fake = fake_mode.from_tensor(
-                    x1, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x1,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 opt_f(x_fake)
                 opt_f(x1_fake)
@@ -362,7 +372,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
-                        inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                        inp,
+                        policy=FreshCreateSymbolicPolicy(
+                            [dim_dynamic for i in range(x.dim())]
+                        ),
                     )
                     opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
@@ -694,7 +707,10 @@ class GraphModule(torch.nn.Module):
                 shape_env=shape_env
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    ),
                 )
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
@@ -872,14 +888,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         def fn1(nt1, nt2):
             return (nt1 + nt2).sin().cos()
 
-        compiled_f = torch.compile(
-            fn1, fullgraph=True, backend="aot_eager", dynamic=True
-        )
+        compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
         out = compiled_f(nt, nt2)
         out_buffer = ViewBufferFromNested.apply(out)
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-        out_ref = compiled_f(nt, nt2)
+        out_ref = fn1(nt, nt2)
         out_buffer_ref = ViewBufferFromNested.apply(out_ref)
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 

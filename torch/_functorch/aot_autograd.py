@@ -827,7 +827,6 @@ def has_same_metadata(t1, t2):
         definitely_true(sym_eq(t1.size(), t2.size()))
         and definitely_true(sym_eq(t1.stride(), t2.stride()))
         and definitely_true(t1.storage_offset() == t2.storage_offset())
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
@@ -883,6 +882,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         aliased_out = aliased_out.detach()
     elif not aliased_base_tensor.requires_grad and target_requires_grad:
         aliased_out.requires_grad_(True)
+    # For outputs aliasing inputs, we need to check if the dtype has changed.
+    # as_strided() is the "most generic" view, but it does not cover cross-dtype views
+    if aliased_out.dtype != target_meta_tensor.dtype:
+        aliased_out = aliased_out.view(target_meta_tensor.dtype)
     return aliased_out
 
 def to_fun(t):
@@ -1153,7 +1156,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 requires_grad=requires_grad,
-                mutation_type=_get_mutation_type(keep_input_mutations, is_train, mutates_data, mutates_metadata, requires_grad)
+                mutation_type=_get_mutation_type(keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
@@ -1419,7 +1422,14 @@ from a multi-output view call")
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data and info.requires_grad
+            if _get_mutation_type(
+                keep_input_mutations,
+                mutates_data=info.mutates_data,
+                mutates_metadata=info.mutates_metadata,
+                requires_grad=info.requires_grad
+                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
+                # this can also include metadata mutations, and inputs that do not require grad,
+            ) == MutationType.MUTATED_OUT_GRAPH and info.mutates_data and info.requires_grad
         ]
         f_output_tangents = [
             o
@@ -1689,7 +1699,7 @@ def fn_input_mutations_to_outputs(
         mutated_inputs_to_return = [
             x
             for (i, x) in enumerate(args)
-            if meta.input_info[i].mutates_metadata or (meta.input_info[i].mutates_data and not keep_data_input_mutations)
+            if i in meta.mutated_inp_runtime_indices
         ]
         return *mutated_inputs_to_return, *outs
     return inner_fn
@@ -2285,19 +2295,17 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, is_train: bool, mutates_data, mutates_metadata, requires_grad):
+def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
     if keep_input_mutations:
-        if is_train:
-            return mutates_data and not mutates_metadata and not requires_grad
-        return not mutates_metadata
+        return mutates_data and not mutates_metadata and not requires_grad
     return False
 
 
-def _get_mutation_type(keep_input_mutations: bool, is_train: bool, mutates_data, mutates_metadata, requires_grad):
+def _get_mutation_type(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
     if (not mutates_data) and (not mutates_metadata):
         return MutationType.NOT_MUTATED
 
-    if _check_if_mutation_can_be_in_graph(keep_input_mutations, is_train, mutates_data, mutates_metadata, requires_grad):
+    if _check_if_mutation_can_be_in_graph(keep_input_mutations, mutates_data, mutates_metadata, requires_grad):
         return MutationType.MUTATED_IN_GRAPH
 
     return MutationType.MUTATED_OUT_GRAPH
@@ -2622,7 +2630,7 @@ def create_synthetic_base_metadata(
             mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=_get_mutation_type(m.keep_input_mutations, m.is_train, mutates_data, mutates_metadata, requires_grad)
+            mutation_type=_get_mutation_type(m.keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
         )
         input_infos.append(inpt_info)
 
@@ -3144,36 +3152,16 @@ def create_runtime_wrapper(
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
-        if keep_input_mutations:
-            if not trace_joint:
-                assert (
-                    len(all_outs)
-                    == num_metadata_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases
-                )
-                assert (
-                    runtime_metadata.num_mutated_inp_runtime_indices == num_metadata_mutated_inps
-                )
-            else:
-                num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
-                # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
-                if num_graph_handled > 0:
-                    all_outs = all_outs[:-num_graph_handled]
-                assert (
-                    len(all_outs)
-                    == num_mutated_runtime_inps + runtime_metadata.num_outputs + num_intermediate_bases
-                )
-                assert (
-                    runtime_metadata.num_mutated_inp_runtime_indices == num_mutated_runtime_inps
-                )
+        if keep_input_mutations and trace_joint:
+            num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
+            # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
+            if num_graph_handled > 0:
+                all_outs = all_outs[:-num_graph_handled]
 
-        else:
-            assert (
-                len(all_outs)
-                == num_mutated_inps + runtime_metadata.num_outputs + num_intermediate_bases
-            )
-            assert (
-                runtime_metadata.num_mutated_inp_runtime_indices == num_mutated_inps
-            )
+        assert (
+            len(all_outs)
+            == num_mutated_runtime_inps + runtime_metadata.num_outputs + num_intermediate_bases
+        )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -4360,14 +4348,20 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+                policy = None
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if x in tracing_context.tensor_to_policy:
+                        policy = tracing_context.tensor_to_policy[x]
+
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
-                    return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
+                    return fake_mode.from_tensor(x, static_shapes=True, policy=policy)
+                return fake_mode.from_tensor(x, static_shapes=False, policy=policy)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
