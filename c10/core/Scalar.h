@@ -48,11 +48,13 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND5(
+  AT_FORALL_SCALAR_TYPES_AND7(
       Half,
       BFloat16,
       Float8_e5m2,
       Float8_e4m3fn,
+      Float8_e5m2fnuz,
+      Float8_e4m3fnuz,
       ComplexHalf,
       DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
@@ -90,11 +92,14 @@ class C10_API Scalar {
     } else if (Tag::HAS_i == tag) {                                   \
       return checked_convert<type, int64_t>(v.i, #type);              \
     } else if (Tag::HAS_si == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymInt")      \
+      return checked_convert<type, int64_t>(                          \
+          toSymInt().guard_int(__FILE__, __LINE__), #type);           \
     } else if (Tag::HAS_sd == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")    \
+      return checked_convert<type, int64_t>(                          \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     } else if (Tag::HAS_sb == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymBool")     \
+      return checked_convert<type, int64_t>(                          \
+          toSymBool().guard_bool(__FILE__, __LINE__), #type);         \
     }                                                                 \
     TORCH_CHECK(false)                                                \
   }

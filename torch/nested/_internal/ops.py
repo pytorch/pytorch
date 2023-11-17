@@ -1,4 +1,5 @@
 import functools
+import math
 
 import torch
 
@@ -65,7 +66,11 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
-        "jt": lambda x: isinstance(x, NestedTensor),
+        "jt": lambda x: isinstance(x, NestedTensor)
+        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        "jt_all": lambda x: isinstance(
+            x, NestedTensor
+        ),  # ops with "jt_all" can accept all kinds of JT
         "any": lambda x: True,
     }
     for i, named_arg_type in enumerate(named_arg_types):
@@ -179,7 +184,6 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
-        "ragged_size": arg._size[arg._ragged_idx],
     }
     return kwargs
 
@@ -297,7 +301,7 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.is_non_overlapping_and_dense.default:
@@ -310,23 +314,25 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func == torch.ops.aten.sym_numel.default:
+        if args[0]._lengths is not None:
+            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
 
     if func == torch.ops.aten.sym_stride.default:
         return args[0]._strides
 
     if func == torch.ops.aten.sym_storage_offset.default:
-        return 0
+        return args[0]._values.storage_offset()
 
 
-@register_jagged_func(torch.ops.prim.layout.default, "self: jt")
+@register_jagged_func(torch.ops.prim.layout.default, "self: jt_all")
 def prim_layout_default(func, *args, **kwargs):
     return torch.jagged
 
 
 @register_jagged_func(
     [torch.ops.aten.size.default],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
@@ -336,7 +342,7 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
         )
 
 
-@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
+@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt_all")
 def is_contiguous_general(func, *args, **kwargs):
     from torch._prims_common import is_contiguous_for_memory_format
 
@@ -344,16 +350,21 @@ def is_contiguous_general(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
+
+    # If created from narrow() check for lengths
+    if inp.lengths() is not None:
+        return False
+
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
     if new_kwargs["memory_format"] == torch.preserve_format:
         return True
-    return is_contiguous_for_memory_format(inp, **new_kwargs)
+    return is_contiguous_for_memory_format(inp.values(), **new_kwargs)
 
 
 register_jagged_func(
-    torch.ops.aten.is_contiguous.memory_format, "self: jt, memory_format: any?"
+    torch.ops.aten.is_contiguous.memory_format, "self: jt_all, memory_format: any?"
 )(is_contiguous_general)
 
 
@@ -473,6 +484,24 @@ def prod_dim_int(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.split.Tensor, "self: jt, split_size: any, dim: any"
+)
+def split_tensor(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "split")
+
+    return tuple(
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in func(inp._values, **new_kwargs)
+    )
+
+
+@register_jagged_func(
     torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any"
 )
 def split_with_sizes_default(func, *args, **kwargs):
@@ -481,23 +510,18 @@ def split_with_sizes_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    values = inp._values
 
-    # hack to split on the last dim
-    dim = new_kwargs["dim"]
-    if dim != -1:
-        raise RuntimeError(
-            "split_with_sizes(): only supported for NestedTensor on dim = -1 for now"
-        )
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "split_with_sizes"
+    )
 
-    split_sizes = new_kwargs["split_sizes"]
     return [
         NestedTensor(values=x, **extract_kwargs(inp))
-        for x in torch.split(values, split_sizes, -1)
+        for x in func(inp._values, **new_kwargs)
     ]
 
 
-@register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
+@register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
     _, new_kwargs = normalize_function(
@@ -509,10 +533,15 @@ def unbind_int(func, *args, **kwargs):
         raise RuntimeError("unbind(): only supported for NestedTensor on dim=0")
 
     inp = new_kwargs.pop("input")
-    values = inp._values
+    values = inp.values()
     offsets = inp.offsets()
+    lengths = inp.lengths()
 
-    return torch.split(values, offsets.diff().tolist())
+    if lengths is None:
+        return torch.split(values, offsets.diff().tolist())
+    return [
+        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
@@ -728,6 +757,23 @@ def native_layer_norm_default(func, *args, **kwargs):
 
     output, mean, std = func(inp._values, **new_kwargs)
     return (NestedTensor(output, **extract_kwargs(inp)), mean, std)
+
+
+@register_jagged_func(
+    torch.ops.aten.native_layer_norm_backward.default,
+    "grad_out: jt, input: jt, normalized_shape: any, mean: any, rstd: any, weight: any?, bias: any?, output_mask: any",
+)
+def native_layer_norm_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    grad_out = new_kwargs.pop("grad_out")
+    inp = new_kwargs.pop("input")
+    d_input, d_gamma, d_beta = func(grad_out._values, inp._values, **new_kwargs)
+    if d_input is None:
+        return (None, d_gamma, d_beta)
+
+    return (NestedTensor(d_input, **extract_kwargs(inp)), d_gamma, d_beta)
 
 
 @register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")

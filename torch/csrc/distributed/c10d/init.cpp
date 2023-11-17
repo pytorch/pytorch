@@ -596,6 +596,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_check_reducer_finalized",
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_force_bucket_rebuild",
+          [](::c10d::Reducer& reducer) {
+            return reducer.force_bucket_rebuild();
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_process_group",
+          [](::c10d::Reducer& reducer,
+             c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
+            return reducer.update_process_group(new_process_group);
+          },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")

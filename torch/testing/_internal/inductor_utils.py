@@ -1,3 +1,6 @@
+import torch
+import re
+import unittest
 from subprocess import CalledProcessError
 
 from torch._inductor.codecache import CppCodeCache
@@ -9,8 +12,6 @@ from torch.testing._internal.common_utils import (
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase
-import torch
-import re
 
 def test_cpu():
     try:
@@ -49,3 +50,18 @@ def _check_has_dynamic_shape(
         has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}"
     )
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
+
+
+def skipCUDAIf(cond, msg):
+    if cond:
+        def decorate_fn(fn):
+            def inner(self, *args, **kwargs):
+                if self.device == "cuda":
+                    raise unittest.SkipTest(msg)
+                return fn(self, *args, **kwargs)
+            return inner
+    else:
+        def decorate_fn(fn):
+            return fn
+
+    return decorate_fn
