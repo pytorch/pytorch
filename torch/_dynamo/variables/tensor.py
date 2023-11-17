@@ -109,6 +109,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
+        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -124,6 +125,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -764,8 +766,9 @@ class SymNodeVariable(VariableTracker):
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
 
-        if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable.create(int(sym_num))
+        if isinstance(sym_num, (sympy.Integer, int, bool)):
+            sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
+            return ConstantVariable.create(sym_num)
 
         return SymNodeVariable(proxy, sym_num, **options)
 

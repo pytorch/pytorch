@@ -12,6 +12,7 @@ from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -31,11 +32,13 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import (
-    op_db, foreach_unary_op_db, foreach_binary_op_db,
+    binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
     foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
+from torch.testing._internal.opinfo.core import S, SampleInput
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
+import copy
 import sys
 import yaml
 import atexit
@@ -45,7 +48,7 @@ from collections.abc import Iterable
 import unittest
 import warnings
 import weakref
-from functools import wraps
+from functools import partial, wraps
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -515,8 +518,7 @@ def run_meta_crossref(
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
-        raise RuntimeError("Original OpInfo is broken") from e
-
+        raise AssertionError("Original OpInfo is broken") from e
 
     # TODO: also handle cases where func raise an exception
 
@@ -1274,6 +1276,29 @@ class TestMeta(TestCase):
     @onlyCUDA
     def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_binary_ufuncs_mixed_dtype(self, device, dtype, op):
+        make_arg = partial(
+            make_tensor,
+            device=device,
+        )
+
+        def sample_input(op, device, dtype, requires_grad, **kwargs):
+            yield SampleInput(
+                make_arg((S,), dtype=dtype), make_arg((S,), dtype=torch.float16)
+            )
+
+        op = copy.copy(op)
+        op.sample_inputs_func = sample_input
+
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
 
     def test_empty_quantized(self):
