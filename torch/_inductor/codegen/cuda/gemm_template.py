@@ -1,8 +1,9 @@
 import copy
 import logging
 import re
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, Dict, List, Optional, Set, Tuple
 
+from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
@@ -183,6 +184,43 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self.alpha = alpha
         self.beta = beta
         self.can_fuse_epilogue = can_fuse_epilogue
+        assert len(input_nodes) == 2 or len(input_nodes) == 3
+        assert self.are_inputs_layout_compatible(
+            [node.get_layout() for node in input_nodes]
+        )
+
+    def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+        assert len(layouts) == 2 or len(layouts) == 3
+        A_layout, B_layout = layouts[:2]
+        if A_layout.dtype != B_layout.dtype:
+            return False
+        if len(A_layout.size) < 2:
+            return False
+        if len(B_layout.size) != len(A_layout.size):
+            return False
+        K = A_layout.size[-1]
+        M = A_layout.size[-2]
+        N = B_layout.size[-1]
+        if K != B_layout.size[-2]:
+            return False
+        if len(A_layout.size) == 3 and A_layout.size[0] != B_layout.size[0]:
+            # batch dim mismatch
+            return False
+        if len(layouts) == 3:
+            C_layout = layouts[2]
+            # @TODO: dtype check
+            # C may have accumulator dtype or lower precision dtype
+            # but not higher precision
+            if len(C_layout.size) != len(A_layout.size):
+                return False
+            if len(A_layout.size) == 3 and A_layout.size[0] != C_layout.size[0]:
+                # batch dim mismatch
+                return False
+            if M != C_layout.size[-2]:
+                return False
+            if N != C_layout.size[-1]:
+                return False
+        return True
 
     @staticmethod
     def add_cutlass_gemm_choices(
@@ -340,7 +378,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Bias: Optional[Buffer] = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
-        if Bias is not None:
+        if len(self.input_nodes) > 2:  # if no bias arg passed in at construction
             pre_fused_addmm_evt = (
                 CutlassEVTEpilogueTypeFormatter.create_pre_fused_addmm_evt_type()
             )
@@ -480,6 +518,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)
         if c_layout is not None:
             new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(c_layout)
+            new_op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(c_layout.dtype)
         if d_layout is not None:
             new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
         return new_op
@@ -684,6 +723,34 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             )
         return arguments
 
+    def get_additional_input_nodes(
+        self,
+        cuda_template_buffer: CUDATemplateBuffer,
+        epilogue_nodes: List[ir.ComputedBuffer],
+    ):
+        template_buffer_names: Set[str] = cuda_template_buffer.get_read_names()
+        fused_reading_buffer_names: Set[str] = set(template_buffer_names)
+
+        for epilogue_node in epilogue_nodes:
+            fused_reading_buffer_names.update(epilogue_node.get_read_names())
+
+        # We need to remove all reads which were written as intermediate results
+        fused_written_names = set()
+        fused_written_names.add(cuda_template_buffer.get_name())
+        for epilogue_node in epilogue_nodes:
+            fused_written_names.add(epilogue_node.get_name())
+        fused_reading_buffer_names -= fused_written_names
+
+        if len(fused_reading_buffer_names) > len(template_buffer_names):
+            # Check that the layout of the additional input is compatible
+            added_names = sorted(fused_reading_buffer_names - template_buffer_names)
+
+            from torch._inductor.virtualized import V
+
+            added_nodes = [V.graph.get_buffer(added_name) for added_name in added_names]
+            return added_nodes
+        return []
+
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
@@ -730,8 +797,26 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        if (
+            Bias is None
+            and template_buffer_node is not None
+            and epilogue_nodes is not None
+            and len(epilogue_nodes) > 0
+        ):
+            additional_input_nodes: List[
+                ir.ComputedBuffer
+            ] = self.get_additional_input_nodes(template_buffer_node, epilogue_nodes)
+            assert (
+                len(additional_input_nodes) <= 1
+            ), "Only one additional input node is supported at the moment"
+            if len(additional_input_nodes) == 1:
+                Bias = additional_input_nodes[0]
+                assert self.are_inputs_layout_compatible(
+                    [X.get_layout(), W.get_layout(), Bias.get_layout()]
+                ), "Input layouts are not compatible"
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
+        # Also there might be a Bias / additional input node which was not present during autotuning
         # @TODO kadeng: Find a way to solve this better
         op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
@@ -744,7 +829,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     op = self.swap_XW(op)
                     should_swap_xw = True
             if self.supports_evt(op):
-                if Bias is not None:
+                if len(self.input_nodes) > 2:  # if bias arg passed in at construction
                     pre_fused_evt_args = CutlassEVTEpilogueArgumentFormatter.create_pre_fused_addmm_arg_str(
                         self.alpha, self.beta
                     )
