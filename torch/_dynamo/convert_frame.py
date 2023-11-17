@@ -409,7 +409,7 @@ def convert_frame_assert(
 def _patch_config_if_changed():
     """
     Will return {} if the ambient config is the same as the compile-time.
-    Else, returns the full compile-time config.
+    Else, returns the compile-time config saved on the code object.
     """
     patch: Dict[str, Any] = {}
     eval_frame = torch._dynamo.eval_frame
