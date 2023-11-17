@@ -316,6 +316,22 @@ class HigherOrderOperator(OperatorBase):
                 return handler(mode, *args, **kwargs)
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
+        # FIXME this is busted ignore this pls
+        if functionality_key == torch._C.DispatchKey.PreDispatch:
+            from torch.utils._python_dispatch import _pop_mode_temporarily
+
+            curr_mode = _get_current_dispatch_mode(is_pre_dispatch=True)
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.PreDispatch without a mode."
+            assert (
+                type(curr_mode) in self.python_key_mode_table
+            ), f"Current active mode {curr_mode} not registered"
+            handler = self.python_key_mode_table[type(curr_mode)]
+            with _pop_mode_temporarily() as mode:
+                return handler(mode, *args, **kwargs)
+
+
         if functionality_key in mode_stack_per_key():
             # The place to handle DispatchKey.PreDispatch
             curr_stack = mode_stack_per_key()[functionality_key]

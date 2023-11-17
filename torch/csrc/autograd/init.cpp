@@ -970,6 +970,7 @@ static PyObject* push_on_torch_dispatch_stack(
       c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
       py::object maybe_mode_key_obj =
           PyObject_FastGetAttrString(arg, "_mode_key");
+
       if (maybe_mode_key_obj) {
         mode_key =
             py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);

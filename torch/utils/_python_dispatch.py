@@ -72,11 +72,11 @@ class TorchDispatchMode:
         instance = cls(*args, **kwargs)
         return instance
 
-def _get_current_dispatch_mode():
-    stack_len = _len_torch_dispatch_stack()
+def _get_current_dispatch_mode(is_pre_dispatch=False):
+    stack_len = _len_torch_dispatch_stack(is_pre_dispatch)
     # Return a user mode on the stack if there are any
     if stack_len > 0:
-        return _get_dispatch_stack_at(stack_len - 1)
+        return _get_dispatch_stack_at(stack_len - 1, is_pre_dispatch)
     return None
 
 
@@ -96,7 +96,7 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         push_mode_for_key(k, mode)
     else:
         if k is None:
-            _push_on_torch_dispatch_stack(mode)
+            _push_on_torch_dispatch_stack(mode, False)
         else:
             _push_on_torch_dispatch_stack(mode, True)
 
@@ -105,8 +105,7 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
     if k is None or isinstance(k, torch._C._TorchDispatchModeKey) or k == torch._C.DispatchKey.PreDispatch:
         if k == torch._C.DispatchKey.PreDispatch:
-            a = _pop_torch_dispatch_stack(None, True)
-            return a
+            return _pop_torch_dispatch_stack(None, True)
         assert k is None or isinstance(k, torch._C._TorchDispatchModeKey)
         return _pop_torch_dispatch_stack(k)
     from torch._ops import pop_mode_for_key

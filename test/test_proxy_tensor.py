@@ -469,6 +469,33 @@ def forward(self, x_1):
     mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
     return mul""")
 
+    def test_pre_dispatch_functionalization_view_op(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x, is_pre_dispatch=True)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                x_unwrapped = x_unwrapped.transpose(1, 0)
+                y = y + x_unwrapped
+                y = y.view(2, 8)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    mm = torch.ops.aten.mm.default(x_1, x_1)
+    transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
+    add = torch.ops.aten.add.Tensor(mm, transpose);  mm = transpose = None
+    view = torch.ops.aten.view.default(add, [2, 8]);  add = None
+    return view""")
+
     def test_val_metadata_mutation(self):
         def f(x):
             y = x.clone()

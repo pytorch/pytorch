@@ -153,7 +153,7 @@ class FunctionalTensor(torch.Tensor):
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
-    def to_functional(x):
+    def to_functional(x, is_pre_dispatch=False):
         # We will do the wrapping for the user.
         assert not torch._is_functional_tensor(x)
         # The only autograd metadata we care about on the FunctionalTensor is:
@@ -166,7 +166,7 @@ class FunctionalTensor(torch.Tensor):
         # _mirror_autograd_meta_to queries tensor sizes,
         # and otherwise the sym_size() call will go to the proxy mode before hitting
         # FunctionalTensor.__torch_dispatch__
-        with FunctionalTensorMode(pre_dispatch=True):
+        with FunctionalTensorMode(is_pre_dispatch):
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
             out = FunctionalTensor(x_functional)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
