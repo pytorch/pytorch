@@ -1,7 +1,7 @@
 # ${generated_comment}
 
 import builtins
-from enum import Enum
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import (
     Any,
@@ -1758,6 +1758,32 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+
+# Functions related to SDPA
+class _SDPAParams:
+    query: Tensor
+    key: Tensor
+    value: Tensor
+    attn_mask: Optional[Tensor]
+    dropout: _float
+    is_causal: _bool
+    def __init__(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Optional[Tensor],
+        dropout: _float,
+        is_causal: _bool) -> None: ...
+
+class _SDPBackend(Enum):
+    ERROR = -1
+    MATH = 0
+    FLASH_ATTENTION = 1
+    EFFICIENT_ATTENTION = 2
+
+def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
+def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
