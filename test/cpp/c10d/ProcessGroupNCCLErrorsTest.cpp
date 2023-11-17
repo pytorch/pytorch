@@ -187,6 +187,13 @@ class ProcessGroupNCCLNoHeartbeatCaught
     return hasMonitorThreadCaughtError_;
   }
 
+  void forceTryWriteDebugInfo() {
+    auto thread = tryWriteDebugInfo();
+    if (thread) {
+      thread->join();
+    }
+  }
+
  protected:
   // Override the heartbeat monitor function to make sure that we capture
   // the exception in the monitor thread because we cannot try-catch it in
@@ -482,6 +489,11 @@ TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoFinished) {
   }
 
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options_);
+  // Write debug info will lead to watchdog thread to wait for 30 seconds.
+  // And this is hard to override, so we just call it before hand. Otherwise,
+  // we need to set a long heartbeat timeout which will make the test way
+  // slower.
+  pg.forceTryWriteDebugInfo();
   watchdogTimeoutTestCommon(pg, 2);
 
   // The flag is true shows that the heartbeat monitor thread does not kill
