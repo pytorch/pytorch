@@ -1565,7 +1565,9 @@ class TrackedFake:
 def _automatic_dynamic(e, tx, source, static_shapes) -> CreateSymbolicPolicy:
     name = source.name()
     prior_policy = tx.output.tracing_context.tensor_to_policy.get(e, None)
-    source_to_symint_node_cache = prior_policy.source_to_symint_node_cache if prior_policy else None
+    source_to_symint_node_cache = (
+        prior_policy.source_to_symint_node_cache if prior_policy else None
+    )
 
     if static_shapes:
         return KnownCreateSymbolicPolicy(
@@ -1720,7 +1722,7 @@ def _automatic_dynamic(e, tx, source, static_shapes) -> CreateSymbolicPolicy:
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
         tensor_source=source,
-        source_to_symint_node_cache=source_to_symint_node_cache
+        source_to_symint_node_cache=source_to_symint_node_cache,
     )
 
 

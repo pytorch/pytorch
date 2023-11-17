@@ -2134,7 +2134,7 @@ class ShapeEnv:
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
                 stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-            policy=policy))
+                policy=policy))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
@@ -2156,9 +2156,6 @@ class ShapeEnv:
             policy: Optional[CreateSymbolicPolicy] = None,
     ):
         source_name = source.name() if source else None
-        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
-            if source_name in policy.source_to_symint_node_cache:
-                return policy.source_to_symint_node_cache[source_name]
 
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -2172,6 +2169,10 @@ class ShapeEnv:
             self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fx_node = None
+
+        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
+            if source_name in policy.source_to_symint_node_cache:
+                return policy.source_to_symint_node_cache[source_name]
 
         if isinstance(sym, sympy.Integer):
             if hint is not None:
