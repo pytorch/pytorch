@@ -56,6 +56,64 @@ def is_same_size_handler(
     return lhs.shape == rhs.shape
 
 
+def convolution_handler(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+) -> object:
+    # extract local tensor and sharding infos to a OpInfo
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+
+    # sharding propagation
+    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None, "output sharding should not be None"
+
+    # local propagation
+    local_tensor_args = [
+        arg.to_local() if isinstance(arg, dtensor.DTensor) else arg for arg in args
+    ]
+    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+    local_results = tp_convolution(op_call, local_tensor_args, op_info.local_kwargs)
+
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
+
+
+def convolution_backward_handler(
+    op_call: torch._ops.OpOverload,
+    args: Tuple[object, ...],
+    kwargs: Dict[str, object],
+) -> object:
+    # Redistribute grad_output tensor to the same placement as input tensor
+    args = list(args)
+    assert isinstance(args[0], dtensor.DTensor) and isinstance(args[1], dtensor.DTensor)
+    args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
+    args = tuple(args)
+
+    # extract local tensor and sharding infos to a OpInfo
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+
+    # sharding propagation
+    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None, "output sharding should not be None"
+
+    # local propagation
+    local_tensor_args = [
+        arg.to_local() if isinstance(arg, dtensor.DTensor) else arg for arg in args
+    ]
+    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+    local_results = tp_convolution_backward(
+        op_call, local_tensor_args, op_info.local_kwargs
+    )
+
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
+
+
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
@@ -80,6 +138,8 @@ class OpDispatcher:
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
+            aten.convolution.default: convolution_handler,
+            aten.convolution_backward.default: convolution_backward_handler,
         }
 
     def dispatch(
@@ -91,14 +151,6 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
-        # Redistribute grad_output tensor to the same placement as input tensor
-        args = list(args)
-        if op_call == torch.ops.aten.convolution_backward.default:
-            assert isinstance(args[0], dtensor.DTensor) and isinstance(
-                args[1], dtensor.DTensor
-            )
-            args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
-        args = tuple(args)
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
