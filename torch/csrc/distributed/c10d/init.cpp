@@ -21,6 +21,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -37,6 +38,7 @@
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/reducer.hpp>
 
@@ -2292,6 +2294,17 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+
+  py::class_<::c10d::IntraNodeComm, c10::intrusive_ptr<::c10d::IntraNodeComm>>(
+      module, "_IntraNodeComm")
+      // .def(py::init<>())
+      .def_static(
+          "rendezvous",
+          &::c10d::IntraNodeComm::rendezvous,
+          py::arg("rdzv_id"),
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def("all_reduce", &::c10d::IntraNodeComm::allReduce, py::arg("input"));
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
