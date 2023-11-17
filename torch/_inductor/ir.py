@@ -4869,27 +4869,17 @@ def _prepare_linear_fusion_create(
     weight.realize()
     if bias is not None:
         bias.realize()
-    with V.graph.fake_mode:
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
-        if bias is not None:
-            output = torch.ops.aten.addmm.default(
-                bias_fake,
-                x_fake,
-                weight_fake,
-            )
-        else:
-            output = torch.ops.aten.mm.default(
-                x_fake,
-                weight_fake,
-            )
-        output_size = output.size()
 
-        req_stride_order = list(reversed(range(len(x.get_size()))))
-        output_stride = make_contiguous_strides_for(output_size)
+    *m, _ = x.get_size()
+    # The weight has been transposed during the qlinear weight prepack process.
+    # https://github.com/pytorch/pytorch/blob/4979f9c0d72490970e2019bb1d2284f83d93f76b/
+    # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp#L291
+    _, oc = weight.get_size()
+    output_size = list(m) + [oc]
+    print("output_size is: {}".format(output_size), flush=True)
+
+    req_stride_order = list(reversed(range(len(x.get_size()))))
+    output_stride = make_contiguous_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
