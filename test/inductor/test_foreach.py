@@ -642,6 +642,44 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing_mut_before(self, op):
+        def fn(a0, a1, b0, b1):
+            a0.add_(torch.ones(10, 10, device="cuda:0"))
+            op([a0, a1], [b0, b1])
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing_mut_after(self, op):
+        def fn(a0, a1, b0, b1):
+            op([a0, a1], [b0, b1])
+            a0.add_(torch.ones(10, 10, device="cuda:0"))
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
