@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict, Optional
+from typing import Dict
 
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass, diagnostics, registration
 
 
 @dataclasses.dataclass
 class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
-    unsupported_op_to_target_mapping: Dict[str, Dict[str, Optional[str]]]
+    unsupported_op_to_target_mapping: Dict[str, Dict[str, None]]
 
 
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
@@ -24,12 +24,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             return
 
         normalized_op_targets_map = {
-            # Make error message more precise by adding dtype information.
-            # e.g.  Unsupported FX nodes: {'call_function': ['aten.mul.Tensor(complex)']}
-            op: [
-                f"{node}({dtype})" if dtype is not None else node
-                for node, dtype in targets.items()
-            ]
+            op: list(targets.keys())
             for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
         }
 
@@ -57,32 +52,34 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 level is `ERROR`.
         """
 
-        op_to_target_mapping: Dict[str, Dict[str, Optional[str]]] = {}
+        op_to_target_mapping: Dict[str, Dict[str, None]] = {}
         for node in self.module.graph.nodes:
             if node.op == "call_function":
-                try:
-                    # NOTE: OPSchema matcher is not in this analysis scope.
-                    self.onnxfunction_dispatcher.get_function_overloads(
-                        node, self.diagnostic_context
+                # NOTE: OPSchema matcher is not in this analysis scope.
+                internal_opname: registration.OpName = (
+                    self.onnxfunction_dispatcher._get_aten_name(
+                        node=node, diagnostic_context=self.diagnostic_context
                     )
-                except diagnostics.RuntimeErrorWithDiagnostic as e:
-                    # Extract the dtype information from the diagnostic message.
-                    if e.diagnostic.message and e.diagnostic.message.startswith(
-                        "Cannot find any COMPLEX symbolic function"
-                    ):
-                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
-                            str(node.target), "complex"
-                        )
-                    elif e.diagnostic.message and e.diagnostic.message.startswith(
-                        "Can ONLY find COMPLEX symbolic function"
-                    ):
-                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
-                            str(node.target), "real"
-                        )
-                    else:
-                        op_to_target_mapping.setdefault(node.op, {}).setdefault(
-                            str(node.target), None
-                        )
+                )
+                overload_registration = (
+                    self.onnxfunction_dispatcher.onnx_registry.is_registered_op(
+                        namespace=internal_opname.namespace,
+                        op_name=internal_opname.op_name,
+                        overload=internal_opname.overload,
+                    )
+                )
+                # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
+                default_registration = (
+                    self.onnxfunction_dispatcher.onnx_registry.is_registered_op(
+                        namespace=internal_opname.namespace,
+                        op_name=internal_opname.op_name,
+                        overload=None,
+                    )
+                )
+                if not overload_registration and not default_registration:
+                    op_to_target_mapping.setdefault(node.op, {}).setdefault(
+                        str(node.target), None
+                    )
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
         self._lint(analysis_result, diagnostic_level)
