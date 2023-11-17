@@ -4192,6 +4192,30 @@ def forward(self, x):
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
 
+    def test_preserve_dynamo_fake_mode_if_aten_graph(self):
+        def fn(x):
+            return torch.sin(x)
+
+        torch_level_gm, _ = torch._dynamo.export(fn, tracing_mode="symbolic")(
+            torch.randn(3, 3)
+        )
+        ph_meta_val = [
+            node.meta["val"]
+            for node in torch_level_gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        aten_level_gm, _ = torch._dynamo.export(
+            fn, tracing_mode="symbolic", aten_graph=True
+        )(torch.randn(3, 3))
+        aten_meta_val = [
+            node.meta["val"]
+            for node in torch_level_gm.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(ph_meta_val), 1)
+        self.assertEqual(len(aten_meta_val), 1)
+        self.assertEqual(ph_meta_val[0].fake_mode, aten_meta_val[0].fake_mode)
+
     def test_torch_inference_mode_ctx(self):
         @torch.inference_mode()
         def fn(x):

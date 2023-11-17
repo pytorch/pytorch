@@ -775,7 +775,13 @@ def make_fx(f,
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
-            fake_tensor_mode = nullcontext()
+            import torch._dynamo
+            # There are cases where user passes a FakeTensor as inputs but sets tracing
+            # mode to "real" e.g. in _dynamo.export(aten_graph=True). In this case, we
+            # should respect the fake_mode of inputs.
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
