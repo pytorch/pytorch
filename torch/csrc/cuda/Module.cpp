@@ -674,7 +674,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   std::vector<py::dict> to_gather_dest;
 
   auto add_frame_key = [&](const py::dict& d,
-                           const std::shared_ptr<c10::GatheredContext> ctx) {
+                           const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
       auto sc = getFromContext(ctx);
       to_gather_frames.emplace_back(sc);
@@ -1352,13 +1352,13 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
       "set_benchmark_limit_cudnn expects an int, "
       "but got %s",
       THPUtils_typename(arg));
-  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
 #if defined(USE_ROCM)
   TORCH_WARN_ONCE(
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
+  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
 #else
   TORCH_WARN_ONCE(
