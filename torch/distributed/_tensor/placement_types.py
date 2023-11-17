@@ -385,7 +385,8 @@ class DTensorSpec:
     tensor_meta: Optional[TensorMeta] = None
 
     def __post_init__(self):
-        self.placements = tuple(self.placements)
+        if not isinstance(self.placements, tuple):
+            self.placements = tuple(self.placements)
         self._hash = hash((self.mesh, self.placements))
 
     def __setattr__(self, attr: str, value: Any):
