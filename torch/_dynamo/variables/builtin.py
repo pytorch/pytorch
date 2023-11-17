@@ -896,14 +896,15 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = dict(
-                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
-                )
+                items = user_cls()
+                for x in arg.unpack_var_sequence(tx):
+                    k, v = x.unpack_var_sequence(tx)
+                    k = ConstDictVariable.get_key(k)
+                    items.update({k: v})
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
-            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                items, user_cls=user_cls, mutable_local=MutableLocal()
+                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
 
