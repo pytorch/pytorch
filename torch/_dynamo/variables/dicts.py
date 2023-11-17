@@ -248,10 +248,9 @@ class DefaultDictVariable(ConstDictVariable):
                 else:
                     if istensor(k):
                         tx.store_global_weakref(global_key_name(k), k)
-                    new_val = dict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
-                    new_val[k] = default_var
-                    tx.replace_all(self, self.modifed(new_val))
+                    self.items[k] = default_var
+                    tx.output.side_effects.mutation(self)
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
