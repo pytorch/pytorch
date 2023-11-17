@@ -999,9 +999,28 @@ test_docs_test() {
 }
 
 test_executorch() {
+  pushd /executorch
+
+  echo "Install torchvision and torchaudio"
+  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
+  # there.  These libraries need to be built here, and not part of the Docker
+  # image because they require the target version of torch to be installed first
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+
+  echo "Run ExecuTorch regression tests for some models"
+  # NB: This is a sample model, more can be added here
+  export PYTHON_EXECUTABLE=python
+  # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
+  # shellcheck disable=SC1091
+  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+
+  popd
+
   # Test torchgen generated code for Executorch.
-  echo "Testing Executorch op registration"
+  echo "Testing ExecuTorch op registration"
   "$BUILD_BIN_DIR"/test_edge_op_registration
+
   assert_git_not_dirty
 }
 
@@ -1016,6 +1035,8 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
   test_xla
+elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
+  test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
@@ -1117,5 +1138,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-  test_executorch
 fi
