@@ -485,6 +485,33 @@ def forward(self, primals_1):
         print(test)
         self.assertEqual(ref, test)
 
+    def test_input_mutation_modifies_autograd_meta_of_aliases(self):
+        def f(a):
+            a.mul_(2)
+            out = a + 1
+            return out.detach()
+
+        x_ref = torch.ones(3, 3, requires_grad=True).clone()
+        x_ref_view = x_ref.view(3, 3)
+
+        x_test = torch.ones(3, 3, requires_grad=True).clone()
+        x_test_view = x_test.view(3, 3)
+
+        f_compiled = aot_function(f, nop, keep_inference_input_mutations=True)
+        f(x_ref)
+        f_compiled(x_test)
+        # f will mutate aliases of the input, including its autograd metadata!
+        # y.grad_fn is AsStridedBackward
+        self.assertEqual(x_ref_view, x_test_view)
+        self.assertEqual(x_ref_view._version, x_test_view._version)
+        self.assertEqual(x_ref_view.grad_fn.__class__, x_test_view.grad_fn.__class__)
+        # Test the actual gradients are correct
+        (x_ref * x_ref_view).sum().backward()
+        (x_test * x_test_view).sum().backward()
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertEqual(x_ref_view.grad, x_test_view.grad)
+
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
