@@ -407,8 +407,8 @@ def extract_input_node_reduction_ranges(  # noqa: F722
     reads = input_node.get_reads()
     reduction_size = None
     size = None
-    seen = set()
     while reduction_size is None and len(reads) > 0:
+        seen = set()
         new_reads = []
         for read in reads:
             if not isinstance(read, MemoryDep):
