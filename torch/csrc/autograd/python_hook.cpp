@@ -26,17 +26,6 @@ static void check_single_result(
     PyObject* result,
     PyObject* hook);
 
-namespace {
-
-// See TODO in python_function.cpp where this function is also duplicated.
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  throw std::move(err);
-}
-
-} // namespace
-
 namespace torch {
 namespace autograd {
 
@@ -82,7 +71,7 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
 
     THPObjectPtr res(PyObject_CallObject(hook, args));
     if (!res)
-      throw_python_error();
+      throw python_error();
     if (res == Py_None)
       continue;
 
@@ -125,7 +114,7 @@ auto PyFunctionTensorPreHook::operator()(const variable_list& values)
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value)
-    throw_python_error();
+    throw python_error();
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, value.release());
   bool is_tup_modified = _call_hooks(dict, tup.get());
@@ -271,11 +260,11 @@ static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_vars)));
   if (!tuple)
-    throw_python_error();
+    throw python_error();
   for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var)
-      throw_python_error();
+      throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
   }
   return tuple.release();
@@ -305,7 +294,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
         PyExc_TypeError,
         "expected tuple, but hook returned '%s'",
         THPUtils_typename(result));
-    throw_python_error();
+    throw python_error();
   }
 
   auto prev_size = PyTuple_GET_SIZE(prev);
@@ -342,7 +331,7 @@ static void check_single_result(
         PyExc_TypeError,
         "expected Variable, but hook returned '%s'",
         THPUtils_typename(_result));
-    throw_python_error();
+    throw python_error();
   }
 
   const auto& original = THPVariable_Unpack(_original);
@@ -355,7 +344,7 @@ static std::string hook_name(PyObject* hook) {
   if (PyObject_HasAttrString(hook, "__name__")) {
     THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
     if (!name)
-      throw_python_error();
+      throw python_error();
 
     if (name && THPUtils_checkString(name.get())) {
       return THPUtils_unpackString(name.get());

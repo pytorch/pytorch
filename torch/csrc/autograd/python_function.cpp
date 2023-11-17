@@ -50,16 +50,15 @@ PyObject* THPGradientEdgeClass = nullptr;
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
-    throw_python_error();                  \
+    throw python_error();                  \
   }
 
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// TODO: I'm not sure why we need to call this function (to persist the
-// error immediately at the callsite) instead of doing `raise python_error()`
-// and relying on the engine to persist for us. But, removing this seems to
-// cause the following test to fail:
+// TODO: We shouldn't need to call this function because the engine
+// can already persist the errors for us. This still seems to be
+// needed for the DistEngine however.
 //
 // python test/distributed/rpc/test_tensorpipe_agent.py -k
 // test_backward_autograd_engine_error

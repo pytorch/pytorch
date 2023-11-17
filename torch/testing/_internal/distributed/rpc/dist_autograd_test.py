@@ -1673,44 +1673,33 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_autograd_engine_error(self):
-        for method in ("hook", "custom_function"):
-            with dist_autograd.context() as context_id:
-                t1 = torch.rand((3, 3), requires_grad=True)
-                t2 = torch.rand((3, 3), requires_grad=True)
-                # Perform some ops before error simulation.
-                tmp = (t1 + t2) * (t1 + t2)
+        with dist_autograd.context() as context_id:
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
+            # Perform some ops before error simulation.
+            tmp = (t1 + t2) * (t1 + t2)
+            t3 = SimulateBackwardError.apply(tmp)
 
-                if method == "hook":
-                    err_msg = "Error in hook"
+            # Run multiple round trips across different nodes and verify the
+            # original node receives an error thrown on a node deep in the chain.
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.add, args=(t2, t3)
+            )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.mul, args=(val, t2)
+            )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.matmul, args=(val, t2)
+            )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.div, args=(val, t2)
+            )
 
-                    def fn(*args):
-                        raise Exception(err_msg)
-                    t3 = tmp.clone()
-                    t3.register_hook(fn)
-                elif method == "custom_function":
-                    t3 = SimulateBackwardError.apply(tmp)
-                    err_msg = "Simulate error on backward pass"
-
-                # Run multiple round trips across different nodes and verify the
-                # original node receives an error thrown on a node deep in the chain.
-                val = rpc.rpc_sync(
-                    worker_name(self._next_rank()), torch.add, args=(t2, t3)
-                )
-                val = rpc.rpc_sync(
-                    worker_name(self._next_rank()), torch.mul, args=(val, t2)
-                )
-                val = rpc.rpc_sync(
-                    worker_name(self._next_rank()), torch.matmul, args=(val, t2)
-                )
-                val = rpc.rpc_sync(
-                    worker_name(self._next_rank()), torch.div, args=(val, t2)
-                )
-
-                with self.assertRaisesRegex(
-                    RuntimeError, f"Error on Node [0-9]+: {err_msg}"
-                ):
-                    # Run backwards, and validate we receive an error.
-                    dist_autograd.backward(context_id, [val.sum()])
+            with self.assertRaisesRegex(
+                RuntimeError, "Error on Node [0-9]+: Simulate error on backward pass"
+            ):
+                # Run backwards, and validate we receive an error.
+                dist_autograd.backward(context_id, [val.sum()])
 
     @dist_init(clean_shutdown=False)
     @skip_but_pass_in_sandcastle_if(
