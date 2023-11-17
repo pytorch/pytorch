@@ -113,6 +113,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
+        "linalg.vector_norm",
         "logit",
         "mean",
         "native_batch_norm",
@@ -145,11 +146,12 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
-        "linalg.vector_norm",
+        "rsub",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
+        "sub",
         "sum",
         "unflatten",
         "var_mean",
@@ -478,6 +480,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
     ),
     xfail(
+        "rsub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
         "scatter_add",
         dtypes=(torch.float16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
@@ -519,6 +528,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "stft",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "sub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
     ),
     xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -764,6 +780,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "native_batch_norm",
         "dot",
         "logit",
+        "rsub",
+        "sub",
     ]
 
     @common_device_type.ops(
