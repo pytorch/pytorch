@@ -862,13 +862,6 @@ class CommonTemplate:
 
                 has_assert_ = get_value(has_assert, dynamic)
                 has_wrapping_ = get_value(has_wrapping, dynamic)
-                # has_assert_ = (
-                #     has_assert(dynamic)
-                #     if inspect.isfunction(has_assert)
-                #     else has_assert
-                # )
-                # if inspect.isfunction(has_assert):
-                #     has_assert_ = has_assert(dynamic)
 
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
