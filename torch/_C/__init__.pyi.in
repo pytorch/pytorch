@@ -51,6 +51,8 @@ from torch.types import (
     Storage,
 )
 
+from torch._prims_common import DeviceLikeType
+
 # This module is defined in torch/csrc/Module.cpp
 
 from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu
@@ -90,7 +92,7 @@ class device:
 
     # THPDevice_pynew
     @overload
-    def __init__(self, device: Union[_device, _int, str]) -> None: ...
+    def __init__(self, device: DeviceLikeType) -> None: ...
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
@@ -398,11 +400,11 @@ def _jit_set_emit_hooks(
 def _jit_get_emit_hooks() -> Tuple[Callable, Callable]: ...
 def _load_for_lite_interpreter(
     filename: Union[str, Path],
-    map_location: Union[_device, str, None],
+    map_location: Optional[DeviceLikeType],
 ): ...
 def _load_for_lite_interpreter_from_buffer(
     buffer: BinaryIO,
-    map_location: Union[_device, str, None],
+    map_location: Optional[DeviceLikeType],
 ): ...
 def _export_operator_list(module: LiteScriptModule): ...
 def _quantize_ondevice_ptq_dynamic(module: LiteScriptModule, method_name: str): ...
@@ -647,20 +649,20 @@ def _parse_source_def(src: str) -> Def: ...
 def import_ir_module(
     cu: CompilationUnit,
     filename: Union[str, Path],
-    map_location: Union[_device, str, None],
+    map_location: Optional[DeviceLikeType],
     extra_files: Dict[str, Any],
 ) -> ScriptModule: ...
 def import_ir_module_from_buffer(
     cu: CompilationUnit,
     buffer: BinaryIO,
-    map_location: Union[_device, str, None],
+    map_location: Optional[DeviceLikeType],
     extra_files: Dict[str, Any],
 ) -> ScriptModule: ...
 def _import_ir_module_from_package(
     cu: CompilationUnit,
     reader: PyTorchFileReader,
     storage_context: DeserializationStorageContext,
-    map_location: Union[_device, str, None],
+    map_location: Optional[DeviceLikeType],
     ts_id: str,
 ) -> ScriptModule: ...
 def _assign_output_shapes(graph: Graph, inputs: List[Tensor]) -> Graph: ...
@@ -1370,7 +1372,7 @@ def _get_privateuse1_backend_name() -> str: ...
 # Defined in torch/csrc/Generator.cpp
 class Generator:
     device: _device
-    def __init__(self, device: Union[_device, str, None] = None) -> None: ...
+    def __init__(self, device: Optional[DeviceLikeType] = None) -> None: ...
     def get_state(self) -> Tensor: ...
     def set_state(self, _new_state: Tensor) -> Generator: ...
     def set_offset(self, offset: _int) -> Generator: ...
