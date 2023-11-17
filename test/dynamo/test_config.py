@@ -186,7 +186,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         ):
             opt_fn_static_shape = torch._dynamo.optimize(cnt_dynamic)(fn)
             res = opt_fn_static_shape(torch.randn(2), torch.randn(2))
-            print("RES", res)
             opt_fn_static_shape(torch.randn(3), torch.randn(3))
 
         self.assertEqual(cnt_dynamic.frame_count, 2)
@@ -196,7 +195,8 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         ):
             for i in range(2, 12):
                 # Only 4-11 will now be recompiled under old config
-                # 2-3 have been recompiled under old config due to shape mismatch
+                # 2-3 have been already been compiled under old config
+                # and hence will hit cache
                 opt_fn_static_shape(torch.randn(i), torch.randn(i))
 
         self.assertEqual(cnt_dynamic.frame_count, 10)
@@ -212,9 +212,9 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=False
         ):
-            opt_fn_static_shape = torch._dynamo.optimize(cnt_dynamic)(fn)
-            opt_fn_static_shape(torch.randn(2), torch.randn(2))
-            opt_fn_static_shape(torch.randn(3), torch.randn(3))
+            opt_fn_dynamic_shape = torch._dynamo.optimize(cnt_dynamic)(fn)
+            opt_fn_dynamic_shape(torch.randn(2), torch.randn(2))
+            opt_fn_dynamic_shape(torch.randn(3), torch.randn(3))
 
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
@@ -222,9 +222,9 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             automatic_dynamic_shapes=False, assume_static_by_default=True
         ):
             for i in range(2, 12):
-                opt_fn_static_shape(
+                opt_fn_dynamic_shape(
                     torch.randn(i), torch.randn(i)
-                )  # will be recompiled due to shape mismatch under old config
+                )  # will not be recompiled due to automatic dynamic shapes
 
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
