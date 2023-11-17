@@ -24,7 +24,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
 )
-from torch.testing._internal.common_utils import IS_LINUX, TEST_MKL, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
 
 
