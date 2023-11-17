@@ -10,18 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -35,14 +24,13 @@ from torch import fx
 from torch._guards import (
     Checkpointable,
     GlobalContextCheckpointState,
-    Guard,
     GuardsCheckpointState,
     Source,
     TracingContext,
 )
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -239,7 +227,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def __init__(
         self,
         code_options: Dict[str, Any],
-        compiler_fn: CompilerFn,
+        compiler_fn: Optional[CompilerFn],
         root_tx,
         export: bool,
         export_constraints,
@@ -256,7 +244,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
         self.cleanup_hooks: List[Callable[[], Any]] = []
 
         # TODO: maybe should just pass the entire f_code in here?  Not
@@ -319,7 +307,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
-        self.compiler_fn: CompilerFn = compiler_fn
+        self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
@@ -381,6 +369,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
 
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
@@ -461,18 +451,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @property
     def fake_mode(self):
-        return self.root_tx.fake_mode
+        return self.tracing_context.fake_mode
 
     @property
     def shape_env(self):
         return self.tracing_context.fake_mode.shape_env
 
     @property
-    def guards(self) -> Set[Guard]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self.tracing_context.guards_context.dynamo_guards
 
     @property
-    def nn_modules(self) -> Dict[str, torch.nn.Module]:
+    def nn_modules(self) -> Dict[str, Any]:
         return self.tracing_context.module_context.nn_modules
 
     def save_global_state(self, out=None):
@@ -627,7 +617,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def get_submodule(self, keys):
         assert keys
-        obj = self.nn_modules
+        obj: Union[torch.nn.Module, Dict[str, torch.nn.Module]] = self.nn_modules
         for k in keys.split("."):
             if isinstance(obj, dict):
                 obj = obj[k]
@@ -791,6 +781,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+        self.should_exit = True
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -827,9 +818,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         root = FakeRootModule(self.nn_modules)
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
-        val_to_names: OrderedDict[
-            VariableTracker, List[str]
-        ] = collections.OrderedDict()
+        val_to_names: Dict[VariableTracker, List[str]] = {}
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
@@ -933,11 +922,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def cleanup_graph(self):
         """
+        Remove "creation_timestamp" from node meta
+
         Remove this pattern from the graph:
             torch._C._set_grad_enabled(False)
             torch._C._set_grad_enabled(True)
         """
+        assert self.should_exit
         nodes = list(self.graph.nodes)
+        for node in nodes:
+            node.meta.pop("creation_timestamp", None)
+
         grad_enabled = torch.is_grad_enabled()
         for node1, node2 in zip(nodes, nodes[1:]):
             if (
@@ -1006,6 +1001,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         from .decorators import disable
 
+        assert self.should_exit
+
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         self.create_node(
@@ -1061,6 +1058,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        assert self.compiler_fn is not None
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:
@@ -1130,6 +1128,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return result
 
     def remove_unused_graphargs(self) -> None:
+        assert self.should_exit
         # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
@@ -1307,7 +1306,7 @@ class SubgraphTracer(fx.Tracer):
         # Map from graph input name to its placeholder proxy object, where the
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
-        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+        self.input_name_to_proxy: Dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
@@ -1324,9 +1323,8 @@ class SubgraphTracer(fx.Tracer):
         # - If we are tracing a HigherOrderOperator's body_fn, then we
         # need to keep track of what free variables were lifted so we can
         # rewrite the HigherOrderOperator call using the traced body_fn.
-        # This is a OrderedDict so that we can
-        # maintain the order of args for the HigherOrderOperator call.
-        self.lifted_freevars = collections.OrderedDict()
+        # Dicts maintain the order of args for the HigherOrderOperator call.
+        self.lifted_freevars = {}
         self.prev_inst = None
 
         self._cur_code = None
@@ -1422,11 +1420,13 @@ class SubgraphTracer(fx.Tracer):
                 self.prev_inst = cur_inst
 
         # update reference to original meta if we're tracing a new code object
+        is_retracing = False
         if tx.f_code is not self._cur_code:
             orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
                 "orig_graphmodule", None
             )
             if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                is_retracing = True
                 self._orig_gm_meta = [
                     nd.meta for nd in orig_graphmodule_maybe.graph.nodes
                 ]
@@ -1471,32 +1471,35 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
+                for field in fx.proxy._COPY_META_FIELDS:
+                    if field in meta:
+                        rv.node.meta[field] = meta[field]
                 if "stack_trace" in meta:
                     rv.node.meta["stack_trace"] = meta["stack_trace"]
-                if "nn_module_stack" in meta and "source_fn_stack" in meta:
-                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
-                    rv.node.meta["source_fn_stack"] = meta["source_fn_stack"]
 
-        if "nn_module_stack" not in rv.node.meta:
-            nn_module_stack = tx.nn_module_stack
-            if nn_module_stack:
-                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+        if not is_retracing:
+            if "nn_module_stack" not in rv.node.meta:
+                nn_module_stack = tx.nn_module_stack
+                if nn_module_stack:
+                    rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if "source_fn_stack" not in rv.node.meta:
-            if kind in {"call_function", "call_method"}:
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (rv.node.name, target)
-                ]
-            elif kind == "call_module":
-                if self.parent is not None:
-                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-                # For modules we store the class
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (
-                        rv.node.name,
-                        rv.node.meta["nn_module_stack"][target][1],
-                    )
-                ]
+            if "source_fn_stack" not in rv.node.meta:
+                if kind in {"call_function", "call_method"}:
+                    rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                        (rv.node.name, target)
+                    ]
+                elif kind == "call_module":
+                    if self.parent is not None:
+                        unimplemented(
+                            "Invoking an nn.Module inside HigherOrderOperator"
+                        )
+                    # For modules we store the class
+                    rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                        (
+                            rv.node.name,
+                            rv.node.meta["nn_module_stack"][target][1],
+                        )
+                    ]
 
         if "stack_trace" not in rv.node.meta:
             frame_summaries: List[traceback.FrameSummary] = []

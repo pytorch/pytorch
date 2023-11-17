@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import itertools
+import math
+import operator
 import os
 import tempfile
 import unittest
@@ -127,6 +129,36 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Test while specifying optional kwarg.
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
+        )
+
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "sympy operation tests don't need dynamic shape"
+    )
+    def test_sympy_operatons_return_numeric(self):
+        def func(x, y):
+            # TODO: add boolean tests when SymBool is supported
+            # to infer types
+            return (
+                torch.tensor([operator.add(x.item(), y.item())]),
+                torch.tensor([operator.sub(x.item(), y.item())]),
+                torch.tensor([operator.mul(x.item(), y.item())]),
+                torch.tensor([operator.truediv(x.item(), y.item())]),
+                torch.tensor([operator.floordiv(x.item(), y.item())]),
+                torch.tensor([operator.pow(x.item(), y.item())]),
+                torch.tensor([operator.abs(x.item())]),
+                torch.tensor([operator.neg(x.item())]),
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        y = torch.randn(1, dtype=torch.float32)
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func,
+            (
+                x,
+                y,
+            ),
         )
 
     @pytorch_test_common.xfail(
@@ -824,6 +856,25 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # TODO: Support dynamic shape
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             exported_program, (x,), skip_dynamic_shapes_check=True
+        )
+
+    def test_exported_program_as_input_from_file(self):
+        import tempfile
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
+            torch.export.save(exported_program, f.name)
+            del exported_program  # Delete the exported program to ensure that we are loading from file
+            loaded_exported_program = torch.export.load(f.name)
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
 
