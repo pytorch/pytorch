@@ -64,6 +64,7 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalSource,
+    Source,
 )
 from .utils import (
     counters,
@@ -202,7 +203,7 @@ def _step_logger():
 class BlockStackEntry:
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: ContextWrappingVariable = None
+    with_context: Optional[ContextWrappingVariable] = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -215,6 +216,7 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index)
 
     def exit(self, tx):
+        assert self.with_context is not None
         return self.with_context.exit(tx)
 
 
@@ -522,6 +524,7 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
+                assert b.with_context is not None
                 self.output.add_output_instructions(
                     [
                         *b.with_context.reconstruct(cg),
@@ -655,10 +658,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return newvar
             return v
 
+        recursive_parents = oldvar.parents_tracker.recursive_parents()
+
         def skip(v: VariableTracker):
             return v.parents_tracker not in recursive_parents
 
-        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -900,6 +904,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable.create(value=inst.argval))
 
     def get_global_source(self, name):
+        source: Source
         if self.output.global_scope is self.f_globals:
             source = GlobalSource(name)
         else:
@@ -1210,6 +1215,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
+        kwargsvars: VariableTracker
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({}, dict)
             argsvars = self.pop()

@@ -26,8 +26,10 @@ from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    CreateSymbolicPolicy,
     DimConstraint,
     DimDynamic,
+    KnownCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
@@ -1058,8 +1060,6 @@ class VariableBuilder:
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
-        # TODO: I think the result is guaranteed to be fake with
-        # ignore_subclass changes
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
         if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
@@ -1382,7 +1382,6 @@ def wrap_fx_proxy_cls(
             # accurate TensorVariable that is able to track subclass-ness;
             # otherwise this is wrong!
             kwargs = {
-                "ignore_subclass": subclass_type is not None,
                 "is_tensor": target_cls
                 in (TensorVariable, TensorWithTFOverrideVariable),
             }
@@ -1418,7 +1417,6 @@ def wrap_fx_proxy_cls(
             isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
             and example_value.fake_mode is tx.fake_mode
         ):
-            # NB: This will be wrong for ignore_subclass; fix it up later!
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else tensor_type
@@ -1563,18 +1561,26 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
-def _automatic_dynamic(e, tx, name, static_shapes):
+# Returns a CreateSymbolicPolicy
+def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     if static_shapes:
-        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+        return KnownCreateSymbolicPolicy(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+        )
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     if any(isinstance(s, SymInt) for s in e.size()):
-        return [
-            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-            for s in e.size()
-        ], [None] * e.dim()
+        return KnownCreateSymbolicPolicy(
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.size()
+            ],
+            constraint_sizes=[None] * e.dim(),
+            source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+        )
 
     # Prep for automatic dynamic
     frame_state_entry = None
@@ -1704,15 +1710,17 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return dynamic_dims, constraint_dims
+    return KnownCreateSymbolicPolicy(
+        dynamic_sizes=dynamic_dims,
+        constraint_sizes=constraint_dims,
+        source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+    )
 
 
-def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
-):
+def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
-        or (ignore_subclass and isinstance(e, torch.Tensor))
+        or isinstance(e, torch.Tensor)
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
@@ -1720,31 +1728,36 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = None, None
+        policy = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            dynamic_dims, constraint_dims = _automatic_dynamic(
-                e, tx, source.name(), static_shapes
-            )
+            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
+
+        tx.output.tracing_context.tensor_to_policy[e] = policy
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
-            dynamic_dims,
-            constraint_dims,
+            policy.dynamic_sizes if policy is not None else None,
+            policy.constraint_sizes if policy is not None else None,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                ignore_subclass=ignore_subclass,
                 source=source,
-                dynamic_dims=dynamic_dims,
-                constraint_dims=constraint_dims,
+                policy=policy,
             )
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+            # TODO: just store the whole policy here
+            tx.output.tracked_fakes.append(
+                TrackedFake(
+                    fake_e,
+                    source,
+                    policy.constraint_sizes if policy is not None else None,
+                )
+            )
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),

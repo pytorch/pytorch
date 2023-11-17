@@ -28,7 +28,6 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -279,17 +278,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        self.immutable_fake_mode = torch._subclasses.FakeTensorMode(
+        fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=shape_env,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
-        self.mutable_fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=True if self.export else False,
-            parent=self.immutable_fake_mode,
-        )
-        self.tracing_context: TracingContext = TracingContext(self.mutable_fake_mode)
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -1026,21 +1020,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
-        parent_fake_mode = self.immutable_fake_mode
-        backend_fake_mode = FakeTensorMode(
-            shape_env=parent_fake_mode.shape_env,
-            parent=parent_fake_mode,
+        old_fake_mode = self.tracing_context.fake_mode
+        backend_fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=old_fake_mode.shape_env,
         )
-        # Dynamo maintains two fake modes - an immutable fake mode which acts as the "parent"
-        # fake mode and is the source of truth for initial memoizations. We can dynamically
-        # swap fake modes as needed, so that the fake mode use by backends is "fresh".
-        # A fresh fake mode means fresh fake tensors, which, for backends ensures that
-        # tensors match their original metadata at the start of trace, as opposed to their metadata
-        # at the end of trace.
-        # TODO: Scope this instead of setting
         self.tracing_context.fake_mode = backend_fake_mode
-        with self.restore_global_state(), backend_fake_mode:
-            compiled_fn = self.call_user_compiler(gm)
+        try:
+            with self.restore_global_state(), backend_fake_mode:
+                compiled_fn = self.call_user_compiler(gm)
+        finally:
+            self.tracing_context.fake_mode = old_fake_mode
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -1427,11 +1416,13 @@ class SubgraphTracer(fx.Tracer):
                 self.prev_inst = cur_inst
 
         # update reference to original meta if we're tracing a new code object
+        is_retracing = False
         if tx.f_code is not self._cur_code:
             orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
                 "orig_graphmodule", None
             )
             if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                is_retracing = True
                 self._orig_gm_meta = [
                     nd.meta for nd in orig_graphmodule_maybe.graph.nodes
                 ]
@@ -1476,32 +1467,35 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
+                for field in fx.proxy._COPY_META_FIELDS:
+                    if field in meta:
+                        rv.node.meta[field] = meta[field]
                 if "stack_trace" in meta:
                     rv.node.meta["stack_trace"] = meta["stack_trace"]
-                if "nn_module_stack" in meta and "source_fn_stack" in meta:
-                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
-                    rv.node.meta["source_fn_stack"] = meta["source_fn_stack"]
 
-        if "nn_module_stack" not in rv.node.meta:
-            nn_module_stack = tx.nn_module_stack
-            if nn_module_stack:
-                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+        if not is_retracing:
+            if "nn_module_stack" not in rv.node.meta:
+                nn_module_stack = tx.nn_module_stack
+                if nn_module_stack:
+                    rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if "source_fn_stack" not in rv.node.meta:
-            if kind in {"call_function", "call_method"}:
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (rv.node.name, target)
-                ]
-            elif kind == "call_module":
-                if self.parent is not None:
-                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-                # For modules we store the class
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (
-                        rv.node.name,
-                        rv.node.meta["nn_module_stack"][target][1],
-                    )
-                ]
+            if "source_fn_stack" not in rv.node.meta:
+                if kind in {"call_function", "call_method"}:
+                    rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                        (rv.node.name, target)
+                    ]
+                elif kind == "call_module":
+                    if self.parent is not None:
+                        unimplemented(
+                            "Invoking an nn.Module inside HigherOrderOperator"
+                        )
+                    # For modules we store the class
+                    rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                        (
+                            rv.node.name,
+                            rv.node.meta["nn_module_stack"][target][1],
+                        )
+                    ]
 
         if "stack_trace" not in rv.node.meta:
             frame_summaries: List[traceback.FrameSummary] = []
