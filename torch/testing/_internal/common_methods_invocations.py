@@ -6000,6 +6000,7 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(make_arg((3, 0)), args=(1,))
     yield SampleInput(make_arg((3, 0)), args=(1,), kwargs={'keepdim': True})
+    yield SampleInput(torch.tensor([2., 3, 0, 0], dtype=dtype, device=device, requires_grad=requires_grad))
 
     # test zero scalar tensor
     zero = make_arg(())
