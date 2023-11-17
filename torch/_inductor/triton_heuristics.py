@@ -1072,6 +1072,7 @@ def reduction(
 ):
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
@@ -1149,6 +1150,10 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+
     xnumel, rnumel = size_hints
 
     configs = [

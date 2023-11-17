@@ -860,6 +860,7 @@ class TritonKernel(Kernel):
             return index
 
         self.simplify_indexing = simplify_indexing
+        self.code_hash = None
 
     def should_use_persistent_reduction(self):
         """
@@ -2553,6 +2554,7 @@ class TritonScheduling(BaseScheduling):
         kernel_name = self.define_kernel(src_code, node_schedule)
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
 
         if kernel.persistent_reduction and config.triton.multi_kernel:
             kernel2 = TritonKernel(
@@ -2565,6 +2567,7 @@ class TritonScheduling(BaseScheduling):
                 src_code2 = kernel2.codegen_kernel()
             kernel_name2 = self.define_kernel(src_code2, node_schedule)
             kernel2.kernel_name = kernel_name2
+            kernel2.code_hash = code_hash(src_code2)
 
             final_kernel = MultiKernel([kernel, kernel2])
         else:

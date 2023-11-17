@@ -6,6 +6,7 @@ from .. import config
 from ..codecache import PyCodeCache, TritonFuture
 from ..utils import do_bench
 from ..virtualized import V
+from torch._inductor.metrics import get_metric_table
 
 log = logging.getLogger(__name__)
 
@@ -46,18 +47,27 @@ class MultiKernelState:
     def __init__(self):
         self.subkernel_to_kernel_name = {}
 
-        # this is mainly for sanity check
-        self.used_names = set()
-
     def define_kernel(self, kernels):
+        """
+        Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
+        This has some minor issue.
+
+        E.g. for persistent reduction https://gist.github.com/shunting314/39e7c00ff8bb2055942ed5a3255d61ca ,
+        there are 2 flavors of non-persistent reduction:
+          https://gist.github.com/shunting314/056d43d35907e87efb883970b35c17d4
+        and
+          https://gist.github.com/shunting314/02ee753b65c513c54e695626afe682bd
+
+        The only different is cache eviction policy.
+
+        We should name the multi-kernel differently in these 2 cases.
+        """
         kernel_names = tuple(k.kernel_name for k in kernels)
         if kernel_names in self.subkernel_to_kernel_name:
             return self.subkernel_to_kernel_name[kernel_names]
 
         # name the multi kernel based on the first kernel
-        multi_kernel_name = f"multi_kernel_{kernel_names[0]}"
-        assert multi_kernel_name not in self.used_names
-        self.used_names.add(multi_kernel_name)
+        multi_kernel_name = f"multi_kernel_{len(self.subkernel_to_kernel_name)}"
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         wrapper = V.graph.wrapper_code
@@ -79,7 +89,21 @@ class MultiKernelState:
             ]
         )
 
+        # add subkernel src code hashes to the multi-kernel source code so changing a
+        # subkernel implementation will result in a differnt py file for
+        # multi-kernel. This makes cache implementation straightforward since
+        # we can decide cache file name based on multi-kernel py file name
+        # directly.
+        #
+        # Without the hash added for subkernels, the cache file may be shared by
+        # different subkernels which is incorrect.
+        subkernel_hashes = "\n".join(
+            f"# subkernel{i} code hash: {kernel.code_hash}"
+            for i, kernel in enumerate(kernels)
+        )
+
         src_code = f"""
+{subkernel_hashes}
 def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
 {kernel_call_def_code}
     multi_kernel_call.run_with_argless_kernels([call0, call1])
@@ -140,8 +164,9 @@ class MultiKernel:
 
         # numels for all subkernels should be the same. Use kernels[0] here
         self.kernels[0].add_numel_to_call_args_and_grid(
-            self.kernel_name, all_call_args, grid
+            kernel_name, all_call_args, grid
         )
+        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
 
         V.graph.wrapper_code.generate_kernel_call(
             self.kernel_name,
@@ -175,15 +200,17 @@ class MultiKernelCall:
         assert len(kernels) >= 2
         self._kernels = kernels
 
+        self._run = PyCodeCache.load(src_code).run
+        self.disable_cache = os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
+
         self.picked_kernel = None
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
-            self.picked_by_config = config.triton.multi_kernel - 2
-            assert self.picked_by_config < len(self._kernels)
-            self.picked_kernel = self.picked_by_config
-
-        self._run = PyCodeCache.load(src_code).run
-        self.load_cache()
+            picked_by_config = config.triton.multi_kernel - 2
+            assert picked_by_config < len(self._kernels)
+            self.picked_kernel = picked_by_config
+        elif not self.disable_cache:
+            self.load_cache()
 
     def cache_file_path(self):
         py_file_path = self._run.__globals__["__file__"]
@@ -234,11 +261,27 @@ class MultiKernelCall:
                 for kernel_call in kernel_calls
             ]
             self.picked_kernel = timings.index(min(timings))
+            k0 = self.kernels[0]
             log.debug(
-                "pick %dth sub-kernel in %s. Timings %s",
+                "pick %dth sub-kernel in %s. Size hints %s. Reduction hint %s. Timings %s",
                 self.picked_kernel,
-                [k.fn.__name__ for k in self.kernels],
+                [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                k0.size_hints,
+                k0.inductor_meta.get("reduction_hint"),
                 timings,
             )
-            self.store_cache()
+
+            get_metric_table("persistent_red_perf").add_row(
+                lambda: {
+                    "kernel1_name": self.kernels[0].inductor_meta.get("kernel_name"),
+                    "kernel2_name": self.kernels[1].inductor_meta.get("kernel_name"),
+                    "kernel1_latency": timings[0],
+                    "kernel2_latency": timings[1],
+                    "size_hints": k0.size_hints,
+                    "reduction_hint": k0.inductor_meta.get("reduction_hint"),
+                    "speedup": timings[1] / timings[0],
+                }
+            )
+            if not self.disable_cache:
+                self.store_cache()
         kernel_calls[self.picked_kernel]()
