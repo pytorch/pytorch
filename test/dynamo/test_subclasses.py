@@ -196,17 +196,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def sigmoid(self):
                 return None
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            x.sigmoid()
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                x.sigmoid()
 
         msg = (
             "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -220,17 +220,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
             ndim = 10
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return x.ndim
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -253,17 +253,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def ndim(self, value):
                 self._ndim = value
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return x.ndim
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -872,14 +872,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         def fn1(nt1, nt2):
             return (nt1 + nt2).sin().cos()
 
-        compiled_f = torch.compile(
-            fn1, fullgraph=True, backend="aot_eager", dynamic=True
-        )
+        compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
         out = compiled_f(nt, nt2)
         out_buffer = ViewBufferFromNested.apply(out)
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-        out_ref = compiled_f(nt, nt2)
+        out_ref = fn1(nt, nt2)
         out_buffer_ref = ViewBufferFromNested.apply(out_ref)
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 

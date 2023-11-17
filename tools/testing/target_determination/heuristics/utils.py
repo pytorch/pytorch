@@ -33,7 +33,9 @@ def query_changed_files() -> List[str]:
         base_commit = "HEAD^"
 
     proc = subprocess.run(
-        ["git", "diff", "--name-only", base_commit, "HEAD"], capture_output=True
+        ["git", "diff", "--name-only", base_commit, "HEAD"],
+        capture_output=True,
+        check=False,
     )
 
     if proc.returncode != 0:
