@@ -449,7 +449,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @property
     def fake_mode(self):
-        return self.root_tx.fake_mode
+        return self.tracing_context.fake_mode
 
     @property
     def shape_env(self):
