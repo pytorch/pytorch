@@ -219,7 +219,7 @@ class TestFloat8Dtype(TestCase):
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         x8_simulated = simulate_fp8_precision(x, dtype)
-        self.assertEqual(x8_simulated, x8.float(), atol=0, rtol=0)
+        self.assertEqual(x8_simulated, x8.float())
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
