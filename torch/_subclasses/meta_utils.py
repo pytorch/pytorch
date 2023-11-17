@@ -254,6 +254,7 @@ class MetaConverter:
                     )
             else:
                 assert policy is None
+            return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
