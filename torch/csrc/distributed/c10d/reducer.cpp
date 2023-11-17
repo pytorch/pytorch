@@ -2308,4 +2308,17 @@ void Reducer::check_finalized() {
   ensure_prior_reduction_finished();
 }
 
+void Reducer::update_process_group(
+    c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  process_group_ = std::move(new_process_group);
+}
+
+void Reducer::force_bucket_rebuild() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  has_rebuilt_bucket_ = false;
+  rebuilt_params_.clear();
+  rebuilt_param_indices_.clear();
+}
+
 } // namespace c10d
