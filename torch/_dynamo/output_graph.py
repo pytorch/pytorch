@@ -1020,8 +1020,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
-        with self.restore_global_state():
-            compiled_fn = self.call_user_compiler(gm)
+        old_fake_mode = self.tracing_context.fake_mode
+        backend_fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=old_fake_mode.shape_env,
+        )
+        self.tracing_context.fake_mode = backend_fake_mode
+        try:
+            with self.restore_global_state(), backend_fake_mode:
+                compiled_fn = self.call_user_compiler(gm)
+        finally:
+            self.tracing_context.fake_mode = old_fake_mode
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
