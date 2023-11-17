@@ -66,13 +66,18 @@ class SimpleModelUneven(torch.nn.Module):
     def __init__(self):
         super().__init__()
         torch.manual_seed(0)
-        self.net1 = nn.Sequential(nn.Linear(5, 10), nn.ReLU())
-        self.net2 = nn.Sequential(nn.Linear(10, 15), nn.ReLU())
-        self.net3 = nn.Linear(15, 30)
-        self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(30, 5))
+        self.net1 = torch.nn.Linear(5, 10)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(10, 15)
+        self.net3 = torch.nn.Linear(15, 30)
+        self.net4 = torch.nn.Linear(30, 5)
 
     def forward(self, x):
-        return self.net4(self.net3(self.net2(self.net1(x))))
+        x = F.relu(self.net1(x))
+        x = F.relu(self.net2(x))
+        x = F.relu(self.net3(x))
+        x = F.relu(self.net4(x))
+        return x
 
     def get_input(self):
         return torch.rand(4, 5, device="cuda")
@@ -246,8 +251,15 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        # model_2d = parallelize_module(
+        #     simple_model().cuda(), tp_mesh, PairwiseParallel()
+        # )
         model_2d = parallelize_module(
-            simple_model().cuda(), tp_mesh, PairwiseParallel()
+            simple_model().cuda(), tp_mesh, parallelize_plan=parallelize_plan,
         )
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
 
@@ -256,6 +268,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
         )
         state_dict_2d = model_2d.state_dict()
+        print(f"{self.rank=}, {state_dict_2d=}")
 
         for no_wrap_items, two_d_items in zip(
             no_wrap_state_dict.items(), state_dict_2d.items()
@@ -367,6 +380,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
         no_wrap_osd_states = no_wrap_osd["state"]
         optim_2d_osd_states = optim_2d_osd["state"]
+        print(f"{self.rank=}, {optim_2d_osd_states=}")
 
         self.assertEqual(len(no_wrap_osd_states), len(optim_2d_osd_states))
         self.assertEqual(no_wrap_osd_states.keys(), optim_2d_osd_states.keys())
