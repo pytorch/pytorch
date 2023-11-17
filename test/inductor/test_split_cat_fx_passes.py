@@ -3,12 +3,18 @@
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+def patch(f):
+    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
+    return f
+
+
 class TestSplitCatFxPasses(TestCase):
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -62,22 +68,22 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
-            (arg_only_dim0, 1),
+            (arg_only_dim0, 0),
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
             (list_replace, 1),
-            (multi_split, 17),
+            (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
             (kwarg1_cm, 1),
             (kwarg2_cm, 1),
-            (multi_split_cm, 17),
+            (multi_split_cm, 1),
             (unequal_split_cm, 1),
             (cm_with_list, 1),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -86,7 +92,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_consecutive_split_merge(self):
         def multi_split(x):
             return [torch.split(s, 2, 1) for s in torch.split(x, 2, 1)]
@@ -221,12 +227,12 @@ class TestSplitCatFxPasses(TestCase):
             torch.randn(2, 32),
         ]
         for fn, expected_split_merged in [
-            (multi_split, 16),
+            (multi_split, 0),
             (multi_split_2, 16),
             (multi_split_2_neg_dim, 16),
             (multi_split_with_sizes, 2),
-            (multi_split_kwarg1, 16),
-            (multi_split_kwarg2, 16),
+            (multi_split_kwarg1, 0),
+            (multi_split_kwarg2, 0),
             (unequal_multi_split, 3),
             (unequal_multi_split_neg_index, 3),
             (diff_dims, 0),
@@ -238,7 +244,7 @@ class TestSplitCatFxPasses(TestCase):
             (split_getitem_out_of_order, 1),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -247,7 +253,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_cat_merge(self):
         def simple_split_cat(x):
             return torch.cat(torch.split(x, 4, dim=1), dim=1)
@@ -257,6 +263,12 @@ class TestSplitCatFxPasses(TestCase):
 
         def simple_split_cat_argspec2(x):
             return torch.cat(tensors=torch.split(x, 4, dim=1), dim=1)
+
+        def simple_split_cat_argspec3(x):
+            return torch.cat(torch.split(x, 4, dim=1), -2)
+
+        def simple_split_cat_argspec4(x):
+            return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
 
         def simple_split_stack(x):
             return torch.stack(torch.split(x, 4, dim=1), dim=1)
@@ -401,6 +413,26 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1
 
+        def input_shuffling_direct_output(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            return cat1, stack1, split_output[6]
+
         def input_shuffling_multiple_output_same_ranges(x):
             split_output = list(torch.split(x, 4, dim=1))
             cat1 = torch.cat(
@@ -499,9 +531,11 @@ class TestSplitCatFxPasses(TestCase):
             expected_sections_removed,
             args,
         ) in [
-            (simple_split_cat, 0, 1, 0, 1, 7, default_args),
-            (simple_split_cat_argspec1, 0, 1, 0, 1, 7, default_args),
-            (simple_split_cat_argspec2, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat, 0, 0, 0, 0, 0, default_args),
+            (simple_split_cat_argspec1, 0, 0, 0, 0, 0, default_args),
+            (simple_split_cat_argspec2, 0, 0, 0, 0, 0, default_args),
+            (simple_split_cat_argspec3, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec4, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec1, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec2, 0, 1, 0, 1, 7, default_args),
@@ -519,11 +553,12 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_multiple_output, 1, 1, 2, 2, 3, default_args),
+            (input_shuffling_direct_output, 1, 1, 2, 2, 3, default_args),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
             (multi_split_cat, 2, 2, 4, 4, 3, multi_args),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -566,7 +601,7 @@ class TestSplitCatFxPasses(TestCase):
         ]
 
         expected = split_with_cat(*args)
-        actual = torch.compile(split_with_cat, dynamic=True)(*args)
+        actual = torch.compile(split_with_cat)(*args)
 
         torch.testing.assert_close(actual, expected)
         self.assertEqual(
@@ -578,7 +613,7 @@ class TestSplitCatFxPasses(TestCase):
             0,
         )
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_cat_merge_mutation(self):
         args = [
             torch.randn(2, 32, 32, 16),
@@ -590,14 +625,14 @@ class TestSplitCatFxPasses(TestCase):
             return torch.cat(splits, dim=1)
 
         expected = split_cat_mutation(*args)
-        actual = torch.compile(split_cat_mutation, dynamic=True)(*args)
+        actual = torch.compile(split_cat_mutation)(*args)
 
         torch.testing.assert_close(actual, expected)
 
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
             items = list(torch.split(x, 1, dim=1))
@@ -653,6 +688,13 @@ class TestSplitCatFxPasses(TestCase):
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items), torch.relu(items[0])
 
+        def graph_should_be_topological_sorted(x):
+            output = []
+            for t in x.split(1):
+                output.append(torch.sin(t.squeeze(dim=0)))
+            output = torch.stack(output)
+            return output
+
         args = [
             torch.randn(2, 32),
         ]
@@ -668,9 +710,10 @@ class TestSplitCatFxPasses(TestCase):
             (dim_mismatch, 0),
             (other_users, 0),
             (other_users_2, 0),
+            (graph_should_be_topological_sorted, 1),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -679,7 +722,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, dim=1), 1)
@@ -807,7 +850,7 @@ class TestSplitCatFxPasses(TestCase):
             print()
             print(fn)
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -832,7 +875,225 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
+    def test_getitem_cat_merge(self):
+        def split_cat_split(x):
+            l1_out = torch.split(x, [200, 50, 50, 20, 20, 20, 20, 20, 20, 50, 30], 1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item10 = l1_out[10]
+            cat_1 = torch.cat((item0, item1), 1)
+            cat_2 = torch.cat((item9, item10), 1)
+            l2_out = torch.split(cat_1, [50, 120, 80], 1)
+            l3_out = torch.split(cat_2, [10, 20, 50], 1)
+            item11 = l2_out[0]
+            item12 = l2_out[1]
+            item13 = l2_out[2]
+            item14 = l3_out[0]
+            item15 = l3_out[1]
+            item16 = l3_out[2]
+
+            output = torch.cat(
+                [
+                    item11,
+                    item12,
+                    item13,
+                    item14,
+                    item15,
+                    item16,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                ],
+                1,
+            )
+            return output
+
+        def split_cat_split_kwarg(x):
+            l1_out = torch.split(
+                x, [200, 50, 50, 20, 20, 20, 20, 20, 20, 50, 30], dim=1
+            )
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item10 = l1_out[10]
+            cat_1 = torch.cat((item0, item1), dim=1)
+            cat_2 = torch.cat((item9, item10), dim=1)
+            l2_out = torch.split(cat_1, [50, 120, 80], dim=1)
+            l3_out = torch.split(cat_2, [10, 20, 50], dim=1)
+            item11 = l2_out[0]
+            item12 = l2_out[1]
+            item13 = l2_out[2]
+            item14 = l3_out[0]
+            item15 = l3_out[1]
+            item16 = l3_out[2]
+
+            output = torch.cat(
+                [
+                    item11,
+                    item12,
+                    item13,
+                    item14,
+                    item15,
+                    item16,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                ],
+                dim=1,
+            )
+            return output
+
+        def split_cat_split_with_multiple_users(x):
+            l1_out = torch.split(
+                x, [50, 50, 200, 20, 20, 20, 20, 20, 40, 10, 50], dim=0
+            )
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item10 = l1_out[10]
+            cat_1 = torch.cat((item0, item1), dim=0)
+            cat_2 = torch.cat((item0, item10), dim=0)
+            l2_out = torch.split(cat_1, [20, 30, 50], dim=0)
+            l3_out = torch.split(cat_2, [10, 60, 30], dim=0)
+            item11 = l2_out[0]
+            item12 = l2_out[1]
+            item13 = l2_out[2]
+            item14 = l3_out[0]
+            item15 = l3_out[1]
+            item16 = l3_out[2]
+
+            output = torch.cat(
+                [
+                    item11,
+                    item12,
+                    item13,
+                    item14,
+                    item15,
+                    item16,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                ],
+                dim=0,
+            )
+            return output
+
+        args = [
+            torch.randn(500, 500),
+        ]
+        for fn, expected_getitem_cat_merged in [
+            (split_cat_split, 2),
+            (split_cat_split_kwarg, 2),
+            (split_cat_split_with_multiple_users, 0),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["getitem_cat_merged"],
+                expected_getitem_cat_merged,
+            )
+            counters.clear()
+
+    @patch
+    def test_stack_tahn_unbind_merge(self):
+        def stack_tahn_unbind(x):
+            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
+            cat_1 = torch.cat((item3, item4), 1)
+            cat_2 = torch.cat((item5, item6), 1)
+            tanh = torch.tanh(stack)
+            unbind = torch.unbind(tanh, 0)
+            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
+
+        args = [
+            torch.randn(50, 120),
+        ]
+        for fn, expected_stack_tahn_unbind_merged in [
+            (stack_tahn_unbind, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["stack_tahn_unbind_merged"],
+                expected_stack_tahn_unbind_merged,
+            )
+            counters.clear()
+
+    def test_numpy_compat_normalization(self):
+        def fn(x, y):
+            a = torch.stack([x, y], axis=1)
+            b = torch.mul(x, x2=y)
+            c = torch.mul(x, x2=y)
+            d = torch.mul(x, x2=y)
+            e = torch.max(x, dim=1, keepdims=True)
+            f = torch.dropout(x=x, p=0.5, train=True)
+            return a, b, c, d, e, f
+
+        fn_t = torch.fx.symbolic_trace(fn)
+        numpy_compat_normalization(fn_t.graph)
+
+        for n in fn_t.graph.nodes:
+            for k in n.kwargs.keys():
+                self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
+
+    @patch
+    def test_stack_normalization_axis_kwarg(self):
+        def fn(x, y):
+            return torch.stack([x, y], axis=1)
+
+        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        expected = fn(x, y)
+        actual = torch.compile(fn)(x, y)
+
+        self.assertEqual(actual, expected)
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()

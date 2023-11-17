@@ -36,8 +36,7 @@ class _MaxPoolNd(Module):
 
 
 class MaxPool1d(_MaxPoolNd):
-    r"""Applies a 1D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 1D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`
     and output :math:`(N, C, L_{out})` can be precisely described as:
@@ -95,8 +94,7 @@ class MaxPool1d(_MaxPoolNd):
 
 
 class MaxPool2d(_MaxPoolNd):
-    r"""Applies a 2D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -169,8 +167,7 @@ class MaxPool2d(_MaxPoolNd):
 
 
 class MaxPool3d(_MaxPoolNd):
-    r"""Applies a 3D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 3D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -249,9 +246,7 @@ class MaxPool3d(_MaxPoolNd):
 class _MaxUnpoolNd(Module):
 
     def extra_repr(self) -> str:
-        return 'kernel_size={}, stride={}, padding={}'.format(
-            self.kernel_size, self.stride, self.padding
-        )
+        return f'kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}'
 
 
 class MaxUnpool1d(_MaxUnpoolNd):
@@ -489,14 +484,11 @@ class _AvgPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
     def extra_repr(self) -> str:
-        return 'kernel_size={}, stride={}, padding={}'.format(
-            self.kernel_size, self.stride, self.padding
-        )
+        return f'kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}'
 
 
 class AvgPool1d(_AvgPoolNd):
-    r"""Applies a 1D average pooling over an input signal composed of several
-    input planes.
+    r"""Applies a 1D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`,
     output :math:`(N, C, L_{out})` and :attr:`kernel_size` :math:`k`
@@ -562,8 +554,7 @@ class AvgPool1d(_AvgPoolNd):
 
 
 class AvgPool2d(_AvgPoolNd):
-    r"""Applies a 2D average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -617,6 +608,7 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_2_t
@@ -641,8 +633,7 @@ class AvgPool2d(_AvgPoolNd):
 
 
 class AvgPool3d(_AvgPoolNd):
-    r"""Applies a 3D average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 3D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -703,6 +694,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
+
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_3_t
@@ -741,6 +733,8 @@ class FractionalMaxPool2d(Module):
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
+    .. note:: Exactly one of ``output_size`` or ``output_ratio`` must be defined.
+
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
@@ -768,6 +762,7 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
+
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
 
@@ -792,8 +787,7 @@ class FractionalMaxPool2d(Module):
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
             if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1):
-                raise ValueError("output_ratio must be between 0 and 1 (got {})"
-                                 .format(output_ratio))
+                raise ValueError(f"output_ratio must be between 0 and 1 (got {output_ratio})")
 
     def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
@@ -810,6 +804,8 @@ class FractionalMaxPool3d(Module):
     The max-pooling operation is applied in :math:`kT \times kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
+
+    .. note:: Exactly one of ``output_size`` or ``output_ratio`` must be defined.
 
     Args:
         kernel_size: the size of the window to take a max over.
@@ -838,6 +834,7 @@ class FractionalMaxPool3d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
+
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
     kernel_size: _size_3_t
@@ -861,8 +858,7 @@ class FractionalMaxPool3d(Module):
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
             if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):
-                raise ValueError("output_ratio must be between 0 and 1 (got {})"
-                                 .format(output_ratio))
+                raise ValueError(f"output_ratio must be between 0 and 1 (got {output_ratio})")
 
     def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
@@ -891,8 +887,7 @@ class _LPPoolNd(Module):
 
 
 class LPPool1d(_LPPoolNd):
-    r"""Applies a 1D power-average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 1D power-average pooling over an input signal composed of several input planes.
 
     On each window, the function computed is:
 
@@ -933,8 +928,7 @@ class LPPool1d(_LPPoolNd):
 
 
 class LPPool2d(_LPPoolNd):
-    r"""Applies a 2D power-average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D power-average pooling over an input signal composed of several input planes.
 
     On each window, the function computed is:
 
@@ -997,7 +991,7 @@ class _AdaptiveMaxPoolNd(Module):
         self.return_indices = return_indices
 
     def extra_repr(self) -> str:
-        return 'output_size={}'.format(self.output_size)
+        return f'output_size={self.output_size}'
 
 # FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
 #   output shapes are, and how the operation computes output.
@@ -1126,7 +1120,7 @@ class _AdaptiveAvgPoolNd(Module):
         self.output_size = output_size
 
     def extra_repr(self) -> str:
-        return 'output_size={}'.format(self.output_size)
+        return f'output_size={self.output_size}'
 
 
 class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):

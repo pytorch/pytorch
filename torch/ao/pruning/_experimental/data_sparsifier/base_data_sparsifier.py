@@ -144,7 +144,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         r"""Converts the mask to sparse coo or dense tensors depending on the `sparse_coo` argument.
         """
         states = copy.deepcopy(states)
-        for _, state in states.items():
+        for state in states.values():
             if sparse_coo:
                 state['mask'] = state['mask'].to_sparse_coo()
             else:

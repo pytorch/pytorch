@@ -34,8 +34,7 @@ class LambdaSL(BaseScheduler):
             self.sl_lambdas = [sl_lambda] * len(sparsifier.groups)
         else:
             if len(sl_lambda) != len(sparsifier.groups):
-                raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(sparsifier.groups), len(sl_lambda)))
+                raise ValueError(f"Expected {len(sparsifier.groups)} lr_lambdas, but got {len(sl_lambda)}")
             self.sl_lambdas = list(sl_lambda)
         super().__init__(sparsifier, last_epoch, verbose)
 

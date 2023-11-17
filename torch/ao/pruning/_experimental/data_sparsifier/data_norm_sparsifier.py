@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
 from functools import reduce
-from typing import Tuple, Any, List
+from typing import Any, List, Optional, Tuple
 
 from .base_data_sparsifier import BaseDataSparsifier
 
@@ -31,9 +31,9 @@ class DataNormSparsifier(BaseDataSparsifier):
         arguments and could be overriden by the configuration provided in the
         `add_data` step.
     """
-    def __init__(self, data_list: List[Tuple[str, Any]] = None, sparsity_level: float = 0.5,
+    def __init__(self, data_list: Optional[List[Tuple[str, Any]]] = None, sparsity_level: float = 0.5,
                  sparse_block_shape: Tuple[int, int] = (1, 4),
-                 zeros_per_block: int = None, norm: str = 'L1'):
+                 zeros_per_block: Optional[int] = None, norm: str = 'L1'):
         if zeros_per_block is None:
             zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
 

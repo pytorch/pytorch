@@ -4,11 +4,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from functorch import make_functional
-from functorch.compile import nnc_jit
+import time
+
 import torch
 import torch.nn as nn
-import time
+from functorch import make_functional
+from functorch.compile import nnc_jit
+
 torch._C._jit_override_can_fuse_on_cpu(True)
 
 
@@ -18,7 +20,7 @@ def bench(f, iters=100, warmup=10):
     begin = time.time()
     for _ in range(iters):
         f()
-    print((time.time() - begin))
+    print(time.time() - begin)
 
 
 class Foo(nn.Module):
@@ -30,7 +32,7 @@ class Foo(nn.Module):
         self.mod = nn.Sequential(*mods)
 
     def forward(self, x):
-        return (self.mod(x)**2).sum()
+        return (self.mod(x) ** 2).sum()
 
 
 batch_size = 16
@@ -54,7 +56,9 @@ def functional_step(x, weights):
     return out, new_weights
 
 
-optim = torch.optim.SGD(jit_mod.parameters(), lr=lr, momentum=0, dampening=0, weight_decay=0)
+optim = torch.optim.SGD(
+    jit_mod.parameters(), lr=lr, momentum=0, dampening=0, weight_decay=0
+)
 
 
 def jit_step(x, weights):

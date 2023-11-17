@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 
@@ -109,7 +108,7 @@ class TestFakeSparsity(TestCase):
         assert hasattr(model_load.seq[1], 'parametrizations')
         assert parametrize.is_parametrized(model_load.linear, 'weight')
 
-        # Check the weigths are preserved
+        # Check the weights are preserved
         self.assertEqual(model_save.linear.parametrizations['weight'].original,
                          model_load.linear.parametrizations['weight'].original)
         self.assertEqual(model_save.seq[0].parametrizations['weight'].original,

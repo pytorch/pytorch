@@ -2,20 +2,44 @@
 #       Anything is subject to change and no guarantee is provided at this point.
 
 from dataclasses import dataclass, fields
-from enum import Enum
+from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
+
+
+# NOTE: Please update this value if any modifications are made to the schema
+SCHEMA_VERSION = 1
+TREESPEC_VERSION = 1
 
 # TODO (zhxchen17) Move to a separate file.
 class _Union:
     @classmethod
     def create(cls, **kwargs):
         assert len(kwargs) == 1
-        return cls(**{**{field.name: None for field in fields(cls)}, **kwargs})
+        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
 
     def __post_init__(self):
-        assert sum(1 for field in fields(self) if getattr(self, field.name) is not None) == 1
+        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
 
-class ScalarType(Enum):
+    @property
+    def value(self):
+        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
+        assert val is not None
+        return val
+
+    @property
+    def type(self):
+        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
+        assert val_type is not None
+        return val_type
+
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self.type}={self.value})"
+
+
+class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
     CHAR = 2
@@ -32,7 +56,7 @@ class ScalarType(Enum):
     BFLOAT16 = 13
 
 
-class Layout(Enum):
+class Layout(IntEnum):
     Unknown = 0
     SparseCoo = 1
     SparseCsr = 2
@@ -43,7 +67,7 @@ class Layout(Enum):
     Strided = 7
 
 
-class MemoryFormat(Enum):
+class MemoryFormat(IntEnum):
     Unknown = 0
     ContiguousFormat = 1
     ChannelsLast = 2
@@ -58,9 +82,21 @@ class Device:
 
 
 @dataclass
+class SymExpr:
+    expr_str: str
+    hint: Optional[int]
+
+
+@dataclass(repr=False)
 class SymInt(_Union):
-    as_symbol: str
+    as_expr: SymExpr
     as_int: int
+
+
+@dataclass(repr=False)
+class SymBool(_Union):
+    as_expr: str
+    as_bool: bool
 
 
 @dataclass
@@ -74,10 +110,16 @@ class TensorMeta:
     layout: Layout
 
 
-@dataclass
+@dataclass(repr=False)
 class SymIntArgument(_Union):
     as_name: str
     as_int: int
+
+
+@dataclass(repr=False)
+class SymBoolArgument(_Union):
+    as_name: str
+    as_bool: bool
 
 
 @dataclass
@@ -85,8 +127,25 @@ class TensorArgument:
     name: str
 
 
-# This is actually a union type
+@dataclass(repr=False)
+class OptionalTensorArgument(_Union):
+    as_tensor: str
+    as_none: Tuple[()]
+
+
 @dataclass
+class GraphArgument:
+    name: str
+    graph: 'Graph'
+
+
+@dataclass
+class CustomObjArgument:
+    blob: bytes
+
+
+# This is actually a union type
+@dataclass(repr=False)
 class Argument(_Union):
     as_none: Tuple[()]
     as_tensor: TensorArgument
@@ -96,6 +155,7 @@ class Argument(_Union):
     as_float: float
     as_floats: List[float]
     as_string: str
+    as_strings: List[str]
     as_sym_int: SymIntArgument
     as_sym_ints: List[SymIntArgument]
     as_scalar_type: ScalarType
@@ -104,6 +164,11 @@ class Argument(_Union):
     as_device: Device
     as_bool: bool
     as_bools: List[bool]
+    as_sym_bool: SymBoolArgument
+    as_sym_bools: List[SymBoolArgument]
+    as_graph: GraphArgument
+    as_optional_tensors: List[OptionalTensorArgument]
+    as_custom_obj: CustomObjArgument
 
 
 @dataclass
@@ -113,14 +178,8 @@ class NamedArgument:
 
 
 @dataclass
-class Operator:
-    name: str
-    version: Optional[int]
-
-
-@dataclass
 class Node:
-    target: Operator
+    target: str
     inputs: List[NamedArgument]
     outputs: List[Argument]
     metadata: Dict[str, str]
@@ -138,31 +197,116 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
+    sym_bool_values: Dict[str, SymBool]
+    is_single_tensor_return: bool = False
 
 
 @dataclass
-class BackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_userInputs: Dict[str, str]
-    loss_output: str
+class UserInputSpec:
+    arg: Argument
+
+
+@dataclass
+class InputToParameterSpec:
+    arg: TensorArgument
+    parameter_name: str
+
+
+@dataclass
+class InputToBufferSpec:
+    arg: TensorArgument
+    buffer_name: str
+
+
+@dataclass
+class InputToTensorConstantSpec:
+    arg: TensorArgument
+    tensor_constant_name: str
+
+
+@dataclass
+class InputSpec(_Union):
+    user_input: UserInputSpec
+    parameter: InputToParameterSpec
+    buffer: InputToBufferSpec
+    tensor_constant: InputToTensorConstantSpec
+
+
+@dataclass
+class UserOutputSpec:
+    arg: Argument
+
+
+@dataclass
+class LossOutputSpec:
+    arg: TensorArgument
+
+
+@dataclass
+class BufferMutationSpec:
+    arg: TensorArgument
+    buffer_name: str
+
+
+@dataclass
+class GradientToParameterSpec:
+    arg: TensorArgument
+    parameter_name: str
+
+
+@dataclass
+class GradientToUserInputSpec:
+    arg: TensorArgument
+    user_input_name: str
+
+
+@dataclass
+class OutputSpec(_Union):
+    user_output: UserOutputSpec
+    loss_output: LossOutputSpec
+    buffer_mutation: BufferMutationSpec
+    gradient_to_parameter: GradientToParameterSpec
+    gradient_to_user_input: GradientToUserInputSpec
 
 
 @dataclass
 class GraphSignature:
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
-    user_inputs: List[str]
-    user_outputs: List[str]
-    buffers_to_mutate: Dict[str, str]
+    input_specs: List[InputSpec]
+    output_specs: List[OutputSpec]
+
+
+@dataclass
+class RangeConstraint:
+    min_val: int
+    max_val: int
+
+
+@dataclass
+class ModuleCallSignature:
+    inputs: List[Argument]
+    outputs: List[Argument]
     in_spec: str
     out_spec: str
-    backward_signature: Optional[BackwardSignature]
+
+
+@dataclass
+class ModuleCallEntry:
+    fqn: str
+    signature: Optional[ModuleCallSignature] = None
 
 
 @dataclass
 class GraphModule:
     graph: Graph
-    buffers: Dict[str, TensorMeta]
-    parameters: Dict[str, TensorMeta]
-    metadata: Dict[str, str]
     signature: GraphSignature
+    module_call_graph: List[ModuleCallEntry]
+
+
+@dataclass
+class ExportedProgram:
+    graph_module: GraphModule
+    opset_version: Dict[str, int]
+    range_constraints: Dict[str, RangeConstraint]
+    equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
+    schema_version: int
+    dialect: str

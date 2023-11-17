@@ -620,7 +620,6 @@ class IListRef {
     unboxed_type unboxed;
     const materialized_type* materialized;
     Payload() : boxed(nullptr) {}
-    ~Payload() {}
   };
 
   Payload payload_;

@@ -114,7 +114,7 @@ class Completion::Data {
   }
 
   static std::function<void()> GetCompleter(
-      std::shared_ptr<Data> data,
+      const std::shared_ptr<Data>& data,
       std::function<void()> closure) {
     auto closure_wrapper = [closure = std::move(closure), data]() {
       std::exception_ptr exptr;

@@ -6,8 +6,8 @@ namespace at {
 class TensorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 TORCH_API bool canUse32BitIndexMath(const at::TensorBase &t, int64_t max_elem=std::numeric_limits<int32_t>::max());
 
-}}
+}

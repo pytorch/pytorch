@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo)
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -1201,6 +1201,32 @@ class TestIndexing(TestCase):
         self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
                                                 [6, 7, 8]])
 
+    def test_unravel_index_errors(self, device):
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor(0.5, device=device),
+                (2, 2))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor([], device=device),
+                (10, 3, 5))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                torch.tensor([1, 2, 3]))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                (1, 2, 2.0))
+
+        with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
+            torch.unravel_index(
+                torch.tensor(0, device=device),
+                (2, -3))
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
@@ -1327,6 +1353,48 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
             torch.take_along_dim(t.cpu(), indices, dim=0)
+
+    @onlyCUDA
+    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+        with DeterministicGuard(True):
+            idx1 = torch.tensor([0])
+            idx2 = torch.tensor([2, 6])
+            idx3 = torch.tensor([1, 5, 7])
+
+            tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx1] = 1.0
+            tensor_a[idx1, :, idx2, idx2, :] = 2.0
+            tensor_a[:, idx1, idx3, :, idx3] = 3.0
+            tensor_b[idx1] = 1.0
+            tensor_b[idx1, :, idx2, idx2, :] = 2.0
+            tensor_b[:, idx1, idx3, :, idx3] = 3.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 11).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[idx3] = 1.0
+            tensor_a[idx2, :] = 2.0
+            tensor_a[:, idx2] = 3.0
+            tensor_a[:, idx1] = 4.0
+            tensor_b[idx3] = 1.0
+            tensor_b[idx2, :] = 2.0
+            tensor_b[:, idx2] = 3.0
+            tensor_b[:, idx1] = 4.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10, 10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[[8]] = 1.0
+            tensor_b[[8]] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
+            tensor_a = torch.rand(10).cpu()
+            tensor_b = tensor_a.to(device=device)
+            tensor_a[6] = 1.0
+            tensor_b[6] = 1.0
+            self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:

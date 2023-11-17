@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 # torch
@@ -73,6 +72,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
+
+from torch.testing._internal.common_utils import set_default_dtype
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -316,12 +317,12 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = fuse_conv_bn_jit(m)
         FileCheck().check_count("prim::CallMethod", 2, exactly=True).run(m.graph)
 
+    @set_default_dtype(torch.double)
     def test_foldbn_complex_cases(self):
         # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
         # this only works when default dtype is double
-        torch.set_default_dtype(torch.double)
         bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
         conv_module = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 
@@ -374,8 +375,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             ).run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
 
             self.assertEqual(eager(x), scripted_or_traced(x))
-
-        torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):
@@ -1692,7 +1691,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             model = self.checkGraphModeOp(
                 Conv(dim),
                 self.img_data_dict[dim],
-                "quantized::conv{}d".format(dim),
+                f"quantized::conv{dim}d",
                 tracing,
             )
             # make sure there is only one quantize_per_tensor for input
@@ -1701,7 +1700,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 model.graph
             )
 
-            FileCheck().check_not("quantized::conv{}d_prepack".format(dim)).run(
+            FileCheck().check_not(f"quantized::conv{dim}d_prepack").run(
                 model.graph
             )
 
@@ -1743,17 +1742,17 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 ConvNdFunctionalRelu(dim),
                 ConvNdInplaceFunctionalRelu(dim),
             ]:
-                conv_name = "conv{}d".format(dim)
+                conv_name = f"conv{dim}d"
                 m = self.checkGraphModeOp(
                     orig_m,
                     self.img_data_dict[dim],
-                    "quantized::conv{}d_relu(".format(dim),
+                    f"quantized::conv{dim}d_relu(",
                     tracing=tracing,
                 )
 
-                FileCheck().check_not("aten::conv{}d(".format(dim)).check_not(
+                FileCheck().check_not(f"aten::conv{dim}d(").check_not(
                     "aten::relu"
-                ).check_not("quantized::conv{}d(".format(dim)).check_not(
+                ).check_not(f"quantized::conv{dim}d(").check_not(
                     "quantized::relu("
                 ).run(
                     m.graph
@@ -2896,7 +2895,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
-                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d(1)
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.leaky_relu = torch.nn.LeakyReLU()

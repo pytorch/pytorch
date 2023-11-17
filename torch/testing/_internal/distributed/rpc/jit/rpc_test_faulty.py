@@ -157,7 +157,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = f"worker{dst_rank}"
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
@@ -173,7 +173,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
             return
 
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = f"worker{dst_rank}"
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
@@ -188,7 +188,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = f"worker{dst_rank}"
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
@@ -205,7 +205,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = f"worker{dst_rank}"
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )

@@ -16,21 +16,21 @@ class ExecutorchCppSignatureTest(unittest.TestCase):
         self.sig = ExecutorchCppSignature.from_native_function(DEFAULT_NATIVE_FUNCTION)
 
     def test_runtime_signature_contains_runtime_context(self) -> None:
-        # test if `RuntimeContext` argument exists in `RuntimeSignature`
+        # test if `KernelRuntimeContext` argument exists in `RuntimeSignature`
         with parametrize(
             use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
         ):
             args = self.sig.arguments(include_context=True)
-            self.assertEquals(len(args), 3)
+            self.assertEqual(len(args), 3)
             self.assertTrue(any(a.name == "context" for a in args))
 
     def test_runtime_signature_does_not_contain_runtime_context(self) -> None:
-        # test if `RuntimeContext` argument is missing in `RuntimeSignature`
+        # test if `KernelRuntimeContext` argument is missing in `RuntimeSignature`
         with parametrize(
             use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
         ):
             args = self.sig.arguments(include_context=False)
-            self.assertEquals(len(args), 2)
+            self.assertEqual(len(args), 2)
             self.assertFalse(any(a.name == "context" for a in args))
 
     def test_runtime_signature_declaration_correct(self) -> None:
@@ -38,17 +38,17 @@ class ExecutorchCppSignatureTest(unittest.TestCase):
             use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
         ):
             decl = self.sig.decl(include_context=True)
-            self.assertEquals(
+            self.assertEqual(
                 decl,
                 (
                     "torch::executor::Tensor & foo_outf("
-                    "torch::executor::RuntimeContext & context, "
+                    "torch::executor::KernelRuntimeContext & context, "
                     "const torch::executor::Tensor & input, "
                     "torch::executor::Tensor & out)"
                 ),
             )
             no_context_decl = self.sig.decl(include_context=False)
-            self.assertEquals(
+            self.assertEqual(
                 no_context_decl,
                 (
                     "torch::executor::Tensor & foo_outf("

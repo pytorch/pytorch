@@ -139,7 +139,7 @@ class IsMemberOfOp final : public Operator<Context> {
         CAFFE_THROW("Unexpected 'dtype' argument value: ", dtype);
     }
   }
-  virtual ~IsMemberOfOp() noexcept {}
+  ~IsMemberOfOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<

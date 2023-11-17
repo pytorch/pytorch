@@ -1,15 +1,15 @@
 #pragma once
 
-#include <vector>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <vector>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
 
 namespace {
-  constexpr int kByteOffset = 8;
+constexpr int kByteOffset = 8;
 }
 
 // Converts from int to char vec to write in store

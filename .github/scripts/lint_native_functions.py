@@ -26,7 +26,7 @@ def fn(base: str) -> str:
     return str(base / Path("aten/src/ATen/native/native_functions.yaml"))
 
 
-with open(Path(__file__).parent.parent.parent / fn("."), "r") as f:
+with open(Path(__file__).parent.parent.parent / fn(".")) as f:
     contents = f.read()
 
 yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]

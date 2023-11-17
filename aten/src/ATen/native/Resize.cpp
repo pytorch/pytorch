@@ -11,6 +11,8 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
+#include <ATen/ops/_resize_output.h>
+#include <ATen/ops/_resize_output_native.h>
 #endif
 
 namespace at { namespace native {
@@ -43,11 +45,11 @@ bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape) {
   return _resize_output_check(output, shape);
 }
 
-void native_resize_(const Tensor& output, IntArrayRef shape) {
+static void native_resize_(const Tensor& output, IntArrayRef shape) {
   native::resize_(output, shape);
 }
 
-void native_resize_(const Tensor& output, SymIntArrayRef shape) {
+static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
   native::resize__symint(output, shape);
 }
 
@@ -92,13 +94,14 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   if (size_bytes != 0) {
     new_data = storage->allocator()->allocate(size_bytes);
   }
-  at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
+  const at::DataPtr& old_data = storage->data_ptr();
   const auto old_capacity = storage->nbytes();
-  storage->set_nbytes(size_bytes);
   const auto copy_capacity = std::min(size_bytes, old_capacity);
   if (old_data != nullptr && copy_capacity > 0) {
-    memcpy(storage->mutable_data(), old_data.get(), copy_capacity);
+    memcpy(new_data.get(), old_data.get(), copy_capacity);
   }
+  storage->set_data_ptr_noswap(std::move(new_data));
+  storage->set_nbytes(size_bytes);
 }
 
 // Call the sparse implementation in SparseTensor.cpp directly.
@@ -172,7 +175,7 @@ static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_byt
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
     TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
-  } else if (new_size_bytes > storage.nbytes()) {
+  } else if (new_size_bytes > storage.sym_nbytes()) {
     resize_bytes_meta(storage.unsafeGetStorageImpl(), std::move(new_size_bytes));
   }
 }
@@ -182,6 +185,11 @@ static void _maybe_resize_storage(TensorImpl* self, int64_t new_size_bytes) {
 }
 
 static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) {
+  if (self->is_cpu()) {
+    maybe_resize_storage_cpu(self, new_size_bytes.expect_int());
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(self->is_meta());
   maybe_resize_storage_meta(self, std::move(new_size_bytes));
 }
 
@@ -223,7 +231,7 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-TensorImpl* resize_impl_meta_(
+static TensorImpl* resize_impl_meta_(
     TensorImpl* self,
     c10::SymIntArrayRef size,
     at::OptionalSymIntArrayRef stride,
@@ -237,6 +245,7 @@ const Tensor& _resize_(
     ArrayRef<T> size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
+  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
   _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
   if (optional_memory_format.has_value()) {
@@ -247,6 +256,10 @@ const Tensor& _resize_(
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
+  }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory() && old_storage_nbytes != -1)) {
+    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
   }
   return self;
 }

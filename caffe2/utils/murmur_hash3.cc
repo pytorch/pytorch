@@ -18,8 +18,6 @@
 
 #define FORCE_INLINE __forceinline
 
-#define FALLTHROUGH_INTENDED
-
 #include <stdlib.h>
 
 #define ROTL32(x, y) _rotl(x, y)
@@ -32,17 +30,6 @@
 #else // defined(_MSC_VER)
 
 #define FORCE_INLINE inline __attribute__((__always_inline__))
-
-#if defined(__clang__) && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::fallthrough)
-#define FALLTHROUGH_INTENDED [[clang::fallthrough]]
-#endif
-#elif defined(__GNUC__) && __GNUC__ > 6
-#define FALLTHROUGH_INTENDED [[gnu::fallthrough]]
-#endif
-#ifndef FALLTHROUGH_INTENDED
-#define FALLTHROUGH_INTENDED
-#endif
 
 inline uint32_t rotl32(uint32_t x, int8_t r) {
   return (x << r) | (x >> (32 - r));
@@ -134,10 +121,10 @@ void MurmurHash3_x86_32(const void* key, int len, uint32_t seed, void* out) {
   switch (len & 3) {
     case 3:
       k1 ^= tail[2] << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 2:
       k1 ^= tail[1] << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 1:
       k1 ^= tail[0];
       k1 *= c1;
@@ -237,61 +224,61 @@ void MurmurHash3_x86_128(
   switch (len & 15) {
     case 15:
       k4 ^= tail[14] << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 14:
       k4 ^= tail[13] << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 13:
       k4 ^= tail[12] << 0;
       k4 *= c4;
       k4 = ROTL32(k4, 18);
       k4 *= c1;
       h4 ^= k4;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
 
     case 12:
       k3 ^= tail[11] << 24;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 11:
       k3 ^= tail[10] << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 10:
       k3 ^= tail[9] << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 9:
       k3 ^= tail[8] << 0;
       k3 *= c3;
       k3 = ROTL32(k3, 17);
       k3 *= c4;
       h3 ^= k3;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
 
     case 8:
       k2 ^= tail[7] << 24;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 7:
       k2 ^= tail[6] << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 6:
       k2 ^= tail[5] << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 5:
       k2 ^= tail[4] << 0;
       k2 *= c2;
       k2 = ROTL32(k2, 16);
       k2 *= c3;
       h2 ^= k2;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
 
     case 4:
       k1 ^= tail[3] << 24;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 3:
       k1 ^= tail[2] << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 2:
       k1 ^= tail[1] << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 1:
       k1 ^= tail[0] << 0;
       k1 *= c1;
@@ -388,51 +375,51 @@ void MurmurHash3_x64_128(
   switch (len & 15) {
     case 15:
       k2 ^= ((uint64_t)tail[14]) << 48;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 14:
       k2 ^= ((uint64_t)tail[13]) << 40;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 13:
       k2 ^= ((uint64_t)tail[12]) << 32;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 12:
       k2 ^= ((uint64_t)tail[11]) << 24;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 11:
       k2 ^= ((uint64_t)tail[10]) << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 10:
       k2 ^= ((uint64_t)tail[9]) << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 9:
       k2 ^= ((uint64_t)tail[8]) << 0;
       k2 *= c2;
       k2 = ROTL64(k2, 33);
       k2 *= c1;
       h2 ^= k2;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
 
     case 8:
       k1 ^= ((uint64_t)tail[7]) << 56;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 7:
       k1 ^= ((uint64_t)tail[6]) << 48;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 6:
       k1 ^= ((uint64_t)tail[5]) << 40;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 5:
       k1 ^= ((uint64_t)tail[4]) << 32;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 4:
       k1 ^= ((uint64_t)tail[3]) << 24;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 3:
       k1 ^= ((uint64_t)tail[2]) << 16;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 2:
       k1 ^= ((uint64_t)tail[1]) << 8;
-      FALLTHROUGH_INTENDED;
+      [[fallthrough]];
     case 1:
       k1 ^= ((uint64_t)tail[0]) << 0;
       k1 *= c1;

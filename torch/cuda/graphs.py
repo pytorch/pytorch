@@ -1,33 +1,36 @@
 import gc
+
 import torch
-
+from torch.utils import _pytree
 from ._utils import _dummy_type
-from torch.utils._pytree import tree_flatten as _tree_flatten
-from torch.utils._pytree import tree_unflatten as _tree_unflatten
 
-if not hasattr(torch._C, '_CudaStreamBase'):
+if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
-    torch._C.__dict__['_CUDAGraph'] = _dummy_type('_CUDAGraph')
-    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
-    torch._C.__dict__['_cuda_isCurrentStreamCapturing'] = _dummy_type('_cuda_isCurrentStreamCapturing')
+    torch._C.__dict__["_CUDAGraph"] = _dummy_type("_CUDAGraph")
+    torch._C.__dict__["_graph_pool_handle"] = _dummy_type("_graph_pool_handle")
+    torch._C.__dict__["_cuda_isCurrentStreamCapturing"] = _dummy_type(
+        "_cuda_isCurrentStreamCapturing"
+    )
 
-from torch._C import _CUDAGraph  # noqa: F401
-from torch._C import _graph_pool_handle
-from torch._C import _cuda_isCurrentStreamCapturing
+from torch._C import (  # noqa: F401
+    _cuda_isCurrentStreamCapturing,
+    _CUDAGraph,
+    _graph_pool_handle,
+)
 
 
 def is_current_stream_capturing():
-    r"""
-    Returns True if CUDA graph capture is underway on the current CUDA stream, False otherwise.
+    r"""Return True if CUDA graph capture is underway on the current CUDA stream, False otherwise.
 
     If a CUDA context does not exist on the current device, returns False without initializing the context.
     """
     return _cuda_isCurrentStreamCapturing()
 
+
 # Python shim helps Sphinx process docstrings more reliably.
 def graph_pool_handle():
-    r"""
-    Returns an opaque token representing the id of a graph memory pool.
+    r"""Return an opaque token representing the id of a graph memory pool.
+
     See :ref:`Graph memory management<graph-memory-management>`.
 
     .. warning::
@@ -38,18 +41,17 @@ def graph_pool_handle():
 
 # Python shim helps Sphinx process docstrings more reliably.
 class CUDAGraph(torch._C._CUDAGraph):
-    r"""
-    Wrapper around a CUDA graph.
+    r"""Wrapper around a CUDA graph.
 
     .. warning::
         This API is in beta and may change in future releases.
     """
-    def __new__(cls):
-        return super(CUDAGraph, cls).__new__(cls)
 
-    def capture_begin(self, pool=None):
-        r"""
-        Begins capturing CUDA work on the current stream.
+    def __new__(cls):
+        return super().__new__(cls)
+
+    def capture_begin(self, pool=None, capture_error_mode="global"):
+        r"""Begin capturing CUDA work on the current stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
         Use :class:`~torch.cuda.graph` or :func:`~torch.cuda.make_graphed_callables`,
@@ -59,17 +61,17 @@ class CUDAGraph(torch._C._CUDAGraph):
             pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
                 :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
                 with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
-        """
-        # I'm not sure if pybind11 converts a None arg to the default defined on the C++ side,
-        # so I'm not taking any chances.
-        if pool is None:
-            super().capture_begin()
-        else:
-            super().capture_begin(pool)
+            capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
+                Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
+                may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
+                actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
+                unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+        """  # noqa: B950
+        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self):
-        r"""
-        Ends CUDA graph capture on the current stream.
+        r"""End CUDA graph capture on the current stream.
+
         After ``capture_end``, ``replay`` may be called on this instance.
 
         Typically, you shouldn't call ``capture_end`` yourself.
@@ -79,29 +81,23 @@ class CUDAGraph(torch._C._CUDAGraph):
         super().capture_end()
 
     def replay(self):
-        r"""
-        Replays the CUDA work captured by this graph.
-        """
+        r"""Replay the CUDA work captured by this graph."""
         super().replay()
 
     def reset(self):
-        r"""
-        Deletes the graph currently held by this instance.
-        """
+        r"""Delete the graph currently held by this instance."""
         super().reset()
 
     def pool(self):
-        r"""
-        Returns an opaque token representing the id of this graph's memory pool.
+        r"""Return an opaque token representing the id of this graph's memory pool.
+
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
         """
         return super().pool()
 
     def enable_debug_mode(self):
-        r"""
-        Enables debugging mode for CUDAGraph.debug_dump.
-        """
+        r"""Enable debugging mode for CUDAGraph.debug_dump."""
         return super().enable_debug_mode()
 
     def debug_dump(self, debug_path):
@@ -116,9 +112,7 @@ class CUDAGraph(torch._C._CUDAGraph):
 
 
 class graph:
-    r"""
-    Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph`
-    object for later replay.
+    r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph` object for later replay.
 
     See :ref:`CUDA Graphs <cuda-graph-semantics>` for a general introduction,
     detailed use, and constraints.
@@ -130,6 +124,11 @@ class graph:
             may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
+        capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
+            Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
+            may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
+            actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
+            unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -137,13 +136,20 @@ class graph:
 
     .. warning::
         This API is in beta and may change in future releases.
-    """
+
+    .. _cudaStreamCaptureMode:
+        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
+    """  # noqa: B950
+
     default_capture_stream = None
 
-    def __init__(self,
-                 cuda_graph,
-                 pool=None,
-                 stream=None):
+    def __init__(
+        self,
+        cuda_graph,
+        pool=None,
+        stream=None,
+        capture_error_mode: str = "global",
+    ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
@@ -151,10 +157,13 @@ class graph:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
         self.pool = () if pool is None else (pool,)
-        self.capture_stream = stream if stream is not None else self.__class__.default_capture_stream
+        self.capture_stream = (
+            stream if stream is not None else self.__class__.default_capture_stream
+        )
         assert self.capture_stream is not None
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
+        self.capture_error_mode = capture_error_mode
 
     def __enter__(self):
         # Free as much memory as we can for the graph
@@ -166,8 +175,9 @@ class graph:
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
 
-        self.cuda_graph.capture_begin(*self.pool)
-
+        self.cuda_graph.capture_begin(
+            *self.pool, capture_error_mode=self.capture_error_mode
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.cuda_graph.capture_end()
@@ -175,10 +185,10 @@ class graph:
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unused_input=False):
-    r"""
-    Accepts callables (functions or :class:`nn.Module<torch.nn.Module>`\ s)
-    and returns graphed versions.
+def make_graphed_callables(
+    callables, sample_args, num_warmup_iters=3, allow_unused_input=False
+):
+    r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
     Each graphed callable's forward pass runs its source callable's
     forward CUDA work as a CUDA graph inside a single autograd node.
@@ -243,7 +253,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
         caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
     """
     if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
-        raise RuntimeError("make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`.")
+        raise RuntimeError(
+            "make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`."
+        )
 
     just_one_callable = False
 
@@ -256,25 +268,37 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
 
     for c, args in zip(callables, sample_args):
         if isinstance(c, torch.nn.Module):
-            assert len(c._backward_hooks) == 0 and len(c._forward_hooks) == 0 and len(c._forward_pre_hooks) == 0, \
-                "Modules must not have hooks registered at the time they are passed. However, registering hooks " + \
-                "on modules after passing them through make_graphed_callables is allowed."
-            assert all(b.requires_grad is False for b in c.buffers()), "In any :class:`~torch.nn.Module` passed to " + \
-                ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have " + \
-                "``requires_grad=False``."
-        flatten_arg, _ = _tree_flatten(args)
+            assert (
+                len(c._backward_hooks) == 0
+                and len(c._forward_hooks) == 0
+                and len(c._forward_pre_hooks) == 0
+            ), (
+                "Modules must not have hooks registered at the time they are passed. However, registering hooks "
+                + "on modules after passing them through make_graphed_callables is allowed."
+            )
+            assert all(b.requires_grad is False for b in c.buffers()), (
+                "In any :class:`~torch.nn.Module` passed to "
+                + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
+                + "``requires_grad=False``."
+            )
+        flatten_arg = _pytree.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
-        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), "In the beta API, sample_args " + \
-            "for each callable must contain only Tensors. Other types are not allowed."
-
+        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
+            "In the beta API, sample_args "
+            + "for each callable must contain only Tensors. Other types are not allowed."
+        )
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
     per_callable_len_user_args = [len(args) for args in flatten_sample_args]
-    per_callable_module_params = [tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
-                                  for c in callables]
-    per_callable_static_input_surfaces = [flatten_sample_args[i] + per_callable_module_params[i]
-                                          for i in range(len(callables))]
+    per_callable_module_params = [
+        tuple(c.parameters()) if isinstance(c, torch.nn.Module) else ()
+        for c in callables
+    ]
+    per_callable_static_input_surfaces = [
+        flatten_sample_args[i] + per_callable_module_params[i]
+        for i in range(len(callables))
+    ]
 
     fwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
     bwd_graphs = [torch.cuda.CUDAGraph() for _ in range(len(callables))]
@@ -286,16 +310,20 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
     # from ending up in any captures.
     torch.cuda.synchronize()
     with torch.cuda.stream(torch.cuda.Stream()):
-        for func, args, static_input_surface in zip(callables,
-                                                    sample_args,
-                                                    per_callable_static_input_surfaces):
+        for func, args, static_input_surface in zip(
+            callables, sample_args, per_callable_static_input_surfaces
+        ):
             for _ in range(num_warmup_iters):
-                outputs, _ = _tree_flatten(func(*args))
-                grad_inputs = torch.autograd.grad(outputs=tuple(o for o in outputs if o.requires_grad),
-                                                  inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                                  grad_outputs=tuple(torch.empty_like(o) for o in outputs if o.requires_grad),
-                                                  only_inputs=True,
-                                                  allow_unused=allow_unused_input)
+                outputs = _pytree.tree_leaves(func(*args))
+                grad_inputs = torch.autograd.grad(
+                    outputs=tuple(o for o in outputs if o.requires_grad),
+                    inputs=tuple(i for i in static_input_surface if i.requires_grad),
+                    grad_outputs=tuple(
+                        torch.empty_like(o) for o in outputs if o.requires_grad
+                    ),
+                    only_inputs=True,
+                    allow_unused=allow_unused_input,
+                )
             del outputs, grad_inputs
     torch.cuda.synchronize()
 
@@ -306,36 +334,37 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
     # Capture forward graphs
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
-    for func, args, fwd_graph in zip(callables,
-                                     sample_args,
-                                     fwd_graphs):
+    for func, args, fwd_graph in zip(callables, sample_args, fwd_graphs):
         with torch.cuda.graph(fwd_graph, pool=mempool):
             outputs = func(*args)
 
-        flatten_outputs, spec = _tree_flatten(outputs)
+        flatten_outputs, spec = _pytree.tree_flatten(outputs)
         per_callable_static_outputs.append(tuple(flatten_outputs))
         per_callable_output_unflatten_spec.append(spec)
-
 
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
-    for static_input_surface, static_outputs, bwd_graph, module_params in \
-            zip(reversed(per_callable_static_input_surfaces),
-                reversed(per_callable_static_outputs),
-                reversed(bwd_graphs),
-                reversed(per_callable_module_params)):
-
+    for static_input_surface, static_outputs, bwd_graph, module_params in zip(
+        reversed(per_callable_static_input_surfaces),
+        reversed(per_callable_static_outputs),
+        reversed(bwd_graphs),
+        reversed(per_callable_module_params),
+    ):
         # For now, assumes all static_outputs require grad
         # assert all(o.requires_grad for o in static_outputs), "Outputs of graphed callables must require grad."
-        static_grad_outputs = tuple(torch.empty_like(o) if o.requires_grad else None for o in static_outputs)
+        static_grad_outputs = tuple(
+            torch.empty_like(o) if o.requires_grad else None for o in static_outputs
+        )
 
         with torch.cuda.graph(bwd_graph, pool=mempool):
-            grad_inputs = torch.autograd.grad(outputs=tuple(o for o in static_outputs if o.requires_grad),
-                                              inputs=tuple(i for i in static_input_surface if i.requires_grad),
-                                              grad_outputs=tuple(o for o in static_grad_outputs if o is not None),
-                                              only_inputs=True,
-                                              allow_unused=allow_unused_input)
+            grad_inputs = torch.autograd.grad(
+                outputs=tuple(o for o in static_outputs if o.requires_grad),
+                inputs=tuple(i for i in static_input_surface if i.requires_grad),
+                grad_outputs=tuple(o for o in static_grad_outputs if o is not None),
+                only_inputs=True,
+                allow_unused=allow_unused_input,
+            )
 
         # Constructs a tuple suitable for returning from Graphed.backward:
         # Pads out the actually-needed grads with Nones in gradient slots for inputs that don't require grad.
@@ -358,15 +387,17 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
     per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
-    def make_graphed_autograd_function(fwd_graph,
-                                       bwd_graph,
-                                       module_params,
-                                       len_user_args,
-                                       output_unflatten_spec,
-                                       static_input_surface,
-                                       static_outputs,
-                                       static_grad_outputs,
-                                       static_grad_inputs):
+    def make_graphed_autograd_function(
+        fwd_graph,
+        bwd_graph,
+        module_params,
+        len_user_args,
+        output_unflatten_spec,
+        static_input_surface,
+        static_outputs,
+        static_grad_outputs,
+        static_grad_inputs,
+    ):
         class Graphed(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *inputs):
@@ -392,32 +423,37 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
 
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
-                return tuple(b.detach() if b is not None else b for b in static_grad_inputs)
+                return tuple(
+                    b.detach() if b is not None else b for b in static_grad_inputs
+                )
 
         def functionalized(*user_args):
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            flatten_user_args, _ = _tree_flatten(user_args)
+            flatten_user_args = _pytree.arg_tree_leaves(*user_args)
             out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
-            return _tree_unflatten(out, output_unflatten_spec)
+            return _pytree.tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
 
     # Put together the final graphed callables
     ret = []
     for i, func in enumerate(callables):
-        graphed = make_graphed_autograd_function(fwd_graphs[i],
-                                                 bwd_graphs[i],
-                                                 per_callable_module_params[i],
-                                                 per_callable_len_user_args[i],
-                                                 per_callable_output_unflatten_spec[i],
-                                                 per_callable_static_input_surfaces[i],
-                                                 per_callable_static_outputs[i],
-                                                 per_callable_static_grad_outputs[i],
-                                                 per_callable_static_grad_inputs[i])
+        graphed = make_graphed_autograd_function(
+            fwd_graphs[i],
+            bwd_graphs[i],
+            per_callable_module_params[i],
+            per_callable_len_user_args[i],
+            per_callable_output_unflatten_spec[i],
+            per_callable_static_input_surfaces[i],
+            per_callable_static_outputs[i],
+            per_callable_static_grad_outputs[i],
+            per_callable_static_grad_inputs[i],
+        )
 
         if isinstance(func, torch.nn.Module):
+
             def make_graphed_forward(func, graph_training_state, graphed, orig_fwd):
                 def new_fwd(*user_args):
                     # If the module's training-or-eval state matches what we graphed,
@@ -426,7 +462,9 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
                         return graphed(*user_args)
                     else:
                         return orig_fwd(*user_args)
+
                 return new_fwd
+
             func.forward = make_graphed_forward(func, func.training, graphed, func.forward)  # type: ignore[assignment]
             ret.append(func)
         else:

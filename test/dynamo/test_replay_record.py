@@ -25,9 +25,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "replay_record_enabled", True
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "print_graph_breaks", True)
-        )
+        torch._logging.set_logs(graph_breaks=True, dynamo=logging.ERROR)
         # Most of the tests are checking to see if errors got logged, so we
         # ask for errors to be suppressed
         cls._exit_stack.enter_context(
@@ -44,6 +42,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
+        torch._logging.set_logs()
         cls._exit_stack.close()
 
     def check_replay(self, fn, *args, exp_exc_name=None):
@@ -177,7 +176,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, torch.ones(1, 1), exp_exc_name="RuntimeError")
 
-    # Verfiy that we replay when we have tensor arguments to the frame being replayed
+    # Verify that we replay when we have tensor arguments to the frame being replayed
     @requires_dill
     def test_fn_call_args(self):
         def test_fn(x, y):

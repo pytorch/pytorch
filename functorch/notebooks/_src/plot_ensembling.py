@@ -19,7 +19,9 @@ Let's demonstrate how to do this using an ensemble of simple CNNs.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 torch.manual_seed(0)
+
 
 # Here's a simple CNN
 class SimpleCNN(nn.Module):
@@ -44,11 +46,12 @@ class SimpleCNN(nn.Module):
         output = x
         return output
 
+
 # Let's generate some dummy data. Pretend that we're working with an MNIST dataset
 # where the images are 28 by 28.
 # Furthermore, let's say we wish to combine the predictions from 10 different
 # models.
-device = 'cuda'
+device = "cuda"
 num_models = 10
 data = torch.randn(100, 64, 1, 28, 28, device=device)
 targets = torch.randint(10, (6400,), device=device)
@@ -81,6 +84,7 @@ predictions2 = [model(minibatch) for model in models]
 # functorch offers the following convenience function to do that. It returns a
 # stateless version of the model (fmodel) and stacked parameters and buffers.
 from functorch import combine_state_for_ensemble
+
 fmodel, params, buffers = combine_state_for_ensemble(models)
 [p.requires_grad_() for p in params]
 
@@ -92,15 +96,20 @@ fmodel, params, buffers = combine_state_for_ensemble(models)
 print([p.size(0) for p in params])
 assert minibatches.shape == (num_models, 64, 1, 28, 28)
 from functorch import vmap
+
 predictions1_vmap = vmap(fmodel)(params, buffers, minibatches)
-assert torch.allclose(predictions1_vmap, torch.stack(predictions1), atol=1e-6, rtol=1e-6)
+assert torch.allclose(
+    predictions1_vmap, torch.stack(predictions1), atol=1e-6, rtol=1e-6
+)
 
 # Option 2: get predictions using the same minibatch of data
 # vmap has an in_dims arg that specify which dimensions to map over.
 # Using ``None``, we tell vmap we want the same minibatch to apply for all of
 # the 10 models.
 predictions2_vmap = vmap(fmodel, in_dims=(0, 0, None))(params, buffers, minibatch)
-assert torch.allclose(predictions2_vmap, torch.stack(predictions2), atol=1e-6, rtol=1e-6)
+assert torch.allclose(
+    predictions2_vmap, torch.stack(predictions2), atol=1e-6, rtol=1e-6
+)
 
 # A quick note: there are limitations around what types of functions can be
 # transformed by vmap. The best functions to transform are ones that are

@@ -36,8 +36,21 @@ def sweep_n(niter, dtype):
         runtime = bench(nt_a, nt_b, niter)
         nt_a_size = torch.ops.aten._nested_tensor_size(nt_a)
         lengths = nt_a_size[:, 1]
-        print(",".join(map(str, [ntensor, dtype, lengths.min().item(),
-              lengths.float().mean().item(), lengths.max().item(), runtime])))
+        print(
+            ",".join(
+                map(
+                    str,
+                    [
+                        ntensor,
+                        dtype,
+                        lengths.min().item(),
+                        lengths.float().mean().item(),
+                        lengths.max().item(),
+                        runtime,
+                    ],
+                )
+            )
+        )
 
 
 if __name__ == "__main__":

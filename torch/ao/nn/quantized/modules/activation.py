@@ -1,5 +1,5 @@
 import torch
-
+from warnings import warn
 __all__ = [
     "ReLU6",
     "Hardswish",
@@ -236,6 +236,9 @@ class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
             bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
             setattr(converted, 'bias_v', bias_v)  # noqa: B010
 
+        del converted.in_proj_weight
+        del converted.in_proj_bias
+
         return converted
 
 class PReLU(torch.nn.Module):
@@ -271,6 +274,11 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
+        observer(float_wt)
+        if observer.dtype != torch.quint8:
+            warn(
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
+            )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
             float_wt, float(wt_scale), int(wt_zp), torch.quint8)
@@ -282,6 +290,11 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
+        observer(float_wt)
+        if observer.dtype != torch.quint8:
+            warn(
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
+            )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
             float_wt, float(wt_scale), int(wt_zp), torch.quint8)

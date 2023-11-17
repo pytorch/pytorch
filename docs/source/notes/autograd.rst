@@ -170,6 +170,31 @@ processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be togglable via context managers and
 decorators.
 
+.. list-table::
+   :widths: 50 50 50 50 50
+   :header-rows: 1
+
+   * - Mode
+     - Excludes operations from being recorded in backward graph
+     - Skips additional autograd tracking overhead
+     - Tensors created while the mode is enabled can be used in grad-mode later
+     - Examples
+   * - default
+     -
+     -
+     - ✓
+     - Forward pass
+   * - no-grad
+     - ✓
+     -
+     - ✓
+     - Optimizer updates
+   * - inference
+     - ✓
+     - ✓
+     -
+     - Data processing, model evaluation
+
 Default Mode (Grad Mode)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -824,19 +849,29 @@ Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
-The hooks that will be covered are: hooks registered to Tensor via
-:meth:`torch.tensor.register_hook`,
-post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
+The hooks that will be covered are: backward hooks registered to Tensor via
+:meth:`torch.Tensor.register_hook`, post-accumulate-grad hooks registered to
+Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`, post-hooks
+registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
 pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
 
 Whether a particular hook will be fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Hooks registered to a Tensor via :meth:`torch.tensor.register_hook`
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_hook`
 are executed when gradients are being computed for that Tensor. (Note that this does not require
 the Tensor's grad_fn to be executed. For example, if the Tensor is passed
 as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
 the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
+
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are executed after the gradients have been accumulated for that Tensor, meaning the
+Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.Tensor.register_hook`
+are run as gradients are being computed, hooks registered via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are only triggered once the Tensor's grad field is updated by autograd at the end of
+the backward pass. Thus, post-accumulate-grad hooks can only be registered for leaf
+Tensors. Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+on a non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
@@ -865,11 +900,13 @@ The order in which the different hooks are fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The order in which things happen are:
-1. hooks registered to Tensor are executed
-2. pre-hook registered to Node are executed (if Node is executed).
-3. The ``.grad`` field is updated for Tensors that retain_grad
-4. Node is executed (subject to rules above)
-5. post-hook registered to Node are executed (if Node is executed)
+
+#. hooks registered to Tensor are executed
+#. pre-hooks registered to Node are executed (if Node is executed).
+#. the ``.grad`` field is updated for Tensors that retain_grad
+#. Node is executed (subject to rules above)
+#. for leaf Tensors that have ``.grad`` accumulated, post-accumulate-grad hooks are executed
+#. post-hooks registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.

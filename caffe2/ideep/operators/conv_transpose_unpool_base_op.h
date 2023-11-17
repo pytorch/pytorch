@@ -116,7 +116,7 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
       CAFFE_ENFORCE_LE(adj_[dim], stride_[dim]);
     }
   }
-  virtual ~IDEEPConvTransposeUnpoolBase() {}
+  ~IDEEPConvTransposeUnpoolBase() override {}
 
   const ideep::tensor& Input(int index) {
     return OperatorBase::template Input<ideep::tensor>(index);

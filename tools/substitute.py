@@ -3,7 +3,7 @@ import os
 import os.path
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file")
     parser.add_argument("--output-file")
@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--replace", action="append", nargs=2)
     options = parser.parse_args()
 
-    with open(options.input_file, "r") as f:
+    with open(options.input_file) as f:
         contents = f.read()
 
     output_file = os.path.join(options.install_dir, options.output_file)
@@ -22,3 +22,7 @@ if __name__ == "__main__":
 
     with open(output_file, "w") as f:
         f.write(contents)
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover

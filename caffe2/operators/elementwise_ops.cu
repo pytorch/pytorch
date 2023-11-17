@@ -9,12 +9,13 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 
-#ifdef __HIPCC__
-#if TORCH_HIP_VERSION < 210
-// rocblas doesn't fully support fp16 yet
-#define ROCBLAS_FP16 0
-#endif
-#endif
+#if defined(USE_ROCM)
+// until we use hipblas v2
+// hipify correctly maps things like CUDA_R_16F to HIP_R_16F,
+// however hipblas v1 is still using its custom type
+#define HIP_R_16F  HIPBLAS_R_16F
+#define HIP_R_32F  HIPBLAS_R_32F
+#endif // USE_ROCM
 
 namespace caffe2 {
 
@@ -122,30 +123,6 @@ void device_reduce<at::Half>(
   (void)N; // Suppress unused variable warning
   (void)buffer; // Suppress unused variable warning
   (void)context; // Suppress unused variable warning
-#if TORCH_HIP_VERSION >= 210
-  auto buffer_size = 1;
-
-  if (buffer->numel() != buffer_size) {
-    buffer->Resize(buffer_size);
-
-    math::Set<at::Half, CUDAContext>(
-        N,
-        convert::To<float, at::Half>(1.),
-        buffer->template mutable_data<at::Half>(),
-        context);
-  }
-
-  CUBLAS_ENFORCE(rocblas_hdot(
-      context->cublas_handle(),
-      N,
-      reinterpret_cast<const rocblas_half*>(in),
-      1,
-      reinterpret_cast<const rocblas_half*>(buffer->data<at::Half>()),
-      0,
-      reinterpret_cast<rocblas_half*>(out)));
-#elif TORCH_HIP_VERSION < 210
-   CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
-#else
   auto buffer_size = 1;
 
   if (buffer->numel() != buffer_size) {
@@ -170,7 +147,6 @@ void device_reduce<at::Half>(
       out,
       CUDA_R_16F,
       CUDA_R_32F));
-#endif
 }
 
 template <typename T, int BLOCK_THREADS>

@@ -47,6 +47,26 @@ void memcpy_from_mapping_impl(api::MemoryMap& src_mapping, Tensor& dst) {
       std::min(src_mapping.nbytes(), dst.nbytes()));
 }
 
+inline void memcpy_from_mapping_bool(api::MemoryMap& src_mapping, Tensor& dst) {
+  uint8_t* src_ptr = src_mapping.template data<uint8_t>();
+  bool* dst_ptr = dst.mutable_data_ptr<bool>();
+  for (int i = 0; (unsigned)i < std::min(src_mapping.nbytes(), dst.nbytes());
+       ++i) {
+    dst_ptr[i] = static_cast<bool>(src_ptr[i]);
+  }
+}
+
+inline void memcpy_to_mapping_uint8(
+    const Tensor& src,
+    api::MemoryMap& dst_mapping) {
+  bool* src_ptr = src.mutable_data_ptr<bool>();
+  uint8_t* dst_ptr = dst_mapping.template data<uint8_t>();
+  for (int i = 0; (unsigned)i < std::min(dst_mapping.nbytes(), src.nbytes());
+       ++i) {
+    dst_ptr[i] = static_cast<uint8_t>(src_ptr[i]);
+  }
+}
+
 void memcpy_to_mapping(const Tensor& src, api::MemoryMap& dst_mapping);
 
 void memcpy_from_mapping(api::MemoryMap& src_mapping, Tensor& dst);

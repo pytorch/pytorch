@@ -19,7 +19,7 @@ class TopKOp : public Operator<Context> {
         OP_SINGLE_ARG(int, "axis", axis_, -1) {
   }
 
-  ~TopKOp() {}
+  ~TopKOp() override {}
 
   bool RunOnDevice() override;
 
@@ -38,7 +38,7 @@ class TopKGradientOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {}
 
-  ~TopKGradientOp() {}
+  ~TopKGradientOp() override {}
 
   bool RunOnDevice() override;
 

@@ -20,7 +20,7 @@
 
 namespace at { namespace native {
 
-void checkLongTensor(const Tensor& tensor) {
+static void checkLongTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor, but got ",
             tensor.dim(), "D ", tensor.device().str(), " ", tensor.scalar_type(), " tensor");
@@ -188,8 +188,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     }
     int64_t dec = prev_batch_size - batch_size;
     if (dec > 0) {
-      for (const auto j : c10::irange(dec)) {
-        (void)j; //Suppress unused variable warning
+      for (C10_UNUSED const auto j : c10::irange(dec)) {
         (*lengths--) = i;
       }
     }

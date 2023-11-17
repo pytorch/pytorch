@@ -4,7 +4,8 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-std::unordered_map<std::string, std::function<void(Stack&)>>& primOpsFnTable() {
+static std::unordered_map<std::string, std::function<void(Stack&)>>&
+primOpsFnTable() {
   static std::unordered_map<std::string, std::function<void(Stack&)>>
       prim_ops_fn;
   return prim_ops_fn;

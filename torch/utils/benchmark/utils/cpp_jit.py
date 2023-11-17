@@ -137,7 +137,7 @@ def _compile_template(
         os.makedirs(build_dir, exist_ok=True)
 
         src_path = os.path.join(build_dir, "timer_src.cpp")
-        with open(src_path, "wt") as f:
+        with open(src_path, "w") as f:
             f.write(src)
 
     # `cpp_extension` has its own locking scheme, so we don't need our lock.
@@ -154,7 +154,7 @@ def _compile_template(
 
 def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> TimeitModuleType:
     template_path: str = os.path.join(SOURCE_ROOT, "timeit_template.cpp")
-    with open(template_path, "rt") as f:
+    with open(template_path) as f:
         src: str = f.read()
 
     module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
@@ -164,7 +164,7 @@ def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> Time
 
 def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> str:
     template_path: str = os.path.join(SOURCE_ROOT, "valgrind_wrapper", "timer_callgrind_template.cpp")
-    with open(template_path, "rt") as f:
+    with open(template_path) as f:
         src: str = f.read()
 
     target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)

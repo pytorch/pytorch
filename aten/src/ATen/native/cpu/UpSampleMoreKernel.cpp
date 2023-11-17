@@ -92,7 +92,7 @@ void cpu_upsample_nearest_backward(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
   auto ndim = input_sizes.size();
@@ -229,7 +229,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -411,7 +411,7 @@ void cpu_upsample_linear_backward(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
   auto ndim = input_sizes.size();
@@ -588,7 +588,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();

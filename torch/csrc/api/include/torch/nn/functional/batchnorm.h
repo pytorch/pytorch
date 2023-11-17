@@ -19,6 +19,10 @@ inline Tensor batch_norm(
     bool training,
     c10::optional<double> momentum,
     double eps) {
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "Expected at least 2 input dimensions, but got ",
+      input.dim());
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];

@@ -1,7 +1,7 @@
 import torch
 from ..modules import Module
 from . import comm
-from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Sequence, Set, Union
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Sequence, Set, TypeVar, Union, cast
 from torch._utils import _get_device_index
 
 from collections import OrderedDict
@@ -87,11 +87,14 @@ def _broadcast_coalesced_reshape(
             return []
 
 
+T = TypeVar("T", bound=Module)
+
+
 def replicate(
-    network: Module,
+    network: T,
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
-) -> List[Module]:
+) -> List[T]:
     if not _replicatable_module(network):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
@@ -180,4 +183,4 @@ def replicate(
                     replica = module_copies[j][i]
                     setattr(replica, key, buffer_copies[j][buffer_idx])
 
-    return [module_copies[j][0] for j in range(num_replicas)]
+    return [cast(T, module_copies[j][0]) for j in range(num_replicas)]

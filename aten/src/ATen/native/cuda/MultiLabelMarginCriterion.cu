@@ -23,36 +23,33 @@ namespace at::native {
 namespace {
 const int MULTILABELMARGIN_THREADS = 128;
 
-void check_shape(const Tensor& input, const Tensor& target) {
-  int64_t ndims = input.dim();
-  bool valid_inputs = (ndims == 2 && input.size(1) != 0) ||
-      (ndims == 1 && input.size(0) != 0) || (ndims == 0);
-  TORCH_CHECK(
-      valid_inputs,
-      "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
-      input.sizes());
+void multilabel_margin_loss_shape_check(
+    int64_t& nframe,
+    int64_t& dim,
+    const int64_t& ndims,
+    const Tensor& input,
+    const Tensor& target) {
+    TORCH_CHECK(
+        (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
+        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+        input.sizes());
 
-  if (ndims <= 1) {
-    int dim = input.dim() == 0 ? 1 : input.size(0);
-    TORCH_CHECK(
-        valid_inputs && target.dim() <= 1 && target.numel() == dim,
-        "inconsistent target size: ",
-        target.sizes(),
-        " for input of size: ",
-        input.sizes());
-  } else if (ndims == 2) {
-    int nframe = input.size(0);
-    int dim = input.size(1);
-    TORCH_CHECK(
-        valid_inputs && target.dim() == 2 && target.size(0) == nframe &&
-            target.size(1) == dim,
-        "inconsistent target size: ",
-        target.sizes(),
-        " for input of size: ",
-        input.sizes());
-  } else {
-    TORCH_CHECK(false, "Expected input of ndims <= 2, but got ndims: ", ndims);
-  }
+    if (ndims <= 1) {
+      nframe = 1;
+      dim = ndims == 0 ? 1 : input.size(0);
+      TORCH_CHECK(
+          target.dim() <= 1 && target.numel() == dim,
+          "inconsistent target size: ", target.sizes(), " for input of size: ",
+          input.sizes());
+    } else {
+      nframe = input.size(0);
+      dim = input.size(1);
+      TORCH_CHECK(
+          target.dim() == 2 && target.size(0) == nframe &&
+          target.size(1) == dim,
+          "inconsistent target size: ", target.sizes(), " for input of size: ",
+          input.sizes());
+    }
 }
 
 template <typename scalar_t, typename accscalar_t>
@@ -206,7 +203,10 @@ void multilabel_margin_loss_forward_out_cuda_template(
     int64_t reduction,
     Tensor& output,
     Tensor& is_target) {
-  check_shape(input, target);
+  int64_t nframe, dim;
+  const int64_t ndims = input.dim();
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
+
   if (input.numel() == 0) {
     return;
   }
@@ -217,7 +217,6 @@ void multilabel_margin_loss_forward_out_cuda_template(
   is_target_.resize_as_(target);
 
   if (input.dim() <= 1) {
-    int dim = input.dim() == 0 ? 1 : input.size(0);
     output.resize_({});
 
     dim3 blocks(1);
@@ -242,8 +241,6 @@ void multilabel_margin_loss_forward_out_cuda_template(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   } else if (input.dim() == 2) {
-    int nframe = input.size(0);
-    int dim = input.size(1);
     dim3 blocks(input.size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
@@ -311,19 +308,21 @@ void multilabel_margin_loss_backward_cuda_out_template(
     int64_t reduction,
     const Tensor& is_target,
     Tensor& grad_input) {
-  check_shape(input, target);
-  auto input_ = input.contiguous();
-  if (input_.numel() == 0) {
+  int64_t nframe, dim;
+  const int64_t ndims = input.dim();
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
+
+  if (input.numel() == 0) {
     return;
   }
 
-  grad_input.resize_as_(input_);
+  auto input_ = input.contiguous();
   auto target_ = target.contiguous();
   auto is_target_ = is_target.contiguous();
   auto grad_output_ = grad_output.contiguous();
+  grad_input.resize_as_(input_);
 
   if (grad_input.dim() <= 1) {
-    int dim = grad_input.dim() == 0 ? 1 : grad_input.size(0);
     int target_size = target_.dim() == 0 ? 1 : target_.size(0);
     TORCH_CHECK(
         (target_.numel() != 0) && (target_.dim() <= 1) && (target_size == dim),
@@ -354,8 +353,6 @@ void multilabel_margin_loss_backward_cuda_out_template(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   } else if (grad_input.dim() == 2) {
-    int nframe = grad_input.size(0);
-    int dim = grad_input.size(1);
     TORCH_CHECK(
         (input_.size(1) != 0) && (target_.dim() == 2) &&
             (target_.size(0) == nframe) && (target_.size(1) == dim),

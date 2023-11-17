@@ -151,12 +151,13 @@
             attributes = {
                 LastUpgradeCheck = 1030;
                 TargetAttributes = {
-                        A06D4CAF232F0DB200763E16 = {
-                                CreatedOnToolsVersion = 10.3;
-                        };
-                        A0EA3AFE237FCB08007CEA34 = {
-                                CreatedOnToolsVersion = 11.2.1;
-                        };
+                    A06D4CAF232F0DB200763E16 = {
+                        CreatedOnToolsVersion = 10.3;
+                    };
+                    A0EA3AFE237FCB08007CEA34 = {
+                        CreatedOnToolsVersion = 11.2.1;
+                        TestTargetID = A06D4CAF232F0DB200763E16;
+                    };
                 };
             };
             buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
@@ -289,8 +290,8 @@
                 GCC_NO_COMMON_BLOCKS = YES;
                 GCC_OPTIMIZATION_LEVEL = 0;
                 GCC_PREPROCESSOR_DEFINITIONS = (
-                        "DEBUG=1",
-                        "$(inherited)",
+                    "DEBUG=1",
+                    "$(inherited)",
                 );
                 GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
                 GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
@@ -363,13 +364,13 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
-                        "$(inherited)",
-                        "@executable_path/Frameworks",
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -382,13 +383,13 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 ENABLE_BITCODE = NO;
                 INFOPLIST_FILE = TestApp/Info.plist;
                 LD_RUNPATH_SEARCH_PATHS = (
-                        "$(inherited)",
-                        "@executable_path/Frameworks",
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
                 PRODUCT_NAME = "$(TARGET_NAME)";
@@ -400,38 +401,42 @@
         A0EA3B06237FCB08007CEA34 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
+                BUNDLE_LOADER = "$(TEST_HOST)";
                 CODE_SIGN_IDENTITY = "iPhone Developer";
-                CODE_SIGN_STYLE = Manual;
+                CODE_SIGN_STYLE = Automatic;
                 DEVELOPMENT_TEAM = "";
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
                 LD_RUNPATH_SEARCH_PATHS = (
-                        "$(inherited)",
-                        "@executable_path/Frameworks",
-                        "@loader_path/Frameworks",
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 PROVISIONING_PROFILE_SPECIFIER = "";
                 "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
                 TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
             };
             name = Debug;
         };
         A0EA3B07237FCB08007CEA34 /* Release */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
+                BUNDLE_LOADER = "$(TEST_HOST)";
                 CODE_SIGN_STYLE = Automatic;
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
                 LD_RUNPATH_SEARCH_PATHS = (
-                        "$(inherited)",
-                        "@executable_path/Frameworks",
-                        "@loader_path/Frameworks",
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
             };
             name = Release;
         };

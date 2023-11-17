@@ -49,6 +49,14 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
+if torch.backends.mps.is_available():
+    extension = CppExtension(
+        'torch_test_cpp_extension.mps',
+        ['mps_extension.mm'],
+        extra_compile_args=CXX_FLAGS,
+    )
+    ext_modules.append(extension)
+
 # todo(mkozuki): Figure out the root cause
 if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
     # malfet: One should not assume that PyTorch re-exports CUDA dependencies

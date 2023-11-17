@@ -1,9 +1,9 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
-
+import types
 import warnings
 import math
 import pickle
-import weakref
+from functools import partial
 
 import torch
 import torch.optim as optim
@@ -32,7 +32,6 @@ from torch.optim.lr_scheduler import (
 from torch.optim.swa_utils import SWALR
 from torch.testing._internal.common_utils import (
     TestCase,
-    run_tests,
     load_tests,
     parametrize,
     instantiate_parametrized_tests,
@@ -1533,7 +1532,7 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_state_dict_picklable(self):
         adam_opt = optim.Adam(self.net.parameters())
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
-        self.assertIsInstance(scheduler._scale_fn_ref, weakref.WeakMethod)
+        self.assertIsInstance(scheduler._scale_fn_ref, types.FunctionType)
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
         pickle.dumps(state)
@@ -1989,11 +1988,9 @@ class TestLRScheduler(TestCase):
             target = [[t[epoch] for t in targets]] * len(schedulers)
             for t, r in zip(target, result):
                 self.assertEqual(
-                    target,
-                    result,
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, t, r
-                    ),
+                    t,
+                    r,
+                    msg=f"LR is wrong in epoch {epoch}: expected {t}, got {r}",
                     atol=1e-5,
                     rtol=0,
                 )
@@ -2217,8 +2214,39 @@ class TestLRScheduler(TestCase):
         self.assertLessEqual(last_lr, max_lr)
 
 
+    @parametrize("LRClass", [
+        partial(LambdaLR, lr_lambda=lambda e: e // 10),
+        partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
+        partial(StepLR, step_size=30),
+        partial(MultiStepLR, milestones=[30, 80]),
+        ConstantLR,
+        LinearLR,
+        partial(ExponentialLR, gamma=0.9),
+        lambda opt, **kwargs: SequentialLR(
+            opt, schedulers=[ConstantLR(opt), ConstantLR(opt)], milestones=[2], **kwargs),
+        PolynomialLR,
+        partial(CosineAnnealingLR, T_max=10),
+        ReduceLROnPlateau,
+        partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+        partial(CosineAnnealingWarmRestarts, T_0=20),
+        partial(OneCycleLR, max_lr=0.01, total_steps=10),
+    ])
+    def test_lr_scheduler_verbose_deprecation_warning(self, LRClass):
+        """Check that a deprecating warning with verbose parameter."""
+        with self.assertWarnsOnceRegex(UserWarning, "The verbose parameter is deprecated"):
+            LRClass(self.opt, verbose=True)
+
+        with self.assertWarnsOnceRegex(UserWarning, "The verbose parameter is deprecated"):
+            LRClass(self.opt, verbose=False)
+
+        # No warning is raised when verbose is the default value.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            LRClass(self.opt)
+
+
 instantiate_parametrized_tests(TestLRScheduler)
 
 
 if __name__ == "__main__":
-    run_tests()
+    print("These tests should be run through test/test_optim.py instead")

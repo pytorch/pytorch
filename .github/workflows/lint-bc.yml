@@ -1,15 +1,24 @@
 name: BC Lint
 
 on:
+  # Copied from check-labels.yml to get around needing approval for first time contributors
+  # See https://docs.github.com/en/actions/managing-workflow-runs/approving-workflow-runs-from-public-forks
+  # Only allow pull_request_target when merging to main, not some historical branch.
+  #
+  # Make sure to don't introduce explicit checking out and installing/running
+  # untrusted user code into this workflow!
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths-ignore: [.github/workflows/lint-bc.yml]
+
+  # To allow testing PRs that change workflows.
+  # May be triggered together with pull_request_target, it's OK.
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
-    branches-ignore:
-      - nightly
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: [.github/workflows/lint-bc.yml]
+    branches-ignore: [nightly]
+
   workflow_dispatch:
 
 jobs:

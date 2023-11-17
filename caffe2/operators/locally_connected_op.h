@@ -26,7 +26,7 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
         "Group locally connected only supports NCHW order right now.");
   }
 
-  ~LocallyConnectedOp() = default;
+  ~LocallyConnectedOp() override = default;
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -81,7 +81,7 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
         "Group locally connected only supports NCHW order right now.");
   }
 
-  ~LocallyConnectedGradientOp() = default;
+  ~LocallyConnectedGradientOp() override = default;
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;

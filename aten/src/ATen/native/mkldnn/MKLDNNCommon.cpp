@@ -47,12 +47,15 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::QInt32:
       return ideep::tensor::data_type::s32;
     case ScalarType::QInt8:
+    case ScalarType::Char:
       return ideep::tensor::data_type::s8;
     case ScalarType::QUInt8:
     case ScalarType::Byte:
       return ideep::tensor::data_type::u8;
     case ScalarType::BFloat16:
       return ideep::tensor::data_type::bf16;
+    case ScalarType::Half:
+      return ideep::tensor::data_type::f16;
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
@@ -97,9 +100,44 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
             tensor.strides().vec()},
             tensor.template data_ptr<BFloat16>()};
   }
-  else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16 tensor input");
+  else if (tensor.scalar_type() == ScalarType::Half) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::f16,
+            tensor.strides().vec()},
+            tensor.template data_ptr<Half>()};
   }
+  else if (tensor.scalar_type() == ScalarType::Byte) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::u8,
+            tensor.strides().vec()},
+            tensor.data_ptr()};
+  }
+  else if (tensor.scalar_type() == ScalarType::Char) {
+    return {{tensor.sizes().vec(),
+            ideep::tensor::data_type::s8,
+            tensor.strides().vec()},
+            tensor.data_ptr()};
+  }
+  else {
+    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8 tensor input");
+  }
+}
+
+ideep::tensor itensor_view_from_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc) {
+  TORCH_CHECK(
+      tensor.device().is_cpu(),
+      "itensor_view_from_dense expects CPU tensor input");
+  TORCH_CHECK(
+      tensor.layout() == at::Layout::Strided,
+      "itensor_view_from_dense expects dense tensor input");
+  TORCH_CHECK(
+      tensor.scalar_type() == at::ScalarType::Float ||
+          tensor.scalar_type() == at::ScalarType::BFloat16 ||
+          tensor.scalar_type() == at::ScalarType::Half,
+      "itensor_view_from_dense expects float, bfloat16 or half tensor input");
+  return {desc, tensor.data_ptr()};
 }
 
 // Helper function for getting an ideep tensor out of an aten Tensor.

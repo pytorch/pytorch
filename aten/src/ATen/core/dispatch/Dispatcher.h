@@ -18,6 +18,10 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
 
+#ifndef NDEBUG
+#include <iostream>
+#endif
+
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
@@ -85,6 +89,12 @@ private:
   };
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
+
+  struct Guard final {
+    Guard() : alive(true), mutex() {}
+    std::atomic<bool> alive;
+    std::mutex mutex;
+  };
 
 public:
   ~Dispatcher();
@@ -214,6 +224,19 @@ public:
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
+   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * for this op in the given Python module. Call this a "pystub".
+   */
+  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+
+  /**
+   * Given an operator, throws if we have an abstract impl pystub.
+   */
+  void throwIfHasAbstractImplPyStub(OperatorName op_name);
+
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
+  /**
    * Register a new operator by name.
    */
   RegistrationHandleRAII registerName(OperatorName op_name);
@@ -313,9 +336,6 @@ private:
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 
-  // This mutex protects concurrent access to the dispatcher
-  std::mutex mutex_;
-
   // This condition variable gets notified whenever we add a new def/impl to the
   // dispatch table.  This is primarily used by multipy/torchdeploy, when
   // we have multiple interpreters trying to register to the dispatch table.
@@ -329,6 +349,12 @@ private:
   // variable.  This is mostly just to help give better diagnostics if
   // something goes horribly wrong
   std::condition_variable cond_var_;
+
+  // Protect concurrent access to the dispatcher.  We store this in a
+  // `shared_ptr` as we return callbacks that call back into dispatcher methods,
+  // and we need to be able to handle and guard against the event when the
+  // `Dispatcher` has been destroyed before the callbacks fire.
+  std::shared_ptr<Guard> guard_;
 };
 
 /**
@@ -414,6 +440,9 @@ public:
     // will be done by the time a typed() handle is acquired.
 #if !defined C10_MOBILE
     operatorDef_->op.assertSignatureIsCorrect<FuncType>();
+    if (fn_has_symint<FuncType>::value) {
+      operatorDef_->op.assertSignatureIsCorrect<typename fn_remove_symint<FuncType>::type>();
+    }
 #endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
@@ -580,27 +609,27 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   auto& schema = op.schema();
   auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
-  if (guard.needsInputs()) {
-    constexpr auto num_boxed_args = impl::boxed_size<Args...>();
-    // If we used std::array<IValue, num_boxed_args> here, we would
-    // have to spend time default constructing the IValues in
-    // boxedArgs. aligned_storage has no such requirement.
-    // Max to avoid zero-size array.`
-    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[std::max(num_boxed_args, static_cast<size_t>(1))];
-    // For debugging only; could be removed (but the compiler will do
-    // that for us and it's nice to have the extra assurance of
-    // correctness from our debug builds).
-    int lastArgIdx = 0;
-    impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
-    // I don't *think* we need std::launder here, because IValue has
-    // no subclasses and no const or reference fields. (We also
-    // couldn't use it even if we wanted to because we are currently
-    // stuck on C++14 rather than C++17, but we could do a backport
-    // similar to folly::launder if needed.)
-    runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
-    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
-      reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
+  constexpr auto num_boxed_args = impl::boxed_size<Args...>();
+  if constexpr (num_boxed_args != 0) {
+    if (guard.needsInputs()) {
+      // If we used std::array<IValue, num_boxed_args> here, we would
+      // have to spend time default constructing the IValues in
+      // boxedArgs. aligned_storage has no such requirement.
+      impl::IValueAlignedStorage boxedArgs[num_boxed_args];
+      // For debugging only; could be removed (but the compiler will do
+      // that for us and it's nice to have the extra assurance of
+      // correctness from our debug builds).
+      int lastArgIdx = 0;
+      impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
+      // I don't *think* we need std::launder here, because IValue has
+      // no subclasses and no const or reference fields.
+      runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+      for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+        reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
+      }
+    } else {
+      runRecordFunction(guard, schema_ref, dispatchKey);
     }
   } else {
     runRecordFunction(guard, schema_ref, dispatchKey);
@@ -736,7 +765,7 @@ namespace std {
 
 template <>
 struct hash<c10::OperatorHandle> {
-  size_t operator()(c10::OperatorHandle op) const noexcept {
+  size_t operator()(const c10::OperatorHandle& op) const noexcept {
     return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
   }
 };

@@ -2,7 +2,7 @@ import bisect
 import dataclasses
 import dis
 import sys
-from numbers import Real
+from typing import Any, Set, Union
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
@@ -127,9 +127,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: set
-    writes: set
-    visited: set
+    reads: Set[Any]
+    writes: Set[Any]
+    visited: Set[Any]
 
 
 def livevars_analysis(instructions, instruction):
@@ -173,8 +173,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: Real
-    high: Real
+    low: Union[int, float]
+    high: Union[int, float]
     fixed_point: FixedPointBox
 
     def zero(self):
@@ -197,7 +197,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions):
+def stacksize_analysis(instructions) -> Union[int, float]:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {
@@ -213,12 +213,21 @@ def stacksize_analysis(instructions):
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
+            # CALL_FINALLY in Python 3.8 is handled differently when determining stack depth.
+            # See https://github.com/python/cpython/blob/3.8/Python/compile.c#L5450.
+            # Essentially, the stack effect of CALL_FINALLY is computed with jump=True,
+            # but the resulting stack depth is propagated to the next instruction, not the
+            # jump target.
+            is_call_finally = (
+                sys.version_info < (3, 9) and inst.opcode == dis.opmap["CALL_FINALLY"]
+            )
             if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
-                    stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
+                    stack_size,
+                    stack_effect(inst.opcode, inst.arg, jump=is_call_finally),
                 )
-            if inst.opcode in JUMP_OPCODES:
+            if inst.opcode in JUMP_OPCODES and not is_call_finally:
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )

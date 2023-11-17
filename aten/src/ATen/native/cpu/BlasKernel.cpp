@@ -263,6 +263,17 @@ void gemm_core_(
   }
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                  \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)         \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
 void cpublas_gemm_impl(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
@@ -272,9 +283,7 @@ void cpublas_gemm_impl(
     const void *b, int64_t ldb,
     const Scalar& beta,
     void *c, int64_t ldc) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::kHalf, at::kBFloat16,
-    type, "cpublas_gemm_impl",
-      [&]{
+  _AT_DISPATCH_GEMM_TYPES(type, "cpublas_gemm_impl", [&]{
         using opmath_t = at::opmath_type<scalar_t>;
         gemm_core_(
             transa, transb, m, n, k,

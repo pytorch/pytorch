@@ -8,9 +8,9 @@ from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.decomposition import decompositions
-from torch._inductor.lowering import fallbacks, lowerings
+from torch._inductor.lowering import lowerings
 from torch._inductor.utils import gen_gm_and_inputs
-
+from torch.utils._pytree import tree_map_only
 
 aten = torch.ops.aten
 
@@ -36,6 +36,8 @@ def compute_speedups(
         for m, model in enumerate(models):
             if device == "cuda":
                 import triton
+
+                model(*example_inputs)
 
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
@@ -70,6 +72,10 @@ def convert_to_jit(gm, gm_args):
     return torch.jit.trace(gm, gm_args)
 
 
+def to_channels_last(ten):
+    return ten if ten.ndim != 4 else ten.to(memory_format=torch.channels_last)
+
+
 def microbenchmark(
     operator, args, kwargs, dtype, accuracy_checking, repeats, measure_nvfuser, device
 ):
@@ -78,15 +84,22 @@ def microbenchmark(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
     if device == "cuda":
-        cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
+        cudagraphs_eager = cudagraphs_inner(
+            gm, gm_args, copy_outputs=False, copy_inputs=False
+        )
         compiled_fn = compile_fx(gm, gm_args)
-        compiled = [cudagraphs_eager, compiled_fn]
+        cudagraphs_compiled = cudagraphs_inner(
+            compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
+        )
+        compiled = [cudagraphs_eager, cudagraphs_compiled]
     else:
         compiled_fn = compile_fx(gm, gm_args)
         compiled = [gm, compiled_fn]
     if measure_nvfuser:
         g = convert_to_jit(gm, gm_args)
-        cudagraphs_jit = cudagraphs_inner(g, gm_args, copy_outputs=False)
+        cudagraphs_jit = cudagraphs_inner(
+            g, gm_args, copy_outputs=False, copy_inputs=False
+        )
         compiled += [cudagraphs_jit]
     if accuracy_checking:
         repeats = 1
@@ -122,9 +135,8 @@ def skip_operator(operator):
     if isinstance(operator, torch._ops.OpOverload):
         op_impls.append(operator.overloadpacket)
 
-    if any(op in fallbacks for op in op_impls):
-        print(f"Skipping {operator}, no inductor impl")
-        return True
+    # TODO - skip benchmarking fallbacks. for some ops we have both lowerings and fallbacks
+    # so its not clear just from operator what will be lowered.
 
     if all(op not in decompositions and op not in lowerings for op in op_impls):
         print(f"Skipping {operator}, no inductor impl")
@@ -155,6 +167,9 @@ def skip_operator(operator):
 @click.option("--device", help="cpu or cuda", default="cuda")
 @click.option("--inp-file", help="use custom input file instead of suite", default=None)
 @click.option("--start-idx", help="specify start index of samples", default=0)
+@click.option(
+    "--channels-last", help="force inputs to channels last", is_flag=True, default=False
+)
 def benchmark(
     suite,
     op,
@@ -166,6 +181,7 @@ def benchmark(
     device,
     inp_file,
     start_idx,
+    channels_last,
 ):
     if inp_file is not None:
         loader = OperatorInputsLoader(inp_file)
@@ -209,6 +225,11 @@ def benchmark(
                     continue
                 print(f"Iter {i}")
                 args, kwargs = inps
+                if channels_last:
+                    args, kwargs = tree_map_only(
+                        torch.Tensor, to_channels_last, (args, kwargs)
+                    )
+
             except StopIteration:
                 break
             try:

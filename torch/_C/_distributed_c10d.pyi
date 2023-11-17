@@ -1,8 +1,10 @@
+# mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, overload, Tuple, Union
 
 from torch import Tensor
+from torch._C import ScriptObject
 from torch.futures import Future
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
@@ -10,6 +12,7 @@ from torch.futures import Future
 _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
 _DEFAULT_PG_TIMEOUT: timedelta
+_DEFAULT_PG_NCCL_TIMEOUT: timedelta
 
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
@@ -62,6 +65,9 @@ class Reducer:
     def set_logger(self, logger: Logger) -> None: ...
     def _remove_autograd_hooks(self) -> None: ...
     def _check_reducer_finalized(self) -> None: ...
+    def _set_sparse_metadata(self, global_unique_ids: Dict[str, Tensor]) -> None: ...
+    def _force_bucket_rebuild(self) -> None: ...
+    def _update_process_group(self, new_process_group: ProcessGroup) -> None: ...
 
 class DDPLoggingData:
     strs_map: Dict[str, str]
@@ -95,18 +101,18 @@ class DebugLevel(Enum):
     DETAIL = ...
 
 class ReduceOp:
-    def __init__(self, op: "RedOpType"): ...
+    def __init__(self, op: RedOpType): ...
 
-    SUM: "RedOpType" = ...
-    AVG: "RedOpType" = ...
-    PRODUCT: "RedOpType" = ...
-    MIN: "RedOpType" = ...
-    MAX: "RedOpType" = ...
-    BAND: "RedOpType" = ...
-    BOR: "RedOpType" = ...
-    BXOR: "RedOpType" = ...
-    PREMUL_SUM: "RedOpType" = ...
-    UNUSED: "RedOpType" = ...
+    SUM: RedOpType = ...
+    AVG: RedOpType = ...
+    PRODUCT: RedOpType = ...
+    MIN: RedOpType = ...
+    MAX: RedOpType = ...
+    BAND: RedOpType = ...
+    BOR: RedOpType = ...
+    BXOR: RedOpType = ...
+    PREMUL_SUM: RedOpType = ...
+    UNUSED: RedOpType = ...
 
     class RedOpType(Enum): ...
 
@@ -114,6 +120,7 @@ class BroadcastOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllreduceOptions:
     reduceOp: ReduceOp
@@ -127,8 +134,9 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
 
-class AllGatherOptions:
+class AllgatherOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class GatherOptions:
     rootRank: int
@@ -137,10 +145,12 @@ class GatherOptions:
 class ScatterOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ReduceScatterOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
 
 class BarrierOptions:
     device_ids: List[int]
@@ -183,6 +193,8 @@ class TCPStore(Store):
         timeout: timedelta = ...,
         wait_for_workers: bool = ...,
         multi_tenant: bool = ...,
+        master_listen_fd: Optional[int] = ...,
+        use_libuv: Optional[bool] = ...,
     ): ...
     @property
     def host(self) -> str: ...
@@ -198,11 +210,14 @@ class Work:
     def is_completed(self) -> bool: ...
     def is_success(self) -> bool: ...
     def exception(self) -> Any: ...
-    def wait(self, timeout: timedelta = _DEFAULT_NO_TIMEOUT) -> bool: ...
+    def wait(self, timeout: timedelta = ...) -> bool: ...
     def source_rank(self) -> int: ...
     def _source_rank(self) -> int: ...
     def result(self) -> List[Tensor]: ...
     def synchronize(self): ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> Work: ...
 
 class ProcessGroup:
     class Options: ...
@@ -214,7 +229,7 @@ class ProcessGroup:
     def broadcast(
         self,
         tensors: List[Tensor],
-        opts=BroadcastOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def broadcast(
@@ -226,44 +241,44 @@ class ProcessGroup:
     def allreduce(
         self,
         tensors: List[Tensor],
-        opts: AllreduceOptions = AllreduceOptions(),
+        opts: AllreduceOptions = ...,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensors: List[Tensor],
-        op=ReduceOp.SUM,
+        op=...,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensor: Tensor,
-        op=ReduceOp.SUM,
+        op=...,
     ) -> Work: ...
     def allreduce_coalesced(
         self,
         tensors: List[Tensor],
-        opts=AllreduceCoalescedOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def reduce(
         self,
         tensors: List[Tensor],
-        opts=ReduceOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def reduce(
         self,
         tensor: Tensor,
         root: int,
-        op=ReduceOp.SUM,
+        op=...,
     ) -> Work: ...
     @overload
     def allgather(
         self,
         output_tensors: List[List[Tensor]],
         input_tensors: List[Tensor],
-        opts=AllGatherOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def allgather(
@@ -275,20 +290,20 @@ class ProcessGroup:
         self,
         output: Tensor,
         input: Tensor,
-        opts=AllGatherOptions(),
+        opts=...,
     ) -> Work: ...
     def allgather_coalesced(
         self,
         output_lists: List[List[Tensor]],
         input_list: List[Tensor],
-        opts=AllGatherOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def gather(
         self,
         output_tensors: List[List[Tensor]],
         input_tensors: List[Tensor],
-        opts=GatherOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def gather(
@@ -302,7 +317,7 @@ class ProcessGroup:
         self,
         output_tensors: List[Tensor],
         input_tensors: List[List[Tensor]],
-        opts=ScatterOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def scatter(
@@ -316,7 +331,7 @@ class ProcessGroup:
         self,
         output_tensors: List[Tensor],
         input_tensors: List[List[Tensor]],
-        opts=ReduceScatterOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def reduce_scatter(
@@ -336,7 +351,7 @@ class ProcessGroup:
         input_tensor: Tensor,
         output_split_sizes: List[int],
         input_split_sizes: List[int],
-        opts=AllToAllOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def alltoall_base(
@@ -351,7 +366,7 @@ class ProcessGroup:
         self,
         output_tensor: List[Tensor],
         input_tensor: List[Tensor],
-        opts=AllToAllOptions(),
+        opts=...,
     ) -> Work: ...
     @overload
     def alltoall(
@@ -372,7 +387,10 @@ class ProcessGroup:
         tag: int,
     ) -> Work: ...
     def recv_anysource(self, tensors: List[Tensor], tag: int) -> Work: ...
-    def barrier(self, opts=BarrierOptions()) -> Work: ...
+    def barrier(self, opts=...) -> Work: ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> ProcessGroup: ...
 
 class ProcessGroupRoundRobin(ProcessGroup): ...
 

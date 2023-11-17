@@ -3,8 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 //
 // A caching allocator for CUDA host allocations (pinned memory).
@@ -35,5 +34,4 @@ inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
   return getCachingHostAllocator()->allocate(size);
 }
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

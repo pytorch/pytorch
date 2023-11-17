@@ -14,7 +14,7 @@ from collections import namedtuple
 class TestLiteScriptModule(TestCase):
 
     def test_typing_namedtuple(self):
-        myNamedTuple = NamedTuple('myNamedTuple', [('a', List[torch.Tensor])])
+        myNamedTuple = NamedTuple('myNamedTuple', [('a', List[torch.Tensor])])  # noqa: UP014
 
         class MyTestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor):

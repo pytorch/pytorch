@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -70,8 +69,7 @@ C10_DEFINE_int64(
     kDefaultBailoutDepth,
     "Number of re-specializations");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
@@ -83,7 +81,7 @@ static std::atomic<bool> profiling_mode{true};
 
 static std::mutex fusion_strategy_lock;
 
-FusionStrategy getInitialStrategy() {
+static FusionStrategy getInitialStrategy() {
   if (FLAGS_torch_jit_always_dynamic) {
     return {{FusionBehavior::DYNAMIC, 12}};
   }
@@ -245,7 +243,7 @@ static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
   }
 }
 
-bool guardDifferentiableGraph(Node* dnode) {
+static bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
   for (const auto i : c10::irange(gi.size())) {
@@ -323,7 +321,7 @@ void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
       "After EliminateDeadCode (end of runNooptPassPipeline)\n", *graph);
 }
 
-void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
+static void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
@@ -448,7 +446,6 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
-    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
@@ -648,13 +645,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
-    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
-    // value
-#ifndef C10_MOBILE
-    if (torch::jit::fuser::cuda::isEnabled()) {
-      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
-    }
-#endif
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
@@ -700,7 +690,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-Node* insertFallbackFunctionCall(
+static Node* insertFallbackFunctionCall(
     Graph* graph,
     GraphFunction* func,
     ArrayRef<Value*> inputs) {
@@ -721,7 +711,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-GraphFunction* createFallbackPathFunction(
+static GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };
@@ -776,5 +766,4 @@ void ProfilingGraphExecutorImpl::runFinalOptimizations(
   AddIfThenElseOp(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

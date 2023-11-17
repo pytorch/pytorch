@@ -42,14 +42,13 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
@@ -62,7 +61,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
