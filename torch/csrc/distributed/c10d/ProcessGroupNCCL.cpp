@@ -1208,6 +1208,18 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
+
+c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
+  if (writeDebugInfo_) {
+    return c10::nullopt;
+  }
+  // If we have not dumped the debugInfo return true and set the flag to false
+  writeDebugInfo_ = true;
+  return c10::optional<std::thread>(
+      std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
+}
+
 void abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1360,8 +1372,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
-  // Store debug info to storage. (By default to local disk)
-  std::thread debugInfoStoreThread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
+  // Store debug info to storage if no other thread does it. (By default to
+  // local disk)
+  auto maybeWriteDebugInfo = tryWriteDebugInfo();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1382,7 +1395,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
   if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       debugInfoStoreThread.joinable()) &&
+       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1394,8 +1407,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // thread, so We mark the thread detach and the dump of debug info becomes
   // "best effort". If the process exit normally, marking it detach also makes
   // sense because we don't really care about dumping the debug info.
-  if (debugInfoStoreThread.joinable()) {
-    debugInfoStoreThread.detach();
+  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
+    maybeWriteDebugInfo->detach();
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
@@ -1515,14 +1528,26 @@ void ProcessGroupNCCL::workCleanupLoop() {
           // rank
           abort();
         }
+
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
-            // Set shutdown mode, so the heartbeat monitor thread will not abort
-            // process immediately.
+            // Set shutdown mode, so the heartbeat monitor thread will not
+            // abort process immediately.
             collectiveDebugInfoMode_.store(true);
+            // Store debug info to storage. (By default to local disk)
+            auto dumpingDebugInfo = tryWriteDebugInfo();
             auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
+            if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
+              std::this_thread::sleep_for(
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+              // At this point, we either have already waited for
+              // `kWatchdogThreadSleepMillis * 30` or the thread has finished so
+              // that we mark the thread detach and the dump of debug info
+              // becomes "best effort".
+              dumpingDebugInfo->detach();
+            }
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();

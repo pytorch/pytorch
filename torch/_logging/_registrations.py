@@ -66,6 +66,14 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "recompiles_verbose",
+    "Prints all guard checks that fail during a recompilation. "
+    "At runtime, Dynamo will stop at the first failed check for each failing guard. "
+    "So not all logged failing checks are actually ran by Dynamo.",
+    visible=True,
+    off_by_default=True,
+)
+register_artifact(
     "graph_breaks",
     "Prints whenever Dynamo decides that it needs to graph break (i.e. create a new graph). Useful for debugging why torch.compile has poor performance",
     visible=True,
