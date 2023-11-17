@@ -459,29 +459,30 @@ class parametrize(_TestParametrizer):
         self.arg_values = arg_values
         self.name_fn = name_fn
 
-    def _formatted_str_repr(self, name, value):
+    def _formatted_str_repr(self, idx, name, value):
         """ Returns a string representation for the given arg that is suitable for use in test function names. """
         if isinstance(value, torch.dtype):
             return dtype_name(value)
         elif isinstance(value, torch.device):
             return str(value)
         # Can't use isinstance as it would cause a circular import
-        elif value.__class__.__name__ == 'OpInfo' or value.__class__.__name__ == 'ModuleInfo':
+        elif type(value).__name__ in {'OpInfo', 'ModuleInfo'}:
             return value.formatted_name
-        else:
-            # Include name and value separated by underscore.
+        elif isinstance(value, (int, float, str)):
             return f"{name}_{str(value).replace('.', '_')}"
+        else:
+            return f"{name}{idx}"
 
-    def _default_subtest_name(self, values):
-        return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
+    def _default_subtest_name(self, idx, values):
+        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
 
-    def _get_subtest_name(self, values, explicit_name=None):
+    def _get_subtest_name(self, idx, values, explicit_name=None):
         if explicit_name:
             subtest_name = explicit_name
         elif self.name_fn:
             subtest_name = self.name_fn(*values)
         else:
-            subtest_name = self._default_subtest_name(values)
+            subtest_name = self._default_subtest_name(idx, values)
         return subtest_name
 
     def _parametrize_test(self, test, generic_cls, device_cls):
@@ -494,7 +495,7 @@ class parametrize(_TestParametrizer):
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
             values = check_exhausted_iterator = object()
-            for values in self.arg_values:
+            for idx, values in enumerate(self.arg_values):
                 maybe_name = None
 
                 decorators = []
@@ -519,7 +520,7 @@ class parametrize(_TestParametrizer):
 
                 param_kwargs = dict(zip(self.arg_names, values))
 
-                test_name = self._get_subtest_name(values, explicit_name=maybe_name)
+                test_name = self._get_subtest_name(idx, values, explicit_name=maybe_name)
 
                 def decorator_fn(_, decorators=decorators):
                     return decorators
