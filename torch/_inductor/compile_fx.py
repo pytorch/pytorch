@@ -160,6 +160,7 @@ def _unlift_graph(mod, gm, graph_signature):
         gm,
         graph_signature,
         state_dict,
+        {},
     )
     unlifted_gm = _unlift(
         gm,
@@ -167,8 +168,8 @@ def _unlift_graph(mod, gm, graph_signature):
         pytree.LeafSpec(),
         None,
         state_dict,
+        {},
         graph_signature.buffers_to_mutate,
-        set(graph_signature.user_outputs),
     )
     return unlifted_gm
 
@@ -622,6 +623,9 @@ def fx_codegen_and_compile(
                 return compiled_fn
 
             if graph.disable_cudagraphs:
+                perf_hint_log.warning(
+                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
+                )
                 BoxedBool.disable(cudagraphs)
 
             compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
