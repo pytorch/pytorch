@@ -3298,6 +3298,24 @@ TEST_F(VulkanAPITest, mm) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, DISABLED_mm_m2_vulkan) {
+  const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = m1_cpu.mm(m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  // When m2 is a vulkan, the current implementation forgot
+  // to pre-pack the m2 tensor, yielding wrong results.
+  const auto out_vulkan = m1_vulkan.mm(m2_cpu.vulkan());
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, mm_error) {
   // mismatched dimensions of m1 and m2.
   const auto m1_cpu = at::rand({179, 99}, at::device(at::kCPU).dtype(at::kFloat));
@@ -4765,7 +4783,7 @@ TEST_F(VulkanAPITest, normal_) {
 
 TEST_F(VulkanAPITest, normal_large) {
   float a_mean = 1.0;
-  float a_std = 0.001;
+  float a_std = 0.01;
 
   auto a_vulkan =
       at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
