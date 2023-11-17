@@ -355,6 +355,7 @@ QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
     operator.add: torch.ops.quantized.add,
     torch.add: torch.ops.quantized.add,
     operator.mul: torch.ops.quantized.mul,
+    operator.matmul: torch.ops.quantized.matmul,
     torch.mul: torch.ops.quantized.mul,
     torch.matmul: torch.ops.quantized.matmul,
 }
