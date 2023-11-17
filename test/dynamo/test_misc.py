@@ -823,6 +823,25 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(cnts.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbolic_shape_rel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(x.shape[0] == 1)
+            torch._check(x.shape[0] != 2)
+            torch._check(x.shape[0] >= 0)
+            torch._check(x.shape[0] > 0)
+            torch._check(x.shape[0] < 4)
+            torch._check(x.shape[0] <= 3)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_is_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1980,6 +1999,19 @@ utils_device.CURRENT_DEVICE == None""",
         x = np.arange(8)
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
+
+    def test_trace_ndarray_frame_2(self):
+        # no tensors/ndarray as inputs in the frame
+        def fn(x):
+            print("graph break.")
+            return 2 * np.arange(x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = 8
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 1)
 
     def test_numpy_non_torch_dtype(self):
         # test that we gracefully graph break on dtypes

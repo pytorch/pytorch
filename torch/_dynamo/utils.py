@@ -376,7 +376,7 @@ def setup_log_file():
     exitstack = contextlib.ExitStack()
     if config.log_file_name is not None:
         log_file_handler = logging.FileHandler(config.log_file_name)
-        for logger in logging.get_loggers():
+        for logger in torch._logging._internal.get_loggers():
             logger.addHandler(log_file_handler)
             exitstack.callback(lambda: logger.removeHandler(log_file_handler))
         return exitstack
@@ -1933,6 +1933,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
@@ -2253,10 +2255,6 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         )
         result += markers[i] + "\n"
     return result
-
-
-def is_guard_failure_reporting_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
 def get_static_address_type(t):
