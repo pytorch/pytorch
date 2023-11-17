@@ -8,6 +8,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_global,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -225,8 +226,7 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
-    track_list = _track_obj
-    track_dict = _track_obj
+    track_mutable = _track_obj
 
     def track_object_existing(
         self,
@@ -510,6 +510,16 @@ class SideEffects:
                         cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            elif isinstance(var, variables.TupleIteratorVariable):
+                for _ in range(var.index):
+                    cg.extend_output([create_load_global("next", push_null=True)])
+                    cg(var.mutable_local.source)
+                    cg.extend_output(
+                        [
+                            create_instruction("CALL_FUNCTION", arg=1),
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
             else:
                 raise AssertionError(type(var))
 

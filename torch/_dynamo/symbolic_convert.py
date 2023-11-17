@@ -1422,6 +1422,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        self.output.side_effects.mutation(obj)
         obj.items.append(v)
 
     def MAKE_FUNCTION(self, inst):

@@ -454,7 +454,7 @@ class VariableBuilder:
             else:
                 result = ConstDictVariable(result, type(value), source=self.source)
 
-            return self.tx.output.side_effects.track_dict(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -779,7 +779,7 @@ class VariableBuilder:
             output, mutable_local=MutableLocal(), source=self.source
         )
         if istype(value, list):
-            return self.tx.output.side_effects.track_list(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -790,9 +790,12 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        return TupleIteratorVariable(
+        result = TupleIteratorVariable(
             output, mutable_local=MutableLocal(), source=self.source
         )
+
+        self.tx.output.side_effects.track_mutable(value, result)
+        return result
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [

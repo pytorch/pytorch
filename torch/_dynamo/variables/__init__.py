@@ -38,6 +38,7 @@ from .lists import (
     NamedTupleVariable,
     RangeVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
