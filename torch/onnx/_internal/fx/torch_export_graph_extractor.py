@@ -46,30 +46,22 @@ class TorchExport(exporter.FXGraphExtractor):
         model = model.run_decompositions(options.decomposition_table)
 
         # Export FX graph to ONNX ModelProto.
-        self.onnx_input_adapter.append_step(
+        self.input_adapter.append_step(
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
-        self.onnx_input_adapter.append_step(
+        self.input_adapter.append_step(
             io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
         )
 
         # ONNX does not support None inputs. During graph building, all None inputs
         # are removed. Here we register this step to input adapter.
-        options.fx_tracer.onnx_input_adapter.append_step(
-            io_adapter.RemoveNoneInputStep()
-        )
+        options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
 
-        updated_model_args = self.onnx_input_adapter.apply(*model_args, **model_kwargs)
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
         # tensor, etc), we flatten the collection and register each element as output.
-        options.fx_tracer.onnx_output_adapter.append_step(
-            io_adapter.FlattenOutputStep()
-        )
-
-        options.fx_tracer.torch_output_adapter.append_step(
-            io_adapter.TruncateBufferAndInputMutationOutputStep(model)
-        )
+        options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]

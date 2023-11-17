@@ -15,8 +15,6 @@ from typing import (
     Union,
 )
 
-import numpy
-
 import torch
 import torch.export as torch_export
 
@@ -48,10 +46,7 @@ class InputAdaptStep(Protocol):
 
 
 class InputAdapter:
-    """A class that adapts the model inputs to a different format.
-
-    Useful to adapt the PyTorch model input to match the exported ONNX model's
-    when their representation differs and/or vice-versa"""
+    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
 
     def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
         self._steps = steps or []
@@ -71,13 +66,13 @@ class InputAdapter:
         *model_args,
         **model_kwargs,
     ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", None]]:
-        """Applies all adapter steps to converts the model inputs to the target format.
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
-            model_args: The model inputs.
-            model_kwargs: The model keyword inputs.
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
         Returns:
-            A sequence of tensors converted representing the model inputs on the target format.
+            A sequence of tensors converted from PyTorch model inputs.
         """
         args: Sequence[Any] = model_args
         kwargs: Mapping[str, Any] = model_kwargs
@@ -105,10 +100,7 @@ class OutputAdaptStep(Protocol):
 
 
 class OutputAdapter:
-    """A class that adapts the model outputs to a different format.
-
-    Useful to adapt the PyTorch model output to match the exported ONNX model's
-    when their representation differs and/or vice-versa"""
+    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
 
     def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
         self._steps = steps or []
@@ -125,14 +117,14 @@ class OutputAdapter:
     @_beartype.beartype
     def apply(
         self, model_outputs: Any
-    ) -> Sequence[Union["torch.Tensor", int, float, bool, str, numpy.ndarray]]:
-        """Applies all adapter steps to converts the model outputs to the target format.
+    ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
             model_outputs: The PyTorch model outputs.
 
         Returns:
-            A sequence of tensors converted representing the model outputs on the target format.
+            PyTorch model outputs in exported ONNX model outputs format.
         """
         for step in self._steps:
             model_outputs = step.apply(model_outputs)
@@ -513,46 +505,6 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
                 error_message="Model outputs incompatible with the format that was exported. ",
             )
         return flattened_outputs
-
-
-class TruncateBufferAndInputMutationOutputStep(OutputAdaptStep):
-    """Removes mutated buffers and inputs from model output.
-
-    :func:`torch.export.export` appends mutated buffers and model inputs to model output.
-    To match PyTorch output's representation, these extra outputs must be removed
-    after the model is executed.
-
-    Args:
-        model: The PyTorch model with embedded parameters and buffers.
-    """
-
-    def __init__(self, model: torch_export.ExportedProgram):
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be a torch.export.ExportedProgram."
-        self.model = model
-
-    def apply(self, model_outputs: Any) -> Sequence[Any]:
-        """Removes mutated buffers and user input from model output.
-
-        Args:
-            model_outputs: The ONNX model outputs.
-
-        Returns:
-            updated_outputs: The model outputs without mutated buffers and user inputs.
-        """
-
-        assert len(model_outputs) == len(
-            self.model.graph_signature.output_specs
-        ), "Actual model outputs mismatches the Model output spec"
-
-        user_outputs = []
-        for out, out_spec in zip(
-            model_outputs, self.model.graph_signature.output_specs
-        ):
-            if out_spec.kind == torch.export.graph_signature.OutputKind.USER_OUTPUT:
-                user_outputs.append(out)
-        return user_outputs
 
 
 class PrependParamsAndBuffersAotAutogradInputStep(InputAdaptStep):

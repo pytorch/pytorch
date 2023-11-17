@@ -128,9 +128,9 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
             return super().apply(model_outputs)
 
 
-def _wrap_model_with_onnx_output_adapter(
+def _wrap_model_with_output_adapter(
     model: Union[torch.nn.Module, Callable],
-    onnx_output_adapter: DynamoFlattenOutputStep,
+    output_adapter: DynamoFlattenOutputStep,
 ) -> Callable:
     """Wrap model with output adapter.
 
@@ -138,11 +138,11 @@ def _wrap_model_with_onnx_output_adapter(
     custom user defined types outputs. It wraps the model with an output adapter to
     convert the outputs to :func:`dynamo.export` compatible types, i.e. :class:`torch.Tensor`.
 
-    The adapting logic is controlled by `onnx_output_adapter``.
+    The adapting logic is controlled by ``output_adapter``.
 
     Args:
         model: PyTorch model or function.
-        onnx_output_adapter: Output adapter to apply to model output.
+        output_adapter: Output adapter to apply to model output.
     Returns:
         Wrapped model.
     """
@@ -151,7 +151,7 @@ def _wrap_model_with_onnx_output_adapter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return onnx_output_adapter.apply(model_func(*args, **kwargs))
+        return output_adapter.apply(model_func(*args, **kwargs))
 
     return wrapped
 
@@ -181,11 +181,11 @@ class DynamoExport(exporter.FXGraphExtractor):
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
         dynamo_flatten_output_step = DynamoFlattenOutputStep()
-        wrapped_model = _wrap_model_with_onnx_output_adapter(
+        wrapped_model = _wrap_model_with_output_adapter(
             model, dynamo_flatten_output_step
         )
         # Record the output adapter step.
-        self.onnx_output_adapter.append_step(dynamo_flatten_output_step)
+        self.output_adapter.append_step(dynamo_flatten_output_step)
 
         # Translate callable to FX graph.
         #
@@ -207,11 +207,11 @@ class DynamoExport(exporter.FXGraphExtractor):
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
-        self.onnx_input_adapter.append_step(
+        self.input_adapter.append_step(
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
 
-        updated_model_args = self.onnx_input_adapter.apply(*model_args, **model_kwargs)
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 
