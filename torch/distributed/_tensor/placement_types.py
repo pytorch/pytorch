@@ -384,6 +384,10 @@ class DTensorSpec:
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
 
+    def __post_init__(self):
+        if not isinstance(self.placements, tuple):
+            self.placements = tuple(self.placements)
+
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
