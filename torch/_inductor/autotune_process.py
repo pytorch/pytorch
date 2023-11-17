@@ -383,6 +383,9 @@ class BenchmarkRequest:
     """
     Only handle triton template benchmark for now. The extern kernel benchmark
     can be done inside the same process since they usually don't cause crash.
+
+    Important: Instances of this class and subclasses have to be serializable
+    across process boundaries. Do not put CUDA Tensors in here!
     """
 
     def __init__(
@@ -473,6 +476,9 @@ class TestBenchmarkRequest(BenchmarkRequest):
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -520,6 +526,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
 
 class CUDABenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -536,6 +545,13 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+
+    def precompile(self):
+        # Prepopulate CUDACodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", str(self))
+        CUDACodeCache.load(self.source_code, "so")
+        log.debug("Done precompiling %s", str(self))
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor

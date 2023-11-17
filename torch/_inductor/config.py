@@ -153,6 +153,18 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# Number of threads to use for pre-compilation of kernels
+# in order to populate compilation cache.
+autotune_precompilation_workers = min(
+    torch.get_num_threads(),
+    int(
+        os.environ.get(
+            "TORCHINDUCTOR_MAX_AUTOTUNE_PRECOMPILATION_WORKERS",
+            str(torch.get_num_threads() - 8),
+        )
+    ),
+)
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
@@ -558,12 +570,15 @@ class cuda:
     # 2）CUDACXX environment variable
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
-    cuda_cxx = None
+    cuda_cxx = os.environ.get("CUDA_NVCC_EXECUTABLE", None)
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
     # are enabled for the CUTLASS backend.
     cutlass_only_evt_capable_ops: bool = False
+
+    # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
 
 
 # create a directory containing lots of debug information
@@ -588,7 +603,7 @@ class trace:
     fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
-    ir_pre_fusion = True
+    ir_pre_fusion = False
 
     # Save TorchInductor IR after fusion pass
     ir_post_fusion = True
@@ -608,6 +623,8 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+    log_autotuning_results = False
 
 
 _save_config_ignore = {

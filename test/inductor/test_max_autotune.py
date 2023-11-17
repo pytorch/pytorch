@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import io
+import json
 import os
 import unittest
 
@@ -23,6 +25,7 @@ from torch._inductor.select_algorithm import (
     ChoiceCaller,
     TritonTemplateCaller,
 )
+from torch._inductor.util_autotuning_log_parser import AutotuningLogParser
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -265,6 +268,13 @@ class TestMaxAutotune(TestCase):
         fp16=True,
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        with_bias=False,
+        m=1024,
+        n=1024,
+        k=1024,
+        max_profiling_configs=4,
+        batch_size=None,
+        evt_only=True,
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
@@ -275,26 +285,38 @@ class TestMaxAutotune(TestCase):
         # so if these shapes don't all align to at least 8 elements
         # it can happen that no Cutlass 3.x op is available
         # that allows fusions
-        a = torch.randn(256, 32).cuda()
-        b = torch.randn(32, 256).cuda()
+        if batch_size is None:
+            a = torch.randn(m, k).mul(1.0 / 32).cuda()
+            b = torch.randn(k, n).mul(1.0 / 32).cuda()
+            if with_bias:
+                bias = torch.randn(m, n).mul(1.0 / 32).cuda()
+        else:
+            a = torch.randn(batch_size, m, k).mul(1.0 / 32).cuda()
+            b = torch.randn(batch_size, k, n).mul(1.0 / 32).cuda()
+            if with_bias:
+                bias = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
         if fp16:
             a = a.half()
             b = b.half()
-
+            if with_bias:
+                bias = bias.half()
+        args = [a, b]
+        if with_bias:
+            args.append(bias)
         with config.patch(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_only_evt_capable_ops": True,
-                "cuda.version": "12.2",  # required to enable the Kernels we need
+                "cuda.cutlass_max_profiling_configs": max_profiling_configs,
+                "cuda.cutlass_only_evt_capable_ops": evt_only,
+                "cuda.version": "12.1",  # required to enable the Kernels we need
             }
         ):
             counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(*args)
+            Y = mm(*args)
             actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
             assert (
                 actual_count == expected_fuse_count
@@ -339,6 +361,73 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_simple(self):
+        def mm(a, b, c):
+            return (a @ b) - 3.3 * c
+
+        with config.patch(
+            {
+                "trace.enabled": True,
+                "trace.output_code": True,
+                "trace.debug_dir": os.path.abspath(
+                    os.path.dirname(__file__) + "/../../tmp/test_code/"
+                ),
+            }
+        ):
+            #  The pointwise ops seem to be pre-fused into a single Pointwise
+            self._test_max_autotune_cutlass_backend_epilogue_fusion(
+                mixed_precision=False,
+                fp16=True,
+                expected_fuse_count=1,
+                mm=mm,
+                with_bias=True,
+                m=2048,
+                n=512,
+                k=4096,
+            )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_random_mask(self):
+        def mm(a, b, c):
+            return (a @ b) * torch.relu(c)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            m=2048,
+            n=512,
+            k=4096,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_one_additional_input_random_mask_batched(
+        self,
+    ):
+        def mm(a, b, c):
+            return (a @ b) * torch.relu(c - 0.02)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            m=2048,
+            n=512,
+            k=4096,
+            batch_size=100,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return (a @ b) * 3.3 - 1.234
@@ -356,6 +445,21 @@ class TestMaxAutotune(TestCase):
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm(self):
+        def mm(a, b, bias):
+            return torch.addmm(bias, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -380,6 +484,39 @@ class TestMaxAutotune(TestCase):
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_bmm(self):
+        def mm(a, b):
+            return torch.bmm(a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=False,
+            batch_size=10,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_baddbmm(self):
+        def mm(a, b, bias):
+            return torch.baddbmm(bias, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=True,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+            batch_size=31,
+            evt_only=False,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -410,9 +547,13 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @parametrize("only_evt_capable", (True, False))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+        self,
+        dynamic: bool = False,
+        only_evt_capable: bool = False,
+        max_autotune_gemm_backends: str = "CUTLASS",
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -436,6 +577,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_only_evt_capable_ops": only_evt_capable,
             }
         ):
             Y = mm(a, a, bias)
@@ -585,6 +727,72 @@ class TestMaxAutotune(TestCase):
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
             torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
+    def test_autotuning_log_parser(self):
+        example_log_lines = """{"backend": "extern", "kernel_call_name": "extern_kernels.bmm", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.0147141041931385}
+{"tile_shape": "(64, 32, 64)", "num_stages": 2, "num_warps": 4, "allow_tf32": "True", "acc_type": "tl.float32", "backend": "Triton", "grid": "(128, 6, 1)", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.01217997465145754}
+{"tile_shape": "(64, 32, 128)", "num_stages": 3, "num_warps": 4, "allow_tf32": "True", "acc_type": "tl.float32", "backend": "Triton", "grid": "(64, 6, 1)", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.01012531017369727}
+"""  # noqa: B950
+        example_input = io.StringIO(example_log_lines)
+        try:
+            parser = AutotuningLogParser(example_input)
+            records = list(parser.get_records())
+            assert len(records) == 3
+            expected_json_records = '[{"backend": "extern", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "[]", "benchmark_result": 0.0147141041931385, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 64)", "benchmark_result": 0.01217997465145754, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 128)", "benchmark_result": 0.01012531017369727, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}]'  # noqa: B950
+            assert json.dumps(records) == expected_json_records, "Record parser failed"
+            pd = None
+            # The rest of this test requires pandas, which might not be installed.
+            try:
+                import pandas
+
+                pd = pandas
+            except ImportError:
+                pass
+            if pd is not None:
+                df = parser.get_dataframe()
+                assert len(df) == 3
+                assert set(df.columns) == {
+                    "backend",
+                    "name",
+                    "problem_hash",
+                    "kernel_schedule",
+                    "tile_shape",
+                    "benchmark_result",
+                    "device",
+                    "cuda_device_name",
+                    "problem_shape_MNK",
+                    "A_size",
+                    "A_stride",
+                    "A_type",
+                    "A_dtype",
+                    "A_shape",
+                    "B_size",
+                    "B_stride",
+                    "B_type",
+                    "B_dtype",
+                    "B_shape",
+                    "Bias_shape",
+                    "M",
+                    "N",
+                    "K",
+                }
+                analysis = parser.get_analysis()
+                assert set(analysis.columns) == {
+                    "problem_hash",
+                    "M",
+                    "N",
+                    "K",
+                    "A_shape",
+                    "B_shape",
+                    "Bias_shape",
+                    "tile_shape",
+                    "backend",
+                    "kernel_schedule",
+                    "benchmark_result",
+                }
+        finally:
+            if example_input:
+                example_input.close()
 
     def test_triton_template_with_epilogues_and_dynamic_shape(self):
         def fn(
