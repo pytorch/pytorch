@@ -59,7 +59,7 @@ class _PartialWrapper:
         # skip if arg_name in keywords so its possible to overwrite
         for arg_name in self.callable_args:
             if arg_name not in keywords:
-                keywords = {**keywords, **{arg_name: self.callable_args[arg_name]()}}
+                keywords = {**keywords, arg_name: self.callable_args[arg_name]()}
         return self.p(*args, **keywords)
 
     def __repr__(self):

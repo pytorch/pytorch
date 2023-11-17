@@ -1220,6 +1220,13 @@
     CompositeExplicitAutograd: copysign_out
   tags: pointwise
 
+- func: _lazy_clone(Tensor self) -> Tensor
+  # Like clone, but the copy takes place lazily, only if either the
+  # input or the output are written.
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _lazy_clone
+
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -10342,6 +10349,21 @@
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
   autogen: _foreach_div.ScalarList_out
+
+- func: _foreach_div.Tensor(Tensor[] self, Tensor other) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_tensor_kernel_slow
+    CUDA: foreach_tensor_div_tensor_kernel_cuda
+
+- func: _foreach_div_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_tensor_kernel_slow_
+    CUDA: foreach_tensor_div_tensor_kernel_cuda_
+  autogen: _foreach_div.Tensor_out
 
 - func: _foreach_clamp_max.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
