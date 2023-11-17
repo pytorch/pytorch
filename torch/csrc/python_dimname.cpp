@@ -7,6 +7,7 @@ namespace torch {
 
 struct InternedStringsTable {
   InternedStringsTable() = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~InternedStringsTable();
   InternedStringsTable(const InternedStringsTable&) = delete;
   InternedStringsTable& operator=(InternedStringsTable const&) = delete;
@@ -23,6 +24,7 @@ struct InternedStringsTable {
 
 InternedStringsTable kPyInternedStringToDimname;
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 InternedStringsTable::~InternedStringsTable() {
   // If python is already dead, leak the wrapped python objects
   if (Py_IsInitialized()) {
