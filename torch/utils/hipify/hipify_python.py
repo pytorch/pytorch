@@ -1090,7 +1090,8 @@ def hipify(
     all_files_set = set(all_files)
     for f in extra_files:
         if not os.path.isabs(f):
-            f = os.path.join(output_directory, f)
+            # Resolve any ".." in the path using os.path.abspath
+            f = os.path.abspath(os.path.join(output_directory, f))
         if f not in all_files_set:
             all_files.append(f)
 
@@ -1101,6 +1102,8 @@ def hipify(
             header_include_dir_path = Path(header_include_dir)
         else:
             header_include_dir_path = Path(os.path.join(output_directory, header_include_dir))
+        # Resolve any ".." in the path using os.path.abspath
+        header_include_dir_path = os.path.abspath(header_include_dir_path)
         for path in header_include_dir_path.rglob('*'):
             if (
                 path.is_file()
