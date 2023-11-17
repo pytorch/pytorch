@@ -2877,7 +2877,9 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index.Tensor)(x, indices)
+        return fallback_handler(aten.index.Tensor, add_to_fallback_set=False)(
+            x, indices
+        )
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -2912,10 +2914,18 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    if is_triton(values) and (
-        accumulate is True or torch.are_deterministic_algorithms_enabled()
-    ):
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    if is_triton(values) and (accumulate or deterministic):
         V.graph.disable_cudagraphs = True
+        msg = (
+            "index put with accumulate."
+            if not deterministic
+            else "deterministic index put."
+        )
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -3683,7 +3693,8 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
 
 fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default
+    aten.max_pool2d_with_indices.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3769,7 +3780,8 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward.default
+    aten.max_pool2d_with_indices_backward.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3990,7 +4002,9 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
+fallback_adaptive_avg_pool2d = fallback_handler(
+    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -4112,7 +4126,9 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4209,7 +4225,9 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
+fallback_avg_pool2d_backward = fallback_handler(
+    aten.avg_pool2d_backward.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4612,9 +4630,13 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
-fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
-fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
+fallback_pow_tensor_tensor = fallback_handler(
+    aten.pow.Tensor_Tensor, add_to_fallback_set=False
+)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar, add_to_fallback_set=False)
+fallback_pow_tensor_scalar = fallback_handler(
+    aten.pow.Tensor_Scalar, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.pow, broadcast=True)

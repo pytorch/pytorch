@@ -10,7 +10,6 @@
 #include <ATen/core/operator_name.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <unordered_map>
-#include <utility>
 
 namespace c10 {
 
@@ -28,12 +27,12 @@ bool operator==(const Argument& lhs, const Argument& rhs);
 struct Argument {
   Argument(
       std::string name = "",
-      const TypePtr& type = nullptr,
+      TypePtr type = nullptr,
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
       c10::optional<AliasInfo> alias_info = c10::nullopt)
-    : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
+    : Argument(name, type, type, N, default_value, kwarg_only, alias_info) {}
 
   Argument(
       std::string name,
@@ -46,7 +45,7 @@ struct Argument {
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
-        N_(N),
+        N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
         kwarg_only_(kwarg_only) {
