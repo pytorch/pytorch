@@ -1562,12 +1562,17 @@ class TrackedFake:
 
 # Performs automatic dynamic dim determination.
 # Returns a CreateSymbolicPolicy
-def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
+def _automatic_dynamic(e, tx, source, static_shapes) -> CreateSymbolicPolicy:
+    name = source.name()
+    prior_policy = tx.output.tracing_context.tensor_to_policy.get(e, None)
+    source_to_symint_node_cache = prior_policy.source_to_symint_node_cache if prior_policy else None
+
     if static_shapes:
         return KnownCreateSymbolicPolicy(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
-            source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -1579,7 +1584,8 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
                 for s in e.size()
             ],
             constraint_sizes=[None] * e.dim(),
-            source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # Prep for automatic dynamic
@@ -1713,7 +1719,8 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     return KnownCreateSymbolicPolicy(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
-        source_to_symint_node_cache=tx.output.tracing_context.source_to_symint_node_cache,
+        tensor_source=source,
+        source_to_symint_node_cache=source_to_symint_node_cache
     )
 
 
@@ -1731,7 +1738,7 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
         policy = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
+            policy = _automatic_dynamic(e, tx, source, static_shapes)
 
         tx.output.tracing_context.tensor_to_policy[e] = policy
 
@@ -1749,16 +1756,15 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 policy=policy,
             )
         )
-        if is_tensor and not (static_shapes and source.is_nn_module()):
-            # TODO: just store the whole policy here
-            tx.output.tracked_fakes.append(
-                TrackedFake(
-                    fake_e,
-                    source,
-                    policy.constraint_sizes if policy is not None else None,
-                )
+        # TODO: just store the whole policy here
+        tx.output.tracked_fakes.append(
+            TrackedFake(
+                fake_e,
+                source,
+                policy.constraint_sizes if policy is not None else None,
             )
-            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+        )
+        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),

@@ -409,7 +409,11 @@ or file a github issue."""
                     if isinstance(arg, torch.Tensor) and not isinstance(
                         arg, torch._subclasses.FakeTensor
                     ):
-                        new_args.append(fake_mode.from_tensor(arg))
+                        policy = None
+                        if tracing_context := torch._guards.TracingContext.try_get():
+                            if x in tracing_context.tensor_to_policy:
+                                policy = tracing_context.tensor_to_policy[x]
+                        new_args.append(fake_mode.from_tensor(arg, policy=policy, source=policy.source))
                     else:
                         new_args.append(arg)
 

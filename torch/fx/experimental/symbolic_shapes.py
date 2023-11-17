@@ -161,13 +161,13 @@ def is_concrete_bool(a: Union[bool, SymBool]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
-def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
+def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # singleton ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, sympy.Expr):
+    elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool)):
         pass
@@ -775,13 +775,15 @@ class KnownCreateSymbolicPolicy(FreshCreateSymbolicPolicy):
 
     It is the cache owners responsibility to maintain the lifecycle of the cache
     w/r/t different shape_envs, clearing, etc.
-
     """
+    tensor_source: Source = None
     source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
-        assert self.source_to_symint_node_cache is not None
+        assert self.tensor_source is not None
+        if not self.source_to_symint_node_cache:
+            object.__setattr__(self, 'source_to_symint_node_cache', {})
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -2076,10 +2078,9 @@ class ShapeEnv:
         # TODO: make this configurable from outside policy; we made a policy
         # decision here where if all sizes are static, we are going to
         # specialize all of the inner strides/offset too. We don't have to
-        # do this, and arguably we should ALWAYS allow for dynamic offset,
-        # this is cheap.
+        # do this.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_strides = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
 
         assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
         assert len(constraint_dims) == dim
@@ -2117,7 +2118,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
+                    dynamic_dim=dynamic_strides,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2137,7 +2138,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_strides_offset,
+            dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), policy=policy)
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
