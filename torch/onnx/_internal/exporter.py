@@ -616,10 +616,12 @@ class ONNXRuntimeOptions:
     session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
     """ONNX Runtime session options."""
 
-    execution_providers: Optional[Sequence[str | tuple[str, dict[Any, Any]]]] = None
+    execution_providers: Optional[
+        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
+    ] = None
     """ONNX Runtime execution providers to use during model execution."""
 
-    execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None
+    execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
     """ONNX Runtime execution provider options."""
 
     @_beartype.beartype
@@ -628,9 +630,9 @@ class ONNXRuntimeOptions:
         *,
         session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None,
         execution_providers: Optional[
-            Sequence[str | tuple[str, dict[Any, Any]]]
+            Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
         ] = None,
-        execution_provider_options: Optional[Sequence[dict[Any, Any]]] = None,
+        execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None,
     ):
         self.session_options = session_options
         self.execution_providers = execution_providers
