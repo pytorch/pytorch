@@ -1208,21 +1208,24 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
 def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two):
     def _inner(match):
         # Check dequant pattern has only 1 user.
-        linear_node = (
-            match.output_node().args[0]
-            if input_dim_exceeds_two
-            else match.output_node()
-        )
+        if input_dim_exceeds_two:
+            output_reshape_node = match.output_node()
+            assert output_reshape_node.target is aten.reshape.default
+            linear_node = output_reshape_node.args[0]
+        else:
+            linear_node = match.output_node()
+
         assert linear_node.target in (aten.addmm.default, aten.mm.default)
         input_index = 0 if linear_node.target is aten.mm.default else 1
         assert dtype in [torch.float32, torch.bfloat16]
 
         if input_dim_exceeds_two:
-            reshape_node = linear_node.args[input_index]
+            act_reshape_node = linear_node.args[input_index]
+            assert act_reshape_node.target is aten.reshape.default
             mul_node = (
-                reshape_node.args[0]
+                act_reshape_node.args[0]
                 if dtype == torch.float32
-                else reshape_node.args[0].args[0]
+                else act_reshape_node.args[0].args[0]
             )
         else:
             mul_node = (
@@ -1278,6 +1281,7 @@ def _register_qlinear_weight_prepack_pass(
         assert dtype in [torch.float32, torch.bfloat16]
         if input_dim_exceeds_two:
             output_reshape_node = match.output_node()
+            assert output_reshape_node.target is aten.reshape.default
             linear_node = output_reshape_node.args[0]
         else:
             linear_node = match.output_node()
@@ -1288,6 +1292,7 @@ def _register_qlinear_weight_prepack_pass(
 
         if input_dim_exceeds_two:
             act_reshape_node = linear_node.args[input_index]
+            assert act_reshape_node.target is aten.reshape.default
             if dtype == torch.float32:
                 mul_node = act_reshape_node.args[0]
             else:
