@@ -903,104 +903,6 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     return _inner
 
 
-def _register_dequant_promotion():
-    dequant_pattern_cases = itertools.product(
-        [torch.float32, torch.bfloat16], [True, False]
-    )
-    for dtype, input_dim_exceeds_two in dequant_pattern_cases:
-        # 4 dequantization patterns will be matched based on the dtype and input dimension size.
-        #
-        # Case 1: int8-mixed-fp32, input dim size is 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Case 2: int8-mixed-fp32, input dim size larger than 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    reshape    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        reshape reshape
-        #      + - | - - - | - +
-        #        quant    quant
-        #
-        # Case 3: int8-mixed-bf16, input dim size is 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    to_bf16    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        to_fp32 to_fp32
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Case 4: int8-mixed-bf16, input dim size larger than 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    to_bf16    |
-        #      |       |       |
-        #      |    reshape    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        reshape reshape
-        #      + - | - - - | - +
-        #        to_fp32 to_fp32
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Take Case 1 as example, this pass will transform
-        # graph 1:
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        quant   quant
-        # into:
-        # graph 2:
-        #            quant
-        #      + - - / - \ - - +
-        #      |dequant dequant|
-        #      |    |      |   |
-        #      | node1 node2   |
-        #      + - | - - - | - +
-        #        quant   quant
-        # In graph 1, the dequant node is shared by node1 and node2,
-        # as a result, neither node1 nor node2 could form an int8
-        # fusion pattern.
-        # After this transformation, the graph 2 could hit the int8
-        # fusion pattern: dequant-node-quant, respectively for
-        # node1 and node2.
-        _register_dequant_promotion_pass(
-            _may_generate_pattern_with_reshape(
-                _may_generate_pattern_with_dtype_convert(
-                    dequantize_per_tensor_activation_pattern,
-                    KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
-                ),
-                KeywordArg("act_reshape_size"),
-                with_reshape=input_dim_exceeds_two,
-            ),
-            pass_number=0,
-            dtype=dtype,
-        )  # pass_number=0 to run before weight prepack
-
-
 def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
     @register_freezing_graph_pattern(
         pattern,
@@ -1488,6 +1390,104 @@ def _generate_qlinear_weight_prepack_patterns(dtype=torch.float32):
     return _generate_dequant_linear_node_pattern(
         dequantize_per_channel_weight_pattern, dtype
     )
+
+
+def _register_dequant_promotion():
+    dequant_pattern_cases = itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    )
+    for dtype, input_dim_exceeds_two in dequant_pattern_cases:
+        # 4 dequantization patterns will be matched based on the dtype and input dimension size.
+        #
+        # Case 1: int8-mixed-fp32, input dim size is 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Case 2: int8-mixed-fp32, input dim size larger than 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    reshape    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        reshape reshape
+        #      + - | - - - | - +
+        #        quant    quant
+        #
+        # Case 3: int8-mixed-bf16, input dim size is 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    to_bf16    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        to_fp32 to_fp32
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Case 4: int8-mixed-bf16, input dim size larger than 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    to_bf16    |
+        #      |       |       |
+        #      |    reshape    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        reshape reshape
+        #      + - | - - - | - +
+        #        to_fp32 to_fp32
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Take Case 1 as example, this pass will transform
+        # graph 1:
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        # into:
+        # graph 2:
+        #            quant
+        #      + - - / - \ - - +
+        #      |dequant dequant|
+        #      |    |      |   |
+        #      | node1 node2   |
+        #      + - | - - - | - +
+        #        quant   quant
+        # In graph 1, the dequant node is shared by node1 and node2,
+        # as a result, neither node1 nor node2 could form an int8
+        # fusion pattern.
+        # After this transformation, the graph 2 could hit the int8
+        # fusion pattern: dequant-node-quant, respectively for
+        # node1 and node2.
+        _register_dequant_promotion_pass(
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    dequantize_per_tensor_activation_pattern,
+                    KeywordArg("autocast_act_dtype"),
+                    dtype != torch.float32,
+                ),
+                KeywordArg("act_reshape_size"),
+                with_reshape=input_dim_exceeds_two,
+            ),
+            pass_number=0,
+            dtype=dtype,
+        )  # pass_number=0 to run before weight prepack
 
 
 @functools.lru_cache(None)
