@@ -50,23 +50,6 @@ def get_previous_failures() -> Set[str]:
         )
 
 
-def _get_previously_failing_tests() -> Set[str]:
-    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = Path(".pytest_cache/v/cache/lastfailed")
-
-    if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
-        warn(
-            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}"
-        )
-        return set()
-
-    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH) as f:
-        last_failed_tests = json.load(f)
-
-    prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
-
-    return python_test_file_to_test_name(prioritized_tests)
-
-
 def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
     prioritized_tests = set()
 
