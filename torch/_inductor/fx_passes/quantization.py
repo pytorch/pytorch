@@ -907,7 +907,7 @@ def _register_dequant_promotion():
     dequant_pattern_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False]
     )
-    for dtype, input_dim_larger_than_two in dequant_pattern_cases:
+    for dtype, input_dim_exceeds_two in dequant_pattern_cases:
         # 4 dequantization patterns will be matched based on the dtype and input dimension size.
         #
         # Case 1: int8-mixed-fp32, input dim size is 2
@@ -940,6 +940,8 @@ def _register_dequant_promotion():
         #      |    to_bf16    |
         #      |    /     \    |
         #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        to_fp32 to_fp32
         #      + - | - - - | - +
         #        quant   quant
         #
@@ -992,7 +994,7 @@ def _register_dequant_promotion():
                     dtype != torch.float32,
                 ),
                 KeywordArg("act_reshape_size"),
-                with_reshape=input_dim_larger_than_two,
+                with_reshape=input_dim_exceeds_two,
             ),
             pass_number=0,
             dtype=dtype,
@@ -1052,12 +1054,12 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # Clone the dequant pattern for each user node
         graph = match.graph
         user_node_list = list(dequant_pattern_end_node.users)
-        for _user_node in user_node_list[1:]:
-            source_node = dequant_pattern_end_node
-            user_node = _user_node
-            while source_node != dequant_pattern_start_node.args[0]:
-                user_node = clone_to_new_node(graph, source_node, user_node)
-                source_node = source_node.args[0]
+        for user_node in user_node_list[1:]:
+            _source_node = dequant_pattern_end_node
+            _user_node = user_node
+            while _source_node != dequant_pattern_start_node.args[0]:
+                _user_node = clone_to_new_node(graph, _source_node, _user_node)
+                _source_node = _source_node.args[0]
 
         counters["inductor"]["dequant_promotion_matcher_count"] += 1
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)

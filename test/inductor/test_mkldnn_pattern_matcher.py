@@ -1129,7 +1129,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_dequant_promotion_cpu_input_dim_large_than_2(self):
+    def test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
                   X
@@ -1148,7 +1148,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_dequant_promotion_int8_mixed_bf16_input_dim_large_than_2(self):
+    def test_qlinear_dequant_promotion_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         Test with int8_mixed_bf16 quantization.
         This testcase test if dequant node before linear is promoted correctly:
