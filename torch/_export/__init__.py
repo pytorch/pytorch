@@ -1,6 +1,5 @@
 import copy
 import dataclasses
-import functools
 import io
 import json
 import pathlib
@@ -55,7 +54,7 @@ from torch.export.exported_program import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -377,7 +376,7 @@ def capture_pre_autograd_graph(
         def _eval(self, mode: bool = True):
             raise NotImplementedError("Calling eval() is not supported yet.")
 
-        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+        _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
         m.meta["inline_constraints"] = {
             k: v
@@ -399,7 +398,14 @@ def capture_pre_autograd_graph(
 
 def _convert_input_to_fake(gm, args, kwargs):
     fake_inps: List[torch.Tensor] = []
-    fake_mode = None
+    fake_mode = FakeTensorMode(
+        allow_fallback_kernels=False,
+        allow_non_fake_inputs=True,
+        shape_env=ShapeEnv(
+            assume_static_by_default=True,
+        ),
+    )
+
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -408,8 +414,6 @@ def _convert_input_to_fake(gm, args, kwargs):
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
-
-    assert fake_mode is not None, "Cannot find fake_mode attatched to the graph's placeholders."
 
     count = 0
 
@@ -422,11 +426,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
-    fake_params_buffers = pytree.tree_map_only(torch.Tensor,
-                                               fake_mode.from_tensor,
-                                               {**dict(gm.named_parameters(remove_duplicate=False)),
-                                                **dict(gm.named_buffers(remove_duplicate=False))})
-    return fake_args, fake_kwargs, fake_params_buffers, fake_mode
+    return fake_args, fake_kwargs, fake_mode
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -554,17 +554,7 @@ def export(
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
-def _disable_prexisiting_fake_mode(fn):
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        with maybe_disable_fake_tensor_mode():
-            return fn(*args, **kwargs)
-
-    return wrapper
-
-
-@_disable_prexisiting_fake_mode
 def _export(
     f: Callable,
     args: Tuple[Any, ...],
@@ -611,8 +601,7 @@ def _export(
     for name, buffer in gm_torch_level.named_buffers(remove_duplicate=False):
         params_buffers[name] = buffer
 
-    # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
-    fake_args, fake_kwargs, fake_params_buffers, dynamo_fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
+    fake_args, fake_kwargs, fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
@@ -623,7 +612,7 @@ def _export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
-                node.meta["val"] = dynamo_fake_mode.from_tensor(attr, static_shapes=True)
+                node.meta["val"] = fake_mode.from_tensor(attr, static_shapes=True)
 
     # When aot_export lifts the params, we lose the nn_module_stack
     # and source_fn from the param nodes as they are treated as fresh inputs
@@ -697,16 +686,11 @@ def _export(
 
     # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
     # to follow the order in orig_args and correctly call gm_torch_level
-
-    # This _reparametrize_module makes sure inputs and gm_torch_level.params/buffers have the same fake_mode,
-    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
-    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(gm_torch_level, fake_params_buffers):
-        gm, graph_signature = aot_export_module(
-            gm_torch_level,
-            (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
-            trace_joint=False
-        )
+    gm, graph_signature = aot_export_module(
+        gm_torch_level,
+        (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
+        trace_joint=False
+    )
 
     def to_str_list(sig_component: List[Any]):
         return [str(v) for v in sig_component]
@@ -737,7 +721,7 @@ def _export(
     # so we serialize them here instead of inside dynamo
     gm.meta["inline_constraints"] = {
         k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+        for k, v in fake_mode.shape_env.runtime_var_to_range.items()
         if re.match(r"^[if]\d+$", str(k))
     }
 

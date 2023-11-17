@@ -660,6 +660,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
+
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
   // We are working on enabling more useful debug information for watchdog
@@ -765,6 +770,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Mutex to Guard monitorWakeUpCV_
   std::mutex monitorMutex_;
+
+  bool writeDebugInfo_ = false;
+
+  // Mutex to Guard the check of writeDebugInfo_
+  std::mutex writeDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
