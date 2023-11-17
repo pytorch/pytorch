@@ -1719,8 +1719,13 @@ symbolic_tensor_failures = {
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
-    xfail('linalg.norm', ''),  # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
-    xfail('linalg.norm', 'subgradients_at_zero'),  # https://github.com/pytorch/pytorch/issues/113905
+    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
+    xfail('dist', ''),
+    xfail('norm', ''),
+    xfail('linalg.vector_norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('renorm', ''),
+
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
     xfail('randint_like', ''),  # when unpacking SymInt, expected int but got s0
 
@@ -1750,6 +1755,11 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+
+    xfail('linalg.norm', ''),
+    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1813,6 +1823,11 @@ out_symbolic_tensor_failures = {
     xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
+
+    # SymIntArrayRef expected to contain only concrete
+    xfail('ones', ''),
+    xfail('randn', ''),
+    xfail('zeros', ''),
 }
 
 out_symbolic_tensor_segfaults = {

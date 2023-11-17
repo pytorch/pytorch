@@ -1597,7 +1597,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     if input.layout == torch.strided and input.device.type in \
             ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
-            if isinstance(dim, (int, torch.SymInt)):
+            if isinstance(dim, int):
                 _dim = [dim]
             else:
                 _dim = dim
@@ -1605,7 +1605,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             _dim = None  # type: ignore[assignment]
 
         if isinstance(p, str):
-            if p == "fro" and (dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2):
+            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
                 if out is None:
                     return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
                 else:
@@ -1642,7 +1642,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     # remove the overloads where dim is an int and replace with BraodcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
-        if isinstance(dim, (int, torch.SymInt)):
+        if isinstance(dim, int):
             _dim = [dim]
         else:
             _dim = dim
