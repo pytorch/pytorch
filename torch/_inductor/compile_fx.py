@@ -1034,9 +1034,7 @@ def compile_fx(
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
             }
-        ), V.set_real_inputs(
-            example_inputs_
-        ):
+        ), V.set_real_inputs(example_inputs_):
             inputs_ = example_inputs_
             if isinstance(model_, torch.fx.GraphModule):
                 fake_inputs = [
