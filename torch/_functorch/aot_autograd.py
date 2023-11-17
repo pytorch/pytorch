@@ -4349,10 +4349,6 @@ def create_aot_dispatcher_function(
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
 
-                policy = None
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    if x in tracing_context.tensor_to_policy:
-                        policy = tracing_context.tensor_to_policy[x]
 
                 if (
                     idx < aot_config.num_params_buffers
@@ -4360,7 +4356,12 @@ def create_aot_dispatcher_function(
                 ):
                     # TODO: Ensure that this codepath is never exercised from
                     # Dynamo
-                    return fake_mode.from_tensor(x, static_shapes=True, policy=policy)
+                    return fake_mode.from_tensor(x, static_shapes=True)
+
+                policy = None
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if x in tracing_context.tensor_to_policy:
+                        policy = tracing_context.tensor_to_policy[x]
                 return fake_mode.from_tensor(x, static_shapes=False, policy=policy)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
