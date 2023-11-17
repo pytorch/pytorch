@@ -1,9 +1,12 @@
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
@@ -346,6 +349,38 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
+// Function to read what we wrote to the local disk for validation.
+std::string readTraceFromFile(const std::string& filename, size_t size) {
+  std::ifstream file(filename, std::ios::binary);
+  // Read the strings from the file
+  if (file) { // While the file stream is in good state
+    std::string str(size, '\0');
+    file.read(&str[0], size);
+    if (file) {
+      return str;
+    }
+  }
+  return "";
+}
+
+// Extend the nested class outside the parent class
+class TestDebugInfoWriter : public c10d::DebugInfoWriter {
+ public:
+  TestDebugInfoWriter() : DebugInfoWriter(0) {}
+
+  void write(const std::string& ncclTrace) override {
+    traces_.assign(ncclTrace.begin(), ncclTrace.end());
+    c10d::DebugInfoWriter::write(ncclTrace);
+  }
+
+  std::vector<uint8_t>& getTraces() {
+    return traces_;
+  }
+
+ private:
+  std::vector<uint8_t> traces_;
+};
+
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   if (skipTest()) {
     return;
@@ -358,11 +393,24 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, timeInterval.c_str(), 1) ==
       0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  auto tempFilename = c10::str(
+      std::filesystem::temp_directory_path().string(), "/nccl_trace_rank_");
+  ASSERT_TRUE(
+      setenv("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", tempFilename.c_str(), 1) == 0);
+  // Enable nccl flight recorder.
+  ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeatCaught pg(store_, 0, 1, options);
+  // The storer here is very similar to the fallback storer.
+  // The only difference is that we are storing traces also in memory for
+  // validation.
+  std::unique_ptr<TestDebugInfoWriter> wrterForTestPtr =
+      std::make_unique<TestDebugInfoWriter>();
+  std::vector<uint8_t>& traces = wrterForTestPtr->getTraces();
+  pg.registerDebugInfoWriter(std::move(wrterForTestPtr));
 
   // Normal collective case.
   auto work = pg.allreduce(tensors_);
@@ -382,6 +430,12 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());
+  EXPECT_TRUE(traces.size() > 0);
+  auto filename = c10::str(tempFilename, 0);
+  auto traceFromStorage = readTraceFromFile(filename, traces.size());
+  // Check the traces read from storage match with the original nccl trace.
+  EXPECT_TRUE(traceFromStorage == std::string(traces.begin(), traces.end()));
+  std::filesystem::remove(filename);
 }
 
 class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
