@@ -1427,7 +1427,7 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, conv2d) {
+void test_conv2d(bool bias_quantized) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
   constexpr std::array<int64_t, 2u> padding{1, 1};
@@ -1506,7 +1506,7 @@ TEST_F(VulkanAPITest, conv2d) {
   const auto output_vulkan = at::native::vulkan::ops::quantized_conv2d(
       out_vulkan,
       weight_q,
-      bias_q,
+      bias_quantized ? bias_q : bias_cpu,
       stride,
       padding,
       dilation,
@@ -1529,6 +1529,11 @@ TEST_F(VulkanAPITest, conv2d) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d) {
+  test_conv2d(false);
+  test_conv2d(true);
 }
 
 TEST_F(VulkanAPITest, conv2d_pw) {
