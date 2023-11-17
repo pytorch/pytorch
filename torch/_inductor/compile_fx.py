@@ -160,6 +160,7 @@ def _unlift_graph(mod, gm, graph_signature):
         gm,
         graph_signature,
         state_dict,
+        {},
     )
     unlifted_gm = _unlift(
         gm,
@@ -167,8 +168,8 @@ def _unlift_graph(mod, gm, graph_signature):
         pytree.LeafSpec(),
         None,
         state_dict,
+        {},
         graph_signature.buffers_to_mutate,
-        set(graph_signature.user_outputs),
     )
     return unlifted_gm
 
@@ -262,8 +263,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                         assert not isinstance(x, FakeTensor)
                         return x
 
-                tracing_context = torch._guards.TracingContext.get()
-                if tracing_context:
+                if tracing_context := torch._guards.TracingContext.try_get():
                     if tracing_context.output_strides:
                         tracing_context.output_strides.clear()
 
@@ -398,7 +398,7 @@ def compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # Return the output strides to the caller via TracingContext
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         context.output_strides.extend(compiled_graph.output_strides)
@@ -623,6 +623,9 @@ def fx_codegen_and_compile(
                 return compiled_fn
 
             if graph.disable_cudagraphs:
+                perf_hint_log.warning(
+                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
+                )
                 BoxedBool.disable(cudagraphs)
 
             compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
@@ -970,7 +973,7 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    tracing_context = torch._guards.TracingContext.get()
+    tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
         params_flat = tracing_context.params_flat
         assert params_flat is not None
@@ -1120,7 +1123,7 @@ def compile_fx(
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
-            context = torch._guards.TracingContext.get()
+            context = torch._guards.TracingContext.try_get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = (
@@ -1218,7 +1221,8 @@ def compile_fx(
         allow_non_fake_inputs=True
     )
     tracing_context = (
-        torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
+        torch._guards.TracingContext.try_get()
+        or torch._guards.TracingContext(fake_mode)
     )
 
     if V.aot_compilation is True:

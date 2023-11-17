@@ -598,14 +598,6 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
-        elif name == "set_" and len(args) > 1:
-            # torch.Tensor.set_() has several overloads.
-            # aten::set_.source_Tensor(Tensor) gets special handling
-            # in AOTAutograd and functionalization, because it is the most common
-            # overload and is used by FSDP.
-            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
-            # unless we find that we need to make it work.
-            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -774,8 +766,9 @@ class SymNodeVariable(VariableTracker):
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
 
-        if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable.create(int(sym_num))
+        if isinstance(sym_num, (sympy.Integer, int, bool)):
+            sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
+            return ConstantVariable.create(sym_num)
 
         return SymNodeVariable(proxy, sym_num, **options)
 

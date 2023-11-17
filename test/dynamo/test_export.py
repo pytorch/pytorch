@@ -2851,7 +2851,13 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    @common_utils.parametrize("type_fn", [type, lambda obj: obj.__class__])
+    @common_utils.parametrize(
+        "type_fn",
+        [
+            common_utils.subtest(type, name="builtin"),
+            common_utils.subtest(lambda obj: obj.__class__, name="attr"),
+        ],
+    )
     def test_access_class_method_from_user_class(self, type_fn):
         class A:
             @classmethod
@@ -3014,7 +3020,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expect operands to be a tuple of Tensors, but got",
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_list_operands(*example_inputs)
 
@@ -3027,7 +3033,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError, "Expect operands to be a tuple of Tensors, but got"
+            RuntimeError,
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_tensor_operands(*example_inputs)
 

@@ -85,9 +85,13 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
+#ifdef USE_CUDA
+#include <ATen/native/transformers/cuda/sdp_utils.h>
+#endif
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -272,6 +276,7 @@ static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
 }
 
 static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
+  HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_num_threads expects an int, "
@@ -281,6 +286,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
   THPUtils_assert(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_getNumInteropThreads(
@@ -292,6 +298,7 @@ static PyObject* THPModule_getNumInteropThreads(
 static PyObject* THPModule_setNumInteropThreads(
     PyObject* module,
     PyObject* arg) {
+  HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_num_interop_threads expects an int, "
@@ -302,6 +309,7 @@ static PyObject* THPModule_setNumInteropThreads(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_setDefaultTensorType(PyObject* _unused, PyObject* type) {
@@ -1649,6 +1657,54 @@ Call this whenever a new thread is created in order to propagate values from
       "_conv_determine_backend_memory_format",
       at::native::_determine_backend_memory_format);
 
+  ////////////////////////////////////////////////////////////////////////////////
+  // Scaled Dot Product Attention utilities
+  ////////////////////////////////////////////////////////////////////////////////
+  py::class_<sdp::sdp_params>(py_module, "_SDPAParams")
+      .def(py::init([](at::Tensor const& query,
+                       at::Tensor const& key,
+                       at::Tensor const& value,
+                       c10::optional<at::Tensor> attn_mask,
+                       double dropout,
+                       bool is_causal) {
+        return sdp::sdp_params{
+            query, key, value, std::move(attn_mask), dropout, is_causal};
+      }))
+      .def_readonly("query", &sdp::sdp_params::query)
+      .def_readonly("key", &sdp::sdp_params::key)
+      .def_readonly("value", &sdp::sdp_params::value)
+      .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
+      .def_readonly("dropout", &sdp::sdp_params::dropout)
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+
+  py::enum_<sdp::SDPBackend>(
+      py_module,
+      "_SDPBackend",
+      "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
+      .value("ERROR", sdp::SDPBackend::error)
+      .value("MATH", sdp::SDPBackend::math)
+      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
+
+  py_module.def(
+      "_can_use_flash_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_flash_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+  py_module.def(
+      "_can_use_mem_efficient_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_mem_efficient_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
       .value("Cusolver", at::LinalgBackend::Cusolver)
@@ -1826,6 +1882,28 @@ Call this whenever a new thread is created in order to propagate values from
         }
         return map;
       });
+
+  py_module.def(
+      "_storage_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      "Gets the memory address of the Tensor's StorageImpl.");
+
+  py_module.def(
+      "_data_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
+      },
+      "Gets the memory address of the Tensor's data pointer.");
+
+  py_module.def(
+      "_is_cow_tensor",
+      [](const at::Tensor& tensor) {
+        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
+      },
+      "Checks if a tensor's data pointer is COW");
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
