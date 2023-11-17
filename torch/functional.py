@@ -1597,7 +1597,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     if input.layout == torch.strided and input.device.type in \
             ("cpu", "cuda", "meta", torch.utils.backend_registration._privateuse1_backend_name):
         if dim is not None:
-            if isinstance(dim, int):
+            if isinstance(dim, (int, torch.SymInt)):
                 _dim = [dim]
             else:
                 _dim = dim
@@ -1605,7 +1605,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             _dim = None  # type: ignore[assignment]
 
         if isinstance(p, str):
-            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
+            if p == "fro" and (dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2):
                 if out is None:
                     return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
                 else:
@@ -1642,7 +1642,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
     # remove the overloads where dim is an int and replace with BraodcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
-        if isinstance(dim, int):
+        if isinstance(dim, (int, torch.SymInt)):
             _dim = [dim]
         else:
             _dim = dim
@@ -1657,22 +1657,22 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             if _dim is None:
                 _dim = list(range(ndim))
             if out is None:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
             else:
-                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
         elif p == "nuc":
             if dtype is not None:
                 raise ValueError("dtype argument is not supported in nuclear norm")
             if _dim is None:
                 if out is None:
-                    return _VF.nuclear_norm(input, keepdim=keepdim)
+                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore[arg-type]
                 else:
-                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
             else:
                 if out is None:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
                 else:
-                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
