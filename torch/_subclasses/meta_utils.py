@@ -485,8 +485,15 @@ class MetaConverter:
                             # so we can insert some special processing on ctx
                             attrs, ctx = t.__tensor_flatten__()
                             transformed_tensors_dict = {}
+                            orig_shape_env = None
                             for attr in attrs:
                                 inner_t = getattr(t, attr)
+                                if orig_shape_env is None:
+                                    orig_shape_env = (
+                                        inner_t.fake_mode.shape_env
+                                        if isinstance(inner_t, FakeTensor)
+                                        else None
+                                    )
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
                                         inner_t, AttrSource(source, attr)
@@ -494,22 +501,27 @@ class MetaConverter:
                                 )
                             # We expect JaggedTensor to have a 'ragged_size' in
                             # its context
-                            assert isinstance(ctx, dict) and "ragged_size" in ctx
-                            assert (
-                                isinstance(t._size[1], torch.SymInt)
-                                and t._size[1].node.singleton_int() is not None
-                            )
-                            # Replace the eager ragged size with our freshly
-                            # allocated jagged size that has a source
-                            ctx["ragged_size"] = shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    t._size[1],
-                                    TensorPropertySource(
-                                        source, TensorProperty.SIZE, 1
+                            assert isinstance(ctx, dict)
+                            assert "ragged_size" in ctx
+                            assert isinstance(t._size[1], torch.SymInt)
+                            if orig_shape_env is shape_env:
+                                # It's already fake and the shape envs line up, reuse the old size
+                                # Do not assert singleton_int; it may already
+                                # be a variable
+                                ctx["ragged_size"] = t._size[1]
+                            else:
+                                assert t._size[1].node.singleton_int() is not None
+                                # Replace the eager ragged size with our freshly
+                                # allocated jagged size that has a source
+                                ctx["ragged_size"] = shape_env.create_symintnode(
+                                    shape_env.create_symbol(
+                                        t._size[1],
+                                        TensorPropertySource(
+                                            source, TensorProperty.SIZE, 1
+                                        ),
                                     ),
-                                ),
-                                hint=t._size[1],
-                            )
+                                    hint=t._size[1]
+                                )
                             r = type(t).__tensor_unflatten__(
                                 transformed_tensors_dict, ctx
                             )
