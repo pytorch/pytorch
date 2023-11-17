@@ -65,7 +65,7 @@ class CycleIteratorVariable(IteratorVariable):
 
         if self.iterator is not None:
             try:
-                new_item = self.iterator.next_variables(tx)
+                new_item, _ = self.iterator.next_variables(tx)
                 if len(self.saved) > MAX_CYCLE:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
