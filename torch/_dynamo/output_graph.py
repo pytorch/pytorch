@@ -29,7 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv, free_unbacked_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1001,6 +1001,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             {},
         )
         self.remove_unused_graphargs()
+        self.insert_deferred_runtime_asserts()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
 
@@ -1170,6 +1171,69 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 else:
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
+
+    def insert_deferred_runtime_asserts(self) -> None:
+        """
+        During tracing, we may have discovered that some data-dependent values
+        had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
+        that x.item() >= 0.  This asserts can happen unpredictably during fake
+        tensor propagation, so we cannot conveniently insert them into the FX graph
+        when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
+        pass insert them into the graph as proper tests.
+        """
+        # TODO: Request simplification on runtime asserts before emitting them
+        # We are going to mutate the dict
+        ras_by_symbol = self.shape_env.deferred_runtime_asserts.copy()
+        symbol_to_node = {}
+        for node in self.graph.nodes:
+            if "example_value" not in node.meta:
+                continue
+
+            defs = []
+
+            # For every new unbacked symbol, we need an fx.Node representing
+            # precisely this value.  There are a few places where the unbacked
+            # symbol could have come from, and we will check them to setup
+            # these nodes.
+            #
+            # For a case like item(), this is trivial (no new node is added.)
+            #
+            # For nonzero(), we need to add something like i0 = out.size(0)
+            #
+            # We could end up with duplicate nodes this way but it is not a
+            # big deal.
+            def match_symbol(symint, cb):
+                if (
+                    isinstance(symint, torch.SymInt) and
+                    isinstance(i0 := symint.node.expr, sympy.Symbol) and
+                    i0 not in symbol_to_node and
+                    self.shape_env.is_unbacked_symint(i0)
+                ):
+                    with self.graph.inserting_after(node):
+                        symbol_to_node[i0] = cb()
+                    defs.append(i0)
+
+            match_symbol(node.meta["example_value"], lambda: node)
+            if isinstance(t := node.meta["example_value"], torch.Tensor):
+                for i, s in enumerate(t.size()):
+                    match_symbol(s, lambda: self.graph.call_method("size", (node, i)))
+                for i, s in enumerate(t.stride()):
+                    match_symbol(s, lambda: self.graph.call_method("stride", (node, i)))
+                match_symbol(s, lambda: self.graph.call_method("storage_offset", (node,)))
+
+            for i0 in defs:
+                ras = ras_by_symbol.pop(i0, [])
+                for ra in ras:
+                    needs = free_unbacked_symbols(ra.expr)
+                    missing = needs - symbol_to_node.keys()
+                    if missing:
+                        ras_by_symbol.setdefault(sorted(missing)[0], []).append(ra)
+                    else:
+                        # Convert the sympy expression into a sequence of FX
+                        # nodes
+                        sympy_interp()
+                        print(node)
+                        print(ra.expr)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """

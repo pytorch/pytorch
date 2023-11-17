@@ -165,7 +165,7 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
         # singleton ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, sympy.Expr):
+    elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool)):
         pass
