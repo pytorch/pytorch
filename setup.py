@@ -1110,12 +1110,17 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
-        "typing-extensions",
+        "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
         "jinja2",
         "fsspec",
     ]
+
+    if IS_WINDOWS and sys.version_info >= (3, 12, 0):
+        # torch.version requires this and it is not part
+        # of the default cpython install on windows in 3.12+
+        install_requires.append("packaging")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
