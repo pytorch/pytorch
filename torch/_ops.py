@@ -373,6 +373,9 @@ class HigherOrderOperator(OperatorBase):
 
     def name(self):
         return self._name
+    
+    def __deepcopy__(self, memo=None):
+        return self
 
 
 def _to_flat_tuple(args, kwargs):
