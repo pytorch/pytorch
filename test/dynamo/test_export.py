@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
+    FreshCreateSymbolicPolicy,
     ShapeEnv,
 )
 from torch.testing._internal import common_utils
@@ -2851,8 +2852,13 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    @common_utils.parametrize("type_fn", [type, lambda obj: obj.__class__])
-    def test_access_class_method_from_user_class(self, type_fn):
+    @common_utils.parametrize("type_access", ["builtin", "class"])
+    def test_access_class_method_from_user_class(self, type_access):
+        if type_access == "builtin":
+            type_fn = type
+        elif type_access == "class":
+            type_fn = lambda obj: obj.__class__  # noqa: E731
+
         class A:
             @classmethod
             def func(cls):
@@ -3241,7 +3247,10 @@ def forward(self, x):
                 shape_env=shape_env,
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
+                    ),
                 )
                 for i, size in enumerate(size_tests):
                     pred = fake_x.size(0) == size

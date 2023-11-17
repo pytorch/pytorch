@@ -10,7 +10,6 @@ from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_di
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.testing._internal.common_state_dict import VerifyStateDictMixin
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -23,6 +22,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
 # Simple and boring model to test interface and some corner cases that do not
@@ -63,7 +63,7 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type):
+    def _create_model(self, compile, model_type, train_steps=2):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."

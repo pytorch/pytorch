@@ -392,7 +392,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b, Generator? generator=None) -> Tensor(a!)"),
+            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -402,16 +402,13 @@ RegisterOperators reg({
           double a;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
-          c10::optional<at::Generator> generator =
-              pop(stack).toOptional<at::Generator>();
-
           pop(stack, tensor, a, b);
-          push(stack, tensor.uniform_(a, b, generator));
+          push(stack, tensor.uniform_(a, b));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std, Generator? generator=None) -> Tensor(a!)"),
+            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -421,11 +418,8 @@ RegisterOperators reg({
           double mean;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
-          c10::optional<at::Generator> generator =
-              pop(stack).toOptional<at::Generator>();
-
           pop(stack, tensor, mean, std);
-          push(stack, tensor.normal_(mean, std, generator));
+          push(stack, tensor.normal_(mean, std));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
