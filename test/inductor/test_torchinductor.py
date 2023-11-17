@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import math
 import operator
@@ -851,20 +852,23 @@ class CommonTemplate:
             fn,
             inps,
             has_assert: typing.Union[bool, typing.Callable[[bool], bool]],
-            has_wrapping: bool,
+            has_wrapping: typing.Union[bool, typing.Callable[[bool], bool]],
         ):
+            def get_value(fn, dynamic):
+                return fn(dynamic) if inspect.isfunction(fn) else fn
+
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
 
-                import inspect
-
-                has_assert_ = (
-                    has_assert(dynamic)
-                    if inspect.isfunction(has_assert)
-                    else has_assert
-                )
-                if inspect.isfunction(has_assert):
-                    has_assert_ = has_assert(dynamic)
+                has_assert_ = get_value(has_assert, dynamic)
+                has_wrapping_ = get_value(has_wrapping, dynamic)
+                # has_assert_ = (
+                #     has_assert(dynamic)
+                #     if inspect.isfunction(has_assert)
+                #     else has_assert
+                # )
+                # if inspect.isfunction(has_assert):
+                #     has_assert_ = has_assert(dynamic)
 
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
@@ -873,11 +877,11 @@ class CommonTemplate:
                     pattern = r"\?.*:"
                     if re.findall(pattern, code):
                         found = True
-                    self.assertTrue(found is has_wrapping)
+                    self.assertTrue(found is has_wrapping_)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert_)
                 else:
                     code = run_and_get_triton_code(fn_opt, *inps)
-                    self.assertTrue(("tl.where" in code) is has_wrapping)
+                    self.assertTrue(("tl.where" in code) is has_wrapping_)
                     self.assertTrue(("device_assert" in code) is has_assert_)
                 self.assertEqual(fn(*inps), fn_opt(*inps))
 
@@ -910,14 +914,19 @@ class CommonTemplate:
             return dynamic
 
         # Wrapping is constant-folded
-        test(flip_with_index_constant, (a,), has_assert=is_dynamic, has_wrapping=False)
+        test(
+            flip_with_index_constant,
+            (a,),
+            has_assert=is_dynamic,
+            has_wrapping=is_dynamic,
+        )
 
         # Operation where we can't prove that the index is always positive or negative
         def pos_and_neg(a):
             b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device=self.device)
             return a[b]
 
-        # It has wrapping but no assert
+        # It has wrapping but no assert when dynamic=False
         test(pos_and_neg, (a,), has_assert=is_dynamic, has_wrapping=True)
 
         # We currently don't do constant propagation with float constants
@@ -929,7 +938,12 @@ class CommonTemplate:
             return a[b]
 
         # Constant is propagated as we can prove that the result is always negative.
-        test(flip_with_index_constant, (a,), has_assert=is_dynamic, has_wrapping=False)
+        test(
+            flip_with_index_constant,
+            (a,),
+            has_assert=is_dynamic,
+            has_wrapping=is_dynamic,
+        )
 
         def unsafe_index(a, b):
             return aten._unsafe_index(a, (b,))

@@ -49,7 +49,6 @@ from .common import (
     free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
-    IndirectAssertLine,
     Kernel,
     OpOverrides,
     PythonPrinter,
@@ -213,31 +212,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype):
         return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
-
-    @staticmethod
-    def check_bounds(expr, size):
-        code = IndentedBuffer()
-
-        var = V.kernel.cse.newvar()
-        expr = texpr(V.kernel.rename_indexing(expr))
-        code.writeline(f"{var} = {expr};")
-
-        mask = None  # is there a mask for var?
-        code.writeline(
-            IndirectAssertLine(
-                V.kernel.assert_line,
-                V.kernel.assert_function,
-                var,
-                mask,
-                V.kernel.indirect_max_sizes,
-            )
-        )
-
-        map_key = (var, mask)
-        V.kernel.indirect_max_sizes[map_key] = (size, V.kernel.index_to_str(size))
-
-        V.kernel.compute.splice(code)
-        return var
 
     @classmethod
     def constant(cls, value, dtype):
@@ -1110,6 +1084,15 @@ class TritonKernel(Kernel):
         new_index_vars = tree.construct(new_sizes)
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
+
+    def get_ranges(self):
+        ranges = {}
+        for symbol, range_ in self.var_ranges().items():
+            r = ValueRanges.unknown()
+            if isinstance(range_, int) or range_.is_number:
+                r = ValueRanges(0, range_ - 1)
+            ranges[symbol] = r
+        return ranges
 
     def index_to_str(self, index: sympy.Expr) -> str:
         """

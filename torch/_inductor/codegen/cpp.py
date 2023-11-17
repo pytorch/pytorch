@@ -43,7 +43,6 @@ from .common import (
     DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
-    IndirectAssertLine,
     Kernel,
     KernelArgs,
     OpOverrides,
@@ -832,28 +831,6 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.is_most_inner_loop_irrevelant
         return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
 
-    def check_bounds(self, expr, size):
-        size = V.kernel.rename_indexing(size)
-
-        lower = V.kernel.cse.newvar()
-        upper = V.kernel.cse.newvar()
-
-        code = IndentedBuffer()
-
-        index_expr = V.kernel.rename_indexing(expr)
-        code.writeline(f'auto {lower} = {cexpr(index_expr)};')
-        code.writeline(f'auto {upper} = {cexpr(index_expr)};')
-
-        x = V.kernel.cse.newvar()
-        code.writeline(f'auto {x} = (0 <= {lower}) & ({upper} < {size});')
-        cond = V.kernel.assert_line.format(
-            assert_fn=V.kernel.assert_function,
-            cond=f"({lower} >= 0) & ({upper} < {size})",
-            cond_print=f"({lower} >= 0) & ({upper} < {size})")
-        code.writeline(cond)
-
-        V.kernel.compute.splice(code)
-        return lower
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -1110,31 +1087,6 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
-    def check_bounds(expr, size):
-        code = IndentedBuffer()
-
-        var = V.kernel.cse.newvar()
-        expr = cexpr(V.kernel.rename_indexing(expr))
-        code.writeline(f"auto {var} = {expr};")
-
-        mask = None  # is there a mask for var?
-        code.writeline(
-            IndirectAssertLine(
-                V.kernel.assert_line,
-                V.kernel.assert_function,
-                var,
-                mask,
-                V.kernel.indirect_max_sizes,
-            )
-        )
-
-        map_key = (var, mask)
-        V.kernel.indirect_max_sizes[map_key] = (size, V.kernel.index_to_str(size))
-
-        V.kernel.compute.splice(code)
-        return var
-
-    @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
 
@@ -1283,6 +1235,15 @@ class CppKernel(Kernel):
         e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
         """
         return cexpr(self.rename_indexing(index))
+
+    def get_ranges(self):
+        ranges = {}
+        for idx, upper in zip(self.itervars, self.ranges):
+            r = ValueRanges.unknown()
+            if isinstance(upper, int) or upper.is_number:
+                r = ValueRanges(0, upper - 1)
+            ranges[idx] = r
+        return ranges
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -2345,11 +2306,6 @@ class CppVecKernelChecker(CppVecKernel):
                     opt_ctx.is_most_inner_loop_irrevelant = tiling_var_irrelevant
                     tmp_var = self.cse.newvar()
                     return tmp_var
-
-            @staticmethod
-            def check_bounds(expr, size):
-                tmp_var = self.cse.newvar()
-                return tmp_var
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):

@@ -25,7 +25,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..utils import (
@@ -898,9 +898,6 @@ class Kernel(CodeGen):
         # Upper bounds for indirect_indexing and their str representation
         self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
 
-        # line used in TORCH_CHECK/tl.device_assert
-        self.assert_line = '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
 
@@ -1046,9 +1043,12 @@ class Kernel(CodeGen):
                     if existing_size is not None:
                         size = sympy.Min(size, existing_size)
                     else:
+                        line = (
+                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                        )
                         self.compute.writeline(
                             IndirectAssertLine(
-                                self.assert_line,
+                                line,
                                 self.assert_function,  # type: ignore[attr-defined]
                                 var,
                                 mask,
@@ -1072,6 +1072,33 @@ class Kernel(CodeGen):
                 if name in store_cache:
                     return store_cache[name]
                 return self.load(name, index)
+
+            @staticmethod
+            def check_bounds(var, expr, size):
+                ranges = self.get_ranges()  # type: ignore[attr-defined]
+
+                should_compute_bounds = True
+                if isinstance(size, int) or size.is_number:
+                    if "Where" in str(expr):
+                        expr_ = expr.subs({expr.args[-1]: 0})
+                        bounds = bound_sympy(expr_, ranges)
+                        # bounds must be within the range [-size, size) to be valid
+                        if bounds.lower >= -size and bounds.upper < size:
+                            should_compute_bounds = False
+                    else:
+                        bounds = bound_sympy(expr, ranges)
+                        # bounds in [0, size)
+                        if bounds.lower >= 0 and bounds.upper < size:
+                            should_compute_bounds = False
+
+                if should_compute_bounds:
+                    bounds = bound_sympy(expr, ranges)
+                    index = self.index_to_str(expr)  # type: ignore[attr-defined]
+                    new_var = self.cse.generate(self.compute, index, bounds=bounds)
+                    new_var.update_on_args("index_wrap", (var,), {})
+                    # print('var name', var.name)
+                    return CSEProxy.indirect_indexing(new_var, size)
+                    # return self.generate_bounds_check(var, size, True)
 
             @staticmethod
             def store(name, index, value, mode=None):
