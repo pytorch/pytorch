@@ -1096,6 +1096,9 @@ class Kernel(CodeGen):
                     index = self.index_to_str(expr)  # type: ignore[attr-defined]
                     new_var = self.cse.generate(self.compute, index, bounds=bounds)
                     new_var.update_on_args("index_wrap", (var,), {})
+                    # set the bounds on new_var as "update_on_args" may change
+                    # the bounds to "var.bounds"
+                    new_var.bounds = bounds
                     return CSEProxy.indirect_indexing(new_var, size)
 
             @staticmethod
