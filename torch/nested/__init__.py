@@ -64,17 +64,16 @@ def as_nested_tensor(
         >>> c = torch.randn(3, 5, requires_grad=True)
         >>> nt2 = torch.nested.as_nested_tensor(c)
     """
-    is_tensor = isinstance(ts, Tensor)
     is_tensor_list = isinstance(ts, list) and all(isinstance(t, Tensor) for t in ts)
-    if not is_tensor and not is_tensor_list:
+    if not isinstance(ts, Tensor) and not is_tensor_list:
         raise TypeError(
             "as_nested_tensor(): Expected first argument to be a tensor or a list of tensors "
         )
 
-    if is_tensor and ts.dim() < 2:
+    if isinstance(ts, Tensor) and ts.dim() < 2:
         raise RuntimeError("as_nested_tensor(): Expected tensor argument to have dim() > 1")
 
-    if is_tensor and ts.is_nested:
+    if isinstance(ts, Tensor) and ts.is_nested:
         if layout == ts.layout:
             # return input directly or input copied to device / dtype
             return ts.to(device=device, dtype=dtype)
@@ -86,7 +85,7 @@ def as_nested_tensor(
     if layout is None:
         layout = torch.strided
     if layout == torch.strided:
-        if is_tensor:
+        if isinstance(ts, Tensor):
             # contiguous() might be necessary to get flattened view.
             # we could probably be more precise about when to do this as an optimization
             buffer = ts.contiguous().view(-1).to(device=device, dtype=dtype)
@@ -98,7 +97,7 @@ def as_nested_tensor(
         else:
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
-        if is_tensor:
+        if isinstance(ts, Tensor):
             # contiguous() might be necessary to get flattened view.
             # we could probably be more precise about when to do this as an optimization
             values = ts.contiguous().flatten(0, 1).to(device=device, dtype=dtype)
@@ -106,7 +105,10 @@ def as_nested_tensor(
             seq_len = ts.shape[1]
             offsets = torch.arange(0, batch_size * seq_len + 1, seq_len,
                                    device=device, dtype=torch.int64)
-            return torch._nested_view_from_values_offsets(values, offsets)
+
+            from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+
+            return nested_view_from_values_offsets(values, offsets)
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 

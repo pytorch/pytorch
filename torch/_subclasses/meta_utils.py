@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional, TYPE_CHECKING
+from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
@@ -187,6 +187,8 @@ class MetaConverter:
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
     ):
+        from torch._subclasses.fake_tensor import FakeTensor
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -235,18 +237,23 @@ class MetaConverter:
 
         def sym_sizes_strides_storage_offset(
             t, src, dynamic_dims=dynamic_dims, constraint_dims=constraint_dims
-        ):
+        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(
-                    t,
-                    src,
-                    # Assume that the set of dims that are dynamic are the same between
-                    # the wrapper tensor and any inner tensors.
-                    # We can revisit this if this assumption does not hold
-                    # for any important subclasses later.
-                    dynamic_dims=dynamic_dims,
-                    constraint_dims=constraint_dims,
-                )
+                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
+                    # Don't reallocate the sizes; the shape envs are the same,
+                    # so reuse the old sizes/strides/etc
+                    return (t.size(), t.stride(), t.storage_offset())
+                else:
+                    return shape_env.create_symbolic_sizes_strides_storage_offset(
+                        t,
+                        src,
+                        # Assume that the set of dims that are dynamic are the same between
+                        # the wrapper tensor and any inner tensors.
+                        # We can revisit this if this assumption does not hold
+                        # for any important subclasses later.
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
+                    )
             else:
                 assert dynamic_dims is None
                 assert constraint_dims is None
@@ -586,8 +593,15 @@ class MetaConverter:
                             # so we can insert some special processing on ctx
                             attrs, ctx = t.__tensor_flatten__()
                             transformed_tensors_dict = {}
+                            orig_shape_env = None
                             for attr in attrs:
                                 inner_t = getattr(t, attr)
+                                if orig_shape_env is None:
+                                    orig_shape_env = (
+                                        inner_t.fake_mode.shape_env
+                                        if isinstance(inner_t, FakeTensor)
+                                        else None
+                                    )
                                 if attr == "_values":
                                     # convert dynamic_dims from NT dim space -> values dim space
                                     inner_dynamic_dims = (
@@ -611,9 +625,21 @@ class MetaConverter:
                                         constraint_dims=inner_constraint_dims,
                                     )
                                 )
-
-                            ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
-
+                            # We expect JaggedTensor to have a 'ragged_size' in
+                            # its context
+                            assert isinstance(ctx, dict)
+                            assert "ragged_size" in ctx
+                            assert isinstance(t._size[1], torch.SymInt)
+                            if orig_shape_env is shape_env:
+                                # It's already fake and the shape envs line up, reuse the old size
+                                # Do not assert singleton_int; it may already
+                                # be a variable
+                                ctx["ragged_size"] = t._size[1]
+                            else:
+                                assert t._size[1].node.singleton_int() is not None
+                                # Replace the eager ragged size with our freshly
+                                # allocated jagged size that has a source
+                                ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
                             r = type(t).__tensor_unflatten__(
                                 transformed_tensors_dict, ctx
                             )
@@ -728,22 +754,14 @@ class MetaConverter:
         shape_env=None,
         *,
         callback=lambda t: t(),
-        ignore_subclass=False,
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        from torch._subclasses.fake_tensor import FakeTensor
 
-        if (
-            type(t) is torch.Tensor
-            or type(t) is torch.nn.Parameter
-            or (ignore_subclass and isinstance(t, torch.Tensor))
-            or is_traceable_wrapper_subclass(t)
-            or isinstance(t, FakeTensor)
-        ):
+        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
@@ -810,23 +828,14 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                # When ignoring subclasses, we treat the input tensor "as if" it
-                # were a normal tensor and create a non-subclassed fake tensor
-                # that, modulo type and attributes, resembles the original tensor.
-                # This can be helpful if you're planning to simulate the subclassness
-                # by hand, e.g., as is done in Dynamo
-                ctx = contextlib.nullcontext()
-                if ignore_subclass:
-                    ctx = torch._C.DisableTorchFunctionSubclass()
-                with ctx:
-                    r = self.meta_tensor(
-                        t,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
-                    )
+                r = self.meta_tensor(
+                    t,
+                    shape_env=shape_env,
+                    callback=callback,
+                    source=source,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
+                )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable

@@ -3340,10 +3340,11 @@ class TestNestedTensorSubclass(NestedTestCase):
     @parametrize("contiguous", [False, True])
     def test_as_nested_tensor_from_tensor(
             self, device, dtype, dim, layout, requires_grad, contiguous):
-        t = (
-            torch.randn(*range(3, 3 + dim), requires_grad=requires_grad) if dim > 0
-            else torch.tensor(3., requires_grad=requires_grad)
-        )
+        if dim == 0:
+            t = torch.tensor(3., requires_grad=requires_grad)
+        else:
+            t = torch.randn(*(3 for _ in range(dim)), requires_grad=requires_grad)
+        assert t.dim() == dim
 
         if dim < 2:
             # 0-1 dim tensors can't be converted to NTs
@@ -3356,13 +3357,13 @@ class TestNestedTensorSubclass(NestedTestCase):
             t = t.transpose(0, 1)
 
         nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
-        self._validate_nt(nt, list(t.unbind(0)), device, dtype, requires_grad, layout)
+        expected_dim = t.dim()
+        expected_batch_size = t.size(0)
+        self._validate_nt(
+            nt, device, dtype, layout, requires_grad, expected_dim, expected_batch_size)
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
             # should be the non-copying (view) case
-            # TODO: Figure out why this is broken!
-            # torch._nested_view_from_buffer_cont() is not returning a view for some reason
-            # ViewNestedFromBuffer doesn't return a view either (and this is expected)
             self.assertTrue(nt._is_view() and nt._base is t)
 
         # should be equivalent to construction from unbound tensor list
