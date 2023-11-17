@@ -91,9 +91,10 @@ class _ToTorchTensor(torch.autograd.Function):
                 grad_output, grad_spec, dtensor_spec
             )
 
-        _, tensor_stride = compute_global_tensor_info(
+        _, tensor_stride, placements = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements
         )
+        dtensor_spec.placements = placements
         return (
             DTensor(
                 grad_output,
@@ -129,7 +130,7 @@ class _FromTorchTensor(torch.autograd.Function):
             # if it's not by default run_check, we assume user is certain that each
             # rank has the same tensor shape, and we just use that to calculate the
             # global shape
-            global_shape, global_stride = compute_global_tensor_info(
+            global_shape, global_stride, placements = compute_global_tensor_info(
                 input, device_mesh, placements
             )
             tensor_shape, tensor_stride = torch.Size(global_shape), tuple(global_stride)
@@ -238,6 +239,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         tensor_meta = TensorMeta(shape, stride, dtype)
         # deepcopy and set spec
+        if not isinstance(placements, tuple):
+            placements = tuple(placements)
         r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         r._local_tensor = local_tensor
         return r
@@ -383,6 +386,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
+        if not isinstance(grad_placements, tuple):
+            grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
             self, grad_placements, True
         )  # pyre-ignore[16]: autograd func
@@ -421,14 +426,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
 
-        for placement in placements:
+        placements = list(placements)
+        for i, placement in enumerate(placements):
             if placement.is_partial():
                 raise RuntimeError(
                     "Can not redistribute to _Partial, _Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
-                placement.dim += self.ndim
+                placements[i] = Shard(placement.dim + self.ndim)
+        placements = tuple(placements)
 
         # Early return the original DTensor if the placements are the same.
         if self._spec.placements == placements:

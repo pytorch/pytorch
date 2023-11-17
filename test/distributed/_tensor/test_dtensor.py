@@ -45,13 +45,13 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
+        placements = [Shard(0)]
         local_tensor = torch.randn(3, 3, requires_grad=True)
         dist_tensor_shape = torch.Size([self.world_size * 3, 3])
         dist_tensor = DTensor(
             local_tensor,
             device_mesh,
-            shard_spec,
+            placements,
             shape=dist_tensor_shape,
             dtype=local_tensor.dtype,
             requires_grad=True,
@@ -63,7 +63,7 @@ class DTensorTest(DTensorTestBase):
             DTensor(
                 local_tensor,
                 device_mesh,
-                shard_spec,
+                placements,
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
                 requires_grad=False,
@@ -75,7 +75,7 @@ class DTensorTest(DTensorTestBase):
             dist_tensor = DTensor(
                 local_tensor,
                 device_mesh,
-                shard_spec,
+                placements,
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
                 requires_grad=True,
@@ -263,9 +263,9 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_from_local_negative_dim(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(-1)]
+        placements = [Shard(-1)]
         local_tensor = torch.randn(3, 3)
-        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
         self.assertEqual(sharded_tensor.placements[0].dim, 1)
 
     @with_comms
