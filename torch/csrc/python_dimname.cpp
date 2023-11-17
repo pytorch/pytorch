@@ -24,11 +24,15 @@ struct InternedStringsTable {
 InternedStringsTable kPyInternedStringToDimname;
 
 InternedStringsTable::~InternedStringsTable() {
-  for (auto it = py_interned_string_to_dimname_.begin();
-       it != py_interned_string_to_dimname_.end();
-       ++it) {
-    // See Note [References to python interned strings]
-    Py_DECREF(it->first);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    for (auto it = py_interned_string_to_dimname_.begin();
+         it != py_interned_string_to_dimname_.end();
+         ++it) {
+      // See Note [References to python interned strings]
+      Py_DECREF(it->first);
+    }
   }
 }
 
