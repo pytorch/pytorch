@@ -2,7 +2,6 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Set
-from warnings import warn
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
