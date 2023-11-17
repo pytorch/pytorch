@@ -119,6 +119,7 @@ def rebase_ghstack_onto(
 
     if dry_run:
         print("Don't know how to dry-run ghstack")
+        return False
     else:
         ghstack_result = subprocess.run(["ghstack"], capture_output=True, check=True)
         push_result = ghstack_result.stdout.decode("utf-8")
