@@ -15,7 +15,6 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
 from functools import wraps
 from typing import List
 
@@ -853,8 +852,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             False,
         )
         # (dynamic shapes, static shapes)
-        self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (106, 127))
+        self.assertIn(cnt.frame_count, (4, 7))
+        self.assertIn(cnt.op_count, (83, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -952,6 +951,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test = f_compiled(x2)
         self.assertEqual(out_ref, out_test)
 
+    # https://github.com/pytorch/pytorch/issues/90552
+    def test_intermediate_leaf_requires_grad(self):
+        def f(x):
+            leaf = torch.ones(2, requires_grad=True)
+            return leaf, leaf * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        leaf, out = f(x)
+        leaf_test, out_test = f_compiled(x)
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(leaf.grad, leaf_test.grad)
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
@@ -975,27 +989,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
-
-    # https://github.com/pytorch/pytorch/issues/111603
-    def test_tuple_enum_as_key_dict(self):
-        class MyEnum(Enum):
-            A = "a"
-
-        class SomeModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x) -> torch.Tensor:
-                return self.linear(x[MyEnum.A])
-
-        x = {MyEnum.A: torch.rand(8, 1)}
-        model_pytorch = SomeModel()
-        model = torch.compile(model_pytorch)
-        # Executing twice works
-        model(x)
-        y = model(x)
-        self.assertEqual(y, model_pytorch(x))
 
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
@@ -2908,10 +2901,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
+    @torch._dynamo.config.patch(verbose=True)
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
-
-        torch._dynamo.config.verbose = True
 
         @torch._dynamo.optimize(counter)
         def f(x):
@@ -3579,6 +3571,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager, compiled)
             if isinstance(backend, CompileCounter):
                 self.assertEqual(backend.frame_count, 2)  # graph breaks
+
+    def test_dynamic_shapes_double_not_equal(self):
+        # https://github.com/pytorch/pytorch/issues/113393
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        x = torch.ones(5, 1, 2, 3)
+        x2 = torch.ones(5, 1, 3, 4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):

@@ -827,7 +827,6 @@ def has_same_metadata(t1, t2):
         definitely_true(sym_eq(t1.size(), t2.size()))
         and definitely_true(sym_eq(t1.stride(), t2.stride()))
         and definitely_true(t1.storage_offset() == t2.storage_offset())
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
@@ -2645,7 +2644,7 @@ def create_synthetic_base_metadata(
         mutates_data = True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
-        mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
+        mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,

@@ -431,6 +431,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl()
 
+        def test_sparsity(self):
+            def foo(view_6, buf31):
+                return aten._sparse_coo_tensor_with_dims_and_tensors(
+                    1,
+                    1,
+                    [1000000, 64],
+                    view_6,
+                    buf31,
+                    dtype=torch.float32,
+                    layout=torch.sparse_coo,
+                    device="cuda",
+                    pin_memory=None,
+                )
+
+            foo_opt = torch.compile(foo)
+
+            view_6 = torch.zeros([1, 102397], dtype=torch.int64, device="cuda")
+            buf31 = torch.rand([102397, 64], device="cuda")
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(view_6, buf31), foo(view_6, buf31))
+
         def test_accumulate_multiple_recordings(self):
             def foo(x):
                 y = x + x + x
