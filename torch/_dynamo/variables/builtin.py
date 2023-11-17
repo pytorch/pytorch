@@ -346,12 +346,11 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b, options):
+        def list_iadd_handler(tx, a, b, _):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
-            # TODO mlazos: need to handle options here
             a.items.extend(b.unpack_var_sequence(tx))
             return a
 
@@ -883,7 +882,6 @@ class BuiltinVariable(VariableTracker):
             if isinstance(arg, dict):
                 return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.ConstDictVariable):
-                # TODO mlazos clone: remove this
                 return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
             elif isinstance(
                 arg,
@@ -1163,7 +1161,6 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                # TODO mlazos clone: remove this
                 var = obj.var_getattr(tx, name)
                 var.source = source
                 return var
@@ -1191,7 +1188,6 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                # TODO mlazos clone: remove this
                 var = obj.var_getattr(tx, name)
                 var.source = source
                 return var

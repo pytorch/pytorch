@@ -69,7 +69,6 @@ class LazyVariableTracker(VariableTracker):
         assert kwargs.get("_cache", self._cache) is self._cache
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
-        # TODO mlazos clone: remove this
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
     def __str__(self):

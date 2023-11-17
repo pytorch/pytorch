@@ -79,14 +79,12 @@ class BaseListVariable(VariableTracker):
 
         if isinstance(index, slice):
             if self.source is not None:
-                # TODO mlazos clone: remove this
                 return self.clone(
                     items=self.items[index],
                     source=GetItemSource(self.source, index),
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 )
             else:
-                # TODO mlazos clone: remove this
                 return self.clone(
                     items=self.items[index],
                     mutable_local=MutableLocal() if self.mutable_local else None,
