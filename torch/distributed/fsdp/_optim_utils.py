@@ -12,6 +12,7 @@ from typing import (
     Iterator,
     List,
     NamedTuple,
+    no_type_check,
     Optional,
     Sequence,
     Set,
@@ -46,7 +47,11 @@ from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
     _reset_flat_param_grad_info_if_needed,
 )
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp.api import (
+    ShardingStrategy,
+    StateDictSettings,
+    StateDictType,
+)
 from torch.utils._pytree import tree_map_only
 
 
@@ -2054,3 +2059,28 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         fqn_to_param_info,
     )
+
+
+@no_type_check
+def _set_optim_use_dtensor(
+    module: nn.Module,
+    state_dict_settings: StateDictSettings,
+) -> None:
+    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
+    # has to be set to SHARDED_STATE_DICT.
+    if getattr(module, "device_mesh", None):
+        state_dict_type = state_dict_settings.state_dict_type
+        if state_dict_type == StateDictType.LOCAL_STATE_DICT:
+            raise RuntimeError(
+                "Found state_dict_type LOCAL_STATE_DICT.",
+                "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+            )
+        elif state_dict_type == StateDictType.FULL_STATE_DICT:
+            logger.warning(
+                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
+            )
+        else:
+            state_dict_settings.optim_state_dict_config._use_dtensor = True
