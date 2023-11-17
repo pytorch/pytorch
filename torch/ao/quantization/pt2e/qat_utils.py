@@ -18,6 +18,7 @@ from torch.ao.quantization.quantizer import (
     QuantizationSpecBase,
 )
 from .utils import (
+    _conv2d_bn_example_inputs,
     _is_supported_batch_norm_for_training,
     fold_bn_weights_into_conv_node,
     get_aten_graph_module,
@@ -26,17 +27,6 @@ from .utils import (
 
 __all__ = []  # type: ignore[var-annotated]
 
-
-# Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
-_conv2d_bn_pattern_example_inputs = (
-    torch.randn(1, 1, 3, 3),  # x
-    torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),           # conv_bias
-    torch.randn(1),           # bn_weight
-    torch.randn(1),           # bn_bias
-    torch.randn(1),           # bn_running_mean
-    torch.randn(1),           # bn_running_var
-)
 
 # Example inputs for both `_quantized_qat_conv2d_bn_pattern` and `_folded_quantized_qat_conv2d_bn_pattern`
 _quantized_conv2d_bn_pattern_example_inputs = (
@@ -520,7 +510,7 @@ def _fuse_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
     """
     m.graph.eliminate_dead_code()
     m.recompile()
-    example_inputs = _conv2d_bn_pattern_example_inputs
+    example_inputs = _conv2d_bn_example_inputs
     match_pattern = get_aten_graph_module(_conv2d_bn_pattern, example_inputs, is_cuda)
 
     # Step (1): Replace patterns with conv bias

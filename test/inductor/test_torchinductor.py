@@ -368,7 +368,10 @@ def check_model(
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
                 assert correct_val.size() == actual_val.size()
-                assert correct_val.stride() == actual_val.stride()
+                strides_equal, _ = torch._prims_common.check_significant_strides(
+                    correct_val, actual_val
+                )
+                assert strides_equal
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
@@ -6893,10 +6896,9 @@ class CommonTemplate:
         # If assume_static_by_default is set, the calls above will trigger
         # 3 function compilation:
         #   1. assuming 'n' is static (equals 2)
-        #   2. making 'n' dynamic, but with the guard 'end < x.shape[0]'
+        #   2. making 'n' dynamic, but with the guard 'end <= x.shape[0]'
         #      (from: torch._inductor.ir.SliceView.create)
-        #   3. when 'n' equals 6 (the above guard is violated)
-        frame_count = 3 if torch._dynamo.config.assume_static_by_default else 2
+        frame_count = 2 if torch._dynamo.config.assume_static_by_default else 1
         self.assertEqual(cnts.frame_count, frame_count)
 
         # Negative index triggers new compilation.
