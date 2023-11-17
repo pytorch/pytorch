@@ -187,17 +187,7 @@ class OpDispatcher:
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec
                 ):
-<<<<<<< HEAD
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
-=======
-                    local_results = op_call(*local_tensor_args, **local_kwargs)
-            elif op_call == torch.ops.aten.convolution.default:
-                local_results = tp_convolution(op_call, local_tensor_args, local_kwargs)
-            elif op_call == torch.ops.aten.convolution_backward.default:
-                local_results = tp_convolution_backward(
-                    op_call, local_tensor_args, local_kwargs
-                )
->>>>>>> resovle rebase conflicts
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
