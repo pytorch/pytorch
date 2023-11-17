@@ -504,8 +504,9 @@ class WrapperCodeGen(CodeGen):
             ending = f".clone(){ending}"
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
-            f"{self.declare}{output_name} = {extern_kernel.kernel}({', '.join(args)}){ending}"
+            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
         if (
             self.supports_intermediate_hooks
@@ -1730,7 +1731,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        self.generate_c_shim_extern_kernel_call(extern_kernel.kernel, args)
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.codegen_kernel_name(), args
+        )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
