@@ -610,7 +610,7 @@ def fx_codegen_and_compile(
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
                         output_strides.append(
-                            tuple(  # type: ignore[arg-type]
+                            tuple(
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
@@ -1036,7 +1036,7 @@ def compile_fx(
             }
         ), V.set_real_inputs(
             example_inputs_
-        ):  # type: ignore[call-arg]
+        ):
             inputs_ = example_inputs_
             if isinstance(model_, torch.fx.GraphModule):
                 fake_inputs = [
