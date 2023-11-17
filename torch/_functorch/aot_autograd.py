@@ -11,7 +11,7 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
 
-from functorch import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torch
 import torch.fx.traceback as fx_traceback
