@@ -934,6 +934,16 @@ def forward(self, x_1, y_1):
     resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
     return None""")
 
+    def test_broadcast_shapes(self):
+        def f(x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0])
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 1), torch.empty(5)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    return (sym_size_int, sym_size_int_1)""")
 
     def test_unary(self):
         def f(x):

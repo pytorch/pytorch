@@ -23,7 +23,7 @@ from torch.utils.weak import WeakIdRef
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+    from torch.fx.experimental.symbolic_shapes import CreateSymbolicPolicy
 
 DimList = List
 
@@ -184,8 +184,7 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        policy: Optional["CreateSymbolicPolicy"] = None,
     ):
         from torch._subclasses.fake_tensor import FakeTensor
 
@@ -236,10 +235,14 @@ class MetaConverter:
             maybe_suppress = shape_env.suppress_guards
 
         def sym_sizes_strides_storage_offset(
-            t, src, dynamic_dims=dynamic_dims, constraint_dims=constraint_dims
+            t, src, inner_policy=policy
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
+                if (
+                    policy == inner_policy
+                    and isinstance(t, FakeTensor)
+                    and t.fake_mode.shape_env is shape_env
+                ):
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size(), t.stride(), t.storage_offset())
@@ -247,16 +250,10 @@ class MetaConverter:
                     return shape_env.create_symbolic_sizes_strides_storage_offset(
                         t,
                         src,
-                        # Assume that the set of dims that are dynamic are the same between
-                        # the wrapper tensor and any inner tensors.
-                        # We can revisit this if this assumption does not hold
-                        # for any important subclasses later.
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
+                        policy=inner_policy,
                     )
             else:
-                assert dynamic_dims is None
-                assert constraint_dims is None
+                assert inner_policy is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -268,8 +265,7 @@ class MetaConverter:
         def empty_create(
             inner_t,
             inner_src,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            inner_policy=policy,
         ):
             (
                 inner_sizes,
@@ -278,8 +274,7 @@ class MetaConverter:
             ) = sym_sizes_strides_storage_offset(
                 inner_t,
                 inner_src,
-                dynamic_dims=dynamic_dims,
-                constraint_dims=constraint_dims,
+                inner_policy=inner_policy,
             )
             return torch.empty_strided(
                 inner_sizes,
@@ -310,6 +305,109 @@ class MetaConverter:
             )
 
             return ragged_size
+
+        # Meta-ifies a nested tensor, maintaining proper view relationships.
+        # Assumes any dense base has already been meta-ified.
+        def metafy_nt(t, dense_base=None):
+            # For nested tensors, manually do transform_subclass
+            # so we can insert some special processing on ctx and
+            # do view handling for values with a dense base
+            attrs, ctx = t.__tensor_flatten__()
+            transformed_tensors_dict = {}
+            orig_shape_env = None
+            for attr in attrs:
+                inner_t = getattr(t, attr)
+                inner_src = AttrSource(source, attr)  # type: ignore[arg-type]
+                if orig_shape_env is None:
+                    orig_shape_env = (
+                        inner_t.fake_mode.shape_env
+                        if isinstance(inner_t, FakeTensor)
+                        else None
+                    )
+                if attr == "_values":
+                    # convert dynamic_dims from NT dim space -> values dim space
+                    inner_policy = FreshCreateSymbolicPolicy(
+                        dynamic_sizes=(
+                            policy.dynamic_sizes[1:]
+                            if isinstance(policy, FreshCreateSymbolicPolicy)
+                            else [DimDynamic.DYNAMIC] * inner_t.dim()
+                        ),
+                        constraint_sizes=(
+                            policy.constraint_sizes[1:]
+                            if isinstance(policy, FreshCreateSymbolicPolicy)
+                            else [None] * inner_t.dim()
+                        ),
+                    )
+
+                    if dense_base is not None:
+                        # For this case, values should be a symbolic view of base.
+                        # Since both values and base are dense, we can use as_strided().
+                        (
+                            inner_sizes,
+                            inner_strides,
+                            inner_storage_offset,
+                        ) = sym_sizes_strides_storage_offset(
+                            inner_t,
+                            inner_src,
+                            inner_policy=inner_policy,
+                        )
+
+                        transformed_tensors_dict[attr] = dense_base.as_strided(
+                            inner_sizes, inner_strides, inner_storage_offset
+                        )
+                        continue
+                else:
+                    # assume fully dynamic for other metadata (e.g. offsets, lengths)
+                    inner_policy = FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[DimDynamic.DYNAMIC], constraint_sizes=[None]
+                    )
+
+                transformed_tensors_dict[attr] = callback(
+                    lambda: empty_create(
+                        inner_t,
+                        inner_src,
+                        inner_policy=inner_policy,
+                    )
+                )
+
+            # We expect JaggedTensor to have a 'ragged_size' in
+            # its context
+            assert isinstance(ctx, dict)
+            assert "ragged_size" in ctx
+            assert isinstance(t._size[1], torch.SymInt)
+            if orig_shape_env is shape_env:
+                # It's already fake and the shape envs line up, reuse the old size
+                # Do not assert singleton_int; it may already
+                # be a variable
+                ctx["ragged_size"] = t._size[1]
+            else:
+                assert t._size[1].node.singleton_int() is not None
+                # Replace the eager ragged size with our freshly
+                # allocated jagged size that has a source
+                ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
+            meta_nt = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
+
+            if dense_base is None:
+                return meta_nt
+
+            # We have a dense base; maintain proper view relationship
+            from torch.nested._internal.nested_tensor import (
+                nested_view_from_values_offsets,
+                nested_view_from_values_offsets_lengths,
+            )
+
+            if meta_nt._lengths is None:
+                # Typical dense -> NT view case
+                return nested_view_from_values_offsets(
+                    meta_nt._values, meta_nt._offsets
+                )
+            else:
+                # base is a dense tensor that is the result of narrow()
+                return nested_view_from_values_offsets_lengths(
+                    meta_nt._values,
+                    meta_nt._offsets,
+                    meta_nt._lengths,
+                )
 
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
@@ -362,18 +460,24 @@ class MetaConverter:
                     assert t._is_view()
 
                     from torch._dynamo.source import AttrSource
-                    from torch.fx.experimental.symbolic_shapes import DimDynamic
+                    from torch.fx.experimental.symbolic_shapes import (
+                        DimDynamic,
+                        FreshCreateSymbolicPolicy,
+                    )
 
                     if shape_env and not t._base.is_nested:
-                        base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
+                        base_policy = FreshCreateSymbolicPolicy(
+                            dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
+                            constraint_sizes=[None] * t._base.dim(),
+                        )
                     else:
-                        base_dynamic_dims = None
+                        base_policy = None
                     base = self.meta_tensor(
                         t._base,
                         shape_env,
                         callback,
                         source=AttrSource(source, "_base"),
-                        dynamic_dims=base_dynamic_dims,
+                        policy=base_policy,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -440,85 +544,7 @@ class MetaConverter:
                                     # want to guard on the base's metadata here.
                                     return t._view_func_unsafe(base)
                                 else:
-                                    from torch._dynamo.source import AttrSource
-                                    from torch.nested._internal.nested_tensor import (
-                                        _tensor_symint_registry,
-                                        nested_view_from_values_offsets,
-                                        nested_view_from_values_offsets_lengths,
-                                    )
-
-                                    # Meta-ify values while maintaining proper view
-                                    # relationship with the base
-                                    view_nt = t._view_func_unsafe(base)
-                                    (
-                                        values_sizes,
-                                        values_strides,
-                                        values_storage_offset,
-                                    ) = sym_sizes_strides_storage_offset(
-                                        view_nt._values,
-                                        AttrSource(source, "_values"),  # type: ignore[arg-type]
-                                        # convert dynamic_dims from NT dim space -> values dim space
-                                        dynamic_dims=(
-                                            None
-                                            if dynamic_dims is None
-                                            else dynamic_dims[1:]
-                                        ),
-                                        constraint_dims=(
-                                            None
-                                            if constraint_dims is None
-                                            else constraint_dims[1:]
-                                        ),
-                                    )
-                                    new_values = base.as_strided(
-                                        values_sizes,
-                                        values_strides,
-                                        values_storage_offset,
-                                    )
-
-                                    # Meta-ify other attributes (e.g. offsets, lengths)
-                                    attrs, ctx = t.__tensor_flatten__()
-                                    transformed_tensors_dict = {}
-                                    for attr in attrs:
-                                        inner_t = getattr(t, attr)
-                                        if attr == "_values":
-                                            continue
-                                        transformed_tensors_dict[attr] = callback(
-                                            lambda: empty_create(
-                                                inner_t,
-                                                AttrSource(source, attr),  # type: ignore[arg-type]
-                                                dynamic_dims=None,
-                                                constraint_dims=None,
-                                            )
-                                        )
-                                    new_offsets = transformed_tensors_dict["_offsets"]
-                                    new_lengths = transformed_tensors_dict.get(
-                                        "_lengths", None
-                                    )
-
-                                    # Wrap ragged size singleton symint to make it symbolic
-                                    ragged_size = get_symbolic_ragged_size(t, source)
-
-                                    # We're not calling __tensor_unflatten__() since we need a
-                                    # view, but we still want to ensure the fake offsets or
-                                    # lengths are associated with a symbolic ragged size.
-                                    ragged_source = (
-                                        new_offsets
-                                        if new_lengths is None
-                                        else new_lengths
-                                    )
-                                    _tensor_symint_registry[ragged_source] = ragged_size
-
-                                    if new_lengths is None:
-                                        return nested_view_from_values_offsets(
-                                            new_values, new_offsets
-                                        )
-                                    else:
-                                        # base is a dense tensor that is the result of narrow().
-                                        return nested_view_from_values_offsets_lengths(
-                                            new_values,
-                                            new_offsets,
-                                            lengths=new_lengths,
-                                        )
+                                    return metafy_nt(t, dense_base=base)
                             else:
                                 # TODO: Handle dense view of NT when we return a proper view for
                                 # e.g. values()
@@ -587,62 +613,13 @@ class MetaConverter:
                         # We assume that if the inner tensors of the subclass are given symbolic sizes,
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
+                        from torch.fx.experimental.symbolic_shapes import (
+                            DimDynamic,
+                            FreshCreateSymbolicPolicy,
+                        )
 
                         if t.is_nested:
-                            # For nested tensors, manually do transform_subclass
-                            # so we can insert some special processing on ctx
-                            attrs, ctx = t.__tensor_flatten__()
-                            transformed_tensors_dict = {}
-                            orig_shape_env = None
-                            for attr in attrs:
-                                inner_t = getattr(t, attr)
-                                if orig_shape_env is None:
-                                    orig_shape_env = (
-                                        inner_t.fake_mode.shape_env
-                                        if isinstance(inner_t, FakeTensor)
-                                        else None
-                                    )
-                                if attr == "_values":
-                                    # convert dynamic_dims from NT dim space -> values dim space
-                                    inner_dynamic_dims = (
-                                        None
-                                        if dynamic_dims is None
-                                        else dynamic_dims[1:]
-                                    )
-                                    inner_constraint_dims = (
-                                        None
-                                        if constraint_dims is None
-                                        else constraint_dims[1:]
-                                    )
-                                else:
-                                    inner_dynamic_dims = None
-                                    inner_constraint_dims = None
-                                transformed_tensors_dict[attr] = callback(
-                                    lambda: empty_create(
-                                        inner_t,
-                                        AttrSource(source, attr),  # type: ignore[arg-type]
-                                        dynamic_dims=inner_dynamic_dims,
-                                        constraint_dims=inner_constraint_dims,
-                                    )
-                                )
-                            # We expect JaggedTensor to have a 'ragged_size' in
-                            # its context
-                            assert isinstance(ctx, dict)
-                            assert "ragged_size" in ctx
-                            assert isinstance(t._size[1], torch.SymInt)
-                            if orig_shape_env is shape_env:
-                                # It's already fake and the shape envs line up, reuse the old size
-                                # Do not assert singleton_int; it may already
-                                # be a variable
-                                ctx["ragged_size"] = t._size[1]
-                            else:
-                                assert t._size[1].node.singleton_int() is not None
-                                # Replace the eager ragged size with our freshly
-                                # allocated jagged size that has a source
-                                ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
-                            r = type(t).__tensor_unflatten__(
-                                transformed_tensors_dict, ctx
-                            )
+                            r = metafy_nt(t)
                         else:
                             r = transform_subclass(
                                 t,
@@ -737,8 +714,7 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
+                        policy=policy,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -755,8 +731,7 @@ class MetaConverter:
         *,
         callback=lambda t: t(),
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        policy=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -801,8 +776,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                policy=policy,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -820,8 +794,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                policy=policy,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
@@ -833,8 +806,7 @@ class MetaConverter:
                     shape_env=shape_env,
                     callback=callback,
                     source=source,
-                    dynamic_dims=dynamic_dims,
-                    constraint_dims=constraint_dims,
+                    policy=policy,
                 )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor

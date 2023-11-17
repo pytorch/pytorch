@@ -1220,6 +1220,13 @@
     CompositeExplicitAutograd: copysign_out
   tags: pointwise
 
+- func: _lazy_clone(Tensor self) -> Tensor
+  # Like clone, but the copy takes place lazily, only if either the
+  # input or the output are written.
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _lazy_clone
+
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
