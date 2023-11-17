@@ -17,8 +17,6 @@ import sys
 from functools import lru_cache
 from typing import Optional, Type, TYPE_CHECKING, Union
 
-import torch
-
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
     sym_float,
@@ -411,7 +409,6 @@ METHOD_TO_OPERATOR = {
     "ne": operator.ne,
     "neg": operator.neg,
     "or": operator.or_,
-    "pow": operator.pow,
     "pow": operator.pow,
     "rshift": operator.rshift,
     "sub": operator.sub,
