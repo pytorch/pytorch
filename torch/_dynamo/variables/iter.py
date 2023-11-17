@@ -75,12 +75,12 @@ class CycleIteratorVariable(IteratorVariable):
                 self.item = new_item
                 if self.item is None:
                     return self.next_variables(tx)
-                return self.item
+                return self.item, self
             except StopIteration:
                 self.iterator = None
                 return self.next_variables(tx)
         elif len(self.saved) > 0:
             self.saved_index = (self.saved_index + 1) % len(self.saved)
-            return self.item
+            return self.item, self
         else:
             raise StopIteration
