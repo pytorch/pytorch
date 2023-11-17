@@ -2011,9 +2011,13 @@ class BenchmarkRunner:
         elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
             self.autocast = torch.cpu.amp.autocast
 
-    def init_optimizer(self, name, device, params):
+    def init_optimizer(self, name, device, params, optim_ctor=None):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            self.optimizer = (
+                torch.optim.SGD(params, lr=0.01, foreach=True)
+                if optim_ctor is None
+                else optim_ctor(params, foreach=True)
+            )
         else:
             self.optimizer = None
 
@@ -2599,7 +2603,14 @@ class BenchmarkRunner:
         return tolerance_status
 
     def run_performance_test(
-        self, name, model, example_inputs, optimize_ctx, experiment, tag=None
+        self,
+        name,
+        model,
+        example_inputs,
+        optimize_ctx,
+        experiment,
+        tag=None,
+        optim_ctor=None,
     ):
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2636,7 +2647,9 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
-        self.init_optimizer(name, current_device, model.parameters())
+        self.init_optimizer(
+            name, current_device, model.parameters(), optimizer=optim_ctor
+        )
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -2656,6 +2669,9 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
+            # TODO: break about optimized_model_iter_fn to be fwd + bwd and then optim step
+            # to be able to get the fine grained optim only regression testing. Right now,
+            # this would only record e2e time. Maybe this is a good first step anyway.
             dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                 optimized_model_iter_fn, model, example_inputs, "dynamo"
             )
