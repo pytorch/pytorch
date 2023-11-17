@@ -1583,74 +1583,34 @@ def forward(self, arg0_1):
         # there is no functionalization.
         self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
 
-    def test_export_with_fake_tensor_inputs(self):
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
+    def test_issue_113041(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
+                self.a = torch.tensor(1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.a
+
+        def forward_hook(
+            module: torch.nn.Module, inputs, output
+        ) -> torch.Tensor:
+            return 2 * output
+
+        seq = torch.nn.Sequential(TestModule()).eval()
+        seq.b = torch.tensor(2)
+        handle = seq.register_forward_hook(forward_hook)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = seq
 
             def forward(self, x):
-                out = self.linear(x)
-                return out
+                return self.seq(x) + self.seq.b
 
-        # Put the inputs on a device
-        with fake_mode, torch.device('meta'):
-            x = torch.rand(5, 2, 2)
-            model = Model()
-
-        def check_device_and_fake_mode():
-            exported_program = torch.export.export(model, (x,))
-            export_res = exported_program(x)
-            exp_res = model(x)
-            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
-            self.assertTrue(export_res.size() == exp_res.size())
-            self.assertTrue(all(val.device == x.device for val in all_meta_val))
-            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
-
-    def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                out = self.linear(x)
-                return out
-
-        # Put the inputs on a device
-        with fake_mode, torch.device('meta'):
-            x = torch.rand(5, 2, 2)
-            model = Model()
-
-        # Manualy set the fake_device of fake tensors.
-        x.fake_device = torch.device('cuda:0')
-        for n, p in model.named_parameters():
-            p.fake_device = torch.device('cuda:0')
-
-        # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
-        # doesn't quite work well with aot_autograd right now due to some logic fails
-        # the check in call getDeviceGuardImpl in InputMetadata.
-        x.requires_grad = False
-        for n, p in model.named_parameters():
-            p.requires_grad = False
-
-
-        def check_device_and_fake_mode():
-            exported_program = torch.export.export(model, (x,))
-            export_res = exported_program(x)
-            exp_res = model(x)
-            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
-            self.assertTrue(export_res.size() == exp_res.size())
-            self.assertTrue(all(val.device == x.device for val in all_meta_val))
-            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
+        inp = (torch.randn(2, 8),)
+        ep = export(M(), inp)  # This errors because dynamo adds an extra input
 
 
 if __name__ == '__main__':

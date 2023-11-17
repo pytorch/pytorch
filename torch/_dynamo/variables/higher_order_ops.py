@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -85,7 +85,7 @@ def only_consist_of(var, types):
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
 def _make_inlined(tx, f):
-    assert isinstance(f, Callable)
+    assert callable(f), "Expect f to be a python callable."
 
     def inline_call(*args, **kwargs):
         return UserFunctionVariable(f).call_function(tx, args, kwargs)
