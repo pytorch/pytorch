@@ -523,8 +523,9 @@ class WrapperCodeGen(CodeGen):
             ending = f".clone(){ending}"
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
-            f"{self.declare}{output_name} = {extern_kernel.kernel}({', '.join(args)}){ending}"
+            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
         if (
             self.supports_intermediate_hooks
@@ -631,6 +632,7 @@ class WrapperCodeGen(CodeGen):
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
@@ -735,6 +737,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
                 )
+
+    def finalize_prefix(self):
+        pass
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -1286,6 +1291,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_dtypes = set()
         self.cached_output_id = count()
 
         from .cpp import cexpr, CppPrinter
@@ -1650,6 +1656,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
+    def finalize_prefix(self):
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.aot_inductor.abi_compatible:
+            for dtype in self.used_cached_dtypes:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
+
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
@@ -1808,11 +1822,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        assert (
-            extern_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {extern_kernel.kernel=}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.abi_compatible_kernel, args
+            extern_kernel.codegen_kernel_name(), args
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -1955,7 +1966,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
+            dtype_str = str(dtype).split('.')[-1]
+            self.used_cached_dtypes.add(dtype_str)
+            return f"cached_torch_dtype_{dtype_str}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
@@ -2388,28 +2401,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
-        if (
-            config.aot_inductor.abi_compatible
-            and not is_legacy_abi
-            and isinstance(type_, torch.OptionalType)
-        ):
-            if val is None:
-                return "0"  # nullptr is not available in C
-            if isinstance(val, (bool, int, str, float)):
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
-                return f"&{var_name}"
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                return f"&{self.val_to_arg_str(val)}"
-
-        return self.val_to_arg_str(val)
-
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            if config.aot_inductor.abi_compatible:
-                return "0"  # nullptr is not available in C
+            # TODO: add abi-compatible support
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
@@ -2434,8 +2429,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            # FIXME handle embedded optional types?
-            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
+            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"
