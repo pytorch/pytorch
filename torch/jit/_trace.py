@@ -1038,6 +1038,10 @@ def trace_module(
 
         module = make_module(mod, _module_class, _compilation_unit)
 
+        if check_trace and check_inputs is None:
+            # Copy the inputs, in-case there is any in-place mutation
+            check_inputs = [copy.deepcopy(inputs)]
+
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
                 # "forward" is a special case because we need to trace
@@ -1086,30 +1090,19 @@ def trace_module(
 
             # Check the trace against new traces created from user-specified inputs
             if check_trace:
-                if check_inputs is not None:
-                    _check_trace(
-                        check_inputs,
-                        func,
-                        check_trace_method,
-                        check_tolerance,
-                        strict,
-                        _force_outplace,
-                        True,
-                        _module_class,
-                        example_inputs_is_kwarg=example_inputs_is_kwarg,
-                    )
-                else:
-                    _check_trace(
-                        [inputs],
-                        func,
-                        check_trace_method,
-                        check_tolerance,
-                        strict,
-                        _force_outplace,
-                        True,
-                        _module_class,
-                        example_inputs_is_kwarg=example_inputs_is_kwarg,
-                    )
+                assert check_inputs is not None
+                # We have already instantiated check_inputs from a copy of inputs above
+                _check_trace(
+                    check_inputs,
+                    func,
+                    check_trace_method,
+                    check_tolerance,
+                    strict,
+                    _force_outplace,
+                    True,
+                    _module_class,
+                    example_inputs_is_kwarg=example_inputs_is_kwarg,
+                )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
 

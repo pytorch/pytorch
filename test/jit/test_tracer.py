@@ -2616,3 +2616,25 @@ class TestMixTracingScripting(JitTestCase):
         for n in fn_t.graph.nodes():
             if n.kind() == "prim::CallFunction":
                 self.assertTrue(n.output().isCompleteTensor())
+
+    def test_jit_trace_mutating_inputs(self):
+        # https://github.com/pytorch/pytorch/issues/113945
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.emb = torch.nn.Embedding(16, 16)
+
+            def forward(self, input):
+                idx = input
+                idx += input
+                ret = self.emb(idx)
+                return ret
+
+        model = Model()
+
+        data = torch.tensor([6], dtype=torch.long)
+        data_opt = data.clone()
+
+        model_opt = torch.jit.trace(model, example_inputs=data.clone())
+
+        self.assertEqual(model_opt(data), model(data_opt))
