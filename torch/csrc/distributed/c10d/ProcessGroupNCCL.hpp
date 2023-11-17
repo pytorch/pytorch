@@ -505,6 +505,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
+  // Provide an API for users to define their own ways to store NCCL debug info.
+  void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
+
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
@@ -635,6 +638,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  void dumpDebuggingInfo();
+
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -651,6 +659,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
+
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -758,6 +771,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to Guard monitorWakeUpCV_
   std::mutex monitorMutex_;
 
+  bool writeDebugInfo_ = false;
+
+  // Mutex to Guard the check of writeDebugInfo_
+  std::mutex writeDebugInfoMutex_;
+
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
@@ -855,6 +873,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
+
+  // The callback function to store NCCL debug info.
+  std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
