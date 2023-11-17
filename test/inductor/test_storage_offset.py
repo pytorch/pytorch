@@ -1,35 +1,13 @@
 # Owner(s): ["module: inductor"]
-import math
 import sys
 import unittest
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.backends.cuda
-import torch.nn.functional as F
-from torch import nn
-from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import same
-from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx_inner
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_utils import (
-    DeterministicGuard,
-    freeze_rng_state,
-    IS_FBCODE,
-    skipIfRocm,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
-    try:
-        import triton
-        from triton import language as tl
-    except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
-
     try:
         from . import test_torchinductor
     except ImportError:
@@ -47,9 +25,11 @@ aten = torch.ops.aten
 
 
 class StorageOffsetTests(TestCase):
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     def test_symbolic_storage_offset(self):
         # Make sure that nn.Parameters with unaligned storage_offset works
         device = "cuda"
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -71,7 +51,6 @@ class StorageOffsetTests(TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CUDA
 
     if HAS_CUDA and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
