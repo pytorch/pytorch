@@ -132,12 +132,6 @@ tensor_dunder_fns_remap = {
 }
 
 
-def torch_reconstruct(codegen, value):
-    name = torch_get_name(value, f"allowed_fn_{id(value)}")
-    unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-    return codegen.setup_globally_cached(unique_var_name, value, False)
-
-
 class BaseTorchVariable(VariableTracker):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
@@ -535,8 +529,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             raise unimplemented("torch.compile does not support strided NestedTensor")
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
-        elif isinstance(self.value, types.ModuleType):
-            unimplemented("TypeError(\"'module' object is not callable\")")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -688,6 +680,7 @@ class TorchVariable(BaseTorchVariable):
     """Points to a module, classes or functions in torch.*"""
 
     def __init__(self, value, **kwargs):
+        # TODO: Remove tensor_dunder_fns_remap since it's not used anymore.
         if (
             isinstance(value, collections.abc.Hashable)
             and value in tensor_dunder_fns_remap
