@@ -18,6 +18,8 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 
+#include <iostream>
+
 // This file contains functorch's Python bindings.
 
 namespace torch {
@@ -144,6 +146,10 @@ Tensor _remove_batch_dim(
     int64_t level,
     int64_t batch_size,
     int64_t out_dim) {
+  TORCH_CHECK(
+      out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
+      "Nested tensors can only be vmapped over dim=0, but got dim=",
+      out_dim);
   if (!has_level(self, level)) {
     auto self_sizes = self.sizes();
     VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
@@ -156,9 +162,7 @@ Tensor _remove_batch_dim(
   const auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
 
-  Tensor self_without_bdim;
-  int64_t newly_exposed_logical_dim;
-  std::tie(self_without_bdim, newly_exposed_logical_dim) =
+  auto [self_without_bdim, newly_exposed_logical_dim] =
       remove_existing_batch_dim(batched, level);
   auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
   return result;
@@ -488,6 +492,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
   });
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DynamicLayer>(m, "DynamicLayer");
 
   py::enum_<TransformType>(m, "TransformType")

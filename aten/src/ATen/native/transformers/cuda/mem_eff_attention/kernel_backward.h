@@ -7,7 +7,6 @@
  */
 #pragma once
 
-#include <ATen/ATen.h>
 #include <cmath>
 #include <type_traits>
 #include <vector>
@@ -15,11 +14,7 @@
 #include <cuda_fp16.h>
 #include <curand_kernel.h>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
-
+#include <ATen/cuda/PhiloxUtils.cuh>
 #include <cutlass/cutlass.h>
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/scale_type.h>
@@ -65,6 +60,7 @@
 
 using namespace gemm_kernel_utils;
 
+namespace PyTorchMemEffAttention {
 namespace {
 
 template <typename FragmentType, int32_t kNumThreads>
@@ -696,7 +692,7 @@ struct AttentionBackwardKernel {
     int32_t q_strideH = -1;
     int32_t k_strideH = -1;
     int32_t v_strideH = -1;
-    int32_t bias_strideH = 0;
+    int64_t bias_strideH = 0;
     int64_t o_strideB = -1;
     int64_t q_strideB = -1;
     int64_t k_strideB = -1;
@@ -804,21 +800,12 @@ struct AttentionBackwardKernel {
         grad_bias_ptr += batch_id * gB_strideB + head_id * gB_strideH;
       }
 
-      scale = warp_uniform(scale);
-      head_dim = warp_uniform(head_dim);
-      head_dim_value = warp_uniform(head_dim_value);
+      // Some values are modified above
+      // Signal to the compiler that they are the same in all threads
+      // and can be stored in warp-uniform registers (Sm75+)
       num_queries = warp_uniform(num_queries);
       num_keys = warp_uniform(num_keys);
-      num_heads = warp_uniform(num_heads);
       custom_mask_type = warp_uniform(custom_mask_type);
-
-      q_strideM = warp_uniform(q_strideM);
-      k_strideM = warp_uniform(k_strideM);
-      v_strideM = warp_uniform(v_strideM);
-      bias_strideM = warp_uniform(bias_strideM);
-      gO_strideM = warp_uniform(gO_strideM);
-      gB_strideM = warp_uniform(gB_strideM);
-      gQKV_strideM_multiplier = warp_uniform(gQKV_strideM_multiplier);
 
       query_ptr = warp_uniform(query_ptr);
       key_ptr = warp_uniform(key_ptr);
@@ -1220,7 +1207,7 @@ struct AttentionBackwardKernel {
           p.num_heads <= 1 || p.bias_strideH % kMinimumAlignment == 0,
           "attn_bias is not correctly aligned (strideH)");
       TORCH_CHECK(
-          p.bias_strideM % kMinimumAlignment == 0,
+          p.num_queries <= 1 || p.bias_strideM % kMinimumAlignment == 0,
           "attn_bias is not correctly aligned (strideM)");
     }
     if (p.grad_bias_ptr) {
@@ -1271,8 +1258,7 @@ struct AttentionBackwardKernel {
     }
     TORCH_CHECK(
         kEnableSplitKeys || p.num_splits_key == 1, "SplitKeys is disabled");
-    TORCH_CHECK(
-        p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
+    TORCH_CHECK(p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
     TORCH_CHECK(
         p.num_splits_key <= cutlass::ceil_div(p.num_keys, kBlockSizeJ),
         "Invalid `num_splits_key` (",
@@ -1323,6 +1309,7 @@ struct AttentionBackwardKernel {
     curandStatePhilox4_32_10_t rng_state_init;
 
     if (kApplyDropout) {
+      // See Note [Seed and Offset Device]
       auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
       // each element of the attention matrix P with shape
       // (batch_sz, n_heads, n_queries, n_keys) is associated with a single
@@ -1338,7 +1325,6 @@ struct AttentionBackwardKernel {
           std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
           &rng_state_init);
     }
-
     CUTLASS_PRAGMA_UNROLL
     for (; key_start < p.num_keys;
          key_start += p.num_splits_key_device() * kBlockSizeJ) {
@@ -2534,3 +2520,5 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 template <typename AK>
 __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
     attention_kernel_backward_batched(typename AK::Params params);
+
+} // namespace PyTorchMemEffAttention

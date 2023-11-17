@@ -167,7 +167,7 @@ class _ExecOrderTracer:
         kwargs: Dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
-        proxy_factory_fn: Callable[[torch.fx.Node], torch.fx.Proxy] = None,
+        proxy_factory_fn: Optional[Callable[[torch.fx.Node], torch.fx.Proxy]] = None,
     ) -> torch.fx.Proxy:
         """
         Overrides ``create_proxy`` to save execution information to

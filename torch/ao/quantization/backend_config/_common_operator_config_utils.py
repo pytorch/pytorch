@@ -452,9 +452,9 @@ def _add_fixed_qparams_to_dtype_configs(
             if orig_constraints.dtype != constraints.dtype:
                 continue
             if orig_constraints.scale_min_lower_bound is not None:
-                raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
+                raise ValueError(f"scale_min_lower_bound is invalid for fixed qparams ops: {dtype_config}")
             if orig_constraints.scale_max_upper_bound is not None:
-                raise ValueError("scale_max_upper_bound is invalid for fixed qparams ops: %s" % dtype_config)
+                raise ValueError(f"scale_max_upper_bound is invalid for fixed qparams ops: {dtype_config}")
             orig_constraints.quant_min_lower_bound = constraints.quant_min_lower_bound
             orig_constraints.quant_max_upper_bound = constraints.quant_max_upper_bound
             orig_constraints.scale_exact_match = constraints.scale_exact_match

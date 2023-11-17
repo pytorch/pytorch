@@ -39,7 +39,7 @@ bool ceil_mode) {
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
+    "max_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
@@ -112,7 +112,7 @@ const Tensor& indices) {
                  stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
+    "max_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 

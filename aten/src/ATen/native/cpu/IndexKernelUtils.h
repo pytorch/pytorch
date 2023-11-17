@@ -57,7 +57,7 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
                       const func_t& f, bool serial_execution=false)
 {
   int ntensor = iter.ntensors();
-  // When launch the index parallel version, set a relative samll grain size less than the INTERNAL::GRAIN_SIZE
+  // When launch the index parallel version, set a relative small grain size less than the INTERNAL::GRAIN_SIZE
   // to make the whole available thread numbers get more balanced work load and a better cache location.
   // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
   const int index_parallel_grain_size = 3000;

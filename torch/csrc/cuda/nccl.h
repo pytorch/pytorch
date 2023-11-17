@@ -18,9 +18,7 @@
 #define HAS_NCCL_BF16_DATATYPE 0
 #endif
 
-namespace torch {
-namespace cuda {
-namespace nccl {
+namespace torch::cuda::nccl {
 
 /* The following are copied from <nccl.h> and redefined in torch::cuda::nccl
  * namespace */
@@ -116,6 +114,7 @@ using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
+TORCH_CUDA_CPP_API const char* version_suffix();
 
 bool is_available(at::TensorList tensors);
 
@@ -216,6 +215,4 @@ TORCH_CUDA_CPP_API void recv(
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int src);
-} // namespace nccl
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::nccl

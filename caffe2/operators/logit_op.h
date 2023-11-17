@@ -32,7 +32,7 @@ class LogitGradientOp final : public Operator<Context> {
   explicit LogitGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         eps_(this->template GetSingleArgument<float>("eps", 1e-6f)) {}
-  ~LogitGradientOp() {}
+  ~LogitGradientOp() override {}
 
   bool RunOnDevice() override;
 

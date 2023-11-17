@@ -4,10 +4,10 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
 #include <bitset>
+#include <variant>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch interpreter stack]
 //
@@ -40,7 +40,7 @@ namespace at { namespace functorch {
 // The VmapInterpreter just does this via a call to ophandle.callBoxed(stack)
 // and most Interpreters will implement it this way.
 
-enum RandomnessType {
+enum class RandomnessType {
     Error,      // always errors when calling a random function
     Same,       // randomness appears the same across batches
     Different,  // randomness appears different across batches
@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 //
 // `Interpreter` is the struct for Interpreters. It holds ALL of the
 // relevant information (what type of interpreter it is and the metadata).
-// Metadata for each interpreter is represented as a Union (c10::variant)
+// Metadata for each interpreter is represented as a Union (std::variant)
 // of all possible metadata (VmapInterpreterMeta, GradInterpreterMeta, ...).
 //
 // Given an Interpreter, how do I get a "VmapInterpreter"? You may wish to do this
@@ -110,7 +110,7 @@ struct FunctionalizeInterpreterMeta {
   bool functionalizeAddBackViews_;
 };
 
-typedef c10::variant<
+typedef std::variant<
   int64_t,
   GradInterpreterMeta,
   JvpInterpreterMeta,
@@ -205,4 +205,4 @@ void setup_dispatch_key_tls(TransformType key, DispatchKeySet include);
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
-}} // namespace at::functorch
+} // namespace at::functorch

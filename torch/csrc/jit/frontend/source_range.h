@@ -3,10 +3,12 @@
 #include <c10/util/Optional.h>
 
 #include <algorithm>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <ostream>
+#include <regex>
+#include <sstream>
 #include <unordered_map>
 
 namespace torch {
@@ -21,17 +23,20 @@ struct SourceRange;
 struct TORCH_API StringCordView {
   StringCordView();
   StringCordView(const StringCordView&) = default;
+  StringCordView(StringCordView&&) noexcept = default;
   StringCordView(
       std::vector<c10::string_view> inputs,
       std::vector<std::shared_ptr<std::string>> ownerships);
 
   StringCordView& operator=(const StringCordView&) = default;
+  StringCordView& operator=(StringCordView&&) noexcept = default;
 
   size_t size() const {
     return accumulated_sizes_.back();
   }
 
   size_t find(const std::string& tok, size_t start) const;
+  size_t find_regex(const std::string& tok, size_t start) const;
   StringCordView substr(size_t start, size_t size) const;
 
   char at(size_t index) const {
@@ -209,7 +214,7 @@ struct TORCH_API Source {
       c10::optional<std::string> filename = c10::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
-      : text_view_(str),
+      : text_view_(std::move(str)),
         filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {

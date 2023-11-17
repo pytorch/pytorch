@@ -2,7 +2,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
 #include <vector>
 
 namespace torch {
@@ -42,8 +41,6 @@ struct TORCH_API PythonPrint {
   std::string str() const;
   const SourceRangeRecords& ranges() const;
   uint64_t minVersion() const;
-
-  ~PythonPrint();
 
  private:
   std::shared_ptr<PythonPrintImpl> pImpl;

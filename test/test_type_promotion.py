@@ -397,8 +397,8 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
                 expected = op(first.to(common_dtype), second.to(common_dtype))
-                self.assertEqual(result.dtype, expected.dtype, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
-                self.assertEqual(result, expected, msg='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result.dtype, expected.dtype, msg=f'{op.__name__} with {dt1}, {dt2}')
+                self.assertEqual(result, expected, msg=f'{op.__name__} with {dt1}, {dt2}')
 
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
@@ -678,10 +678,13 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
+        self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
+        self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
 
     @float_double_default_dtype
     def test_promote_self(self, device):
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool,
+                                               torch.float8_e5m2, torch.float8_e4m3fn):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
     @expectedFailureMeta
@@ -809,7 +812,7 @@ class TestTypePromotion(TestCase):
             return
 
         suffix = '_' if inplace else ''
-        err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
+        err = f"{'  coalesced' if coalesced else 'uncoalesced'} {op_name + suffix}({dtype1}, {dtype2})"
 
         def op(t1, t2, suf=None):
             suf = suffix if suf is None else suf
@@ -850,7 +853,7 @@ class TestTypePromotion(TestCase):
         # Test op(dense, sparse)
         if add_sub or op_name == 'mul':
             if inplace:
-                e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
+                e, d1, s1, d2, s2 = (x.clone() for x in test_tensors)
             dense_sparse = op(d1, s2)
             dense_sparse = dense_sparse.to_dense() if dense_sparse.is_sparse else dense_sparse
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
@@ -871,7 +874,7 @@ class TestTypePromotion(TestCase):
         # Test op(sparse, scalar)
         if not add_sub and not (self.device_type == 'cpu' and dtype1 == torch.half):
             if inplace:
-                e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
+                e, d1, s1, d2, s2 = (x.clone() for x in test_tensors)
             scalar = d2.view(d2.numel())[0].item()
 
             sparse = op(s1, scalar)
@@ -984,21 +987,19 @@ class TestTypePromotion(TestCase):
                 # Note: These cases prettyprint the failing inputs to make
                 # debugging test failures easier.
                 if undesired_failure and same_result:
-                    msg = ("Failure: {0} == {1}. "
-                           "torch type was {2}. NumPy type was {3}. np_first is {4} "
-                           "default type is {5}.").format(actual, expected,
-                                                          torch_type, np_type,
-                                                          np_first,
-                                                          torch.get_default_dtype())
+                    msg = (
+                        f"Failure: {actual} == {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
                     self.fail(msg)
 
                 if not undesired_failure and not same_result:
-                    msg = ("Failure: {0} != {1}. "
-                           "torch type was {2}. NumPy type was {3}. np_first is {4} "
-                           "default type is {5}.").format(actual, expected,
-                                                          torch_type, np_type,
-                                                          np_first,
-                                                          torch.get_default_dtype())
+                    msg = (
+                        f"Failure: {actual} != {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
                     self.fail(msg)
 
 
@@ -1163,6 +1164,19 @@ class TestTypePromotion(TestCase):
                 if inp.dtype in floating_types() or exp_type == inp.dtype:
                     actual = torch.clamp_max_(inp, val)
                     self.assertEqual(actual, expected, exact_dtype=False)
+
+    @onlyNativeDeviceTypes
+    def test_ternary_out_promotion(self, device):
+        for op in [torch.addcdiv, torch.addcmul]:
+            for dtype in [torch.float32, torch.cfloat]:
+                prom_dtype = torch.float64 if dtype is torch.float32 else torch.cdouble if dtype is torch.cfloat else dtype
+                x = torch.rand(3, device=device, dtype=dtype)
+                y = torch.empty(3, device=device, dtype=dtype)
+                y_promo = torch.empty(3, device=device, dtype=prom_dtype)
+                op(x, x, x, out=y)
+                op(x, x, x, out=y_promo)
+                self.assertEqual(y, y_promo.to(dtype=dtype))
+
 
 
 

@@ -11,29 +11,39 @@ class TestVulkanShaderCodegen(unittest.TestCase):
         yaml_with_duplicate_keys = """
 conv2d_pw:
   parameter_names_with_default_values:
+      NAME: conv2d_pw_1x1
       TILE_SIZE_X: 1
       TILE_SIZE_Y: 1
   parameter_values:
-    - TILE_SIZE_X: 2
+    - NAME: conv2d_pw_2x2
+      TILE_SIZE_X: 2
       TILE_SIZE_Y: 2
-    - TILE_SIZE_X: 2
+    - NAME: conv2d_pw_2x4
+      TILE_SIZE_X: 2
       TILE_SIZE_Y: 4
-    - TILE_SIZE_X: 4
+    - NAME: conv2d_pw_4x2
+      TILE_SIZE_X: 4
       TILE_SIZE_Y: 2
-    - TILE_SIZE_X: 4
+    - NAME: conv2d_pw_4x4
+      TILE_SIZE_X: 4
       TILE_SIZE_Y: 4
 conv2d_pw:
   parameter_names_with_default_values:
-    - TILE_SIZE_X: 1
-    - TILE_SIZE_Y: 1
+      NAME: conv2d_pw_1x1
+      TILE_SIZE_X: 1
+      TILE_SIZE_Y: 1
   parameter_values:
-    - TILE_SIZE_X: 2
+    - NAME: conv2d_pw_2x2
+      TILE_SIZE_X: 2
       TILE_SIZE_Y: 2
-    - TILE_SIZE_X: 2
+    - NAME: conv2d_pw_2x4
+      TILE_SIZE_X: 2
       TILE_SIZE_Y: 4
-    - TILE_SIZE_X: 4
+    - NAME: conv2d_pw_4x2
+      TILE_SIZE_X: 4
       TILE_SIZE_Y: 2
-    - TILE_SIZE_X: 4
+    - NAME: conv2d_pw_4x4
+      TILE_SIZE_X: 4
       TILE_SIZE_Y: 4
 """
 
@@ -50,10 +60,12 @@ conv2d_pw:
         yaml_with_key_mismatch = """
 conv2d_pw:
   parameter_names_with_default_values:
+      NAME: conv2d_pw_1x1
       TILE_SIZE_X: 1
       TILE_SIZE_Y: 1
   parameter_values:
-    - TILE_SIZE_X: 2
+    - NAME: conv2d_pw_2x2
+      TILE_SIZE_X: 2
       TILE_SIZE_Z: 2
 """
 
@@ -68,10 +80,12 @@ conv2d_pw:
         yaml_with_key_mismatch = """
 conv2d_pw:
   parameter_names_with_default_values:
+      NAME: conv2d_pw_1x1
       TILE_SIZE_X: 1
       TILE_SIZE_Y: 1
   parameter_values:
-    - TILE_SIZE_Y: 2
+    - NAME: conv2d_pw_1x2
+      TILE_SIZE_Y: 2
 """
         file_content = """
 x = $TILE_SIZE_X + $TILE_SIZE_Y
@@ -92,9 +106,9 @@ x = $TILE_SIZE_X + $TILE_SIZE_Y
                     file_name_2 = os.path.join(tmp_dir, "conv2d_pw_1x2.glsl")
                     self.assertTrue(os.path.exists(file_name_1))
                     self.assertTrue(os.path.exists(file_name_2))
-                    with open(file_name_1, "r") as f:
+                    with open(file_name_1) as f:
                         contents = f.read()
                         self.assertTrue("1 + 1" in contents)
-                    with open(file_name_2, "r") as f:
+                    with open(file_name_2) as f:
                         contents = f.read()
                         self.assertTrue("1 + 2" in contents)

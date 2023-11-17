@@ -14,11 +14,11 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
+.additional_ci_files
 /.extracted_scripts/
 **/.pytorch_specified_test_cases.csv
 **/.pytorch-disabled-tests.json
 **/.pytorch-slow-tests.json
-**/.pytorch-test-times.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -44,6 +44,7 @@ docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/compile/generated/
 docs/source/generated/
+docs/source/compile/generated/
 log
 usage_log.txt
 test-reports/
@@ -362,3 +363,14 @@ venv/
 # Log files
 *.log
 sweep/
+
+# Android build artifacts
+android/pytorch_android/.cxx
+android/pytorch_android_torchvision/.cxx
+
+# Pyre configs (for internal usage)
+.pyre_configuration
+.pyre_configuration.codenav
+.arcconfig
+.stable_pyre_client
+.pyre_client

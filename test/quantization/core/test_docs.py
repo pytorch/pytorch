@@ -62,9 +62,7 @@ class TestQuantizationDocs(QuantizationTestCase):
             if "\n" not in unique_identifier:
                 unique_identifier += "\n"
 
-            assert unique_identifier in content, "could not find {} in {}".format(
-                unique_identifier, path_to_file
-            )
+            assert unique_identifier in content, f"could not find {unique_identifier} in {path_to_file}"
 
             # get index of first line of code
             line_num_start = content.index(unique_identifier) + 1
@@ -84,10 +82,8 @@ class TestQuantizationDocs(QuantizationTestCase):
 
             # want to make sure we are actually getting some code,
             assert last_line_num - line_num_start > 3 or short_snippet, (
-                "The code in {} identified by {} seems suspiciously short:"
-                "\n\n###code-start####\n{}###code-end####".format(
-                    path_to_file, unique_identifier, code
-                )
+                f"The code in {path_to_file} identified by {unique_identifier} seems suspiciously short:"
+                f"\n\n###code-start####\n{code}###code-end####"
             )
             return code
 

@@ -8,8 +8,7 @@
 
 #pragma once
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
     int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
@@ -27,6 +26,12 @@ using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
 
+using max_pool3d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
+using max_pool3d_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool3d_fn, max_pool3d_kernel);
+DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
 namespace {
 
 template <typename dest_t, typename src_t>
@@ -71,7 +76,7 @@ static inline T pooling_output_shape(
 
 template <typename T>
 std::pair<T, T> _pooling_same_mode_padding_lr(
-    T inputSize, T kernelSize, int64_t stride, int64_t dilation) {
+    T inputSize, T kernelSize, T stride, T dilation) {
   // NOTE: with strides, the output shape is ceil(inputSize/stride)
   auto total_padding = T(dilation) * (kernelSize - 1);
 
@@ -94,8 +99,8 @@ inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
 }
 
 inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
-    c10::SymInt inputSize, c10::SymInt kernelSize, int64_t stride, int64_t dilation) {
-  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), stride, dilation);
+    c10::SymInt inputSize, c10::SymInt kernelSize, c10::SymInt stride, c10::SymInt dilation) {
+  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), std::move(stride), std::move(dilation));
 }
 
 // AveragePool2d/DilatedMaxPool2d (forward)
@@ -330,7 +335,6 @@ avg_pool3d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-1, owidth);
 }
 
-} // namespace
+} // anonymous namespace
 
-} // at::native
-} // at
+} // namespace at::native

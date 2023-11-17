@@ -26,7 +26,7 @@ struct InputBuffer {
   // Accumulates the variable at a specified index.
   // The optional CUDA streams determine which stream the accumulation
   // is run on and how the addition is synchronized.
-  void add(
+  TORCH_API void add(
       size_t pos,
       Variable&& var,
       const c10::optional<c10::Stream>& opt_producer_stream,

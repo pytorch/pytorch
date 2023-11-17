@@ -85,7 +85,8 @@ imagespecs = {
 
 def handle_extension(extensions, f):
     """
-    Returns a decoder handler function for the list of extensions.
+    Return a decoder handler function for the list of extensions.
+
     Extensions can be a space separated list of extensions.
     Extensions can contain dots, in which case the corresponding number
     of extension components must be present in the key given to f.
@@ -94,7 +95,6 @@ def handle_extension(extensions, f):
     handle_extension("jpg jpeg", my_decode_jpg)  # invoked for any file.jpg
     handle_extension("seg.jpg", special_case_jpg)  # invoked only for file.seg.jpg
     """
-
     extensions = extensions.lower().split()
 
     def g(key, data):
@@ -114,6 +114,7 @@ def handle_extension(extensions, f):
 class ImageHandler:
     """
     Decode image data using the given `imagespec`.
+
     The `imagespec` specifies whether the image is decoded
     to numpy/torch/pi, decoded to uint8/float, and decoded
     to l/rgb/rgba:
@@ -136,8 +137,9 @@ class ImageHandler:
     - pilrgb: pil None rgb
     - pilrgba: pil None rgba
     """
+
     def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), "unknown image specification: {}".format(imagespec)
+        assert imagespec in list(imagespecs.keys()), f"unknown image specification: {imagespec}"
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
@@ -167,14 +169,14 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -269,6 +271,7 @@ def extension_extract_fn(pathname):
 class Decoder:
     """
     Decode key/data sets using a list of handlers.
+
     For each key/data item, this iterates through the list of
     handlers until some handler returns something other than None.
     """

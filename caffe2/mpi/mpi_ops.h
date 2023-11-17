@@ -31,7 +31,7 @@ class MPIBroadcastOp final : public Operator<Context> {
   MPIBroadcastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {}
-  ~MPIBroadcastOp() {}
+  ~MPIBroadcastOp() override {}
 
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
@@ -65,7 +65,7 @@ class MPIReduceOp final : public Operator<Context> {
   MPIReduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         root_(OperatorBase::template GetSingleArgument<int>("root", 0)) {}
-  ~MPIReduceOp() {}
+  ~MPIReduceOp() override {}
 
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();

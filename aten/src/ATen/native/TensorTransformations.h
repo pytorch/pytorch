@@ -8,8 +8,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   TORCH_CHECK(!shifts.empty(), "`shifts` required");
@@ -28,4 +27,4 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
   return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

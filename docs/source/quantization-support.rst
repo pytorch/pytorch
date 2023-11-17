@@ -31,7 +31,7 @@ Preparing model for quantization
     :nosignatures:
     :template: classtemplate.rst
 
-    fuse_modules
+    fuse_modules.fuse_modules
     QuantStub
     DeQuantStub
     QuantWrapper
@@ -119,6 +119,17 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     PrepareCustomConfig
     ConvertCustomConfig
     StandaloneModuleConfigEntry
+
+torch.ao.quantization.quantizer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.ao.quantization.quantizer
+
+torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.ao.quantization.pt2e
+.. automodule:: torch.ao.quantization.pt2e.representation
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

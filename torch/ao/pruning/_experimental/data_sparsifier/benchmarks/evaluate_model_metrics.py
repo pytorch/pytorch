@@ -3,7 +3,7 @@ import torch
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
 import numpy as np  # type: ignore[import]
 import sklearn  # type: ignore[import]
-from dlrm_utils import make_test_data_loader, dlrm_wrap, fetch_model
+from dlrm_utils import make_test_data_loader, dlrm_wrap, fetch_model  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
 import argparse
 

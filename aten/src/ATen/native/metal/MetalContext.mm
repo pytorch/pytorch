@@ -78,7 +78,7 @@ C10_CLANG_DIAGNOSTIC_POP()
   if (state) {
     return state;
   }
-  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
+  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()] ?: @""];
   TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
   NSError* errors = nil;
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
@@ -126,7 +126,7 @@ C10_CLANG_DIAGNOSTIC_POP()
     }
   }
   NSError* errors = nil;
-  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]
+  id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()] ?: @""
                                         constantValues:constantValues
                                                  error:&errors];
   TORCH_CHECK(func, errors.localizedDescription.UTF8String);
@@ -160,7 +160,7 @@ C10_CLANG_DIAGNOSTIC_POP()
     [options setLanguageVersion:_deviceInfo.languageVersion];
     [options setFastMathEnabled:YES];
     _library = [_device
-        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
+        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS] ?: @""
                      options:options
                        error:&localError];
     compilationError = localError;

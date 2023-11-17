@@ -6,8 +6,7 @@
 
 #include <limits>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
@@ -312,6 +311,7 @@ struct MetaAllocator final : public at::Allocator {
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {}
 };
 
 static MetaAllocator g_meta_alloc;
@@ -441,4 +441,4 @@ TensorBase empty_strided_symint_meta(
       options.pinned_memory_opt());
 }
 
-}} // namespace at::detail
+} // namespace at::detail

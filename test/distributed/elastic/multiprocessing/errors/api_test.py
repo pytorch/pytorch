@@ -43,7 +43,7 @@ def raise_child_failure_error_fn(name, child_error_file=""):
 
 
 def read_resource_file(resource_file: str) -> str:
-    with open(os.path.join(os.path.dirname(__file__), resource_file), "r") as fp:
+    with open(os.path.join(os.path.dirname(__file__), resource_file)) as fp:
         return "".join(fp.readlines())
 
 
@@ -169,7 +169,7 @@ class ApiTest(unittest.TestCase):
             with self.assertRaises(SentinelError):
                 raise_exception_fn()
 
-        with open(self.test_error_file, "r") as fp:
+        with open(self.test_error_file) as fp:
             err = json.load(fp)
             self.assertIsNotNone(err["message"]["message"])
             self.assertIsNotNone(err["message"]["extraInfo"]["py_callstack"])
@@ -203,9 +203,9 @@ class ApiTest(unittest.TestCase):
                 raise_child_failure_error_fn("trainer", trainer_error_file)
             pf = cm.exception.get_first_failure()[1]
             # compare worker error file with reply file and overridden error code
-            expect = json.load(open(pf.error_file, "r"))
+            expect = json.load(open(pf.error_file))
             expect["message"]["errorCode"] = pf.exitcode
-            actual = json.load(open(self.test_error_file, "r"))
+            actual = json.load(open(self.test_error_file))
             self.assertTrue(
                 json.dumps(expect, sort_keys=True),
                 json.dumps(actual, sort_keys=True),

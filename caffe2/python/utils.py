@@ -67,7 +67,7 @@ def Caffe2TensorToNumpyArray(tensor):
             tensor.int64_data, dtype=np.int64).reshape(tensor.dims)
     elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
         return np.asarray(
-            tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data
+            tensor.int32_data, dtype=int).reshape(tensor.dims)   # pb.INT32=>int use int32_data
     elif tensor.data_type == caffe2_pb2.TensorProto.INT16:
         return np.asarray(
             tensor.int32_data, dtype=np.int16).reshape(tensor.dims)  # pb.INT16=>np.int16 use int32_data
@@ -100,9 +100,9 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
     elif arr.dtype == np.int64:
         tensor.data_type = caffe2_pb2.TensorProto.INT64
         tensor.int64_data.extend(list(arr.flatten().astype(np.int64)))
-    elif arr.dtype == np.int or arr.dtype == np.int32:
+    elif arr.dtype == int or arr.dtype == np.int32:
         tensor.data_type = caffe2_pb2.TensorProto.INT32
-        tensor.int32_data.extend(arr.flatten().astype(np.int).tolist())
+        tensor.int32_data.extend(arr.flatten().astype(int).tolist())
     elif arr.dtype == np.int16:
         tensor.data_type = caffe2_pb2.TensorProto.INT16
         tensor.int32_data.extend(list(arr.flatten().astype(np.int16)))  # np.int16=>pb.INT16 use int32_data

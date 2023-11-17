@@ -19,8 +19,7 @@ constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
 
 struct TestCPUGenerator : public c10::GeneratorImpl {
   TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(kCustomRNG)}, value_(value) { }
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~TestCPUGenerator() = default;
+  ~TestCPUGenerator() override = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }
   c10::optional<float> next_float_normal_sample() { return next_float_normal_sample_; }

@@ -6,7 +6,9 @@ from torch import Tensor
 __all__ = ['PixelShuffle', 'PixelUnshuffle']
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
+    r"""Rearrange elements in a tensor according to an upscaling factor.
+
+    Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
     to a tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an upscale factor.
 
     This is useful for implementing efficient sub-pixel convolution
@@ -43,6 +45,7 @@ class PixelShuffle(Module):
     .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
         https://arxiv.org/abs/1609.05158
     """
+
     __constants__ = ['upscale_factor']
     upscale_factor: int
 
@@ -54,11 +57,13 @@ class PixelShuffle(Module):
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def extra_repr(self) -> str:
-        return 'upscale_factor={}'.format(self.upscale_factor)
+        return f'upscale_factor={self.upscale_factor}'
 
 
 class PixelUnshuffle(Module):
-    r"""Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
+    r"""Reverse the PixelShuffle operation.
+
+    Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
     in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
     :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
 
@@ -93,6 +98,7 @@ class PixelUnshuffle(Module):
     .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
         https://arxiv.org/abs/1609.05158
     """
+
     __constants__ = ['downscale_factor']
     downscale_factor: int
 
@@ -104,4 +110,4 @@ class PixelUnshuffle(Module):
         return F.pixel_unshuffle(input, self.downscale_factor)
 
     def extra_repr(self) -> str:
-        return 'downscale_factor={}'.format(self.downscale_factor)
+        return f'downscale_factor={self.downscale_factor}'

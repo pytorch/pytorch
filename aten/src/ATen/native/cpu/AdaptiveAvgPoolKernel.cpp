@@ -181,7 +181,7 @@ void cpu_adaptive_avg_pool_channels_last<BFloat16>(
 
     // temp buffer for sum, use float as accumulation type
     // can't reuse output buffer to store sum since it is BFloat16
-    std::unique_ptr<float []> sum_arr(new float[channels]);
+    auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
     for (const auto i : c10::irange(begin, end)) {
@@ -258,7 +258,7 @@ void cpu_adaptive_avg_pool_backward(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
@@ -308,7 +308,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   auto grad_input = grad_input_.contiguous(memory_format);
   auto grad_output = grad_output_.contiguous(memory_format);
 
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
 
   int64_t nbatch = grad_input.size(0);

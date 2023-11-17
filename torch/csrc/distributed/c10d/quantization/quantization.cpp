@@ -9,7 +9,7 @@ namespace quantization {
 
 // TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
-void FloatToBFloat16Quantized_ref(
+static void FloatToBFloat16Quantized_ref(
     const float* const input,
     const size_t nrows,
     const size_t ncols,
@@ -26,7 +26,7 @@ void FloatToBFloat16Quantized_ref(
   }
 }
 
-void BFloat16QuantizedToFloat_ref(
+static void BFloat16QuantizedToFloat_ref(
     const at::BFloat16* const input,
     const size_t nrows,
     const size_t ncols,

@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
 import torch
-from torch.fx.graph import Graph
-from torch.fx.node import Node
+from torch.fx import (
+    Node,
+    Graph,
+)
 from torch.fx._compatibility import compatibility
 from typing import Dict, List, Set, Any, Union, Tuple
 import logging
@@ -30,7 +32,7 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class InternalMatch():
+class InternalMatch:
     # Nodes from which the match was found
     anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph
@@ -41,6 +43,10 @@ class InternalMatch():
 
     # nodes in matched subgraph returned by output
     returning_nodes: List[Node] = field(default_factory=list)
+
+    # map from a string name to a node in the target graph
+    # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
+    name_node_map: Dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
@@ -359,7 +365,7 @@ class SubgraphMatcher:
         if before != after:
             logger.info("Filtered out %s matches because they are not fully contained", before - after)
 
-        # filter out the matches that that forms a cycle if the subgraph is fused
+        # filter out the matches that form a cycle if the subgraph is fused
         valid_matches = []
         for match in matches:
             matched_compute_nodes = \

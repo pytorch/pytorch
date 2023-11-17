@@ -33,7 +33,7 @@ this:
 
 .. code-block:: cmake
 
-  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
   project(example-app)
 
   find_package(Torch REQUIRED)
@@ -41,7 +41,7 @@ this:
 
   add_executable(example-app example-app.cpp)
   target_link_libraries(example-app "${TORCH_LIBRARIES}")
-  set_property(TARGET example-app PROPERTY CXX_STANDARD 14)
+  set_property(TARGET example-app PROPERTY CXX_STANDARD 17)
 
   # The following code block is suggested to be used on Windows.
   # According to https://github.com/pytorch/pytorch/issues/25457,
@@ -97,7 +97,7 @@ using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration
 
 .. code-block:: sh
 
-  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+  cmake -DCMAKE_PREFIX_PATH=`python3 -c 'import torch;print(torch.utils.cmake_prefix_path)'` ..
 
 If all goes well, it will look something like this:
 

@@ -6,8 +6,10 @@ from torch import Tensor
 __all__ = ['ChannelShuffle']
 
 class ChannelShuffle(Module):
-    r"""Divide the channels in a tensor of shape :math:`(*, C , H, W)`
-    into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
+    r"""Divides and rearranges the channels in a tensor.
+
+    This operation divides the channels in a tensor of shape :math:`(*, C , H, W)`
+    into g groups and rearranges them as :math:`(*, C \frac g, g, H, W)`,
     while keeping the original tensor shape.
 
     Args:
@@ -40,6 +42,7 @@ class ChannelShuffle(Module):
            [15, 16]],
          ]]
     """
+
     __constants__ = ['groups']
     groups: int
 
@@ -51,4 +54,4 @@ class ChannelShuffle(Module):
         return F.channel_shuffle(input, self.groups)
 
     def extra_repr(self) -> str:
-        return 'groups={}'.format(self.groups)
+        return f'groups={self.groups}'

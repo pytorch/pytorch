@@ -1,7 +1,6 @@
 #include <torch/csrc/profiler/data_flow.h>
 
 #include <c10/util/overloaded.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/profiler/collection.h>
 
 namespace torch {
@@ -11,6 +10,7 @@ namespace impl {
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct RawTensorInfo {
   TensorImplAddress impl_;
   StorageImplData storage_;
@@ -77,7 +77,7 @@ void calculateUniqueTensorIDs(
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& i : torch_op.inputs_) {
-              c10::visit(raw_tensors, i);
+              std::visit(raw_tensors, i);
             }
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {

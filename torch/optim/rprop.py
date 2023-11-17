@@ -1,9 +1,8 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["Rprop", "rprop"]
 
@@ -21,9 +20,9 @@ class Rprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
-            raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
+            raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
         defaults = dict(
             lr=lr,
@@ -43,9 +42,11 @@ class Rprop(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params, grads, prevs, step_sizes):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params.append(p)
             grad = p.grad
             if grad.is_sparse:
@@ -77,6 +78,7 @@ class Rprop(Optimizer):
             step_sizes.append(state["step_size"])
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -101,7 +103,7 @@ class Rprop(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
 
-            self._init_group(group, params, grads, prevs, step_sizes)
+            has_complex = self._init_group(group, params, grads, prevs, step_sizes)
 
             rprop(
                 params,
@@ -115,6 +117,7 @@ class Rprop(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=group["differentiable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -154,7 +157,7 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
     <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -164,11 +167,11 @@ Rprop.__doc__ = r"""Implements the resilient backpropagation algorithm.
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 def rprop(
     params: List[Tensor],
@@ -180,6 +183,7 @@ def rprop(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     step_size_min: float,
     step_size_max: float,
@@ -213,6 +217,7 @@ def rprop(
         etaplus=etaplus,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -228,6 +233,7 @@ def _single_tensor_rprop(
     etaplus: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -274,6 +280,7 @@ def _multi_tensor_rprop(
     etaplus: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -281,24 +288,25 @@ def _multi_tensor_rprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
-    for grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
+    for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
         # Handle complex params
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_prevs = _view_complex_as_real(grouped_prevs)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_step_sizes = _view_complex_as_real(grouped_step_sizes)
-
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes)
 
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
-        signs = [s.sign() for s in signs]
+        if maximize:
+            torch._foreach_neg_(signs)
+
+        # At the end of the step, grouped_prevs will contain the current grads, so we reuse
+        # grouped_prevs memory instead of creating a new buffer, but, for clarity, we reassign
+        # to keep referring to the buffer as grouped_grads.
+        torch._foreach_copy_(grouped_prevs, grouped_grads)
+        if maximize:
+            torch._foreach_neg_(grouped_prevs)
+        grouped_grads = grouped_prevs
+
+        torch._foreach_sign_(signs)
         for sign in signs:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus
@@ -313,12 +321,15 @@ def _multi_tensor_rprop(
         # for dir>=0 dfdx=dfdx
         grouped_grads = list(grouped_grads)
         for i in range(len(grouped_grads)):
-            grouped_grads[i] = grouped_grads[i].clone(memory_format=torch.preserve_format)
             grouped_grads[i][signs[i].eq(etaminus)] = 0
+
+        # explicitly del signs as it's not used after here to save memory
+        del signs
 
         # update parameters
         grad_signs = [grad.sign() for grad in grouped_grads]
         torch._foreach_addcmul_(grouped_params, grad_signs, grouped_step_sizes, value=-1)
 
-        for i in range(len(grouped_prevs)):
-            grouped_prevs[i].copy_(grouped_grads[i])
+        # Logically, you may expect grouped_prevs to get updated to grouped_grads, but that's
+        # basically already happened since we've been using grouped_prevs' memory to store
+        # updated grouped_grads!

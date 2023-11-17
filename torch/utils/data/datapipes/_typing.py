@@ -51,6 +51,7 @@ TYPE2ABC = {
 def issubtype(left, right, recursive=True):
     r"""
     Check if the left-side type is a subtype of the right-side type.
+
     If any of type is a composite type like `Union` and `TypeVar` with
     bounds, it would be expanded into a list of types and check all
     of left-side types are subtypes of either one from right-side types.
@@ -108,6 +109,7 @@ def _decompose_type(t, to_list=True):
 def _issubtype_with_constraints(variant, constraints, recursive=True):
     r"""
     Check if the variant is a subtype of either one from constraints.
+
     For composite types like `Union` and `TypeVar` with bounds, they
     would be expanded for testing.
     """
@@ -208,9 +210,7 @@ def issubinstance(data, data_type):
 
 
 class _DataPipeType:
-    r"""
-    Save type annotation in `param`
-    """
+    r"""Save type annotation in `param`."""
 
     def __init__(self, param):
         self.param = param
@@ -234,7 +234,7 @@ class _DataPipeType:
             return issubtype(self.param, other.param)
         if isinstance(other, type):
             return issubtype(self.param, other)
-        raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
+        raise TypeError(f"Expected '_DataPipeType' or 'type', but found {type(other)}")
 
     def issubtype_of_instance(self, other):
         return issubinstance(other, self.param)
@@ -247,11 +247,13 @@ _DEFAULT_TYPE = _DataPipeType(Generic[T_co])
 
 class _DataPipeMeta(GenericMeta):
     r"""
-    Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
-    on the type, and validate the return hint of `__iter__`.
+    Metaclass for `DataPipe`.
+
+    Add `type` attribute and `__init_subclass__` based on the type, and validate the return hint of `__iter__`.
 
     Note that there is subclass `_IterDataPipeMeta` specifically for `IterDataPipe`.
     """
+
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
@@ -279,13 +281,13 @@ class _DataPipeMeta(GenericMeta):
     @_tp_cache
     def _getitem_(self, params):
         if params is None:
-            raise TypeError('{}[t]: t can not be None'.format(self.__name__))
+            raise TypeError(f'{self.__name__}[t]: t can not be None')
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
             params = (params, )
 
-        msg = "{}[t]: t must be a type".format(self.__name__)
+        msg = f"{self.__name__}[t]: t must be a type"
         params = tuple(_type_check(p, msg) for p in params)
 
         if isinstance(self.type.param, _GenericAlias):
@@ -303,13 +305,12 @@ class _DataPipeMeta(GenericMeta):
                                        '__type_class__': True})
 
         if len(params) > 1:
-            raise TypeError('Too many parameters for {} actual {}, expected 1'.format(self, len(params)))
+            raise TypeError(f'Too many parameters for {self} actual {len(params)}, expected 1')
 
         t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
-            raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
-                            .format(t, self.type))
+            raise TypeError(f'Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]')
 
         # Types are equal, fast path for inheritance
         if self.type == t:
@@ -339,8 +340,9 @@ class _DataPipeMeta(GenericMeta):
 
 class _IterDataPipeMeta(_DataPipeMeta):
     r"""
-    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`. Aad various functions for behaviors
-    specific to `IterDataPipe`.
+    Metaclass for `IterDataPipe` and inherits from `_DataPipeMeta`.
+
+    Add various functions for behaviors specific to `IterDataPipe`.
     """
 
     def __new__(cls, name, bases, namespace, **kwargs):
@@ -351,8 +353,9 @@ class _IterDataPipeMeta(_DataPipeMeta):
             @functools.wraps(reset_func)
             def conditional_reset(*args, **kwargs):
                 r"""
-                Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`. This allows recently
-                restored DataPipe to preserve its restored state during the initial `__iter__` call.
+                Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`.
+
+                This allows recently restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
                 if datapipe._snapshot_state in (_SnapshotState.Iterating, _SnapshotState.NotStarted):
@@ -388,8 +391,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             param = _eval_type(sub_cls.type.param, base_globals, locals())
             sub_cls.type.param = param
         except TypeError as e:
-            raise TypeError("{} is not supported by Python typing"
-                            .format(sub_cls.type.param.__forward_arg__)) from e
+            raise TypeError(f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing") from e
 
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
@@ -412,17 +414,17 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
 
 def reinforce_type(self, expected_type):
     r"""
-    Reinforce the type for DataPipe instance. And the 'expected_type' is required
-    to be a subtype of the original type hint to restrict the type requirement
-    of DataPipe instance.
+    Reinforce the type for DataPipe instance.
+
+    And the 'expected_type' is required to be a subtype of the original type
+    hint to restrict the type requirement of DataPipe instance.
     """
     if isinstance(expected_type, tuple):
         expected_type = Tuple[expected_type]
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):
-        raise TypeError("Expected 'expected_type' as subtype of {}, but found {}"
-                        .format(self.type, _type_repr(expected_type)))
+        raise TypeError(f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}")
 
     self.type = _DataPipeType(expected_type)
     return self

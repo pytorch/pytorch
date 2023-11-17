@@ -925,7 +925,7 @@ template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int 
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   double *wr = w;
-  double *wi = w + n;
+  double *wi = w ? w + n : nullptr;
   (void)rwork; // unused
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -934,7 +934,7 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   float *wr = w;
-  float *wi = w + n;
+  float *wi = w ? w  + n : nullptr;
   (void)rwork; // unused
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
@@ -1698,7 +1698,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   if (self.numel() == 0) {
@@ -1733,7 +1733,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   checkSameDevice("cholesky", result, self);
@@ -3273,7 +3273,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
   //     "should be replaced with\n",
   //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
-  //     "V = Vh.mH()\n",
+  //     "V = Vh.mH\n",
   //     "and\n",
   //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
   //     "should be replaced with\n",
@@ -4012,9 +4012,9 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
-Tensor linalg_vander(
+Tensor linalg_vander_symint(
     const Tensor& x,
-    c10::optional<int64_t> N) {
+    c10::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||
@@ -4024,16 +4024,16 @@ Tensor linalg_vander(
               "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
   const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
 
-  auto shape = x_.sizes().vec();
+  auto shape = x_.sym_sizes().vec();
   const auto n = N.value_or(shape.back());
   TORCH_CHECK(n > 1, "N must be greater than 1.");
 
   // Append cumprod of the oher 0...n-1 powers
   shape.push_back(n - 1);
-  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand_symint(shape), -1);
   // The row of ones
   shape.back() = 1LL;
-  auto ones =  result.new_ones(shape);
+  auto ones =  result.new_ones_symint(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
 }}  // namespace at::native

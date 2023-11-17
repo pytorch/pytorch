@@ -331,6 +331,21 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 verify_diff=False,
             )
 
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_coalescing_manager_debug_mode_detail(self):
+            """
+            Tests that coalescing manager w/TORCH_DISTRIBUTED_DEBUG
+            does not crash: https://github.com/pytorch/pytorch/issues/109520
+            """
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            dev = torch.cuda.current_device()
+            pg._start_coalescing(torch.device(dev))
+            pg.allreduce([torch.ones(1, device=dev)])
+            pg._end_coalescing(torch.device(dev))
+
 
 @requires_gloo()
 class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):

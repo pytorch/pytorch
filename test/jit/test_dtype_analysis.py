@@ -52,7 +52,6 @@ custom_rules_works_list = {
     "max_pool3d",
     "nn.functional.prelu",
     "batch_norm",
-    "batch_norm",
 }
 
 custom_rules_expected_failure_list = {

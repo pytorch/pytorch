@@ -3,11 +3,7 @@ import cimodel.lib.miniutils as miniutils
 
 
 class IOSNightlyJob:
-    def __init__(self,
-                 variant,
-                 is_full_jit=False,
-                 is_upload=False):
-
+    def __init__(self, variant, is_full_jit=False, is_upload=False):
         self.variant = variant
         self.is_full_jit = is_full_jit
         self.is_upload = is_upload
@@ -16,19 +12,24 @@ class IOSNightlyJob:
         return "upload" if self.is_upload else "build"
 
     def get_common_name_pieces(self, sep):
-
         extra_name_suffix = [self.get_phase_name()] if self.is_upload else []
 
         extra_name = ["full_jit"] if self.is_full_jit else []
 
-        common_name_pieces = [
-            "ios",
-        ] + extra_name + [
-        ] + ios_definitions.XCODE_VERSION.render_dots_or_parts(sep) + [
-            "nightly",
-            self.variant,
-            "build",
-        ] + extra_name_suffix
+        common_name_pieces = (
+            [
+                "ios",
+            ]
+            + extra_name
+            + []
+            + ios_definitions.XCODE_VERSION.render_dots_or_parts(sep)
+            + [
+                "nightly",
+                self.variant,
+                "build",
+            ]
+            + extra_name_suffix
+        )
 
         return common_name_pieces
 
@@ -37,10 +38,14 @@ class IOSNightlyJob:
 
     def gen_tree(self):
         build_configs = BUILD_CONFIGS_FULL_JIT if self.is_full_jit else BUILD_CONFIGS
-        extra_requires = [x.gen_job_name() for x in build_configs] if self.is_upload else []
+        extra_requires = (
+            [x.gen_job_name() for x in build_configs] if self.is_upload else []
+        )
 
         props_dict = {
-            "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(".")),
+            "build_environment": "-".join(
+                ["libtorch"] + self.get_common_name_pieces(".")
+            ),
             "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},
@@ -56,11 +61,13 @@ class IOSNightlyJob:
         if self.is_full_jit:
             props_dict["lite_interpreter"] = miniutils.quote(str(int(False)))
 
-        template_name = "_".join([
-            "binary",
-            "ios",
-            self.get_phase_name(),
-        ])
+        template_name = "_".join(
+            [
+                "binary",
+                "ios",
+                self.get_phase_name(),
+            ]
+        )
 
         return [{template_name: props_dict}]
 
@@ -75,10 +82,14 @@ BUILD_CONFIGS_FULL_JIT = [
     IOSNightlyJob("arm64", is_full_jit=True),
 ]
 
-WORKFLOW_DATA = BUILD_CONFIGS + BUILD_CONFIGS_FULL_JIT + [
-    IOSNightlyJob("binary", is_full_jit=False, is_upload=True),
-    IOSNightlyJob("binary", is_full_jit=True, is_upload=True),
-]
+WORKFLOW_DATA = (
+    BUILD_CONFIGS
+    + BUILD_CONFIGS_FULL_JIT
+    + [
+        IOSNightlyJob("binary", is_full_jit=False, is_upload=True),
+        IOSNightlyJob("binary", is_full_jit=True, is_upload=True),
+    ]
+)
 
 
 def get_workflow_jobs():

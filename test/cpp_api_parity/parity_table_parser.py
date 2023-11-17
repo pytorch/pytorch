@@ -35,22 +35,22 @@ def parse_parity_tracker_table(file_path):
             return str == 'Yes'
         else:
             raise RuntimeError(
-                '{} is not a supported parity choice. The valid choices are "Yes" and "No".'.format(str))
+                f'{str} is not a supported parity choice. The valid choices are "Yes" and "No".')
 
     parity_tracker_dict = {}
 
-    with open(file_path, 'r') as f:
+    with open(file_path) as f:
         all_text = f.read()
         packages = all_text.split('##')
         for package in packages[1:]:
             lines = [line.strip() for line in package.split('\n') if line.strip() != '']
             package_name = lines[0]
             if package_name in parity_tracker_dict:
-                raise RuntimeError("Duplicated package name `{}` found in {}".format(package_name, file_path))
+                raise RuntimeError(f"Duplicated package name `{package_name}` found in {file_path}")
             else:
                 parity_tracker_dict[package_name] = {}
             for api_status in lines[3:]:
-                api_name, has_impl_parity_str, has_doc_parity_str = [x.strip() for x in api_status.split('|')]
+                api_name, has_impl_parity_str, has_doc_parity_str = (x.strip() for x in api_status.split('|'))
                 parity_tracker_dict[package_name][api_name] = ParityStatus(
                     has_impl_parity=parse_parity_choice(has_impl_parity_str),
                     has_doc_parity=parse_parity_choice(has_doc_parity_str))

@@ -348,7 +348,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     const auto& tensor = ivalue.toTensor();
     return jMethodTensor(
         JIValue::javaClassStatic(),
-        TensorHybrid::newJTensorFromAtTensor(tensor.cpu()));
+        TensorHybrid::newJTensorFromAtTensor(tensor));
   } else if (ivalue.isBool()) {
     static auto jMethodBool =
         JIValue::javaClassStatic()

@@ -1474,32 +1474,6 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_nozp) {
   }
 }
 
-TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_subtile) {
-  TEST_REQUIRES_X86_SSE2;
-  for (size_t k = 9; k < 16; k++) {
-    for (uint32_t m = 1; m <= 8; m++) {
-      for (uint32_t n = 1; n <= 4; n++) {
-        GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester()
-            .mr(8)
-            .nr(4)
-            .m(m)
-            .n(n)
-            .k(k)
-            .iterations(3);
-        tester.test_packed<uint32_t>(
-            pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
-        tester.test_packed<uint16_t>(
-            pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w16__sse2);
-        tester.test_packed<uint8_t>(
-            pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w8__sse2);
-      }
-    }
-  }
-}
-
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_div_8) {
   TEST_REQUIRES_X86_SSE2;
   for (size_t k = 16; k < 128; k += 8) {

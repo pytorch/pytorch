@@ -1172,7 +1172,7 @@ TEST(RecordFunctionTest, Callbacks) {
         },
         [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx != nullptr);
           TORCH_CHECK(ctx->a == 123);
           TORCH_CHECK(ctx->b == "test_str");
         }));
@@ -1335,8 +1335,8 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TestThreadLocalDebugInfo() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  virtual ~TestThreadLocalDebugInfo() override {}
 
  private:
   int model_id_ = 0;
@@ -3007,7 +3007,7 @@ graph(%x.1 : Tensor):
   return (%y))IR",
       &*graph);
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3020,7 +3020,7 @@ graph(%x.1 : Tensor):
         ->run(*g);
   }
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3049,7 +3049,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
-    // arange does not acually support complex, leave as
+    // arange does not actually support complex, leave as
     // union[int, float] for now
     if (schema->name() == "aten::arange") {
       continue;

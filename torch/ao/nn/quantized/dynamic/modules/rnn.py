@@ -93,8 +93,8 @@ class RNNBase(torch.nn.Module):
         if dropout > 0 and num_layers == 1:  # type: ignore[operator]
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
-                          "num_layers greater than 1, but got dropout={} and "
-                          "num_layers={}".format(dropout, num_layers))
+                          f"num_layers greater than 1, but got dropout={dropout} and "
+                          f"num_layers={num_layers}")
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
@@ -185,12 +185,10 @@ class RNNBase(torch.nn.Module):
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
+                f'input must have {expected_input_dim} dimensions, got {input.dim()}')
         if self.input_size != input.size(-1):
             raise RuntimeError(
-                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    self.input_size, input.size(-1)))
+                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
 
     def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -231,8 +229,8 @@ class RNNBase(torch.nn.Module):
     def set_weight_bias(self, weight_bias_dict):
 
         def weight_bias_name(ihhh, layer, suffix):
-            weight_name = "weight_{}_l{}{}".format(ihhh, layer, suffix)
-            bias_name = "bias_{}_l{}{}".format(ihhh, layer, suffix)
+            weight_name = f"weight_{ihhh}_l{layer}{suffix}"
+            bias_name = f"bias_{ihhh}_l{layer}{suffix}"
             return weight_name, bias_name
 
         num_directions = 2 if self.bidirectional else 1
@@ -286,7 +284,7 @@ class RNNBase(torch.nn.Module):
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
-            raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype for dynamic RNN quantization: {dtype}')
         # RNNBase can be either LSTM or GRU
         qRNNBase: Union[LSTM, GRU]
         if mod.mode == 'LSTM':
@@ -308,8 +306,8 @@ class RNNBase(torch.nn.Module):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def retrieve_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = f'weight_{ihhh}_l{layer}{suffix}'
+                    bias_name = f'bias_{ihhh}_l{layer}{suffix}'
                     weight = getattr(mod, weight_name)
                     bias = getattr(mod, bias_name)
                     return weight, bias
@@ -358,15 +356,15 @@ class RNNBase(torch.nn.Module):
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
-                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'weight_ih_l{layer}{suffix}'
+                key_name2 = f'weight_hh_l{layer}{suffix}'
                 # packed weights are part of torchbind class, CellParamsSerializationType
                 # Within the packed weight class, the weight and bias are accessible as Tensors
                 packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
                 weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
                 weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
-                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'bias_ih_l{layer}{suffix}'
+                key_name2 = f'bias_hh_l{layer}{suffix}'
                 weight_bias_dict['bias'][key_name1] = packed_weight_bias[0].__getstate__()[0][1]
                 weight_bias_dict['bias'][key_name2] = packed_weight_bias[1].__getstate__()[0][1]
                 count = count + 1
@@ -494,7 +492,7 @@ class LSTM(RNNBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LSTM, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -526,15 +524,15 @@ class GRU(RNNBase):
         \begin{array}{ll}
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
-            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t \odot (W_{hn} h_{(t-1)}+ b_{hn})) \\
+            h_t = (1 - z_t) \odot n_t + z_t \odot h_{(t-1)}
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
     at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer
     at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
     :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
-    :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
+    :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
     (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
@@ -612,20 +610,20 @@ class GRU(RNNBase):
 
     .. note::
         The calculation of new gate :math:`n_t` subtly differs from the original paper and other frameworks.
-        In the original implementation, the Hadamard product :math:`(*)` between :math:`r_t` and the
+        In the original implementation, the Hadamard product :math:`(\odot)` between :math:`r_t` and the
         previous hidden state :math:`h_{(t-1)}` is done before the multiplication with the weight matrix
         `W` and addition of bias:
 
         .. math::
             \begin{aligned}
-                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t * h_{(t-1)} ) + b_{hn})
+                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t \odot h_{(t-1)} ) + b_{hn})
             \end{aligned}
 
         This is in contrast to PyTorch implementation, which is done after :math:`W_{hn} h_{(t-1)}`
 
         .. math::
             \begin{aligned}
-                n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn}))
+                n_t = \tanh(W_{in} x_t + b_{in} + r_t \odot (W_{hn} h_{(t-1)}+ b_{hn}))
             \end{aligned}
 
         This implementation differs on purpose for efficiency.
@@ -746,7 +744,7 @@ class GRU(RNNBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(GRU, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -825,19 +823,16 @@ class RNNCellBase(torch.nn.Module):
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
-                "input has inconsistent input_size: got {}, expected {}".format(
-                    input.size(1), self.input_size))
+                f"input has inconsistent input_size: got {input.size(1)}, expected {self.input_size}")
 
     def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
         if input.size(0) != hx.size(0):
             raise RuntimeError(
-                "Input batch size {} doesn't match hidden{} batch size {}".format(
-                    input.size(0), hidden_label, hx.size(0)))
+                f"Input batch size {input.size(0)} doesn't match hidden{hidden_label} batch size {hx.size(0)}")
 
         if hx.size(1) != self.hidden_size:
             raise RuntimeError(
-                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
-                    hidden_label, hx.size(1), self.hidden_size))
+                f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     @classmethod
     def from_float(cls, mod):
@@ -860,7 +855,7 @@ class RNNCellBase(torch.nn.Module):
         dtype = weight_observer_method().dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
-            raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype for dynamic RNN quantization: {dtype}')
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
@@ -1009,12 +1004,12 @@ class RNNCell(RNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
         return ret
 
     @classmethod
     def from_float(cls, mod):
-        return super(RNNCell, cls).from_float(mod)
+        return super().from_float(mod)
 
 
 class LSTMCell(RNNCellBase):
@@ -1057,7 +1052,7 @@ class LSTMCell(RNNCellBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LSTMCell, cls).from_float(mod)
+        return super().from_float(mod)
 
 
 class GRUCell(RNNCellBase):
@@ -1098,4 +1093,4 @@ class GRUCell(RNNCellBase):
 
     @classmethod
     def from_float(cls, mod):
-        return super(GRUCell, cls).from_float(mod)
+        return super().from_float(mod)

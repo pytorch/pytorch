@@ -87,14 +87,12 @@ struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
 #endif
 
 #if !defined(USE_ROCM)
-namespace at { namespace native {
+namespace at::native {
 namespace cub = ::at_cuda_detail::cub;
-}}
+} // namespace at::native
 #endif
 
-namespace at {
-namespace cuda {
-namespace cub {
+namespace at::cuda::cub {
 
 namespace detail {
 
@@ -414,4 +412,4 @@ void reduce(InputIteratorT input, OutputIteratorT output, int64_t num_items, Red
 
 }
 
-}}}  // namespace at::cuda::cub
+}  // namespace at::cuda::cub

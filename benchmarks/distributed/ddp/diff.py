@@ -10,12 +10,12 @@ import numpy as np
 
 
 def load(path):
-    with open(path, 'r') as f:
+    with open(path) as f:
         return json.load(f)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyTorch distributed benchmark diff')
+    parser = argparse.ArgumentParser(description="PyTorch distributed benchmark diff")
     parser.add_argument("file", nargs=2)
     args = parser.parse_args()
 
@@ -26,12 +26,12 @@ def main():
     jb = load(args.file[1])
 
     keys = (set(ja.keys()) | set(jb.keys())) - {"benchmark_results"}
-    print("{:20s} {:>20s}      {:>20s}".format("", "baseline", "test"))
-    print("{:20s} {:>20s}      {:>20s}".format("", "-" * 20, "-" * 20))
+    print(f"{'':20s} {'baseline':>20s}      {'test':>20s}")
+    print(f"{'':20s} {'-' * 20:>20s}      {'-' * 20:>20s}")
     for key in sorted(keys):
         va = str(ja.get(key, "-"))
         vb = str(jb.get(key, "-"))
-        print("{:20s} {:>20s}  vs  {:>20s}".format(key + ":", va, vb))
+        print(f"{key + ':':20s} {va:>20s}  vs  {vb:>20s}")
     print("")
 
     ba = ja["benchmark_results"]
@@ -44,18 +44,20 @@ def main():
 
         model = ra["model"]
         batch_size = int(ra["batch_size"])
-        name = "{} with batch size {}".format(model, batch_size)
-        print("Benchmark: {}".format(name))
+        name = f"{model} with batch size {batch_size}"
+        print(f"Benchmark: {name}")
 
         # Print header
         print("")
-        print("{:>10s}".format(""), end='')  # noqa: E999
+        print(f"{'':>10s}", end="")  # noqa: E999
         for _ in [75, 95]:
-            print("{:>16s}{:>10s}{:>10s}".format("sec/iter", "ex/sec", "diff"), end='')  # noqa: E999
+            print(
+                f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end=""
+            )  # noqa: E999
         print("")
 
         # Print measurements
-        for (i, (xa, xb)) in enumerate(zip(ra["result"], rb["result"])):
+        for i, (xa, xb) in enumerate(zip(ra["result"], rb["result"])):
             # Ignore round without ddp
             if i == 0:
                 continue
@@ -66,16 +68,19 @@ def main():
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print("{:>4d} GPUs:".format(ngpus), end='')  # noqa: E999
+            print(f"{ngpus:>4d} GPUs:", end="")  # noqa: E999
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
                 # We're measuring time, so lower is better (hence the negation)
                 delta = -100 * ((vb - va) / va)
-                print("  p{:02d}: {:8.3f}s {:7d}/s {:+8.1f}%".format(p, vb, int(batch_size / vb), delta), end='')  # noqa: E999
+                print(
+                    f"  p{p:02d}: {vb:8.3f}s {int(batch_size / vb):7d}/s {delta:+8.1f}%",
+                    end="",
+                )  # noqa: E999
             print("")
         print("")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

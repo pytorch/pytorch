@@ -9,9 +9,12 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_unique2.h>
+#include <ATen/ops/_unique2_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/unique_consecutive.h>
+#include <ATen/ops/unique_consecutive_native.h>
 #include <ATen/ops/unique_dim_consecutive.h>
+#include <ATen/ops/unique_dim_consecutive_native.h>
 #endif
 
 namespace at::native {
@@ -38,12 +41,12 @@ static std::string getUniqueKey(const ScalarType& dtype,
 }
 
 // dim arg not supported when non consecutive, ie sorted
-std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
-                                                UniqueCachedGraph* uniqueGraph,
-                                                const bool return_inverse,
-                                                const bool return_counts,
-                                                const bool consecutive,
-                                                c10::optional<int64_t> dimOpt) {
+static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
+                                                       UniqueCachedGraph* uniqueGraph,
+                                                       const bool return_inverse,
+                                                       const bool return_counts,
+                                                       const bool consecutive,
+                                                       c10::optional<int64_t> dimOpt) {
   int64_t dim = dimOpt.has_value() ? maybe_wrap_dim(dimOpt.value(), self.dim()) : 0;
 
   MPSGraph* graph = uniqueGraph->graph();
@@ -57,6 +60,20 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   MPSGraphTensor* inverseIndicesTensor = nil;
   MPSGraphTensor* countTensor = nil;
   MPSGraphTensor* lengthTensor = nil;
+
+  const bool needsFlatten = !(dimOpt.has_value() || [shape count] == 1);
+  if (needsFlatten) {
+    inputTensor = [graph reshapeTensor:inputTensor withShape:@[ @-1 ] name:nil];
+    length = 1;
+    for (const auto i : c10::irange([shape count])) {
+      if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
+        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
+      }
+    }
+
+    destShape = @[ [NSNumber numberWithUnsignedInteger:length] ];
+  }
+
   if (length <= 1) {
     // Trivial case, only 1 element everything is unique
     resultTensor = inputTensor;
@@ -74,19 +91,6 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
     dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
     inputTensor = [graph castTensor:inputTensor toType:dataType name:@"castInputTensor"];
-  }
-
-  bool needsFlatten = !(dimOpt.has_value() || [shape count] == 1);
-  if (needsFlatten) {
-    inputTensor = [graph reshapeTensor:inputTensor withShape:@[ @-1 ] name:nil];
-    length = 1;
-    for (const auto i : c10::irange([shape count])) {
-      if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
-        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
-      }
-    }
-
-    destShape = @[ [NSNumber numberWithUnsignedInteger:length] ];
   }
 
   MPSGraphTensor* sortedInput = nil;
@@ -197,14 +201,14 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
   }
 }
 
-void runUniqueGraph(UniqueCachedGraph* uniqueGraph,
-                    const Tensor& input,
-                    Tensor& output,
-                    Tensor& inverse_indices,
-                    Tensor& counts,
-                    Tensor& length,
-                    bool return_inverse,
-                    bool return_counts) {
+static void runUniqueGraph(UniqueCachedGraph* uniqueGraph,
+                           const Tensor& input,
+                           Tensor& output,
+                           Tensor& inverse_indices,
+                           Tensor& counts,
+                           Tensor& length,
+                           bool return_inverse,
+                           bool return_counts) {
   Placeholder inputPlaceholder = Placeholder(uniqueGraph->inputTensor_, input);
   NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
     inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
@@ -232,11 +236,11 @@ void runUniqueGraph(UniqueCachedGraph* uniqueGraph,
 
 } // namespace mps
 
-std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
-                                                    const bool return_inverse,
-                                                    const bool return_counts,
-                                                    const bool consecutive,
-                                                    c10::optional<int64_t> dimOpt) {
+static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
+                                                           const bool return_inverse,
+                                                           const bool return_counts,
+                                                           const bool consecutive,
+                                                           c10::optional<int64_t> dimOpt) {
   const Tensor& input = self.contiguous();
 
   // get flat output size

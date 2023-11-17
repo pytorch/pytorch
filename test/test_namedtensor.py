@@ -92,8 +92,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         msg='Name inference for {} on device {} failed'.format(
-                             op.__name__, device))
+                         msg=f'Name inference for {op.__name__} on device {device} failed')
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
     # Right now I don't know what it should look like.
@@ -328,7 +327,7 @@ class TestNamedTensor(TestCase):
     def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
-            names_tag = 'names={}'.format(named_tensor.names)
+            names_tag = f'names={named_tensor.names}'
             self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
@@ -530,8 +529,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.size('N'), 2)
         self.assertEqual(t.size('C'), 5)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name*'):
-            t.size(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.size('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
@@ -541,8 +538,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.stride('N'), 3 * 5)
         self.assertEqual(t.stride('C'), 1)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-            t.stride(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.stride('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
@@ -854,7 +849,7 @@ class TestNamedTensor(TestCase):
                 out = testcase.lambd(tensor)
             except RuntimeError as err:
                 # Get a better error message by catching the error and asserting.
-                raise RuntimeError('{}: {}'.format(testcase.name, err)) from err
+                raise RuntimeError(f'{testcase.name}: {err}') from err
             self.assertEqual(out.names, tensor.names,
                              msg=testcase.name)
 
@@ -2055,6 +2050,13 @@ class TestNamedTensor(TestCase):
 
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
+
+    def test_support_device_named_grad(self):
+        named_tensor = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'NYI: named tensors only support CPU, CUDA'):
+            named_tensor.rename_('N', 'C')
+            named_tensor.names = ['N', 'C']
+            named_tensor = torch.randn(3, 3, device='meta', names=['N', 'C'])
 
 
 if __name__ == '__main__':

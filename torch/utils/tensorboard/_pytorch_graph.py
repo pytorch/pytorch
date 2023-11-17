@@ -119,8 +119,7 @@ class NodePyOP(NodePy):
 
 
 class GraphPy:
-    """Helper class to convert torch.nn.Module to GraphDef proto and visualization
-    with TensorBoard.
+    """Helper class to convert torch.nn.Module to GraphDef proto and visualization with TensorBoard.
 
     GraphDef generation operates in two passes:
 
@@ -213,10 +212,7 @@ class GraphPy:
                 ]
 
     def to_proto(self):
-        """
-        Converts graph representation of GraphPy object to TensorBoard
-        required format.
-        """
+        """Convert graph representation of GraphPy object to TensorBoard required format."""
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
         nodes = []
@@ -234,9 +230,9 @@ class GraphPy:
 
 
 def parse(graph, trace, args=None, omit_useless_nodes=True):
-    """This method parses an optimized PyTorch model graph and produces
-    a list of nodes and node stats for eventual conversion to TensorBoard
-    protobuf format.
+    """Parse an optimized PyTorch model graph and produces a list of nodes and node stats.
+
+    Useful for eventual conversion to TensorBoard protobuf format.
 
     Args:
       graph (PyTorch module): The model graph to be parsed.
@@ -271,11 +267,9 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]
-                attr_to_scope[attr_key] = "{}/{}.{}".format(
-                    parent_scope, attr_scope, attr_name
-                )
+                attr_to_scope[attr_key] = f"{parent_scope}/{attr_scope}.{attr_name}"
             else:
-                attr_to_scope[attr_key] = "__module.{}".format(attr_name)
+                attr_to_scope[attr_key] = f"__module.{attr_name}"
             # We don't need classtype nodes; scope will provide this information
             if node.output().type().kind() != CLASSTYPE_KIND:
                 node_py = NodePyOP(node)
@@ -286,7 +280,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
 
     for i, node in enumerate(graph.outputs()):  # Create sink nodes for output ops
         node_pyio = NodePyIO(node, "output")
-        node_pyio.debugName = "output.{}".format(i + 1)
+        node_pyio.debugName = f"output.{i + 1}"
         node_pyio.inputs = [node.debugName()]
         nodes_py.append(node_pyio)
 
@@ -302,7 +296,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
     for name, module in trace.named_modules(prefix="__module"):
         mod_name = parse_traced_name(module)
         attr_name = name.split(".")[-1]
-        alias_to_name[name] = "{}[{}]".format(mod_name, attr_name)
+        alias_to_name[name] = f"{mod_name}[{attr_name}]"
 
     for node in nodes_py.nodes_op:
         module_aliases = node.scopeName.split("/")
@@ -320,8 +314,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
 
 def graph(model, args, verbose=False, use_strict_trace=True):
     """
-    This method processes a PyTorch model and produces a `GraphDef` proto
-    that can be logged to TensorBoard.
+    Process a PyTorch model and produces a `GraphDef` proto that can be logged to TensorBoard.
 
     Args:
       model (PyTorch module): The model to be parsed.
@@ -365,7 +358,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
 
 @contextlib.contextmanager
 def _set_model_to_eval(model):
-    """A context manager to temporarily set the training mode of ``model`` to eval."""
+    """Context manager to temporarily set the training mode of ``model`` to eval."""
     if not isinstance(model, torch.jit.ScriptFunction):
         originally_training = model.training
         model.train(False)
@@ -382,6 +375,6 @@ def _set_model_to_eval(model):
 
 
 def _node_get(node: torch._C.Node, key: str):
-    """Gets attributes of a node which is polymorphic over return type."""
+    """Get attributes of a node which is polymorphic over return type."""
     sel = node.kindOf(key)
     return getattr(node, sel)(key)

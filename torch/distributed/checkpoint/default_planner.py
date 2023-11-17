@@ -11,7 +11,6 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 
 
@@ -52,7 +51,7 @@ from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.checkpoint._traverse import set_element
 
-logger: logging.Logger = logging.getLogger(__file__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -138,15 +137,11 @@ class DefaultSavePlanner(SavePlanner):
         return self.transform_object(write_item, object)
 
     def lookup_object(self, index: MetadataIndex) -> Any:
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         return find_state_dict_object(self.state_dict, index)
 
     def transform_object(self, write_item: WriteItem, object: Any):
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         if write_item.type == WriteItemType.BYTE_IO:
             bytes = io.BytesIO()
             torch.save(object, bytes)
@@ -222,15 +217,11 @@ class DefaultLoadPlanner(LoadPlanner):
         pass
 
     def lookup_tensor(self, index: MetadataIndex) -> torch.Tensor:
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
-        """
-        This is an extension from the planner interface to make it easy to extend the default planner
-        """
+        """Extension from the planner interface to make it easy to extend the default planner."""
         return narrow_tensor_by_index(
             tensor, read_item.dest_offsets, read_item.lengths
         )
@@ -294,7 +285,7 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (ShardedTensor)) or is_coordinator:
+        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)
@@ -302,13 +293,15 @@ def create_default_local_save_plan(
 
 def create_default_global_save_plan(
     all_plans: List[SavePlan],
+    rewrite_index_hints: bool = True,
 ) -> Tuple[List[SavePlan], Metadata]:
     """
     Create the global plan and metadata used by DefaultSavePlanner.
 
     Metadata is produced by concatenating the metadata of all ``WriteItem`` from the supplied plans.
 
-    The only global planning change is to update index hints in all ``MetadataIndex`` objects.
+    The only global planning change is to update index hints in all ``MetadataIndex`` objects if
+    ``rewrite_index_hints`` is True.
     """
     md: Dict[str, STORAGE_TYPES] = {}
     new_plans = []
@@ -334,10 +327,12 @@ def create_default_global_save_plan(
                         ),
                     ),
                 )
-                new_index = dataclasses.replace(
-                    item.index, index=len(tensor_md.chunks)
-                )
-                new_item = dataclasses.replace(item, index=new_index)
+                new_item = item
+                if rewrite_index_hints:
+                    new_index = dataclasses.replace(
+                        item.index, index=len(tensor_md.chunks)
+                    )
+                    new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
                 assert (
@@ -352,9 +347,7 @@ def create_default_global_save_plan(
 
 
 def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
-    """
-    Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``.
-    """
+    """Return the ``Metadata`` if DefaultSavePlanner was used to checkpoint ``state_dict``."""
     plan = _create_default_metadata_only_plan(state_dict)
     _, md = create_default_global_save_plan([plan])
     return md
@@ -363,10 +356,7 @@ def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
 def _check_box_overlap(
     box0: ChunkStorageMetadata, box1: ChunkStorageMetadata
 ) -> bool:
-    """
-    Checks if two boxes overlap. Tuples are (offset, lengths)
-    """
-
+    """Check if two boxes overlap. Tuples are (offset, lengths)."""
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D
     # shard, we would check if one shard is above or on the left of the
