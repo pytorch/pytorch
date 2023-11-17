@@ -2007,6 +2007,7 @@ def forward(self, x_1, output_1):
             dummy_None,
             dummy_empty,
             BLOCK_SIZE: "tl.constexpr",
+            RANDOM_SIZE: "tl.constexpr",
         ):
             pass
 
@@ -2014,7 +2015,13 @@ def forward(self, x_1, output_1):
         def call_triton(output):
             n_elements = output.numel()
             grid = (n_elements,)
-            pass_kernel[grid](output, n_elements, None, torch.empty_like(output))
+            pass_kernel[grid](
+                output,
+                n_elements,
+                None,
+                torch.empty_like(output),
+                RANDOM_SIZE=0,
+            )
             return output
 
         output = torch.randn(5, device="cuda")
