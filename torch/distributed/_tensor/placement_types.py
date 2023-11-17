@@ -275,6 +275,7 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
+@dataclass(frozen=True)
 class Replicate(Placement):
     # replicate placement
     def __eq__(self, other: object) -> bool:
@@ -315,6 +316,7 @@ class Replicate(Placement):
         return tensor
 
 
+@dataclass(frozen=True)
 class _Partial(Placement):
     # This is a default partial placement with element-wise reduce op
     # when doing reduction it follows the contract of `_to_replicate`
@@ -323,9 +325,7 @@ class _Partial(Placement):
     #
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-
-    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
-        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
+    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
