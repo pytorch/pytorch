@@ -7021,6 +7021,32 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
 
+    def test_autograd_print_tensor(self):
+        a = torch.ones(1, requires_grad=True)
+        a_clone = a.clone()
+        self.assertEqual(repr(a), "tensor([1.], requires_grad=True)")
+        self.assertEqual(repr(a_clone), "tensor([1.], grad_fn=<CloneBackward0>)")
+
+        with torch.no_grad():
+            b = a[:]
+            b *= 2
+
+        # Special handling for printing view created in no-grad and modified
+        # in-placed in no-grad.
+        self.assertEqual(repr(b), "tensor([2.], grad_fn=<Invalid>)")
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                return x
+
+        c = Func.apply(a)
+        self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
+
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
         with torch.no_grad():

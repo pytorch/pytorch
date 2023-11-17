@@ -688,6 +688,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+            if (
+                isinstance(tensor_variable, TensorVariable)
+                and "requires_grad" in kwargs
+                and kwargs["requires_grad"].as_python_constant()
+            ):
+                unimplemented(
+                    """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+                )
+
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)
                 and kwargs["out"].as_python_constant() is None
@@ -713,6 +723,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    if not torch._prims_common.is_contiguous(
+                        kwargs["out"].proxy.node.meta["example_value"]
+                    ):
+                        # It's difficult to handle strides correctly in functionalization
+                        # when calling an out= op with a non-contiguous out argument
+                        unimplemented(
+                            "out= op was called where output tensor was non-contiguous"
+                        )
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable

@@ -52,6 +52,7 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import onnx
+    import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
@@ -611,9 +612,7 @@ class ONNXRuntimeOptions:
         execution_provider_options: ONNX Runtime execution provider options.
     """
 
-    import onnxruntime  # type: ignore[import]
-
-    session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None
+    session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
     """ONNX Runtime session options."""
 
     execution_providers: Optional[Sequence[str | tuple[str, dict[Any, Any]]]] = None
@@ -626,7 +625,7 @@ class ONNXRuntimeOptions:
     def __init__(
         self,
         *,
-        session_options: Optional[Sequence[onnxruntime.SessionOptions]] = None,
+        session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None,
         execution_providers: Optional[
             Sequence[str | tuple[str, dict[Any, Any]]]
         ] = None,
