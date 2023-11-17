@@ -33,6 +33,8 @@ from torch.types import (
     Number,
 )
 
+from torch._prims_common import DeviceLikeType
+
 ${function_hints}
 
 ${all_directive}
