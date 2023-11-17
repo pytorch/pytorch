@@ -48,6 +48,16 @@ __all__ = ["SymNode", "method_to_operator", "magic_methods", "sym_sqrt"]
 SymTypes = (SymInt, SymFloat, SymBool)
 
 
+def _to_symtype(t):
+    if t is bool:
+        return SymBool
+    if t is int:
+        return SymInt
+    if t is float:
+        return SymFloat
+    return t
+
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -96,7 +106,7 @@ class SymNode:
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
         if hint is not None:
-            assert type(hint) is pytype, (
+            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
@@ -826,7 +836,6 @@ def _make_node_magic(method, func):
 
         if pytype is not None and out_hint is not None:
             out_hint = pytype(out_hint)
-
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
