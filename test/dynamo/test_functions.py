@@ -1339,6 +1339,95 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
 
+    def test_partial_across_graph_break_uninvoked(self):
+        from functools import partial
+
+        def bar(x, **kwargs):
+            return x + x
+
+        @torch.compile(backend="eager", dynamic=True)
+        def foo(x, i):
+            def inner():
+                print("this is a graph_break")
+                return op(x)
+
+            op = partial(bar, dim=10)
+            x = inner()
+            op = partial(bar, other=10)
+            return inner() + x
+
+        foo(torch.rand(1), 10)
+
+    def test_no_recompile_inner_function(self):
+        def forward(inp):
+            def g(y):
+                return inp + y
+
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_no_recompile_inner_lambda(self):
+        def forward(inp):
+            g = lambda y: inp + y
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+
+                return x
+
+            return a()
+
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
+
 
 def udf_mul(x, y):
     return x * y
@@ -1766,11 +1855,7 @@ def forward(self, x_1, output_1):
     def test_triton_kernel_no_clones(self, grad, dynamic):
         from torch._inductor.utils import run_and_get_code
 
-        def call_triton(
-            x: torch.Tensor,
-            y: torch.Tensor,
-        ):
-            output = torch.zeros_like(x, requires_grad=grad)
+        def call_triton(x: torch.Tensor, y: torch.Tensor, output: torch.Tensor):
             n_elements = output.numel()
 
             tmp = torch.add(x, 1)
@@ -1781,14 +1866,16 @@ def forward(self, x_1, output_1):
 
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        o1 = torch.zeros_like(t1, requires_grad=grad)
 
-        torch_add = call_triton(t1, t2)
+        torch_add = call_triton(t1, t2, o1)
         metrics.reset()
+        o2 = torch.zeros_like(t1, requires_grad=grad)
         test, codes = run_and_get_code(
-            torch.compile(call_triton, dynamic=dynamic), t1, t2
+            torch.compile(call_triton, dynamic=dynamic), t1, t2, o2
         )
         if not grad:
-            self.assertEqual(metrics.generated_kernel_count, 2)
+            self.assertEqual(metrics.generated_kernel_count, 1)
         self.assertEqual(torch_add, test)
         # These two asserts are not optimal since it requires original aten
         # to be in the metadata, so there might be false negatives
@@ -1951,9 +2038,9 @@ def forward(self, x_1, output_1):
             y: torch.Tensor,
             xi: torch.Tensor,
             yi: torch.Tensor,
+            output: torch.Tensor,
+            outputi: torch.Tensor,
         ):
-            output = torch.zeros_like(x, requires_grad=grad)
-            outputi = torch.zeros_like(xi)
             n_elements = output.numel()
 
             grid = (x.numel(),)
@@ -1977,9 +2064,11 @@ def forward(self, x_1, output_1):
 
         t1i = torch.randint(-2, 2, (5,), device="cuda")
         t2i = torch.randint(-2, 2, (5,), device="cuda")
+        o = torch.zeros_like(t1, requires_grad=grad)
+        oi = torch.zeros_like(t1i)
         int_result = 2 * t1i + 2 * t2i
 
-        (result, resulti) = call_triton(t1, t2, t1i, t2i)
+        (result, resulti) = call_triton(t1, t2, t1i, t2i, o, oi)
         self.assertEqual(float_result, result)
         self.assertEqual(int_result, resulti)
 
@@ -2040,8 +2129,7 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("grid_type", [1, 2, 3])
     def test_triton_kernel_autotune(self, grad, dynamic, backend, grid_type):
-        def call_triton(x: torch.Tensor, y: torch.Tensor):
-            output = torch.zeros_like(x, requires_grad=grad)
+        def call_triton(x: torch.Tensor, y: torch.Tensor, output: torch.Tensor):
             n_elements = output.numel()
 
             def grid_fn(meta):
@@ -2059,12 +2147,15 @@ def forward(self, x_1, output_1):
 
         t1 = torch.rand(256, device="cuda", requires_grad=grad)
         t2 = torch.rand(256, device="cuda", requires_grad=grad)
+        output = torch.zeros_like(t1, requires_grad=grad)
 
-        torch_add = call_triton(t1, t2)
+        torch_add = call_triton(t1, t2, output)
         compiled_func = torch.compile(
             call_triton, backend=backend, fullgraph=True, dynamic=dynamic
         )
-        self.assertEqual(compiled_func(t1, t2), torch_add)
+
+        output2 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_cuda()
     @skipIfRocm
@@ -2073,8 +2164,7 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("grid_type", [1, 2, 3])
     def test_triton_kernel_2d_autotune(self, grad, dynamic, backend, grid_type):
-        def call_triton(x: torch.Tensor, y: torch.Tensor):
-            output = torch.zeros_like(x, requires_grad=grad)
+        def call_triton(x: torch.Tensor, y: torch.Tensor, output: torch.Tensor):
             x_elements = output.size()[0]
             y_elements = output.size()[1]
 
@@ -2099,12 +2189,14 @@ def forward(self, x_1, output_1):
 
         t1 = torch.rand((512, 256), device="cuda", requires_grad=grad)
         t2 = torch.rand((512, 256), device="cuda", requires_grad=grad)
+        output = torch.zeros_like(t1, requires_grad=grad)
 
-        torch_result = call_triton(t1, t2)
+        torch_result = call_triton(t1, t2, output)
         compiled_func = torch.compile(
             call_triton, backend=backend, fullgraph=True, dynamic=dynamic
         )
-        self.assertEqual(compiled_func(t1, t2), torch_result)
+        output2 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, output2), torch_result)
 
     @requires_cuda()
     @common_utils.parametrize("grad", [False, True])
@@ -2113,9 +2205,13 @@ def forward(self, x_1, output_1):
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, dynamic, backend):
         def call_triton_add(
-            x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
+            x: torch.Tensor,
+            y: torch.Tensor,
+            output: torch.Tensor,
+            grid_type: int,
+            num=1,
+            positional=False,
         ):
-            output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
 
             def grid_fn(meta):
@@ -2137,26 +2233,32 @@ def forward(self, x_1, output_1):
 
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        o1 = torch.zeros_like(t1, requires_grad=grad)
 
         torch_add = t1 + t2
 
         # No Dynamo -- Make sure triton kernel works
-        self.assertEqual(call_triton_add(t1, t2, 1), torch_add)
+        self.assertEqual(call_triton_add(t1, t2, o1, 1), torch_add)
         # No Dynamo -- Make sure triton kernel works (with positional BLOCK_SIZE)
-        self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
+        o2 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(call_triton_add(t1, t2, o2, 1, True), torch_add)
 
         # With Dynamo
         compiled_func = torch.compile(
             call_triton_add, backend=backend, fullgraph=True, dynamic=dynamic
         )
         # With simple kernel
-        self.assertEqual(compiled_func(t1, t2, 0), torch_add)
+        o3 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, o3, 0), torch_add)
         # With lambda kernel
-        self.assertEqual(compiled_func(t1, t2, 1), torch_add)
+        o4 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, o4, 1), torch_add)
         # With lambda kernel (with positional BLOCK_SIZE)
-        self.assertEqual(compiled_func(t1, t2, 1, 1, True), torch_add)
+        o5 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, o5, 1, 1, True), torch_add)
         # With user defined function kernel
-        self.assertEqual(compiled_func(t1, t2, 2, 200), torch_add)
+        o6 = torch.zeros_like(t1, requires_grad=grad)
+        self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
     def test_dataclass_factory(self):
         @dataclass

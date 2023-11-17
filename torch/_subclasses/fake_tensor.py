@@ -328,7 +328,6 @@ class FakeTensorConverter:
         t,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         *,
         source=None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
@@ -367,7 +366,6 @@ class FakeTensorConverter:
             t,
             shape_env=shape_env,
             callback=mk_fake_tensor,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
@@ -404,7 +402,6 @@ class FakeTensorConverter:
         *,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
@@ -415,7 +412,6 @@ class FakeTensorConverter:
             t,
             make_constant,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
@@ -708,7 +704,6 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 
 
 # takes in multiple-devices, dont default to default device handling
-@register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -718,7 +713,6 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 
 
 # same with multi_device_op_default, but return the input
-@register_op_impl(aten.index_put_.default)
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
@@ -730,6 +724,27 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten.index_put.default)
+@register_op_impl(aten.index_put_.default)
+def index_put_impl(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values = new_kwargs["values"]
+    self_device = new_kwargs["input"].fake_device
+    torch._check(
+        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
+    )
+
+    out = run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    if func is aten.index_put_.default:
+        return new_kwargs["input"]
+    else:
+        return out
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -1373,6 +1388,18 @@ class _DispatchCacheKey(list):
         return self.hashvalue
 
 
+@dataclass(frozen=True)
+class _DispatchCacheEntry:
+    """
+    Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
+    1) We need to create a new FakeTensor given some Tensor metadata. 2 )The op is
+    an in-place op and we need to alias the correct input.
+    """
+
+    metadata: Optional[TensorMetadata] = None
+    arg_idx: Optional[int] = None
+
+
 @dataclass
 class _UnhashableDispatchArg(Exception):
     """
@@ -1404,11 +1431,11 @@ class FakeTensorDispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache = {}
-    cache_hits = 0
-    cache_misses = 0
+    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
+    cache_hits: int = 0
+    cache_misses: int = 0
     cache_bypasses = defaultdict(int)
-    cache_enabled = FakeTensorConfig.cache
+    cache_enabled: bool = FakeTensorConfig.cache
 
     def __init__(
         self,
@@ -1547,17 +1574,17 @@ class FakeTensorMode(TorchDispatchMode):
             FakeTensorMode.cache_bypasses[e.reason] += 1
             return self._dispatch_impl(func, types, args, kwargs)
 
-        cached_metadata = FakeTensorMode.cache.get(key, None)
-        if cached_metadata is not None:
+        entry = FakeTensorMode.cache.get(key, None)
+        if entry is not None:
             FakeTensorMode.cache_hits += 1
-            output = self._new_fake_from_metadata(cached_metadata)
+            output = self._output_from_cache_entry(entry, func, args)
         else:
             FakeTensorMode.cache_misses += 1
             output = self._dispatch_impl(func, types, args, kwargs)
             if isinstance(output, FakeTensor):
-                # Some ops produce simple data types or tuples of Tensors, but
-                # it's rare enough to skip the complexity of caching other types.
-                FakeTensorMode.cache[key] = extract_tensor_metadata(output)
+                # Some ops return simple data types or tuples of Tensors, but
+                # it's rare, so skip the complexity of caching other types.
+                FakeTensorMode.cache[key] = self._cache_entry(args, output)
 
         return output
 
@@ -1567,12 +1594,11 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Create a cache key given the dispatch args.
         """
-        # TODO: This can probably be relaxed or removed.
-        if func.is_view:
-            raise _UnhashableDispatchArg("view op")
-
         if torch.Tag.inplace_view in func._tags:
-            raise _UnhashableDispatchArg("inplace view op")
+            raise _UnhashableDispatchArg("inplace view")
+
+        if func == torch.ops.aten._unsafe_view.default:
+            raise _UnhashableDispatchArg("unsafe view")
 
         key = (func, self._translate_arg(args), self._translate_arg(kwargs))
         return _DispatchCacheKey(key)
@@ -1601,17 +1627,34 @@ class FakeTensorMode(TorchDispatchMode):
                 raise _UnhashableDispatchArg("constant attribute")
             return extract_tensor_metadata(arg)
         elif isinstance(arg, torch.Tensor):
-            size = arg.size()
-            if not (len(size) == 0 or (len(size) == 1 and size[0] == 0)):
-                raise _UnhashableDispatchArg("real tensor")
-            return extract_tensor_metadata(arg)
+            raise _UnhashableDispatchArg("non-fake tensor")
         else:
             return arg
 
-    def _new_fake_from_metadata(self, metadata: TensorMetadata) -> FakeTensor:
+    def _cache_entry(self, args: Tuple[Any], output: FakeTensor) -> _DispatchCacheEntry:
         """
-        Create a new empty FakeTensor from the given metadata.
+        Create an entry to cache the given 'output' Tensor.
         """
+        # If this is an in-place op, we need to cache which input arg is aliased.
+        for idx in range(len(args)):
+            if id(args[idx]) == id(output):
+                return _DispatchCacheEntry(None, idx)
+
+        # Otherwise, store the output tensor's metadata.
+        return _DispatchCacheEntry(extract_tensor_metadata(output), None)
+
+    def _output_from_cache_entry(
+        self, entry: _DispatchCacheEntry, func: OpOverload, args: Tuple[Any]
+    ) -> FakeTensor:
+        """
+        Create a new FakeTensor from the cache entry.
+        """
+        if entry.arg_idx is not None:
+            # This is an in-place op; return the aliased arg.
+            return args[entry.arg_idx]
+
+        # Create a new empty FakeTensor with the cached metadata.
+        metadata = entry.metadata
         if metadata.is_quantized:
             raise UnsupportedFakeTensorException("is_quantized nyi")
         if metadata.is_conj:
@@ -1630,10 +1673,18 @@ class FakeTensorMode(TorchDispatchMode):
             requires_grad=metadata.requires_grad,
         )
 
-        if metadata.storage_offset != empty.storage_offset():
-            empty.set_(
-                empty.storage(), metadata.storage_offset, empty.size(), empty.stride()
-            )
+        if func.is_view or metadata.storage_offset != 0:
+            if func.is_view:
+                # For view ops, the storage should be the same as the input.
+                tensor_args = [t for t in args if isinstance(t, torch.Tensor)]
+                assert len(tensor_args) == 1
+                storage = tensor_args[0].untyped_storage()
+            else:
+                storage = empty.untyped_storage()
+            with in_kernel_invocation_manager(self):
+                empty.set_(
+                    storage, metadata.storage_offset, metadata.shape, metadata.stride
+                )
 
         return FakeTensor(self, empty, metadata.device)
 
@@ -2088,7 +2139,6 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         *,
         static_shapes=None,
-        ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
@@ -2108,7 +2158,6 @@ class FakeTensorMode(TorchDispatchMode):
             self,
             tensor,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,

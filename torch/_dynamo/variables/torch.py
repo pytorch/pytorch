@@ -24,7 +24,7 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..device_interface import device_interfaces
+from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..utils import (
@@ -132,23 +132,6 @@ tensor_dunder_fns_remap = {
 }
 
 
-try:
-    # Wed need to monkeypatch transformers here, sadly.
-    # TODO(voz): Upstream to transformers lib
-    import transformers
-
-    def _dynamo_overriden_transformers_eq(self, other):
-        if not hasattr(other, "__dict__"):
-            return False
-        return self.__dict__ == other.__dict__
-
-    transformers.configuration_utils.PretrainedConfig.__eq__ = (
-        _dynamo_overriden_transformers_eq
-    )
-except ImportError:
-    pass
-
-
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -188,7 +171,7 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, False, initialized=False)
+                ctx = GradModeVariable.create(tx, False)
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
@@ -196,11 +179,13 @@ class TorchCtxManagerClassVariable(VariableTracker):
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
             ):
-                ctx = GradModeVariable.create(tx, True, initialized=False)
+                ctx = GradModeVariable.create(tx, True)
                 return ctx.call_function(tx, args, kwargs)
             return GradModeVariable.create(tx, True)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant())
+            return GradModeVariable.create(
+                tx, args[0].as_python_constant(), initialized=True
+            )
         elif self.value is torch.inference_mode:
             return InferenceModeVariable.create(tx, args[0].as_python_constant())
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
@@ -448,7 +433,8 @@ class TorchVariable(VariableTracker):
         elif any(
             self.value is method
             for method in [
-                interface_elem.stream for interface_elem in device_interfaces.values()
+                device_interface.stream
+                for _, device_interface in get_registered_device_interfaces()
             ]
         ):
             assert len(args) == 1
@@ -702,6 +688,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+            if (
+                isinstance(tensor_variable, TensorVariable)
+                and "requires_grad" in kwargs
+                and kwargs["requires_grad"].as_python_constant()
+            ):
+                unimplemented(
+                    """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+                )
+
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)
                 and kwargs["out"].as_python_constant() is None
@@ -727,6 +723,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    if not torch._prims_common.is_contiguous(
+                        kwargs["out"].proxy.node.meta["example_value"]
+                    ):
+                        # It's difficult to handle strides correctly in functionalization
+                        # when calling an out= op with a non-contiguous out argument
+                        unimplemented(
+                            "out= op was called where output tensor was non-contiguous"
+                        )
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
