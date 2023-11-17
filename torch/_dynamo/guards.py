@@ -245,6 +245,7 @@ class GuardBuilder(GuardBuilderBase):
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
+        self.config_hash: Optional[bytes] = None
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -604,10 +605,10 @@ class GuardBuilder(GuardBuilderBase):
     def CONFIG_HASH_MATCH(self, guard: Guard):
         """Guard on the hash of the compiled function's dynamo config"""
 
+        config_hash = torch._dynamo.eval_frame.get_saved_else_current_config_hash()
         assert guard.source is GuardSource.GLOBAL
-        code = [
-            f"___compile_config_hash() == '{torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()}'"
-        ]
+        code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
+        self.config_hash = config_hash
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1011,6 +1012,7 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+        self.check_fn.config_hash = builder.config_hash
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c

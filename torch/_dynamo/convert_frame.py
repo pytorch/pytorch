@@ -374,7 +374,7 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "cache_size": cache_size.num_cache_entries_in_bucket,
                 "accumulated_cache_size": cache_size.num_cache_entries,
             },
         )
@@ -430,8 +430,12 @@ def _patch_config_if_changed():
                     "Current config does not match config saved when compiling\n"
                     "Saved hash: %s, Current hash: %s\nRestoring saved config."
                 ),
-                saved_config_hash.hex(),
-                current_config_hash.hex(),
+                saved_config_hash.hex()
+                if config.verbose
+                else saved_config_hash.hex()[:7],
+                current_config_hash.hex()
+                if config.verbose
+                else current_config_hash.hex()[:7],
             )
             config_dict_ref = config.shallow_copy_dict()
             for key in patch:
@@ -693,7 +697,7 @@ def _compile(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries_in_bucket,
                 cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
