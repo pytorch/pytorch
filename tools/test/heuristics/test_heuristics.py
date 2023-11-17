@@ -415,6 +415,25 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_unranked_tests=expected_aggregated_unranked_relevance,
         )
 
+    def test_get_test_stats_works_with_class_granularity_heuristics(self) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test2::TestFooClass"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        # These should not throw an error
+        aggregator.get_test_stats(TestRun("test2::TestFooClass"))
+        aggregator.get_test_stats(TestRun("test2"))
+
 
 if __name__ == "__main__":
     unittest.main()
