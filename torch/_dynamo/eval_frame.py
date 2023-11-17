@@ -37,7 +37,11 @@ from torch import _guards
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    DimDynamic,
+    FreshCreateSymbolicPolicy,
+)
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -883,12 +887,15 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
                     arg.node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i],
-                        dynamic_dims=[
-                            DimDynamic.DYNAMIC
-                            if d in flat_args_dynamic_dims[i]
-                            else DimDynamic.STATIC
-                            for d in range(len(flat_args[i].shape))
-                        ],
+                        policy=FreshCreateSymbolicPolicy(
+                            dynamic_sizes=[
+                                DimDynamic.DYNAMIC
+                                if d in flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
+                                for d in range(len(flat_args[i].shape))
+                            ],
+                            constraint_sizes=[None] * len(flat_args[i].shape),
+                        ),
                     )
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
