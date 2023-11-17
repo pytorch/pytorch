@@ -11,7 +11,6 @@ from torch._dynamo.skipfiles import (
     LEGACY_MOD_INLINELIST,
     MOD_INLINELIST,
 )
-from torch._dynamo.testing import load_test_module
 from torch._dynamo.trace_rules import (
     get_torch_obj_rule_map,
     load_object,
