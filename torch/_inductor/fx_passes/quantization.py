@@ -1,5 +1,6 @@
 import copy
 import functools
+import itertools
 import math
 import operator
 from typing import Any, Tuple
@@ -41,6 +42,17 @@ def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert
             prims.convert_element_type.default,
             pattern,
             dtype,
+        )
+    else:
+        return pattern
+
+
+def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape=True):
+    if with_reshape:
+        return CallFunction(
+            torch.ops.aten.reshape.default,
+            pattern,
+            reshape_size,
         )
     else:
         return pattern
@@ -855,27 +867,136 @@ def _register_quantization_lowerings():
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     def _inner(match):
-        assert dtype in [torch.float32, torch.bfloat16]
-        if dtype == torch.float32:
-            mul_node = match.output_node()
+        dequant_pattern_end_node = match.output_node()
+        if dequant_pattern_end_node.target not in [
+            aten.mul.Tensor,
+            prims.convert_element_type.default,
+            aten.reshape.default,
+        ]:
+            return False
+
+        if dequant_pattern_end_node.target is aten.reshape.default:
+            mul_node = (
+                dequant_pattern_end_node.args[0]
+                if dtype == torch.float32
+                else dequant_pattern_end_node.args[0].args[0]
+            )
         else:
-            convert_to_bf16_node = match.output_node()
-            mul_node = convert_to_bf16_node.args[0]
+            mul_node = (
+                dequant_pattern_end_node
+                if dtype == torch.float32
+                else dequant_pattern_end_node.args[0]
+            )
+
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
         if (
             mul_node.target is aten.mul.Tensor
             and sub_node.target is aten.sub.Tensor
             and to_fp32_node.target is prims.convert_element_type.default
-            and len(list(mul_node.users)) > 1
-            if dtype == torch.float32
-            else len(list(convert_to_bf16_node.users)) > 1
+            and len(list(dequant_pattern_end_node.users)) > 1
         ):
             # dequant pattern has more than 1 users to be promoted
             return True
         return False
 
     return _inner
+
+
+def _register_dequant_promotion():
+    dequant_pattern_cases = itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    )
+    for dtype, input_dim_larger_than_two in dequant_pattern_cases:
+        # 4 dequantization patterns will be matched based on the dtype and input dimension size.
+        #
+        # Case 1: int8-mixed-fp32, input dim size is 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Case 2: int8-mixed-fp32, input dim size larger than 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    reshape    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        reshape reshape
+        #      + - | - - - | - +
+        #        quant    quant
+        #
+        # Case 3: int8-mixed-bf16, input dim size is 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    to_bf16    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Case 4: int8-mixed-bf16, input dim size larger than 2
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |       |       |
+        #      |    to_bf16    |
+        #      |       |       |
+        #      |    reshape    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        reshape reshape
+        #      + - | - - - | - +
+        #        to_fp32 to_fp32
+        #      + - | - - - | - +
+        #        quant   quant
+        #
+        # Take Case 1 as example, this pass will transform
+        # graph 1:
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        # into:
+        # graph 2:
+        #            quant
+        #      + - - / - \ - - +
+        #      |dequant dequant|
+        #      |    |      |   |
+        #      | node1 node2   |
+        #      + - | - - - | - +
+        #        quant   quant
+        # In graph 1, the dequant node is shared by node1 and node2,
+        # as a result, neither node1 nor node2 could form an int8
+        # fusion pattern.
+        # After this transformation, the graph 2 could hit the int8
+        # fusion pattern: dequant-node-quant, respectively for
+        # node1 and node2.
+        _register_dequant_promotion_pass(
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    dequantize_per_tensor_activation_pattern,
+                    KeywordArg("autocast_act_dtype"),
+                    dtype != torch.float32,
+                ),
+                KeywordArg("act_reshape_size"),
+                with_reshape=input_dim_larger_than_two,
+            ),
+            pass_number=0,
+            dtype=dtype,
+        )  # pass_number=0 to run before weight prepack
 
 
 def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
@@ -890,6 +1011,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         assert dtype in [torch.float32, torch.bfloat16]
 
         def clone_to_new_node(graph, source_node, user_node):
+            # clone the source_node to connect with user_node
             assert (
                 source_node.op == "call_function"
             ), "clone_to_new_node only support node.op call_function"
@@ -903,38 +1025,40 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 user_node.replace_input_with(source_node, new_node)
             return new_node
 
-        if dtype == torch.float32:
-            mul_node = match.output_node()
-        else:
-            convert_to_bf16_node = match.output_node()
-            mul_node = convert_to_bf16_node.args[0]
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
-        assert mul_node.target is aten.mul.Tensor
-        assert sub_node.target is aten.sub.Tensor
-        assert to_fp32_node.target is prims.convert_element_type.default
+        # Find the start node and end node of a dequant pattern to be cloned
+        # * End node should be the match.output_node()
+        # * Start node should be the dtype convert to float32 node
+        dequant_pattern_end_node = match.output_node()
+        assert dequant_pattern_end_node.target in [
+            aten.mul.Tensor,
+            prims.convert_element_type.default,
+            aten.reshape.default,
+        ]
 
-        graph = match.graph
-        user_node_list = (
-            list(mul_node.users)
-            if dtype == torch.float32
-            else list(convert_to_bf16_node.users)
-        )
-        for user_node in user_node_list:
-            # Step1: Duplicate the mul node
-            if dtype == torch.float32:
-                new_mul_node = clone_to_new_node(graph, mul_node, user_node)
+        def _find_first_node_in_dequant_pattern(_node):
+            if (
+                _node.target is prims.convert_element_type.default
+                and _node.args[1] == torch.float32
+            ):
+                # For a dequant pattern, we expect the start node is a to_fp32 node
+                return _node
             else:
-                new_convert_to_bf16_node_node = clone_to_new_node(
-                    graph, convert_to_bf16_node, user_node
-                )
-                new_mul_node = clone_to_new_node(
-                    graph, mul_node, new_convert_to_bf16_node_node
-                )
-            # Step2: Duplicate the sub node
-            new_sub_node = clone_to_new_node(graph, sub_node, new_mul_node)
-            # Step3: Duplicate the to_fp32 node
-            _ = clone_to_new_node(graph, to_fp32_node, new_sub_node)
+                return _find_first_node_in_dequant_pattern(_node.args[0])
+
+        dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
+            dequant_pattern_end_node
+        )
+
+        # Clone the dequant pattern for each user node
+        graph = match.graph
+        user_node_list = list(dequant_pattern_end_node.users)
+        for _user_node in user_node_list[1:]:
+            source_node = dequant_pattern_end_node
+            user_node = _user_node
+            while source_node != dequant_pattern_start_node.args[0]:
+                user_node = clone_to_new_node(graph, source_node, user_node)
+                source_node = source_node.args[0]
+
         counters["inductor"]["dequant_promotion_matcher_count"] += 1
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
@@ -1366,42 +1490,10 @@ def _generate_qlinear_weight_prepack_patterns(dtype=torch.float32):
 
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
-    for dtype in [torch.float32, torch.bfloat16]:
-        # Step 1: Dequant promotion for int8-mixed-fp32/bf16
-        # Transform
-        # graph 1:
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        quant   quant
-        # into:
-        # graph 2:
-        #            quant
-        #      + - - / - \ - - +
-        #      |dequant dequant|
-        #      |    |      |   |
-        #      | node1 node2   |
-        #      + - | - - - | - +
-        #        quant   quant
-        # In graph 1, the dequant node is shared by node1 and node2,
-        # as a result, neither node1 nor node2 could form an int8
-        # fusion pattern.
-        # After this transformation, the graph 2 could hit the int8
-        # fusion pattern: dequant-node-quant, respectively for
-        # node1 and node2.
-        _register_dequant_promotion_pass(
-            _may_generate_pattern_with_dtype_convert(
-                dequantize_per_tensor_activation_pattern,
-                KeywordArg("autocast_act_dtype"),
-                dtype != torch.float32,
-            ),
-            pass_number=0,
-            dtype=dtype,
-        )  # pass_number=0 to run before weight prepack
+    # Step 1: Dequant promotion for int8-mixed-fp32/bf16
+    _register_dequant_promotion()
 
+    for dtype in [torch.float32, torch.bfloat16]:
         # Step 2: QConv weight prepack
         weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(dtype)
         for weight_prepack_pattern in weight_prepack_patterns:
