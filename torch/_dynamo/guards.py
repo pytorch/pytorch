@@ -57,14 +57,13 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_keys_getitem,
-    dict_keys_repr,
+    dict_const_keys,
+    dict_const_keys_repr,
+    dict_param_key_ids,
     guard_failures,
-    is_guard_failure_reporting_enabled,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -72,6 +71,9 @@ from .utils import (
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
+recompiles_verbose_log = torch._logging.getArtifactLogger(
+    __name__, "recompiles_verbose"
+)
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -106,15 +108,15 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___tensor_to_id": tensor_to_id,
+    "___dict_param_key_ids": dict_param_key_ids,
+    "___dict_const_keys": dict_const_keys,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
-    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
     "inf": float("inf"),
-    "__load_module": lambda name: importlib.import_module(name),
+    "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy":
@@ -518,21 +520,22 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
+        param_key_ids = set(dict_param_key_ids(value))
+        const_keys = set(dict_const_keys(value))
+        const_keys_repr = dict_const_keys_repr(
+            const_keys, local=is_from_local_source(guard.originating_source)
         )
-        if any_tensor:
-            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
+        if param_key_ids:
+            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
         else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
+            code.append(f"set({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -1235,6 +1238,14 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
+def is_recompiles_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
+
+
+def is_recompiles_verbose_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
+
+
 def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
@@ -1248,28 +1259,35 @@ def get_guard_fail_reason(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = ""
+    reasons: List[str] = []
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason = eval(part, global_scope, scope)
+            try:
+                fail_reason = eval(part, global_scope, scope)
+            except Exception as e:
+                if is_recompiles_verbose_enabled():
+                    continue
+                else:
+                    raise
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
 
         if isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
-        elif isinstance(fail_reason, str):
-            reason = fail_reason
-            break
+            fail_reason = part
+        if isinstance(fail_reason, str):
+            reasons.append(fail_reason)
+            if not is_recompiles_verbose_enabled():
+                break
 
-    guard_failures[orig_code_map[code]].append(reason)
+    reason_str = "\n".join(reasons)
+    guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
-                GuardFail(reason or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
         log.error(
@@ -1277,7 +1295,7 @@ def get_guard_fail_reason(
             exc_info=True,
         )
 
-    return reason
+    return reason_str
 
 
 def get_and_maybe_log_recompilation_reason(
@@ -1299,20 +1317,29 @@ def get_and_maybe_log_recompilation_reason(
 
     code = frame.f_code
 
-    do_recompiles_log = (
-        is_guard_failure_reporting_enabled()
-        and recompiles_log.isEnabledFor(logging.DEBUG)
-    )
+    # at least one of "recompiles" or "recompiles_verbose" is enabled
+    do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
 
     if do_recompiles_log or config.error_on_recompile:
-        failures = "\n".join(reasons)
-        guard_failure_details = f"triggered by the following guard failure(s):\n{textwrap.indent(failures, '- ')}"
+        if is_recompiles_verbose_enabled():
+            failures = "\n\n".join(
+                f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
+                for i, reason in enumerate(reasons)
+            )
+        else:
+            failures = textwrap.indent("\n".join(reasons), "- ")
+        guard_failure_details = (
+            f"triggered by the following guard failure(s):\n{failures}"
+        )
         message = (
             f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
             f"{textwrap.indent(guard_failure_details, '    ')}"
         )
         if do_recompiles_log:
-            recompiles_log.debug(message, stack_info=True)
+            if is_recompiles_verbose_enabled():
+                recompiles_verbose_log.debug(message)
+            else:
+                recompiles_log.debug(message)
         if config.error_on_recompile:
             raise exc.RecompileError(message)
 
