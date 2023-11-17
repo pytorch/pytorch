@@ -910,8 +910,30 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         pass_number=pass_number,
     )
     def dequant_promotion(match: Match, *args, **kwargs):
-        # If dequant pattern used by multiply nodes,
-        # we will do dequant promotion. So each user node has a separate dequant pattern connected.
+        # Dequant_promotion will transform
+        # graph 1:
+        #            quant
+        #      + - - - | - - - +
+        #      |    dequant    |
+        #      |    /     \    |
+        #      |  node1  node2 |
+        #      + - | - - - | - +
+        #        quant   quant
+        # into:
+        # graph 2:
+        #            quant
+        #      + - - / - \ - - +
+        #      |dequant dequant|
+        #      |    |      |   |
+        #      | node1 node2   |
+        #      + - | - - - | - +
+        #        quant   quant
+        # In graph 1, the dequant node is shared by node1 and node2,
+        # as a result, neither node1 nor node2 could form an int8
+        # fusion pattern.
+        # After this transformation, the graph 2 could hit the int8
+        # fusion pattern: dequant-node-quant, respectively for
+        # node1 and node2.
         assert dtype in [torch.float32, torch.bfloat16]
 
         def clone_to_new_node(graph, source_node, user_node):
@@ -939,6 +961,12 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
             aten.reshape.default,
         ]
 
+        # For a dequant pattern, we should expect see the node list as:
+        # * OPT(aten.reshape.default)
+        # * OPT(prims.convert_element_type.default) (to_bf16)
+        # * aten.mul
+        # * aten.sub
+        # * prims.convert_element_type.default (to_fp32)
         def _find_first_node_in_dequant_pattern(_node):
             if (
                 _node.target is prims.convert_element_type.default
@@ -947,6 +975,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 # For a dequant pattern, we expect the start node is a to_fp32 node
                 return _node
             else:
+                assert (
+                    len(_node.args) >= 1
+                ), "In in dequant pattern, each node should have more than 1 arg."
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
         dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
@@ -1398,83 +1429,25 @@ def _register_dequant_promotion():
     )
     for dtype, input_dim_exceeds_two in dequant_pattern_cases:
         # 4 dequantization patterns will be matched based on the dtype and input dimension size.
-        #
         # Case 1: int8-mixed-fp32, input dim size is 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Case 2: int8-mixed-fp32, input dim size larger than 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    reshape    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        reshape reshape
-        #      + - | - - - | - +
-        #        quant    quant
-        #
+        # Case 2: int8-mixed-fp32, input dim size exceeds 2
         # Case 3: int8-mixed-bf16, input dim size is 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    to_bf16    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        to_fp32 to_fp32
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Case 4: int8-mixed-bf16, input dim size larger than 2
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |       |       |
-        #      |    to_bf16    |
-        #      |       |       |
-        #      |    reshape    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        reshape reshape
-        #      + - | - - - | - +
-        #        to_fp32 to_fp32
-        #      + - | - - - | - +
-        #        quant   quant
-        #
-        # Take Case 1 as example, this pass will transform
-        # graph 1:
-        #            quant
-        #      + - - - | - - - +
-        #      |    dequant    |
-        #      |    /     \    |
-        #      |  node1  node2 |
-        #      + - | - - - | - +
-        #        quant   quant
-        # into:
-        # graph 2:
-        #            quant
-        #      + - - / - \ - - +
-        #      |dequant dequant|
-        #      |    |      |   |
-        #      | node1 node2   |
-        #      + - | - - - | - +
-        #        quant   quant
-        # In graph 1, the dequant node is shared by node1 and node2,
-        # as a result, neither node1 nor node2 could form an int8
-        # fusion pattern.
-        # After this transformation, the graph 2 could hit the int8
-        # fusion pattern: dequant-node-quant, respectively for
-        # node1 and node2.
+        # Case 4: int8-mixed-bf16, input dim size exceeds 2
+        #           quant
+        #   + - - - - | - - - - +
+        #   |      dequant      |
+        #   |         |         |
+        #   |    OPT(to_bf16)   |
+        #   |         |         |
+        #   |    OPT(reshape)   |
+        #   |      /     \      |
+        #   |    node1  node2   |
+        #   + - - | - - - | - - +
+        #  OPT(reshape) OPT(reshape)
+        #   + - - | - - - | - - +
+        #  OPT(to_fp32) OPT(to_fp32)
+        #   + - - | - - - | - - +
+        #       quant   quant
         _register_dequant_promotion_pass(
             _may_generate_pattern_with_reshape(
                 _may_generate_pattern_with_dtype_convert(
