@@ -134,7 +134,7 @@ class SymNode:
     def _update_hint(self):
         r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
         if r is not None:
-            self._hint = self.pytype(r)
+            self._hint = self.pytype(r) if not isinstance(r, SymTypes) else r
 
     @property
     def hint(self):
@@ -834,7 +834,11 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        if pytype is not None and out_hint is not None:
+        if (
+            pytype is not None
+            and out_hint is not None
+            and not isinstance(out_hint, SymTypes)
+        ):
             out_hint = pytype(out_hint)
 
         # Create a FX node that corresponds to the operation being applied to
