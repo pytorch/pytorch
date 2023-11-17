@@ -1870,6 +1870,33 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_default_name_non_primitive(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [1, .5, "foo", object()])
+            def test_default_names(self, device, x):
+                pass
+
+            @parametrize("x,y", [(1, object()), (object(), .5), (object(), object())])
+            def test_two_things_default_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+        expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_0_5_{}',
+            '{}.test_default_names_x_foo_{}',
+            '{}.test_default_names_x3_{}',
+            '{}.test_two_things_default_names_x_1_y0_{}',
+            '{}.test_two_things_default_names_x1_y_0_5_{}',
+            '{}.test_two_things_default_names_x2_y2_{}')
+        )
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
     def test_name_fn(self, device):
         device = self.device_type
 
