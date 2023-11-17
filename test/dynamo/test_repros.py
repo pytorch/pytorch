@@ -3573,6 +3573,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             if isinstance(backend, CompileCounter):
                 self.assertEqual(backend.frame_count, 2)  # graph breaks
 
+    def test_dynamic_shapes_double_not_equal(self):
+        # https://github.com/pytorch/pytorch/issues/113393
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        x = torch.ones(5, 1, 2, 3)
+        x2 = torch.ones(5, 1, 3, 4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
+
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
             for _ in range(1000):

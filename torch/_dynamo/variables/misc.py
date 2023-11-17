@@ -452,8 +452,24 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
+        from ..allowed_functions import is_user_defined_allowed
+        from .builder import wrap_fx_proxy
+
         if name == "apply":
-            return self.call_apply(tx, args, kwargs)
+            if is_user_defined_allowed(self.fn_cls):
+                trampoline_autograd_apply = produce_trampoline_autograd_apply(
+                    self.fn_cls
+                )
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        trampoline_autograd_apply,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+            else:
+                return self.call_apply(tx, args, kwargs)
         elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
