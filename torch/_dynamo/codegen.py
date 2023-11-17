@@ -3,7 +3,7 @@ import dataclasses
 import re
 import sys
 import types
-from typing import Counter, List, Optional, OrderedDict
+from typing import Counter, Dict, List, Optional
 
 import torch.nn
 from . import utils
@@ -51,9 +51,7 @@ class PyCodegen:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: OrderedDict[
-            int, GraphOutputEntry
-        ] = collections.OrderedDict()
+        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
         self._output: List[Instruction] = []
         self.tempvars = tempvars or {}
         self.tx = tx

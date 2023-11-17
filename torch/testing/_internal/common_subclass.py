@@ -197,7 +197,7 @@ class SubclassInfo:
 
 subclass_db = {
     torch.Tensor: SubclassInfo(
-        'base_tensor', create_fn=lambda shape: torch.randn(shape)
+        'base_tensor', create_fn=torch.randn
     ),
     NonWrapperTensor: SubclassInfo(
         'non_wrapper_tensor',
