@@ -1525,6 +1525,7 @@ __all__ = [
     "ExportOptions",
     "ONNXProgram",
     "ONNXProgramSerializer",
+    "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
     "OnnxRegistry",
