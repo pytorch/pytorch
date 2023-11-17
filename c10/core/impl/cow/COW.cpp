@@ -1,7 +1,6 @@
 #include <c10/core/impl/cow/COW.h>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/cow/COWDeleter.h>
@@ -30,24 +29,18 @@ at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
   return make_data_ptr(data_ptr, *ctx);
 }
 
-bool is_simple_context(
-    const void* context,
-    const void* data,
-    const at::Allocator* allocator) {
-  if (allocator == c10::GetDefaultMobileCPUAllocator()) {
-    return reinterpret_cast<size_t>(data) ==
-        reinterpret_cast<size_t>(context) + c10::gAlignment;
-  } else {
-    return data == context;
-  }
-}
-
 } // namespace
 
 bool has_simple_data_ptr(const c10::StorageImpl& storage) {
   const c10::DataPtr& data_ptr = storage.data_ptr();
-  return is_simple_context(
-      data_ptr.get_context(), data_ptr.get(), storage.allocator());
+  const void* ctx = data_ptr.get_context();
+  const void* data = data_ptr.get();
+  const c10::Allocator* allocator = storage.allocator();
+  if (allocator != nullptr) {
+    return allocator->is_simple_data_ptr(data_ptr);
+  } else {
+    return ctx == data;
+  }
 }
 
 bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
@@ -88,8 +81,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage.mutable_data_ptr().move_context();
-    TORCH_INTERNAL_ASSERT(is_simple_context(
-        original_ctx.get(), data_ptr.get(), storage.allocator()));
 
     // Save this for the result.
     new_data_ptr = make_data_ptr(
@@ -115,6 +106,42 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
       *std::move(new_data_ptr),
       storage.allocator(),
       storage.resizable());
+}
+
+C10_API void materialize_cow_storage(StorageImpl& storage) {
+  const at::DataPtr& data_ptr = storage.data_ptr();
+
+  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
+
+  auto result = ctx->decrement_refcount();
+
+  // This must be set by each branch below.
+  std::optional<DataPtr> new_data_ptr;
+
+  if (std::holds_alternative<cow::COWDeleterContext::LastReference>(result)) {
+    // This is the only reference to the data. If there were any racing writes,
+    // the context ensured they finished before giving us the result.
+    std::unique_ptr<void, DeleterFnPtr> data =
+        std::get<cow::COWDeleterContext::LastReference>(std::move(result));
+    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
+    new_data_ptr = DataPtr(
+        data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
+            result));
+    // We don't need to consume the result, it's just a shared lock ensuring
+    // that the data will remain while we copy it.
+    new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+  }
+
+  TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
+  DataPtr old_data_ptr =
+      storage.set_data_ptr_no_materialize_cow(*std::move(new_data_ptr));
+  // The refcount of the context was already decremented above. Release the
+  // reference to the context so the refcount doesn't get decremented again
+  old_data_ptr.release_context();
 }
 
 } // namespace c10::impl::cow
