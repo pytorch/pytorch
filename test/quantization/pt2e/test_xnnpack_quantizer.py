@@ -526,11 +526,11 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
+            with torchdynamo.config.patch(allow_rnn=True):
+                model_graph = capture_pre_autograd_graph(
+                    model_graph,
+                    example_inputs,
+                )
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
@@ -590,11 +590,11 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
+            with torchdynamo.config.patch(allow_rnn=True):
+                model_graph = capture_pre_autograd_graph(
+                    model_graph,
+                    example_inputs,
+                )
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
