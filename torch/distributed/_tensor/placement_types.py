@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -384,24 +384,37 @@ class DTensorSpec:
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
 
+    def __post_init__(self):
+        self._hash = hash((self.mesh, self.placements))
+
+    def __setattr__(self, attr: str, value: Any):
+        super().__setattr__(attr, value)
+        # Make sure to recompute the hash in case any of the hashed attributes
+        # change (though we do not expect `mesh` or `placements` to change)
+        if attr in ("mesh", "placements", "tensor_meta"):
+            if self.tensor_meta is not None:
+                self._hash = hash(
+                    (
+                        self.mesh,
+                        self.placements,
+                        self.tensor_meta.shape,
+                        self.tensor_meta.stride,
+                        self.tensor_meta.dtype,
+                    )
+                )
+            else:
+                self._hash = hash((self.mesh, self.placements))
+
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
         # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them.
-        if self.tensor_meta is not None:
-            return hash(
-                (
-                    self.mesh,
-                    self.placements,
-                    self.tensor_meta.shape,
-                    self.tensor_meta.stride,
-                    self.tensor_meta.dtype,
-                )
-            )
-        else:
-            return hash((self.mesh, self.placements))
+        # We eagerly cache the spec to avoid recomputing the hash upon each
+        # use, where we make sure to update the hash when the `tensor_meta`
+        # changes.
+        return self._hash
 
     def __eq__(self, __o: object) -> bool:
         if not (
