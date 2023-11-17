@@ -585,11 +585,10 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @inductor_config.patch(joint_graph_constant_folding=True)
     def test_pointless_cumsum(self):
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
-
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
