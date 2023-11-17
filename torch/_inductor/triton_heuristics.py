@@ -312,9 +312,7 @@ class CachingAutotuner(KernelInterface):
             for i, arg in enumerate(self.fn.arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = list(self.fn.arg_names)
-        while def_args and def_args[-1] in cfg.kwargs:
-            def_args.pop()
+        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
         scope = {
             "grid_meta": cfg.kwargs,
