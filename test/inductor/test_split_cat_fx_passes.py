@@ -3,6 +3,7 @@
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -67,17 +68,17 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
-            (arg_only_dim0, 1),
+            (arg_only_dim0, 0),
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
             (list_replace, 1),
-            (multi_split, 17),
+            (multi_split, 1),
             (unequal_split, 1),
             (arg_only_cm, 1),
             (kwarg1_cm, 1),
             (kwarg2_cm, 1),
-            (multi_split_cm, 17),
+            (multi_split_cm, 1),
             (unequal_split_cm, 1),
             (cm_with_list, 1),
         ]:
@@ -226,12 +227,12 @@ class TestSplitCatFxPasses(TestCase):
             torch.randn(2, 32),
         ]
         for fn, expected_split_merged in [
-            (multi_split, 16),
+            (multi_split, 0),
             (multi_split_2, 16),
             (multi_split_2_neg_dim, 16),
             (multi_split_with_sizes, 2),
-            (multi_split_kwarg1, 16),
-            (multi_split_kwarg2, 16),
+            (multi_split_kwarg1, 0),
+            (multi_split_kwarg2, 0),
             (unequal_multi_split, 3),
             (unequal_multi_split_neg_index, 3),
             (diff_dims, 0),
@@ -1029,6 +1030,68 @@ class TestSplitCatFxPasses(TestCase):
                 expected_getitem_cat_merged,
             )
             counters.clear()
+
+    @patch
+    def test_stack_tahn_unbind_merge(self):
+        def stack_tahn_unbind(x):
+            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
+            cat_1 = torch.cat((item3, item4), 1)
+            cat_2 = torch.cat((item5, item6), 1)
+            tanh = torch.tanh(stack)
+            unbind = torch.unbind(tanh, 0)
+            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
+
+        args = [
+            torch.randn(50, 120),
+        ]
+        for fn, expected_stack_tahn_unbind_merged in [
+            (stack_tahn_unbind, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["stack_tahn_unbind_merged"],
+                expected_stack_tahn_unbind_merged,
+            )
+            counters.clear()
+
+    def test_numpy_compat_normalization(self):
+        def fn(x, y):
+            a = torch.stack([x, y], axis=1)
+            b = torch.mul(x, x2=y)
+            c = torch.mul(x, x2=y)
+            d = torch.mul(x, x2=y)
+            e = torch.max(x, dim=1, keepdims=True)
+            f = torch.dropout(x=x, p=0.5, train=True)
+            return a, b, c, d, e, f
+
+        fn_t = torch.fx.symbolic_trace(fn)
+        numpy_compat_normalization(fn_t.graph)
+
+        for n in fn_t.graph.nodes:
+            for k in n.kwargs.keys():
+                self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
+
+    @patch
+    def test_stack_normalization_axis_kwarg(self):
+        def fn(x, y):
+            return torch.stack([x, y], axis=1)
+
+        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        expected = fn(x, y)
+        actual = torch.compile(fn)(x, y)
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

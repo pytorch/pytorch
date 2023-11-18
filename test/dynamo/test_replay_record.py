@@ -176,7 +176,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, torch.ones(1, 1), exp_exc_name="RuntimeError")
 
-    # Verfiy that we replay when we have tensor arguments to the frame being replayed
+    # Verify that we replay when we have tensor arguments to the frame being replayed
     @requires_dill
     def test_fn_call_args(self):
         def test_fn(x, y):

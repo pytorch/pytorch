@@ -572,7 +572,11 @@ API Reference
 
 
 .. automodule:: torch.export.exported_program
+.. automodule:: torch.export.graph_signature
 .. autoclass:: InputKind
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
 .. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses

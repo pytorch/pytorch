@@ -20,12 +20,14 @@ void SymInt::promote_to_negative() {
 }
 
 SymNode SymInt::toSymNode() const {
-  TORCH_CHECK(is_heap_allocated());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      is_heap_allocated(), "SymInt::toSymNode is_heap_allocated");
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
 SymInt::SymInt(SymNode sin_sp) {
-  TORCH_CHECK(sin_sp->is_int());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      sin_sp->is_int(), "SymInt::SymInt sin_sp->is_int()");
   auto ptr = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;

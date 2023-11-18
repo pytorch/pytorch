@@ -5,6 +5,7 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
+import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
@@ -89,6 +90,12 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
        and func is getattr(torch.Tensor, func.__name__, None)):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
+    if name == "<lambda>":
+        # For lambdas, try to get their defining name in the module
+        try:
+            name = inspect.getsource(func).split("=")[0].strip()
+        except Exception as e:
+            raise RuntimeError("Unable to represent lambda") from e
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     # Fixup segment_reduce mismatch
@@ -376,7 +383,7 @@ class Node:
         self._args = args_left + (arg,) + args_right
 
         _new_input_nodes = {}
-        map_arg(arg, lambda n: _new_input_nodes.setdefault(n))
+        map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
             if new_use not in self._input_nodes:
@@ -427,8 +434,8 @@ class Node:
             old_use.users.pop(self)
 
         self._input_nodes = {}
-        map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
-        map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
+        map_arg(self._args, self._input_nodes.setdefault)
+        map_arg(self._kwargs, self._input_nodes.setdefault)
 
         for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)

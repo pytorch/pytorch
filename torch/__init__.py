@@ -238,7 +238,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    import torch._C as _C
+    from . import _C as _C
 
 class SymInt:
     """
@@ -729,14 +729,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
-        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
-          quantized, sets new elements to a known value.  Floating point or
-          complex values are set to NaN. Integer values are set to the maximum
-          value.
-        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
-          and :func:`torch.empty_permuted` will fill the output tensor with a known
-          value. Floating point or complex dtype tensors are filled with NaN. Integer
-          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -780,6 +772,11 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
+
+    In addition, several operations fill uninitialized memory when this setting
+    is turned on and when
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
+    See the documentation for that attribute for more information.
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1171,7 +1168,7 @@ from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage,
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1181,7 +1178,7 @@ class ByteStorage(_LegacyStorage):
 class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1191,7 +1188,7 @@ class DoubleStorage(_LegacyStorage):
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1201,7 +1198,7 @@ class FloatStorage(_LegacyStorage):
 class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1211,7 +1208,7 @@ class HalfStorage(_LegacyStorage):
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1221,7 +1218,7 @@ class LongStorage(_LegacyStorage):
 class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1231,7 +1228,7 @@ class IntStorage(_LegacyStorage):
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1241,7 +1238,7 @@ class ShortStorage(_LegacyStorage):
 class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1251,7 +1248,7 @@ class CharStorage(_LegacyStorage):
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1261,7 +1258,7 @@ class BoolStorage(_LegacyStorage):
 class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1271,7 +1268,7 @@ class BFloat16Storage(_LegacyStorage):
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1281,7 +1278,7 @@ class ComplexDoubleStorage(_LegacyStorage):
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1291,7 +1288,7 @@ class ComplexFloatStorage(_LegacyStorage):
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1301,7 +1298,7 @@ class QUInt8Storage(_LegacyStorage):
 class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1311,7 +1308,7 @@ class QInt8Storage(_LegacyStorage):
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1321,7 +1318,7 @@ class QInt32Storage(_LegacyStorage):
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1331,7 +1328,7 @@ class QUInt4x2Storage(_LegacyStorage):
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1597,7 +1594,7 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-        current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
+        current_config: Dict[str, Any] = config.shallow_copy_dict()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
