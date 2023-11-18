@@ -313,8 +313,9 @@ test_inductor() {
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
 # For example 'dynamic_aot_eager_torchbench' TEST_CONFIG means we run
 # the benchmark script with '--dynamic-shapes --backend aot_eager --device cuda'
-# The matrix of test options is specified in .github/workflows/periodic.yml
-# and .github/workflows/inductor.yml
+# The matrix of test options is specified in .github/workflows/inductor.yml,
+# .github/workflows/inductor-periodic.yml, and
+# .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
 if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
