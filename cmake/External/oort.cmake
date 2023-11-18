@@ -4,7 +4,7 @@ if(NOT __OORT_INCLUDED)
   set(__OORT_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/oort/build")
   set(__OORT_INSTALL_DIR "${PROJECT_SOURCE_DIR}/torch")
   ExternalProject_Add(oort_external
-    SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/oort
+    SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/triton-mathaot/mathaot
     BINARY_DIR ${__OORT_BUILD_DIR}
     PREFIX ${__OORT_INSTALL_DIR}
     CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${__OORT_INSTALL_DIR}
