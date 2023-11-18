@@ -98,6 +98,10 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
    */
 #if defined(__CUDA_ARCH__)
   uint32_t renorm_shift = __clz(nonsign);
+#elif defined(__SYCL_DEVICE_ONLY__)
+  // Note: zero is not a supported input into `__builtin_clz`
+  uint32_t renorm_shift =
+      nonsign != 0 ? __builtin_clz(nonsign) : sizeof(uint32_t) * CHAR_BIT;
 #elif defined(_MSC_VER)
   unsigned long nonsign_bsr;
   _BitScanReverse(&nonsign_bsr, (unsigned long)nonsign);

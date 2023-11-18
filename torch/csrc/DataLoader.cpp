@@ -124,24 +124,18 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
     PyObject* module,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int error;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::set<pid_t>* pid_set;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  pid_t worker_pid;
-  siginfo_t infop;
 
   // Only check the pids we care about
   for (auto& w : worker_pids) {
-    pid_set = &(w.second);
-    for (auto pid_it = pid_set->begin(); pid_it != pid_set->end(); ++pid_it) {
-      worker_pid = *pid_it;
+    auto& pid_set = w.second;
+    for (auto worker_pid : pid_set) {
       // Use waitid rather than waitpid so that we can set NOWAIT, and that
       // Python and other handlers can get whatever info they want about the
       // child.
+      siginfo_t infop{};
       infop.si_pid = 0;
-      error = waitid(P_PID, worker_pid, &infop, WEXITED | WNOHANG | WNOWAIT);
+      auto error =
+          waitid(P_PID, worker_pid, &infop, WEXITED | WNOHANG | WNOWAIT);
       // ignore errors and case with no waitable child
       if (error < 0 || infop.si_pid == 0)
         continue;
@@ -154,7 +148,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
             << "num_workers=0 may give better error trace.";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
-        pid_set->clear();
+        pid_set.clear();
         throw std::runtime_error(oss.str());
       } else if (
           infop.si_code == CLD_KILLED ||
@@ -168,7 +162,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
         }
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
-        pid_set->clear();
+        pid_set.clear();
         throw std::runtime_error(oss.str());
       }
     }

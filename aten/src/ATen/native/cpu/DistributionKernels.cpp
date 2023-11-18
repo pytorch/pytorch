@@ -57,7 +57,8 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Gen
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     at::Tensor tmp_int_tensor;
     if (std::is_same<scalar_t, int>::value && contig) {
       tmp_int_tensor = self;
@@ -240,13 +241,7 @@ REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-#ifdef CPU_CAPABILITY_AVX512
-// normal_stub isn't being dispatched to AVX512 because it exposes
-// flakiness in test_sgd of test/optim/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub);
-#else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
-#endif
 REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
 REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);

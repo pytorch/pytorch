@@ -1,7 +1,7 @@
 from . import fft, linalg, random
 from ._dtypes import *  # noqa: F403
 from ._funcs import *  # noqa: F403
-from ._getlimits import errstate, finfo, iinfo
+from ._getlimits import finfo, iinfo
 from ._ndarray import (
     array,
     asarray,

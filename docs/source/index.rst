@@ -66,6 +66,7 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cpu
    cuda
+   torch.cuda.memory <torch_cuda_memory>
    mps
    torch.backends <backends>
    torch.export <export>
@@ -93,7 +94,6 @@ Features described in this documentation are classified by release status:
    profiler
    nn.init
    onnx
-   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -112,6 +112,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.deterministic <deterministic>
    torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>

@@ -66,21 +66,22 @@ PyObject* THPDevice_pynew(
     return THPDevice_New(device);
   } else if (r.idx == 1) {
     auto as_device = r.device(0); // this works, because device can take strings
-    auto device_type = r.string(0);
     if (as_device.has_index()) {
+      auto device_type = r.string(0);
       throw std::runtime_error(
           "type (string) must not include an index because index "
           "was passed explicitly: " +
           device_type);
     }
-    int32_t device_index = -1;
+    int64_t device_index = -1;
     if (!r.isNone(1)) {
       device_index = r.toInt64(1);
       // -1 is allowed in ATen/C++, to mean the default device, but not in
       // Python.
       TORCH_CHECK(device_index >= 0, "Device index must not be negative");
     }
-    at::Device device(as_device.type(), device_index);
+    at::Device device(
+        as_device.type(), static_cast<c10::DeviceIndex>(device_index));
     return THPDevice_New(device);
   }
   Py_RETURN_NONE;
@@ -163,8 +164,8 @@ PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   std::ostringstream oss;
   oss << self->device.type();
   if (self->device.has_index()) {
-    args = THPObjectPtr{
-        Py_BuildValue("(si)", oss.str().c_str(), self->device.index())};
+    args = THPObjectPtr{Py_BuildValue(
+        "(si)", oss.str().c_str(), static_cast<int>(self->device.index()))};
   } else {
     args = THPObjectPtr{Py_BuildValue("(s)", oss.str().c_str())};
   }

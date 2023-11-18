@@ -1,4 +1,4 @@
-#include <c10/core/LargeNegativeIntSymNodeImpl.h>
+#include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
@@ -13,19 +13,21 @@ namespace c10 {
 // Postcondition: invariants on SymInt are fixed
 void SymInt::promote_to_negative() {
   auto s =
-      SymInt(SymNode(c10::make_intrusive<LargeNegativeIntSymNodeImpl>(data_)));
+      SymInt(SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(data_)));
   // Similar to move operator=, but do NOT release data_
   data_ = s.data_;
   s.data_ = 0;
 }
 
 SymNode SymInt::toSymNode() const {
-  TORCH_CHECK(is_heap_allocated());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      is_heap_allocated(), "SymInt::toSymNode is_heap_allocated");
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
 SymInt::SymInt(SymNode sin_sp) {
-  TORCH_CHECK(sin_sp->is_int());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      sin_sp->is_int(), "SymInt::SymInt sin_sp->is_int()");
   auto ptr = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
@@ -82,6 +84,22 @@ SymInt::operator SymFloat() const {
   }
 }
 
+bool SymInt::is_same(const SymInt& other) const {
+  if (is_heap_allocated() != other.is_heap_allocated()) {
+    return false;
+  }
+  // Both not heap allocated
+  if (!is_heap_allocated() && this->operator!=(other)) {
+    return false;
+  }
+  // Both heap allocated
+  if (is_heap_allocated() &&
+      toSymNodeImplUnowned() != other.toSymNodeImplUnowned()) {
+    return false;
+  }
+  return true;
+}
+
 SymNode SymInt::wrap_node(const SymNode& base) const {
   if (auto ma = maybe_as_int()) {
     return base->wrap_int(*ma);
@@ -103,6 +121,14 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
     return *ma;
   } else {
     return toSymNodeImplUnowned()->guard_int(file, line);
+  }
+}
+
+bool SymInt::expect_size(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_int()) {
+    return *ma >= 0;
+  } else {
+    return toSymNodeImplUnowned()->expect_size(file, line);
   }
 }
 

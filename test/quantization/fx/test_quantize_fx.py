@@ -8622,9 +8622,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # FX Graph Mode and Eager Mode now diverages in numerics of add_scalar and mul_scalar
             # self.assertEqual(m(data), ref_m(data))
 
-
-
-    def test_embedding_fx(self):
+    def test_embedding(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8667,7 +8665,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # make sure it runs
                 m(*example_inputs)
 
-    def test_embedding_bag_fx(self):
+    def test_embedding_bag(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()

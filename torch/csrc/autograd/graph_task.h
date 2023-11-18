@@ -146,6 +146,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // Safe to read owner_ and reentrant_depth_ without synchronization
   int owner_;
   // The number of parent graph tasks for this graph task
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int reentrant_depth_;
 
   bool can_checkpoint() const {

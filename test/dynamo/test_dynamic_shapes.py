@@ -4,6 +4,7 @@ import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.fx.experimental import _config as fx_config
 from torch.testing._internal.common_utils import TEST_Z3
 
 try:
@@ -44,7 +45,9 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        (config, "translation_validation", TEST_Z3),
+        (fx_config, "translation_validation", TEST_Z3),
+        (fx_config, "check_shape_env_recorded_events", True),
+        (fx_config, "validate_shape_env_verison_key", True),
         xfail_prop="_expected_failure_dynamic",
     )
 
@@ -68,6 +71,7 @@ tests = [
 ]
 for test in tests:
     make_dynamic_cls(test)
+del test
 
 if TEST_Z3:
     # this only fails when z3 is available

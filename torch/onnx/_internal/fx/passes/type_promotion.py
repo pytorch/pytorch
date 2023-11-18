@@ -195,8 +195,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *_pytree.tree_flatten(candidate_args)[0],
-            *_pytree.tree_flatten(candidate_kwargs)[0],
+            *_pytree.arg_tree_leaves(*candidate_args.values(), **candidate_kwargs),
             type_promotion_kind=self.promotion_kind,
         )
 
@@ -910,6 +909,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1641,7 +1643,7 @@ class InsertTypePromotion(_pass.Transform):
     metadata, specifically the fake tensor stored under node.meta["val"], and ensure it
     reflects the latest changes.
 
-    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/master/generated/onnx_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
+    See [FXE0015: fx_node_insert_type_promotion](https://pytorch.org/docs/master/generated/onnx_dynamo_diagnostics_rules/FXE0015%3Afx-node-insert-type-promotion.html) for more details.  # noqa: B950
     """
 
     def __init__(

@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
-          input_dims.push_back(c10::stoi(s));
+          input_dims.push_back(std::stoi(s));
         }
         caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
         if (blob == nullptr) {

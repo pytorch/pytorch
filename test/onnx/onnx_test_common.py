@@ -7,6 +7,7 @@ import contextlib
 import copy
 import dataclasses
 import io
+import logging
 import os
 import unittest
 import warnings
@@ -30,13 +31,15 @@ import onnxruntime
 import pytest
 import pytorch_test_common
 import torch
+from torch import export as torch_export
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
-_ModelType = Union[torch.nn.Module, Callable]
+_ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
 _InputArgsType = Optional[
     Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
 ]
@@ -82,11 +85,11 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def assert_dynamic_shapes(export_output: torch.onnx.ExportOutput, dynamic_shapes: bool):
+def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: bool):
     """Assert whether the exported model has dynamic shapes or not.
 
     Args:
-        export_output (torch.onnx.ExportOutput): The output of torch.onnx.dynamo_export.
+        onnx_program (torch.onnx.ONNXProgram): The output of torch.onnx.dynamo_export.
         dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
             When True, raises if graph inputs don't have at least one dynamic dimension
             When False, raises if graph inputs have at least one dynamic dimension.
@@ -98,7 +101,7 @@ def assert_dynamic_shapes(export_output: torch.onnx.ExportOutput, dynamic_shapes
     if dynamic_shapes is None:
         return
 
-    model_proto = export_output.model_proto
+    model_proto = onnx_program.model_proto
     # Process graph inputs
     dynamic_inputs = []
     for inp in model_proto.graph.input:
@@ -267,21 +270,24 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # since ONNX doesn't represent kwargs.
         export_error: Optional[torch.onnx.OnnxExporterError] = None
         try:
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 ref_model,
                 *ref_input_args,
                 **ref_input_kwargs,
                 export_options=torch.onnx.ExportOptions(
                     op_level_debug=self.op_level_debug,
                     dynamic_shapes=self.dynamic_shapes,
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        verbosity_level=logging.DEBUG
+                    ),
                 ),
             )
         except torch.onnx.OnnxExporterError as e:
             export_error = e
-            export_output = e.export_output
+            onnx_program = e.onnx_program
 
-        if verbose:
-            export_output.save_diagnostics(
+        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+            onnx_program.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
@@ -292,10 +298,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             raise export_error
 
         if not skip_dynamic_shapes_check:
-            assert_dynamic_shapes(export_output, self.dynamic_shapes)
+            assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
 
         _compare_pytorch_onnx_with_ort(
-            export_output,
+            onnx_program,
             model,
             input_args,
             input_kwargs,
@@ -318,7 +324,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     else {}
                 )
                 _compare_pytorch_onnx_with_ort(
-                    export_output,
+                    onnx_program,
                     model,
                     additional_input_args,
                     additional_input_kwargs,
@@ -330,7 +336,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
 @_beartype.beartype
 def run_ort(
-    onnx_model: Union[str, torch.onnx.ExportOutput],
+    onnx_model: Union[str, torch.onnx.ONNXProgram],
     pytorch_inputs: Sequence[_InputArgsType],
 ) -> _OutputsType:
     """Run ORT on the given ONNX model and inputs
@@ -338,7 +344,7 @@ def run_ort(
     Used in test_fx_to_onnx_with_onnxruntime.py
 
     Args:
-        onnx_model (Union[str, torch.onnx.ExportOutput]): Converter ONNX model
+        onnx_model (Union[str, torch.onnx.ONNXProgram]): Converter ONNX model
         pytorch_inputs (Sequence[_InputArgsType]): The given torch inputs
 
     Raises:
@@ -347,31 +353,12 @@ def run_ort(
     Returns:
         _OutputsType: ONNX model predictions
     """
-    if isinstance(onnx_model, torch.onnx.ExportOutput):
+    if isinstance(onnx_model, torch.onnx.ONNXProgram):
         buffer = io.BytesIO()
         onnx_model.save(buffer)
         ort_model = buffer.getvalue()
     else:
         ort_model = onnx_model
-
-    # NOTE: Inline model before running in onnxruntime.
-    # This is a workaround since onnxruntime crashes or segfaults when loading model
-    # with nested functions.
-    # Ref: https://github.com/microsoft/onnxruntime/issues/15849
-    try:
-        import onnx.inliner
-    except ImportError:
-        warnings.warn("Cannot import onnx.inliner. Skip inlining model.")
-    else:
-        if isinstance(ort_model, bytes):
-            buffer = io.BytesIO(ort_model)
-        else:
-            assert isinstance(ort_model, str)
-            buffer = ort_model
-
-        model_proto = onnx.load(buffer)
-        inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
-        ort_model = inlined_model_proto.SerializeToString()
 
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()
@@ -411,7 +398,7 @@ def _try_clone_inputs(input_args, input_kwargs):
 
 @_beartype.beartype
 def _compare_pytorch_onnx_with_ort(
-    export_output: torch.onnx.ExportOutput,
+    onnx_program: torch.onnx.ONNXProgram,
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
@@ -428,14 +415,14 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_kwargs = input_kwargs
 
     # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = export_output.adapt_torch_inputs_to_onnx(
+    onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
         *input_args, **input_kwargs
     )
 
-    ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
-    ort_outputs = run_ort(export_output, onnx_format_args)
+    ort_outputs = run_ort(onnx_program, onnx_format_args)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
@@ -450,7 +437,7 @@ def _compare_pytorch_onnx_with_ort(
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
 # TODO(titaiwang): Change this when more versions are supported

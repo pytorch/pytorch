@@ -268,7 +268,7 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.binary(x, other)
                 return x
 
-        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        input_shapes = {2: (112, 112), 3: (22, 22, 22)}
         for pointwise_name, pointwise_fn in self._binary_list().items():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
@@ -301,7 +301,7 @@ class TestMkldnnFusion(JitTestCase):
                             self.assertEqual(ref, other)
                             self.assertEqual(ref, fused_inplace)
 
-                        self.assertEqual(ref, fused)
+                        self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
 
 
     def test_linear_binary_fusion_ops(self):

@@ -7,7 +7,8 @@ from typing import Dict, List, Optional, Tuple
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 0
+SCHEMA_VERSION = 1
+TREESPEC_VERSION = 1
 
 # TODO (zhxchen17) Move to a separate file.
 class _Union:
@@ -138,6 +139,11 @@ class GraphArgument:
     graph: 'Graph'
 
 
+@dataclass
+class CustomObjArgument:
+    blob: bytes
+
+
 # This is actually a union type
 @dataclass(repr=False)
 class Argument(_Union):
@@ -162,6 +168,7 @@ class Argument(_Union):
     as_sym_bools: List[SymBoolArgument]
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
+    as_custom_obj: CustomObjArgument
 
 
 @dataclass
@@ -191,29 +198,81 @@ class Graph:
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
+    is_single_tensor_return: bool = False
 
 
 @dataclass
-class BackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
+class UserInputSpec:
+    arg: Argument
+
+
+@dataclass
+class InputToParameterSpec:
+    arg: TensorArgument
+    parameter_name: str
+
+
+@dataclass
+class InputToBufferSpec:
+    arg: TensorArgument
+    buffer_name: str
+
+
+@dataclass
+class InputToTensorConstantSpec:
+    arg: TensorArgument
+    tensor_constant_name: str
+
+
+@dataclass
+class InputSpec(_Union):
+    user_input: UserInputSpec
+    parameter: InputToParameterSpec
+    buffer: InputToBufferSpec
+    tensor_constant: InputToTensorConstantSpec
+
+
+@dataclass
+class UserOutputSpec:
+    arg: Argument
+
+
+@dataclass
+class LossOutputSpec:
+    arg: TensorArgument
+
+
+@dataclass
+class BufferMutationSpec:
+    arg: TensorArgument
+    buffer_name: str
+
+
+@dataclass
+class GradientToParameterSpec:
+    arg: TensorArgument
+    parameter_name: str
+
+
+@dataclass
+class GradientToUserInputSpec:
+    arg: TensorArgument
+    user_input_name: str
+
+
+@dataclass
+class OutputSpec(_Union):
+    user_output: UserOutputSpec
+    loss_output: LossOutputSpec
+    buffer_mutation: BufferMutationSpec
+    gradient_to_parameter: GradientToParameterSpec
+    gradient_to_user_input: GradientToUserInputSpec
 
 
 @dataclass
 class GraphSignature:
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
-    user_inputs: List[str]
-    user_outputs: List[str]
-    buffers_to_mutate: Dict[str, str]
-    backward_signature: Optional[BackwardSignature]
-
-
-@dataclass
-class CallSpec:
-    in_spec: str
-    out_spec: str
+    input_specs: List[InputSpec]
+    output_specs: List[OutputSpec]
 
 
 @dataclass
@@ -240,8 +299,6 @@ class ModuleCallEntry:
 class GraphModule:
     graph: Graph
     signature: GraphSignature
-    # TODO(zhxchen17) Merge call_spec into call graph.
-    call_spec: CallSpec
     module_call_graph: List[ModuleCallEntry]
 
 
@@ -252,3 +309,4 @@ class ExportedProgram:
     range_constraints: Dict[str, RangeConstraint]
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
     schema_version: int
+    dialect: str

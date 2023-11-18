@@ -3,12 +3,19 @@ import dis
 import functools
 import logging
 import os.path
+import random
 import re
 import sys
 import types
 import unittest
-from typing import Sequence, Union
+from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch
 from torch import fx
@@ -56,7 +63,7 @@ def named_buffers_for_optimized_module(mod):
     return mod._orig_mod.named_buffers
 
 
-def remove_optimized_module_prefix(name):
+def remove_optimized_module_prefix(name) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
 
 
@@ -134,21 +141,21 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
-def debug_dir():
+def debug_dir() -> str:
     path = os.path.join(os.path.dirname(__file__), "../debug")
     if not os.path.exists(path):
         os.mkdir(path)
     return path
 
 
-def debug_dump(name, code: types.CodeType, extra=""):
+def debug_dump(name, code: types.CodeType, extra="") -> None:
     with open(os.path.join(debug_dir(), name), "w") as fd:
         fd.write(
             f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _):
+def debug_insert_nops(frame, cache_size, hooks, _) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -181,7 +188,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -200,7 +207,7 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -217,21 +224,21 @@ class EagerAndRecordGraphs:
     def __init__(self):
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
         return gm
 
 
-def strip_comment(code):
+def strip_comment(code) -> str:
     code = str(code)
     return re.sub(r"(?m)^ *#.*\n?", "", code)
 
 
-def remove_trailing_space(code):
+def remove_trailing_space(code) -> str:
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
-def normalize_gm(gm_str):
+def normalize_gm(gm_str) -> str:
     # strip comments as comments have path to files which may differ from
     # system to system.
     return remove_trailing_space(strip_comment(gm_str))
@@ -242,16 +249,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
-    if expected_ops is None:
-        expected = CompileCounter()
-        try:
-            gm = torch.fx.symbolic_trace(fn)
-            expected(gm)
-            print("\nfx.symbolic_trace graph:")
-            gm.graph.print_tabular()
-            expected_ops = expected.op_count
-        except Exception:
-            pass  # Silently ignore FX errors (not our issue)
 
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
@@ -317,16 +314,14 @@ def _make_fn_with_patches(fn, *patches):
 
 
 def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
-    class DummyTestClass(cls):
-        pass
-
-    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
             fn = getattr(cls, name)
             if not callable(fn):
+                setattr(DummyTestClass, name, getattr(cls, name))
                 continue
             new_name = f"{name}{fn_suffix}"
             new_fn = _make_fn_with_patches(fn, *patches)
@@ -334,6 +329,9 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
             setattr(DummyTestClass, new_name, new_fn)
+        # NB: Doesn't handle slots correctly, but whatever
+        elif not hasattr(DummyTestClass, name):
+            setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
 
@@ -362,3 +360,14 @@ def expectedFailureCodegenDynamic(fn):
 def expectedFailureDynamicWrapper(fn):
     fn._expected_failure_dynamic_wrapper = True
     return fn
+
+
+def reset_rng_state(use_xla=False):
+    torch.manual_seed(1337)
+    random.seed(1337)
+    if np:
+        np.random.seed(1337)
+    if use_xla:
+        import torch_xla.core.xla_model as xm
+
+        xm.set_rng_state(1337, str(xm.xla_device()))

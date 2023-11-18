@@ -48,11 +48,13 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND5(
+  AT_FORALL_SCALAR_TYPES_AND7(
       Half,
       BFloat16,
       Float8_e5m2,
       Float8_e4m3fn,
+      Float8_e5m2fnuz,
+      Float8_e4m3fnuz,
       ComplexHalf,
       DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
@@ -300,12 +302,12 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymBool sb) {
-    if (sb.is_symbolic()) {
+    if (auto m = sb.maybe_as_bool()) {
+      tag = Tag::HAS_b;
+      v.i = *m;
+    } else {
       tag = Tag::HAS_sb;
       v.p = std::move(sb).release();
-    } else {
-      tag = Tag::HAS_b;
-      v.d = sb.as_bool_unchecked();
     }
   }
 

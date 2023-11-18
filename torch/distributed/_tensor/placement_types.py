@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Tuple
+from typing import cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -9,7 +9,6 @@ import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
 from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.fx.passes.shape_prop import TensorMetadata
 
 
 class Placement:
@@ -367,6 +366,15 @@ class _Partial(Placement):
         return "P"
 
 
+class TensorMeta(NamedTuple):
+    # simple named tuple to represent tensor metadata
+    # intentionally to stay simple only for sharding
+    # propagation purposes.
+    shape: torch.Size
+    stride: Tuple[int, ...]
+    dtype: torch.dtype
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
@@ -374,7 +382,7 @@ class DTensorSpec:
     placements: Tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
-    tensor_meta: Optional[TensorMetadata] = None
+    tensor_meta: Optional[TensorMeta] = None
 
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -388,8 +396,8 @@ class DTensorSpec:
                     self.mesh,
                     self.placements,
                     self.tensor_meta.shape,
-                    self.tensor_meta.dtype,
                     self.tensor_meta.stride,
+                    self.tensor_meta.dtype,
                 )
             )
         else:
@@ -405,13 +413,27 @@ class DTensorSpec:
         if self.tensor_meta is None or __o.tensor_meta is None:
             return self.tensor_meta == __o.tensor_meta
 
-        # perf hack to avoid redistribute due to memory_format to be None.
-        # and we only care about shape, dtype and stride for now.
         return (
             self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
             and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
         )
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the DTensorSpec
+        """
+        if len(self.placements) == 1:
+            placement_str = str(self.placements[0])
+        else:
+            placement_str = str(self.placements)
+
+        if self.tensor_meta is not None:
+            tensor_shape = str(tuple(self.tensor_meta.shape))
+        else:
+            tensor_shape = "unknown shape"
+
+        return f"Spec({placement_str} on {tensor_shape})"
 
     @property
     def shape(self) -> torch.Size:
@@ -489,7 +511,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: List[int],
         sums: List[int],
-        tensor_meta: Optional[TensorMetadata] = None,
+        tensor_meta: Optional[TensorMeta] = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -500,7 +522,7 @@ class DTensorSpec:
                 tensor dimension, see `dim_map` property doc for details
             sums (List[int]): a list of integer that represents the dist tensor have
                 pending sum on which device mesh dimension.
-            tensor meta (TensorMetadata): DTensor metadata
+            tensor meta (TensorMeta): DTensor metadata
 
         Return:
             a class:`DTensorSpec` object
@@ -527,3 +549,9 @@ class DTensorSpec:
                 placements[m] = Shard(i)
 
         return cls(mesh, tuple(placements), tensor_meta=tensor_meta)
+
+    def is_replicated(self):
+        """
+        return True if the current DTensorSpec replicates on all mesh dims (devices)
+        """
+        return all(placement.is_replicate() for placement in self.placements)

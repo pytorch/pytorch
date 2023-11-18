@@ -42,5 +42,25 @@ struct TORCH_API FunctionPostHook {
   }
 };
 
+struct TORCH_API PostAccumulateGradHook {
+  virtual ~PostAccumulateGradHook() = default;
+  virtual void operator()(const Variable& tensor) = 0;
+  // only implemented for python hooks on nodes, registers hook with compiled
+  // autograd
+  virtual void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
+  }
+
+  virtual void apply_with_saved(
+      Variable&,
+      torch::dynamo::autograd::SwapSavedVariables&) {
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
+  }
+};
+
 } // namespace autograd
 } // namespace torch

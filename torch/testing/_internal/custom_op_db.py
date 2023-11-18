@@ -162,7 +162,7 @@ def numpy_nonzero_impl(x):
 def numpy_nonzero_abstract(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
-    shape = [x.dim(), i0]
+    shape = [i0, x.dim()]
     result = x.new_empty(shape, dtype=torch.long)
     return result
 
@@ -337,7 +337,6 @@ def numpy_nms_impl(boxes, scores, iou_threshold):
         inds = np.where(ovr <= iou_threshold)[0]
         order = order[inds + 1]
 
-    result = np.stack(keep)
     result = torch.tensor(np.stack(keep), device=device)
     # Needed for data-dependent condition :(
     assert result.size(0) >= 2
@@ -352,7 +351,7 @@ def numpy_nms_abstract(boxes, scores, iou_threshold):
 
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
-    result = boxes.new_empty([i0, 4])
+    result = boxes.new_empty([i0], dtype=torch.int64)
     return result
 
 def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):

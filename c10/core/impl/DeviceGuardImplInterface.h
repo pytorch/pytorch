@@ -62,6 +62,14 @@ namespace impl {
  * those uses will be devirtualized.
  */
 struct C10_API DeviceGuardImplInterface {
+  DeviceGuardImplInterface() = default;
+  DeviceGuardImplInterface(const DeviceGuardImplInterface&) = default;
+  DeviceGuardImplInterface& operator=(const DeviceGuardImplInterface&) =
+      default;
+  DeviceGuardImplInterface(DeviceGuardImplInterface&&) noexcept = default;
+  DeviceGuardImplInterface& operator=(DeviceGuardImplInterface&&) noexcept =
+      default;
+
   /**
    * Return the type of device managed by this guard implementation.
    */
@@ -117,7 +125,7 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
       const {
-    (void)isHighPriority; // Suppress unused varaible warning
+    (void)isHighPriority; // Suppress unused variable warning
     TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
   }
 

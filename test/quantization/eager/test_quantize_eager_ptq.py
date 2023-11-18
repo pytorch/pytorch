@@ -1500,7 +1500,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
 
     @skipIfNoFBGEMM
-    def test_embedding_op_dynamic(self):
+    def test_embedding_ops_dynamic(self):
         class EmbeddingWithLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()

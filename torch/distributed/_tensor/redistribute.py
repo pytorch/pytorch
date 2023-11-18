@@ -72,12 +72,17 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
     return output
 
 
-# Intentionally expose this API to trace ops on local tensors
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
 ) -> torch.Tensor:
+    """
+    This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
+    the target DTensorSpec, which involves the necessary collective calls to transform
+    the local shard of the DTensor from its current spec to the target spec.
+    """
+
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
@@ -154,12 +159,9 @@ def redistribute_local_tensor(
 
         elif target.is_partial():
             if current.is_replicate():
-                # For replicate -> partial, we zero out all other ranks of the current mesh dim
-                # and leave only 1 rank have the data, to perform a "zero cost" reshard.
-                if my_coordinate[i] != 0:
-                    new_local_tensor = local_tensor.zero_()
-                else:
-                    new_local_tensor = local_tensor
+                # For replicate -> partial, we perform division to num of chunks and generate
+                # parial, and recover it back when pending sum get cleared.
+                new_local_tensor = local_tensor / num_chunks
             else:
                 raise RuntimeError(
                     f"redistribute from {current_placements} to {target_placements} not supported yet"
@@ -197,7 +199,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=input.shape,
             dtype=input.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=input.requires_grad,
             stride=input.stride(),
         )
 
@@ -224,7 +226,11 @@ class Redistribute(torch.autograd.Function):
                 target_placements.append(Replicate())
             else:
                 target_placements.append(target)
-        target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements))
+        target_spec = DTensorSpec(
+            previous_spec.mesh,
+            tuple(target_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
@@ -234,7 +240,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=grad_output.requires_grad,
             stride=grad_output.stride(),
         )
 

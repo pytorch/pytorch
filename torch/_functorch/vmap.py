@@ -8,8 +8,13 @@ import torch
 import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
-from .pytree_hacks import tree_map_
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_unflatten,
+    tree_map_,
+    _broadcast_to_and_flatten,
+    TreeSpec,
+)
 from functools import partial
 import os
 import itertools
@@ -365,7 +370,7 @@ def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, ran
     return tree_unflatten(flat_output, arg_spec)
 
 
-# Vmap refactored helper funcions:
+# Vmap refactored helper functions:
 def _check_randomness_arg(randomness):
     if randomness not in ['error', 'different', 'same']:
         raise RuntimeError(f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}")

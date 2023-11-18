@@ -168,13 +168,30 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
   // packed dimension.
   else {
     TORCH_CHECK(
-        ndim >= 1 && ndim <= 4,
-        "Texture storage only valid for 1 <= ndim <= 4!");
+        ndim >= 0 && ndim <= 4,
+        "Texture storage only valid for 0 <= ndim <= 4, received: ",
+        ndim);
 
     c10::SmallVector<int64_t, 6u> gpu_sizes(ndim == 4 ? 4 : 3);
 
     // Channel dim will be be aligned to the next multiple of 4
     switch (ndim) {
+      case 0:
+        switch (memory_layout) {
+          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
+            // 0-dimension tensors only has 1 element. Hence it is always {4, 1,
+            // 1} when stored as image textures. Channels need to be multiple of
+            // 4 due to packing.
+            gpu_sizes[0] = 4;
+            gpu_sizes[1] = 1;
+            gpu_sizes[2] = 1;
+            break;
+          default:
+            TORCH_CHECK(
+                false,
+                "Invalid memory format used to create vTensor with zero-dim!");
+        }
+        break;
       case 1:
         switch (memory_layout) {
           case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
@@ -433,8 +450,6 @@ vTensor::vTensor(
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->image_;
 }
@@ -443,8 +458,6 @@ api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->image_;
 }
@@ -452,8 +465,6 @@ api::VulkanImage& vTensor::image(
 api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->buffer_;
 }
@@ -462,8 +473,6 @@ api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->buffer_;
 }

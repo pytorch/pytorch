@@ -224,6 +224,19 @@ public:
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
+   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * for this op in the given Python module. Call this a "pystub".
+   */
+  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+
+  /**
+   * Given an operator, throws if we have an abstract impl pystub.
+   */
+  void throwIfHasAbstractImplPyStub(OperatorName op_name);
+
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
+  /**
    * Register a new operator by name.
    */
   RegistrationHandleRAII registerName(OperatorName op_name);
@@ -427,6 +440,9 @@ public:
     // will be done by the time a typed() handle is acquired.
 #if !defined C10_MOBILE
     operatorDef_->op.assertSignatureIsCorrect<FuncType>();
+    if (fn_has_symint<FuncType>::value) {
+      operatorDef_->op.assertSignatureIsCorrect<typename fn_remove_symint<FuncType>::type>();
+    }
 #endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
@@ -749,7 +765,7 @@ namespace std {
 
 template <>
 struct hash<c10::OperatorHandle> {
-  size_t operator()(c10::OperatorHandle op) const noexcept {
+  size_t operator()(const c10::OperatorHandle& op) const noexcept {
     return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
   }
 };
