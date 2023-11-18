@@ -49,7 +49,7 @@ def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from . import fb  # type: ignore[import]  # noqa: F401
+        from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
 def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):

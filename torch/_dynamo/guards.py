@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from weakref import ReferenceType
 
 
@@ -194,7 +194,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
+        lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
@@ -276,7 +276,7 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def TYPE_MATCH(self, guard: Guard):
+    def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
@@ -318,7 +318,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
             )
 
         ref = self.arg_ref(guard)

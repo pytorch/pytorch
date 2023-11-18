@@ -63,7 +63,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols", "sym_eq",
+    "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -618,6 +618,7 @@ class DimDynamic(Enum):
     # Treat the dimension statically based on its hint
     STATIC = 2
 
+
 # NB: These constraints affect both clients and backends: given some
 # constraint C, the client must pass inputs that satisfy the constraint,
 # while a backend must not introduce guards BEYOND this constraint.
@@ -725,6 +726,35 @@ class EqualityConstraint(Constraint):
 
     def is_equal(self, source1, source2):
         return self._find(source1) == self._find(source2)
+
+@dataclass(frozen=True)
+class CreateSymbolicPolicy:
+    """
+    Data structure specifying how we should create symbols in
+    ``create_symbolic_sizes_strides_storage_offset``; e.g., should
+    they be static or dynamic.
+
+    This is an abstract base class because we are probably going to add
+    another version of this that says "use exactly these SymInts, don't
+    allocate fresh symbols."
+    """
+    pass
+
+
+@dataclass(frozen=True)
+class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
+    """
+    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    a policy determination as given by ``DimDynamic`` and ``DimConstraint``.
+    This will cause fresh symbols to be allocated
+    """
+    dynamic_sizes: DimList[DimDynamic]
+    constraint_sizes: DimList[DimConstraint] = None
+    # TODO: add storage offset and stride policy
+
+    def __post_init__(self):
+        if self.constraint_sizes is None:
+            object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
@@ -1889,18 +1919,20 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex_size: Sequence[int],
                            source: Source,
-                           dynamic_dims: DimList[DimDynamic],
-                           constraint_dims: DimList[DimConstraint]) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, dynamic_dims, constraint_dims)
+                           policy: CreateSymbolicPolicy
+                           ) -> List[sympy.Expr]:
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, policy)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
                                           source: Source,
-                                          dynamic_dims: DimList[DimDynamic],
-                                          constraint_dims: List[DimConstraint]
+                                          policy: CreateSymbolicPolicy,
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
+        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        dynamic_dims = policy.dynamic_sizes
+        constraint_dims = policy.constraint_sizes
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
@@ -1913,8 +1945,7 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy: Optional[CreateSymbolicPolicy] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1976,8 +2007,7 @@ class ShapeEnv:
             ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            policy=policy,
         )
 
     @record_shapeenv_event()
@@ -1989,15 +2019,13 @@ class ShapeEnv:
         is_dim_dynamic: Sequence[bool],
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy: Optional[CreateSymbolicPolicy] = None,
     ):
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
-        if constraint_dims is None:
+        if policy is None:
             constraint_dims = [None] * dim
-        if dynamic_dims is None:
             dynamic_dims = []
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
@@ -2010,6 +2038,11 @@ class ShapeEnv:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+
+        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        constraint_dims = policy.constraint_sizes
+        dynamic_dims = policy.dynamic_sizes
 
         # TODO: make this configurable from outside policy; we made a policy
         # decision here where if all sizes are static, we are going to
@@ -2022,7 +2055,7 @@ class ShapeEnv:
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, dynamic_dims, constraint_dims)
+        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, policy)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex_stride):
             if val in (0, 1):
