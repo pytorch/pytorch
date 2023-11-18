@@ -279,29 +279,6 @@ class MetaConverter:
             self.check_for_expired_weak_storages()
             self.check_expired_count = 0
 
-        def get_symbolic_ragged_size(nt, source):
-            # must be a singleton symint
-            assert (
-                isinstance(nt._size[1], torch.SymInt)
-                and nt._size[1].node.singleton_int() is not None
-            )
-
-            from torch._dynamo.source import TensorProperty, TensorPropertySource
-
-            # Replace the eager ragged size with our freshly
-            # allocated jagged size that has a source
-            ragged_size = shape_env.create_symintnode(
-                shape_env.create_symbol(
-                    nt._size[1],
-                    TensorPropertySource(
-                        source, TensorProperty.SIZE, 1  # type: ignore[arg-type]
-                    ),
-                ),
-                hint=nt._size[1],
-            )
-
-            return ragged_size
-
         # Meta-ifies a nested tensor, maintaining proper view relationships.
         # Assumes any base has already been meta-ified.
         def metafy_nt(t, meta_base=None):
@@ -392,10 +369,27 @@ class MetaConverter:
                 # be a variable
                 ctx["ragged_size"] = t._size[1]
             else:
-                assert t._size[1].node.singleton_int() is not None
+                assert (
+                    isinstance(t._size[1], torch.SymInt)
+                    and t._size[1].node.singleton_int() is not None
+                )
                 # Replace the eager ragged size with our freshly
                 # allocated jagged size that has a source
-                ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
+
+                from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+                # Replace the eager ragged size with our freshly
+                # allocated jagged size that has a source
+                ctx["ragged_size"] = shape_env.create_symintnode(
+                    shape_env.create_symbol(
+                        t._size[1],
+                        TensorPropertySource(
+                            source, TensorProperty.SIZE, 1  # type: ignore[arg-type]
+                        ),
+                    ),
+                    hint=t._size[1],
+                )
+
             meta_nt = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
             if meta_base is None:
