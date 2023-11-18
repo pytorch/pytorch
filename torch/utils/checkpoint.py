@@ -1307,7 +1307,14 @@ def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
         must_recompute_policy_fn = noop_policy
 
     storage: Dict[Any, List[Any]] = defaultdict(list)
-    return _CachingTorchDispatchMode(no_recompute_policy_fn, must_recompute_policy_fn, storage), _CachedTorchDispatchMode(no_recompute_policy_fn, must_recompute_policy_fn, storage)
+    return (
+        _CachingTorchDispatchMode(
+            no_recompute_policy_fn, must_recompute_policy_fn, storage
+        ),
+        _CachedTorchDispatchMode(
+            no_recompute_policy_fn, must_recompute_policy_fn, storage
+        ),
+    )
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and

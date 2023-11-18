@@ -504,9 +504,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list)
-            )
+            return context_fn_gen(_get_custom_policy(func_list=no_recompute_list))
 
         def gn(x, y):
             return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
@@ -669,9 +667,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list)
-            )
+            return context_fn_gen(_get_custom_policy(func_list=no_recompute_list))
 
         def gn(x, y):
             return torch.sigmoid(
@@ -717,9 +713,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list)
-            )
+            return context_fn_gen(_get_custom_policy(func_list=no_recompute_list))
 
         def gn(x, y):
             return torch.sigmoid(
