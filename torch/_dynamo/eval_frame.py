@@ -1372,7 +1372,7 @@ def export(
         if same_signature:
             check_signature_rewritable(graph)
 
-        # NB: This is mostly hitting the cache; DyOnamo already converted these
+        # NB: This is mostly hitting the cache; Dynamo already converted these
         example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
         if aten_graph:
