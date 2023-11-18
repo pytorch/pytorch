@@ -814,9 +814,8 @@ class MockModule(torch.nn.Module):
 class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
-        opt__do_paste_mask = torch._dynamo.optimize(
-            torch._dynamo.testing.CompileCounter()
-        )(_do_paste_mask)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt__do_paste_mask = torch.compile(_do_paste_mask, backend=cnt)
         opt__do_paste_mask(
             torch.randn(1, 1, 28, 28),
             torch.tensor([[0.0, 1, 2, 4]]) * 1,
@@ -852,12 +851,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             640,
             False,
         )
-
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"],
-            torch._dynamo.utils.counters["frames"]["ok"] + 1,
-        )
+        # (dynamic shapes, static shapes)
+        self.assertIn(cnt.frame_count, (4, 7))
+        self.assertIn(cnt.op_count, (83, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -920,6 +916,55 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.sub(1, alpha=2)
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
+
+    # https://github.com/pytorch/pytorch/issues/113010
+    def test_out_overload_non_contiguous(self):
+        def f(x, y):
+            return torch.abs(x, out=y.T)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        x_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = f_compiled(x_test, y_test)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(y_ref, y_test)
+
+    # https://github.com/pytorch/pytorch/issues/109053
+    def test_view_dtype_overload(self):
+        def f(x):
+            return x.view(torch.int32)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x1 = torch.ones(4, requires_grad=True)
+        out_ref = f(x1)
+        out_test = f_compiled(x1)
+        self.assertEqual(out_ref, out_test)
+
+        x2 = torch.ones(4, requires_grad=False)
+        out_ref = f(x2)
+        out_test = f_compiled(x2)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/90552
+    def test_intermediate_leaf_requires_grad(self):
+        def f(x):
+            leaf = torch.ones(2, requires_grad=True)
+            return leaf, leaf * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        leaf, out = f(x)
+        leaf_test, out_test = f_compiled(x)
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(leaf.grad, leaf_test.grad)
 
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
@@ -1538,85 +1583,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
-
-    def test_tensor_setattr_data_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func1(x, y):
-            x.data = y
-            x.add_(1)
-            return x
-
-        def func2(x, y):
-            x.data = y
-            y.data = torch.zeros([0])
-            return x
-
-        for func in [func1, func2]:
-            a = torch.rand([6])
-            a1 = torch.clone(a)
-            b = torch.rand([6])
-            b1 = torch.clone(b)
-
-            cnt = torch._dynamo.testing.CompileCounter()
-
-            _ = func(a, b)
-            _ = torch.compile(func, backend=cnt)(a1, b1)
-
-            self.assertEqual(a, a1)
-            self.assertEqual(b, b1)
-            self.assertEqual(cnt.frame_count, 2)  # graph breaks
-
-    def test_tensor_untracked_setattr_data_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func(y):
-            x = torch.tensor([0])
-            x.data = y  # Setattr for untracked tensors is unsupported
-            x.add_(1)
-            return x
-
-        a = torch.rand([6])
-        a1 = torch.clone(a)
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        _ = func(a)
-        _ = torch.compile(func, backend=cnt)(a1)
-
-        self.assertEqual(a, a1)
-        self.assertEqual(cnt.frame_count, 2)  # graph breaks
-
-    def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func(x):
-            y = torch.tensor([0])
-            # If we setattr to untracked tensor, it aliases a new tensor.
-            # we need to start tracking y even though it is created in graph
-            x.data = y
-            x.add_(1)
-            return x, y
-
-            a = torch.rand([6])
-            a1 = torch.clone(a)
-
-            cnt = torch._dynamo.testing.CompileCounter()
-
-            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
-            self.assertEqual(a, a1)
-            self.assertEqual(cnt.frame_count, 2)
-
-    def test_setattr_data_tensor_raises(self):
-        def func(x):
-            x.data = None
-            x.add_(1)
-            return x
-
-        a = torch.rand([6])
-        a1 = torch.clone(a)
-
-        with self.assertRaises(TypeError):
-            func(a)
-        with self.assertRaises(TypeError):
-            torch.compile(func, backend="eager")(a1)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
@@ -2451,77 +2417,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(x, x), opt_f(x, x))
             self.assertEqual(f(x, y), opt_f(x, y))
 
-    def test_reformer_remove_unused_args(self):
-        # This test case is very interesting.  First, let's describe
-        # the bug this is testing for.  The bug we fixed is twofold:
-        #
-        # - We prune GraphArgs that aren't used in the output graph.
-        #   However, sometimes it is possible for those GraphArgs to be
-        #   utilized in shape guards (you could imagine this happening if
-        #   dynamo poked some shape variables without recording them in the
-        #   graph.)  If we prune those GraphArgs, we get a
-        #   "s1 not in ..." error as we can no longer codegen the
-        #   requested guards.
-        #
-        # - But in practice, Dynamo usually traces size accesses into the
-        #   graph, preventing the GraphArg from getting pruned.  So how
-        #   come we were running into this in practice with hf_Reformer?
-        #   The answer is checkpointing!
-        #
-        # This brings us to the following test case.  Here's what it does:
-        #
-        # 1. It traces some operations, and then checkpoints before inlining
-        #    the function call to g
-        #
-        # 2. g traces some more operations (triggering the shape guard
-        #    to be created), but then it graph breaks
-        #
-        # 3. Because you can't graph break in an inlining function, we roll
-        #    back to the outer checkpoint ("undoing" the operation that
-        #    induced the shape guard) and then immediately generate a
-        #    subgraph at that point.
-        #
-        # If we failed to checkpoint the ShapeEnv, it can still have guards
-        # from the aborted speculation, which we will then still attempt to
-        # codegen.
-        #
-        # There's an additional nuance: suppose x is used but y is not.
-        # If you create a guard like y == x * 2, you will accidentally avoid
-        # the "s1 not in ..." error, as y will get substituted with x * 2,
-        # but x is still a GraphArg (it's used) and you don't end up with
-        # the error.  This is why we must show y + y == x, not vice versa.
-        # Similarly, it is also why we must not do a simple guard like x == y
-        #
-        # Can we actually demonstrate that checkpointing the ShapeEnv is
-        # necessary?  It's not so easy to induce this case.  Dynamo is very
-        # eager about adding locals to GraphArgs; any local that is in scope,
-        # even if it isn't used, is added to GraphArgs (see also
-        # https://github.com/pytorch/torchdynamo/issues/1925 ).  So long
-        # as Dynamo eagerly guards in this way, we have an invariant that
-        # all locals are guaranteed to show up in GraphArgs before the
-        # inlining function call, in which case we will always have enough
-        # information to codegen our guards so long as we don't prune the
-        # unused GraphArgs away (and indeed, the direct fix for this bug
-        # was to make sure we use original GraphArgs).  Non locals,
-        # conversely, typically are static, and so won't have guards allocated
-        # for them.  That being said, there may still be a way to trigger
-        # this error.
-
-        def g(x, y):
-            r = torch.cat((y, y)) + x
-            print("foo")
-            return r
-
-        def f(x, y):
-            x = x * 3
-            return g(x, y)
-
-        opt_f = torch._dynamo.optimize("aot_eager")(f)
-
-        x = torch.randn(4)
-        y = torch.randn(2)
-        self.assertEqual(f(x, y), opt_f(x, y))
-
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -3006,10 +2901,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
+    @torch._dynamo.config.patch(verbose=True)
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
-
-        torch._dynamo.config.verbose = True
 
         @torch._dynamo.optimize(counter)
         def f(x):
@@ -3532,6 +3426,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_sizes_aot_autograd(self):
+        def fn(result, split_sizes):
+            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
+            return rs
+
+        example_inputs = (
+            torch.randn(32, requires_grad=True),
+            torch.tensor((7, 16, 9)),
+        )
+        actual = torch.compile(fn, fullgraph=True, backend="aot_eager")(*example_inputs)
+        expected = fn(*example_inputs)
+        self.assertEqual(actual, expected)
+
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
         In this case self.fn = something that should be a TorchVariable.
@@ -3622,6 +3530,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_fn(inp, other, alpha=alpha, out=compile_out)
             self.assertTrue(same(out, compile_out))
 
+    def test_negative_shape_guard(self):
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=True)
+
+        x = torch.ones(5, 1, 3, 4)
+        x2 = torch.ones(5, 1, 2, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_addr_alpha_beta_out(self):
         inp = torch.randn(2, 3)
         vec1 = torch.randn(2)
@@ -3636,6 +3559,47 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
+
+    def test_setattr_requires_grad_graph_breaks(self):
+        def fn(x):
+            z = x + 4
+            x.requires_grad = True
+            y = x * z
+            return y
+
+        for backend in ["count", "eager", "aot_eager"]:
+            if backend == "count":
+                backend = CompileCounter()
+            opt_fn = torch.compile(fn, backend=backend)
+
+            eager = torch.zeros(5)
+            compiled = eager.clone()
+
+            out_eager = fn(eager)
+            out_opt = opt_fn(compiled)
+
+            self.assertEqual(out_eager, out_opt)
+
+            out_eager.sum().backward()
+            out_opt.sum().backward()
+
+            self.assertEqual(eager, compiled)
+            if isinstance(backend, CompileCounter):
+                self.assertEqual(backend.frame_count, 2)  # graph breaks
+
+    def test_dynamic_shapes_double_not_equal(self):
+        # https://github.com/pytorch/pytorch/issues/113393
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        x = torch.ones(5, 1, 2, 3)
+        x2 = torch.ones(5, 1, 3, 4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):

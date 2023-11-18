@@ -558,7 +558,7 @@ class _World:
                     "pg_name": self.pg_names[pg],
                     "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": list(ranks.values())
+                    "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
                     else [],  # 'ranks' is an empty list when all ranks are involved in a pg
                     "group_size": len(ranks),
@@ -1896,6 +1896,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = src_tensor
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -1939,6 +1940,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = 0
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -3217,6 +3219,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     opts = ScatterOptions()
     opts.rootRank = src
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()

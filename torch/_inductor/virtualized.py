@@ -138,7 +138,7 @@ class KernelFormatterHandler:
                 )
                 formatter.output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
+        with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)

@@ -2,7 +2,6 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/ceil_div.h>
 #include <ATen/NumericUtils.h>
-#include <assert.h>
 #include <c10/macros/Macros.h>
 #include <stdlib.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
