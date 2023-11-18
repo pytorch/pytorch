@@ -26,8 +26,10 @@ from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    CreateSymbolicPolicy,
     DimConstraint,
     DimDynamic,
+    FreshCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
@@ -49,9 +51,9 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
-    ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
+    GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
     NumpyTensorSource,
@@ -64,6 +66,7 @@ from ..utils import (
     clone_input,
     get_fake_value,
     get_static_address_type,
+    global_key_name,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -86,7 +89,6 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
-    is_hashable_python_var,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -402,18 +404,23 @@ class VariableBuilder:
             # under the assumption that the values themselves don't change.
             self.install_guards(GuardBuilder.DICT_VERSION)
             result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
-                    v,
+                k: UserDefinedObjectVariable(
+                    value[k],
                     source=GetItemSource(self.get_source(), k),
                 )
-                for k, v in value.items()
+                for k in value.keys()
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(is_hashable_python_var(k) for k in value.keys()):
+        ) and all(
+            ConstantVariable.is_literal(k)
+            or self.tensor_can_be_dict_key(k)
+            or isinstance(k, enum.Enum)
+            for k in value.keys()
+        ):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -426,30 +433,30 @@ class VariableBuilder:
             else:
                 self.install_guards(GuardBuilder.DICT_KEYS)
 
-            idx = 0
+            # store key variables in global location for reconstruction
+            for key in value.keys():
+                if self.tensor_can_be_dict_key(key):
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
-            def build_key_value(k, v):
-                nonlocal idx
-                if ConstantVariable.is_literal(k):
-                    key = ConstantVariable.create(k)
-                    source_key = k
+            def index_source(key):
+                if self.tensor_can_be_dict_key(key):
+                    return GlobalWeakRefSource(global_key_name(key))
                 else:
-                    source_key = ConstDictKeySource(self.get_source(), idx)
-                    key = VariableBuilder(self.tx, source_key)(k)
+                    return key
 
-                source_value = GetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
-
-                idx += 1
-                return key, value
-
-            result = dict(build_key_value(k, v) for k, v in value.items())
+            result = {
+                k: LazyVariableTracker.create(
+                    value[k],
+                    source=GetItemSource(self.get_source(), index_source(k)),
+                )
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    default_factory=self._wrap(value.default_factory),
+                    self._wrap(value.default_factory),
                 )
             else:
                 result = ConstDictVariable(result, type(value))
@@ -684,12 +691,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
         elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
                 value,
@@ -766,6 +773,35 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
+
+    def tensor_can_be_dict_key(self, value):
+        # only allow Parameter and another specific Tensor can be used as dict key
+        return (
+            isinstance(value, torch.nn.Parameter)
+            or isinstance(self.source, AttrSource)
+            and self.source.member == "state"
+            and isinstance(self.source.base, LocalSource)
+        )
+
+    def tensor_should_specialize(self):
+        return (
+            self.source
+            and isinstance(self.source, GetItemSource)
+            and isinstance(self.source.base, GetItemSource)
+            and self.source.base.index == "params"
+            and isinstance(self.source.base.base, GetItemSource)
+            and isinstance(self.source.base.base.base, AttrSource)
+            and self.source.base.base.base.member == "param_groups"
+            and isinstance(self.source.base.base.base.base, LocalSource)
+            and (
+                isinstance(
+                    self.tx.f_locals[self.source.base.base.base.base.local_name],
+                    torch.optim.Optimizer,
+                )
+                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
+                else True
+            )
+        )
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
@@ -1005,6 +1041,7 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
+            should_specialize=self.tensor_should_specialize(),
             subclass_type=subclass_type,
             source=source,
             **options,
@@ -1023,8 +1060,6 @@ class VariableBuilder:
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
-        # TODO: I think the result is guaranteed to be fake with
-        # ignore_subclass changes
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
         if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
@@ -1347,7 +1382,6 @@ def wrap_fx_proxy_cls(
             # accurate TensorVariable that is able to track subclass-ness;
             # otherwise this is wrong!
             kwargs = {
-                "ignore_subclass": subclass_type is not None,
                 "is_tensor": target_cls
                 in (TensorVariable, TensorWithTFOverrideVariable),
             }
@@ -1366,6 +1400,11 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        should_specialize = options.pop("should_specialize", False)
+        if is_parameter or should_specialize:
+            specialized_value = initial_example_value
+        else:
+            specialized_value = None
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -1378,11 +1417,12 @@ def wrap_fx_proxy_cls(
             isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
             and example_value.fake_mode is tx.fake_mode
         ):
-            # NB: This will be wrong for ignore_subclass; fix it up later!
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else tensor_type
             )
+
+        specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
         return target_cls(proxy, **options)
@@ -1521,18 +1561,24 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
-def _automatic_dynamic(e, tx, name, static_shapes):
+# Returns a CreateSymbolicPolicy
+def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     if static_shapes:
-        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+        return FreshCreateSymbolicPolicy(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+        )
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     if any(isinstance(s, SymInt) for s in e.size()):
-        return [
-            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-            for s in e.size()
-        ], [None] * e.dim()
+        return FreshCreateSymbolicPolicy(
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.size()
+            ],
+            constraint_sizes=[None] * e.dim(),
+        )
 
     # Prep for automatic dynamic
     frame_state_entry = None
@@ -1662,15 +1708,16 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return dynamic_dims, constraint_dims
+    return FreshCreateSymbolicPolicy(
+        dynamic_sizes=dynamic_dims,
+        constraint_sizes=constraint_dims,
+    )
 
 
-def wrap_to_fake_tensor_and_record(
-    e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
-):
+def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
-        or (ignore_subclass and isinstance(e, torch.Tensor))
+        or isinstance(e, torch.Tensor)
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
@@ -1678,32 +1725,34 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = None, None
+        policy = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            dynamic_dims, constraint_dims = _automatic_dynamic(
-                e, tx, source.name(), static_shapes
-            )
+            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
-            dynamic_dims,
-            constraint_dims,
+            policy.dynamic_sizes if policy is not None else None,
+            policy.constraint_sizes if policy is not None else None,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                ignore_subclass=ignore_subclass,
                 source=source,
-                dynamic_dims=dynamic_dims,
-                constraint_dims=constraint_dims,
+                policy=policy,
             )
         )
-        if is_tensor and not (static_shapes and source.is_nn_module()):
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+        # TODO: just store the whole policy here
+        tx.output.tracked_fakes.append(
+            TrackedFake(
+                fake_e,
+                source,
+                policy.constraint_sizes if policy is not None else None,
+            )
+        )
+        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
@@ -1747,8 +1796,11 @@ class SourcelessBuilder:
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
-            items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable(items, mutable_local=MutableLocal())
+            return ConstDictVariable(
+                {k: self(tx, v) for k, v in value.items()},
+                dict,
+                mutable_local=MutableLocal(),
+            )
         elif isinstance(value, set):
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()

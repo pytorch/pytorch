@@ -3990,5 +3990,5 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
 
 if __name__ == "__main__":
     raise RuntimeError(
-        f"You shouldn't run {sys.argv[0]} directly, instead try timm_model.py, torchbench.py or hugginface.py"
+        f"You shouldn't run {sys.argv[0]} directly, instead try timm_model.py, torchbench.py or huggingface.py"
     )
