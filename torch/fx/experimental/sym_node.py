@@ -48,6 +48,16 @@ __all__ = ["SymNode", "method_to_operator", "magic_methods", "sym_sqrt"]
 SymTypes = (SymInt, SymFloat, SymBool)
 
 
+def _to_symtype(t):
+    if t is bool:
+        return SymBool
+    if t is int:
+        return SymInt
+    if t is float:
+        return SymFloat
+    return t
+
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -62,7 +72,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float]],
+        hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
     ):
@@ -95,6 +105,11 @@ class SymNode:
         # unbacked symint that a hint was now possible, but as we added more
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
+        if hint is not None:
+            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
+                "Cannot create SymNode of type "
+                f"{pytype} with incompatible hint of type {type(hint)}"
+            )
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
@@ -119,7 +134,7 @@ class SymNode:
     def _update_hint(self):
         r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
         if r is not None:
-            self._hint = self.pytype(r)
+            self._hint = self.pytype(r) if not isinstance(r, SymTypes) else r
 
     @property
     def hint(self):
@@ -818,6 +833,13 @@ def _make_node_magic(method, func):
             pytype = float
         else:
             pytype = self.pytype
+
+        if (
+            pytype is not None
+            and out_hint is not None
+            and not isinstance(out_hint, SymTypes)
+        ):
+            out_hint = pytype(out_hint)
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.

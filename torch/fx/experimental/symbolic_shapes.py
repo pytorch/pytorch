@@ -728,7 +728,7 @@ class EqualityConstraint(Constraint):
         return self._find(source1) == self._find(source2)
 
 
-def assert_policy(policy):
+def _assert_policy(policy):
     assert isinstance(policy, CreateSymbolicPolicy), "Invalid policy object"
     assert type(policy) != CreateSymbolicPolicy, "Illegal usage of policy ABC"
 
@@ -775,13 +775,15 @@ class KnownCreateSymbolicPolicy(FreshCreateSymbolicPolicy):
 
     It is the cache owners responsibility to maintain the lifecycle of the cache
     w/r/t different shape_envs, clearing, etc.
-
     """
+    tensor_source: Source = None
     source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
-        assert self.source_to_symint_node_cache is not None
+        assert self.tensor_source is not None
+        if not self.source_to_symint_node_cache:
+            object.__setattr__(self, 'source_to_symint_node_cache', {})
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -1958,7 +1960,7 @@ class ShapeEnv:
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        assert_policy(policy)
+        _assert_policy(policy)
         dynamic_dims = policy.dynamic_sizes
         constraint_dims = policy.constraint_sizes
         size = []
@@ -2069,17 +2071,16 @@ class ShapeEnv:
             # Policy is None - set one
             policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
         # We got a FreshCreateSymbolicPolicy
-        assert_policy(policy)
+        _assert_policy(policy)
         constraint_dims = policy.constraint_sizes
         dynamic_dims = policy.dynamic_sizes
 
         # TODO: make this configurable from outside policy; we made a policy
         # decision here where if all sizes are static, we are going to
         # specialize all of the inner strides/offset too. We don't have to
-        # do this, and arguably we should ALWAYS allow for dynamic offset,
-        # this is cheap.
+        # do this.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_strides = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
 
         assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
         assert len(constraint_dims) == dim
@@ -2117,7 +2118,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
+                    dynamic_dim=dynamic_strides,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2133,11 +2134,11 @@ class ShapeEnv:
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
                 stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-            policy=policy))
+                policy=policy))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_strides_offset,
+            dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), policy=policy)
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
@@ -2155,9 +2156,6 @@ class ShapeEnv:
             policy: Optional[CreateSymbolicPolicy] = None,
     ):
         source_name = source.name() if source else None
-        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
-            if source_name in policy.source_to_symint_node_cache:
-                return policy.source_to_symint_node_cache[source_name]
 
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -2171,6 +2169,10 @@ class ShapeEnv:
             self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fx_node = None
+
+        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
+            if source_name in policy.source_to_symint_node_cache:
+                return policy.source_to_symint_node_cache[source_name]
 
         if isinstance(sym, sympy.Integer):
             if hint is not None:
