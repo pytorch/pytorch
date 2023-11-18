@@ -1252,6 +1252,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
+
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
             index = x.shape[-1]
@@ -1995,13 +2003,19 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @skipIfRocm
-    def test_triton_kernel_None_arg(self):
+    def test_triton_kernel_various_args(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128})],
+            key=[],
+        )
         @triton.jit
         def pass_kernel(
             out_ptr,
-            dummy_None,
             n_elements,
+            dummy_None,
+            dummy_empty,
             BLOCK_SIZE: "tl.constexpr",
+            RANDOM_SIZE: "tl.constexpr",
         ):
             pass
 
@@ -2009,7 +2023,13 @@ def forward(self, x_1, output_1):
         def call_triton(output):
             n_elements = output.numel()
             grid = (n_elements,)
-            pass_kernel[grid](output, None, n_elements, BLOCK_SIZE=16)
+            pass_kernel[grid](
+                output,
+                n_elements,
+                None,
+                torch.empty_like(output),
+                RANDOM_SIZE=0,
+            )
             return output
 
         output = torch.randn(5, device="cuda")
