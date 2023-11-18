@@ -22,10 +22,7 @@ class ProcessException(Exception):
 
 
 class ProcessRaisedException(ProcessException):
-    """
-    Exception is thrown when the process failed due to exception
-    raised by the code.
-    """
+    """Exception raised when a process failed due to an exception raised by the code."""
 
     def __init__(
         self,
@@ -37,10 +34,7 @@ class ProcessRaisedException(ProcessException):
 
 
 class ProcessExitedException(ProcessException):
-    """
-    Exception is thrown when the process failed due to signal
-    or exited with a specific code.
-    """
+    """Exception raised when a process failed due to signal or exited with a specific code."""
 
     __slots__ = ["exit_code"]
 
@@ -94,8 +88,9 @@ class ProcessContext:
         return [int(process.pid) for process in self.processes]
 
     def join(self, timeout=None):
-        r"""
-        Tries to join one or more processes in this spawn context.
+        r"""Join one or more processes within spawn context.
+
+        Attempt to join one or more processes in this spawn context.
         If one of them exited with a non-zero exit status, this function
         kills the remaining processes and raises an exception with the cause
         of the first process exiting.

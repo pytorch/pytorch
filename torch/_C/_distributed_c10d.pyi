@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, overload, Tuple, Union
@@ -65,6 +66,8 @@ class Reducer:
     def _remove_autograd_hooks(self) -> None: ...
     def _check_reducer_finalized(self) -> None: ...
     def _set_sparse_metadata(self, global_unique_ids: Dict[str, Tensor]) -> None: ...
+    def _force_bucket_rebuild(self) -> None: ...
+    def _update_process_group(self, new_process_group: ProcessGroup) -> None: ...
 
 class DDPLoggingData:
     strs_map: Dict[str, str]
@@ -117,6 +120,7 @@ class BroadcastOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllreduceOptions:
     reduceOp: ReduceOp
@@ -141,6 +145,7 @@ class GatherOptions:
 class ScatterOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ReduceScatterOptions:
     reduceOp: ReduceOp
