@@ -26,7 +26,6 @@ def not_none(obj):
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
-    print(gm.code)
     assert ((not_none(freq) or not_none(freq_ge)) and not_none(op)) or ((not_none(freqs) or not_none(freqs_ge)) and not_none(ops))
     if not_none(op):
         ops = [op]
@@ -423,7 +422,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
     def test_compile_selective_checkpoint_must_recompute(self):
-        # TODO: write the baseline case ("don't care about sigmoid, and check that sigmoid is not recomputed")
         def context_fn_must_recompute_sigmoid():
             no_recompute_list = [
                 torch.ops.aten.mm.default,

@@ -893,10 +893,6 @@ def min_cut_rematerialization_partition(
         for user in node.users:
             add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    import pickle
-    with open('nx_graph.pkl', 'wb') as file:
-        pickle.dump(nx_graph, file)
-
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
