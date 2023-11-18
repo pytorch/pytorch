@@ -23,9 +23,9 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
-    skipIfRocm
 )
 
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
