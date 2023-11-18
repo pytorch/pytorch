@@ -389,7 +389,9 @@ class FusionTests(TestCase):
         # scale (1) + X (4*2048*hidden_size) * 3 + welford_reduction (4*2048) * 4 +
         #   LN scale (hidden_size) * 2 + LN bias (hidden_size) * 2 + amax (num_splits * 2 + 1)
         # num_splits depends on SM architectures.
-        expected_amax_keep_dim_numel = 1 + hidden_size * 4 + 4 * 2048 * hidden_size * 3 + 4 * 2048 * 4 + 1
+        expected_amax_keep_dim_numel = (
+            1 + hidden_size * 4 + 4 * 2048 * hidden_size * 3 + 4 * 2048 * 4 + 1
+        )
         self.assertGreaterAlmostEqual(
             int(count_numel(f, *inp, True)), expected_amax_keep_dim_numel
         )
