@@ -973,6 +973,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_dup_unbacked_sym_decl(self):
         class Model(torch.nn.Module):
             def __init__(self):

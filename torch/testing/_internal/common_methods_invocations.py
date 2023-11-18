@@ -8878,7 +8878,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
@@ -8891,7 +8891,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
