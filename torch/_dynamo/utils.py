@@ -1445,6 +1445,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
+    from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -1518,7 +1519,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
-        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+        elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -2294,3 +2295,14 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
     )
+
+
+def to_fake_tensor(t, fake_mode):
+    policy = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_policy:
+            policy = tracing_context.tensor_to_policy[t]
+            source = policy.tensor_source
+
+    return fake_mode.from_tensor(t, static_shapes=False, policy=policy, source=source)
