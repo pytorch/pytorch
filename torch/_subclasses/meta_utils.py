@@ -521,7 +521,7 @@ class MetaConverter:
                                             source, TensorProperty.SIZE, 1
                                         ),
                                     ),
-                                    hint=t._size[1]
+                                    hint=t._size[1],
                                 )
                             r = type(t).__tensor_unflatten__(
                                 transformed_tensors_dict, ctx
@@ -641,7 +641,6 @@ class MetaConverter:
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        from torch._subclasses.fake_tensor import FakeTensor
 
         if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
