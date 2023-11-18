@@ -106,7 +106,7 @@ def is_magic_method(op):
 
 
 class GraphLowering(torch.fx.Interpreter):
-    current_node: torch.fx.Node
+    graph_outputs: List[ir.IRNode]
     scheduler: "torch._inductor.scheduler.Scheduler"
     wrapper_code: WrapperCodeGen
 
@@ -197,7 +197,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.graph_outputs: List[ir.IRNode] = []
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
         self.cuda = False
@@ -214,6 +213,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.extern_node_serializer: Optional[
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = extern_node_serializer
+        self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -706,7 +706,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     @contextmanager
     def set_current_node(self, node: torch.fx.Node):
-        old = getattr(self, "current_node", None)
+        old = self.current_node
         try:
             self.current_node = node
             yield
