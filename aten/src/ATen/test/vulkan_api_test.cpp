@@ -4,8 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
 #include <c10/util/ArrayRef.h>
 
@@ -3298,16 +3296,40 @@ TEST_F(VulkanAPITest, mm) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, DISABLED_mm_m2_vulkan) {
-  const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+TEST_F(VulkanAPITest, mm_m2_is_variable) {
+  int n = 19;
+  int p = 25;
+  int m = 21;
+  const auto m1_cpu = at::rand({n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({p, m}, at::device(at::kCPU).dtype(at::kFloat));
+
   const auto out_cpu = m1_cpu.mm(m2_cpu);
 
   const auto m1_vulkan = m1_cpu.vulkan();
-  // When m2 is a vulkan, the current implementation forgot
-  // to pre-pack the m2 tensor, yielding wrong results.
-  const auto out_vulkan = m1_vulkan.mm(m2_cpu.vulkan());
+  const auto m2_vulkan = m2_cpu.vulkan();
 
+  const auto out_vulkan = m1_vulkan.mm(m2_vulkan);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mm_m1_m2_variable) {
+  int n = 19;
+  int p = 25;
+  int m = 21;
+  const auto m1_cpu = at::rand({n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({p, m}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto out_cpu = at::mm(m1_cpu, m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+
+  const auto out_vulkan = at::mm(m1_vulkan, m2_vulkan);
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
     showRtol(out_cpu, out_vulkan.cpu());
