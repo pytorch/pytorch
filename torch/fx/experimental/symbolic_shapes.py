@@ -728,7 +728,7 @@ class EqualityConstraint(Constraint):
         return self._find(source1) == self._find(source2)
 
 
-def assert_policy(policy):
+def _assert_policy(policy):
     assert isinstance(policy, CreateSymbolicPolicy), "Invalid policy object"
     assert type(policy) != CreateSymbolicPolicy, "Illegal usage of policy ABC"
 
@@ -1960,7 +1960,7 @@ class ShapeEnv:
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        assert_policy(policy)
+        _assert_policy(policy)
         dynamic_dims = policy.dynamic_sizes
         constraint_dims = policy.constraint_sizes
         size = []
@@ -2071,7 +2071,7 @@ class ShapeEnv:
             # Policy is None - set one
             policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
         # We got a FreshCreateSymbolicPolicy
-        assert_policy(policy)
+        _assert_policy(policy)
         constraint_dims = policy.constraint_sizes
         dynamic_dims = policy.dynamic_sizes
 
