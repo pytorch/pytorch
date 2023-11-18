@@ -370,6 +370,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
@@ -779,6 +781,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+        self.should_exit = True
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -919,11 +922,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def cleanup_graph(self):
         """
+        Remove "creation_timestamp" from node meta
+
         Remove this pattern from the graph:
             torch._C._set_grad_enabled(False)
             torch._C._set_grad_enabled(True)
         """
+        assert self.should_exit
         nodes = list(self.graph.nodes)
+        for node in nodes:
+            node.meta.pop("creation_timestamp", None)
+
         grad_enabled = torch.is_grad_enabled()
         for node1, node2 in zip(nodes, nodes[1:]):
             if (
@@ -992,6 +1001,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         from .decorators import disable
 
+        assert self.should_exit
+
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         self.create_node(
@@ -1021,15 +1032,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
-        backend_fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=old_fake_mode.shape_env,
-        )
-        self.tracing_context.fake_mode = backend_fake_mode
-        try:
-            with self.restore_global_state(), backend_fake_mode:
-                compiled_fn = self.call_user_compiler(gm)
-        finally:
-            self.tracing_context.fake_mode = old_fake_mode
+        if not self.export:
+            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            backend_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=old_fake_mode.shape_env,
+            )
+            # TODO(voz): Ostensibily, this should be scoped and
+            # restore back to old_fake_mode, but doing so currently violates
+            # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            self.tracing_context.fake_mode = backend_fake_mode
+
+        with self.restore_global_state():
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -1125,6 +1139,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return result
 
     def remove_unused_graphargs(self) -> None:
+        assert self.should_exit
         # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
