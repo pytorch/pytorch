@@ -887,7 +887,7 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs: List[Any]) -> Any:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.gcc()
+        return build_paths.cc()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -1440,6 +1440,7 @@ def cpp_compile_command(
     if isinstance(input, str):
         input = [input]
     ipaths_str = " ".join(["-I" + p for p in ipaths])
+    clang_flags = ""
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1448,8 +1449,12 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
-        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
-        linker_paths = " ".join(["-B" + p for p in linker_paths])
+        assert is_clang()
+        # Use clang runtime instead of libgcc
+        clang_flags += " --rtlib=compiler-rt"
+        clang_flags += " -fuse-ld=lld"
+        linker_paths = "-B" + build_paths.glibc_lib()
+        linker_paths += " -L" + build_paths.glibc_lib()
     else:
         inp_name = input
         out_name = output
@@ -1463,7 +1468,7 @@ def cpp_compile_command(
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths}
+            {macros} {linker_paths} {clang_flags}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
