@@ -31,6 +31,8 @@ from torch._guards import (
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv, free_unbacked_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.reference import PythonReferenceAnalysis
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -1184,56 +1186,68 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # TODO: Request simplification on runtime asserts before emitting them
         # We are going to mutate the dict
         ras_by_symbol = self.shape_env.deferred_runtime_asserts.copy()
-        symbol_to_node = {}
+        symbol_to_proxy = {}
         for node in self.graph.nodes:
-            if "example_value" not in node.meta:
-                continue
+            with self.graph.inserting_after(node):
+                if "example_value" not in node.meta:
+                    continue
 
-            defs = []
+                defs = []
 
-            # For every new unbacked symbol, we need an fx.Node representing
-            # precisely this value.  There are a few places where the unbacked
-            # symbol could have come from, and we will check them to setup
-            # these nodes.
-            #
-            # For a case like item(), this is trivial (no new node is added.)
-            #
-            # For nonzero(), we need to add something like i0 = out.size(0)
-            #
-            # We could end up with duplicate nodes this way but it is not a
-            # big deal.
-            def match_symbol(symint, cb):
-                if (
-                    isinstance(symint, torch.SymInt) and
-                    isinstance(i0 := symint.node.expr, sympy.Symbol) and
-                    i0 not in symbol_to_node and
-                    self.shape_env.is_unbacked_symint(i0)
-                ):
-                    with self.graph.inserting_after(node):
-                        symbol_to_node[i0] = cb()
-                    defs.append(i0)
+                # For every new unbacked symbol, we need an fx.Node representing
+                # precisely this value.  There are a few places where the unbacked
+                # symbol could have come from, and we will check them to setup
+                # these nodes.
+                #
+                # For a case like item(), this is trivial (no new node is added.)
+                #
+                # For nonzero(), we need to add something like i0 = out.size(0)
+                #
+                # We could end up with duplicate nodes this way but it is not a
+                # big deal.
+                #
+                # We also do this to setup backed SymInts, but those are all going
+                # to be matched from placeholders
+                def match_symbol(symint, cb):
+                    if (
+                        isinstance(symint, torch.SymInt) and
+                        isinstance(i0 := symint.node.expr, sympy.Symbol) and
+                        i0 not in symbol_to_proxy
+                    ):
+                        symbol_to_proxy[i0] = fx.Proxy(cb())
+                        defs.append(i0)
 
-            match_symbol(node.meta["example_value"], lambda: node)
-            if isinstance(t := node.meta["example_value"], torch.Tensor):
-                for i, s in enumerate(t.size()):
-                    match_symbol(s, lambda: self.graph.call_method("size", (node, i)))
-                for i, s in enumerate(t.stride()):
-                    match_symbol(s, lambda: self.graph.call_method("stride", (node, i)))
-                match_symbol(s, lambda: self.graph.call_method("storage_offset", (node,)))
+                match_symbol(node.meta["example_value"], lambda: node)
+                if isinstance(t := node.meta["example_value"], torch.Tensor):
+                    for i, s in enumerate(t.size()):
+                        match_symbol(s, lambda: self.graph.call_method("size", (node, i)))
+                    for i, s in enumerate(t.stride()):
+                        match_symbol(s, lambda: self.graph.call_method("stride", (node, i)))
+                    match_symbol(s, lambda: self.graph.call_method("storage_offset", (node,)))
 
-            for i0 in defs:
-                ras = ras_by_symbol.pop(i0, [])
-                for ra in ras:
-                    needs = free_unbacked_symbols(ra.expr)
-                    missing = needs - symbol_to_node.keys()
-                    if missing:
-                        ras_by_symbol.setdefault(sorted(missing)[0], []).append(ra)
-                    else:
-                        # Convert the sympy expression into a sequence of FX
-                        # nodes
-                        sympy_interp()
-                        print(node)
-                        print(ra.expr)
+                for i0 in defs:
+                    ras = ras_by_symbol.pop(i0, [])
+                    for ra in ras:
+                        # Need to process ALL free symbols, not just unbacked ones
+                        fvs = free_symbols(ra.expr)
+                        missing = fvs - symbol_to_proxy.keys()
+                        if missing:
+                            i1 = sorted(missing)[0]
+                            assert self.shape_env.is_unbacked_symint(i1)
+                            ras_by_symbol.setdefault(i1, []).append(ra)
+                        else:
+                            # Convert the sympy expression into a sequence of FX
+                            # nodes
+                            res = sympy_interp(PythonReferenceAnalysis, symbol_to_proxy, ra.expr).node
+                            with self.graph.inserting_after(res):
+                                res2 = self.graph.call_function(torch.ops.aten.scalar_tensor.default, (res,))
+                            with self.graph.inserting_after(res2):
+                                self.graph.call_function(
+                                    torch.ops.aten._assert_async.msg,
+                                    # TODO: use ra.msg here, but it's pretty
+                                    # useless right now
+                                    (res2, f"Deferred runtime assertion failed {ra.expr}")
+                                )
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
