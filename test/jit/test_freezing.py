@@ -1995,8 +1995,8 @@ class TestFrozenOptimizations(JitTestCase):
         torch.set_default_dtype(torch.double)
 
     def tearDown(self):
-        super().tearDown()
         torch.set_default_dtype(self.default_dtype)
+        super().tearDown()
 
     def test_conv_bn_folding(self):
         conv_bias = [True, False]
@@ -2691,9 +2691,9 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             conv_bias = [True, False]
             conv_ops = [nn.Conv2d, nn.Conv3d]
-            add_z = [True, False]
+            use_add_z = [True, False]
             use_tracing = [True, False]
-            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, use_add_z, use_tracing):
                 class Net(nn.Module):
                     def __init__(self, in_channels, out_channels, **kwargs):
                         super().__init__()

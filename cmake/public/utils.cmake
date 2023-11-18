@@ -435,9 +435,9 @@ function(torch_compile_options libname)
     list(APPEND private_compile_options
       -Wall
       -Wextra
+      -Wdeprecated
       -Wno-unused-parameter
       -Wno-unused-function
-      -Wno-unused-result
       -Wno-missing-field-initializers
       -Wno-unknown-pragmas
       -Wno-type-limits
@@ -445,14 +445,8 @@ function(torch_compile_options libname)
       -Wno-unknown-pragmas
       -Wno-strict-overflow
       -Wno-strict-aliasing
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces
       )
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options
-        -Wno-range-loop-analysis)
-    else()
+    if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608
@@ -541,7 +535,13 @@ endfunction()
 function(append_cxx_flag_if_supported flag outputvar)
     string(TOUPPER "HAS${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
-    check_cxx_compiler_flag("${flag}" ${_FLAG_NAME})
+    # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      string(REGEX REPLACE "Wno-" "W" new_flag "${flag}")
+    else()
+      set(new_flag ${flag})
+    endif()
+    check_cxx_compiler_flag("${new_flag}" ${_FLAG_NAME})
     if(${_FLAG_NAME})
         string(APPEND ${outputvar} " ${flag}")
         set(${outputvar} "${${outputvar}}" PARENT_SCOPE)

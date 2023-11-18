@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include <mutex>
 
 #include <c10/core/Device.h>

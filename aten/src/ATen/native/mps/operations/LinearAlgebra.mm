@@ -511,7 +511,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();

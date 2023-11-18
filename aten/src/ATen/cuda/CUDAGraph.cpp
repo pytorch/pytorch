@@ -5,9 +5,13 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
+#include <chrono>
+#include <thread>
+
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
+constexpr int kSynchronizeBusyWaitMillis = 10;
 
 MempoolId_t graph_pool_handle() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
@@ -55,6 +59,25 @@ CaptureId_t capture_sequence_id() {
  * describes memory management for captures.
  */
 
+std::atomic<int> CUDAGraph::pending_event_queries = 0;
+
+// Track any outstanding event queries that could happen e.g., in a NCCL watchdog so that they
+// can be resolved before the capture begins. Note that event queries are not allowed during a
+// graph capture in the default capture mode.
+void CUDAGraph::inc_pending_event_queries() {
+  pending_event_queries++;
+}
+
+void CUDAGraph::dec_pending_event_queries() {
+  TORCH_INTERNAL_ASSERT(pending_event_queries > 0,
+    "Attempted to decrement the number of outstanding events to be queried, but it was <= 0.");
+  pending_event_queries--;
+}
+
+int CUDAGraph::num_pending_event_queries() {
+  return pending_event_queries;
+}
+
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
@@ -63,7 +86,7 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -115,10 +138,19 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
 
+  // At this point, any NCCL watchdogs should be aware that we are in capture mode
+  // and therefore should not enqueue any additional work that could be event-queried.
+  // We still must wait on any existing work that has not been cleaned up.
+  while (num_pending_event_queries()) {
+    TORCH_WARN_ONCE("Waiting for pending NCCL work to finish before starting graph capture.");
+    std::this_thread::sleep_for(
+      std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
+  }
+
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
+  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, nullptr));
@@ -252,7 +284,7 @@ void CUDAGraph::enable_debug_mode() {
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11030)
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11030)|| (defined(USE_ROCM) && ROCM_VERSION >= 50600)
   if (_cuda_graphs_debug) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
@@ -264,7 +296,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
     TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 and is not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
 #endif
 }
 
@@ -295,9 +327,11 @@ void CUDAGraph::reset() {
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
+    has_graph_ = false;
   }
   if (has_graph_exec_) {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
+    has_graph_exec_ = false;
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")

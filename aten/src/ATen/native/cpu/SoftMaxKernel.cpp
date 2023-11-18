@@ -1,3 +1,4 @@
+#include <memory>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cpu/SoftmaxKernel.h>
 
@@ -14,6 +15,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
@@ -49,8 +51,8 @@ inline void _vec_log_softmax_lastdim(
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
-    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
-    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
+    auto tmp_sum_scalar = std::make_unique<scalar_t[]>(CHUNK_SIZE);
+    auto max_input_arr = std::make_unique<scalar_t[]>(CHUNK_SIZE);
     for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
       int64_t loop_end = CHUNK_SIZE;
       if (ii + CHUNK_SIZE > end)
@@ -104,8 +106,9 @@ inline void _vec_log_softmax_lastdim(
   });
 }
 
-template <typename scalar_t>
-inline void _vec_softmax_lastdim(
+template<typename scalar_t>
+inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax_lastdim(
     scalar_t* input_data_base,
     scalar_t* output_data_base,
     int64_t outer_size,
@@ -137,30 +140,30 @@ inline void _vec_softmax_lastdim(
   });
 }
 
-template <>
-inline void _vec_softmax_lastdim<BFloat16>(
-    BFloat16* input_data_base,
-    BFloat16* output_data_base,
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax_lastdim(
+    scalar_t* input_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
-  using bVec = vec::Vectorized<BFloat16>;
+  using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
-    std::unique_ptr<float []> buffer(new float[dim_size]);
+    auto buffer = std::make_unique<float []>(dim_size);
     float* buffer_data = buffer.get();
 
     for (const auto i : c10::irange(begin, end)) {
-      BFloat16* input_data = input_data_base + i * dim_size;
-      BFloat16* output_data = output_data_base + i * dim_size;
+      scalar_t* input_data = input_data_base + i * dim_size;
+      scalar_t* output_data = output_data_base + i * dim_size;
       // reduce to max and cache float input data
       fVec max_fvec = fVec(-std::numeric_limits<float>::infinity());
       int64_t d0 = 0;
-      for (; d0 < dim_size - (dim_size % bVec::size()); d0 += bVec::size()) {
-        bVec data_bvec = bVec::loadu(input_data + d0);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+      for (; d0 < dim_size - (dim_size % Vec::size()); d0 += Vec::size()) {
+        Vec data_vec = Vec::loadu(input_data + d0);
+        auto [data_fvec0, data_fvec1] = vec::convert_to_float<scalar_t>(data_vec);
         max_fvec = vec::maximum(max_fvec, data_fvec0);
         max_fvec = vec::maximum(max_fvec, data_fvec1);
         data_fvec0.store(buffer_data + d0);
@@ -190,14 +193,14 @@ inline void _vec_softmax_lastdim<BFloat16>(
 
       sum_val = 1 / sum_val;
       int64_t d2 = 0;
-      for (; d2 < dim_size - (dim_size % bVec::size()); d2 += bVec::size()) {
+      for (; d2 < dim_size - (dim_size % Vec::size()); d2 += Vec::size()) {
         fVec out_fvec0 = fVec::loadu(buffer_data + d2) * fVec(sum_val);
         fVec out_fvec1 = fVec::loadu(buffer_data + d2 + fVec::size()) * fVec(sum_val);
-        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
-        out_bvec.store(output_data + d2);
+        Vec out_vec = vec::convert_from_float<scalar_t>(out_fvec0, out_fvec1);
+        out_vec.store(output_data + d2);
       }
       for (; d2 < dim_size; d2++) {
-        output_data[d2] = BFloat16(buffer_data[d2] * sum_val);
+        output_data[d2] = scalar_t(buffer_data[d2] * sum_val);
       }
     }
   });
@@ -256,8 +259,9 @@ inline void _vec_host_softmax_backward_lastdim(
       });
 }
 
-template <typename scalar_t>
-inline void _vec_softmax_backward(
+template<typename scalar_t>
+inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax_backward(
     scalar_t* grad_input_data_base,
     scalar_t* grad_output_data_base,
     scalar_t* output_data_base,
@@ -275,7 +279,7 @@ inline void _vec_softmax_backward(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
+        auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -338,36 +342,35 @@ inline void _vec_softmax_backward(
       });
 }
 
-template <>
-inline void _vec_softmax_backward<BFloat16>(
-    BFloat16* grad_input_data_base,
-    BFloat16* grad_output_data_base,
-    BFloat16* output_data_base,
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax_backward(
+    scalar_t* grad_input_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
-  using bVec = vec::Vectorized<BFloat16>;
+  using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
   int64_t CHUNK_SIZE = std::max<int64_t>(
-      BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
-  CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
+      BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
+  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<float[]> buffer(new float[CHUNK_SIZE]);
+        auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
 
         // thread local buffer that holds grad_output and output data in float32
-        std::unique_ptr<float[]> grad_output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto grad_output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
-        std::unique_ptr<float[]> output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* output_buffer_data = output_buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -379,7 +382,7 @@ inline void _vec_softmax_backward<BFloat16>(
           // init
           fVec zero_fvec = fVec(float(0));
           int64_t d0 = 0;
-          for (; d0 < size - (size % bVec::size()); d0 += bVec::size()) {
+          for (; d0 < size - (size % Vec::size()); d0 += Vec::size()) {
             zero_fvec.store(tmp_sum_data + d0);
             zero_fvec.store(tmp_sum_data + d0 + fVec::size());
           }
@@ -391,23 +394,21 @@ inline void _vec_softmax_backward<BFloat16>(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            BFloat16* grad_output_ptr = grad_output_data_base + offset;
-            BFloat16* output_ptr = output_data_base + offset;
+            scalar_t* grad_output_ptr = grad_output_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
             float* grad_output_buffer_ptr =
                 grad_output_buffer_data + dim_idx * CHUNK_SIZE;
             float* output_buffer_ptr =
                 output_buffer_data + dim_idx * CHUNK_SIZE;
 
             int64_t d1 = 0;
-            for (; d1 < size - (size % bVec::size()); d1 += bVec::size()) {
-              bVec grad_output_bvec = bVec::loadu(grad_output_ptr + d1);
-              fVec grad_output_fvec0, grad_output_fvec1;
-              std::tie(grad_output_fvec0, grad_output_fvec1) =
-                  convert_bfloat16_float(grad_output_bvec);
-              bVec output_bvec = bVec::loadu(output_ptr + d1);
-              fVec output_fvec0, output_fvec1;
-              std::tie(output_fvec0, output_fvec1) =
-                  convert_bfloat16_float(output_bvec);
+            for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
+              Vec grad_output_vec = Vec::loadu(grad_output_ptr + d1);
+              auto [grad_output_fvec0, grad_output_fvec1] =
+                  vec::convert_to_float<scalar_t>(grad_output_vec);
+              Vec output_vec = Vec::loadu(output_ptr + d1);
+              auto [output_fvec0, output_fvec1] =
+                  vec::convert_to_float<scalar_t>(output_vec);
               fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d1);
               fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d1 + fVec::size());
               sum_fvec0 += grad_output_fvec0 * output_fvec0;
@@ -433,7 +434,7 @@ inline void _vec_softmax_backward<BFloat16>(
 
           // compute output * (grad_output - sum)
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
-            BFloat16* grad_input_ptr = grad_input_data_base +
+            scalar_t* grad_input_ptr = grad_input_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             float* grad_output_buffer_ptr =
@@ -442,7 +443,7 @@ inline void _vec_softmax_backward<BFloat16>(
                 output_buffer_data + dim_idx * CHUNK_SIZE;
 
             int64_t d2 = 0;
-            for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
+            for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
               fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d2);
               fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d2 + fVec::size());
               fVec grad_output_fvec0 = fVec::loadu(grad_output_buffer_ptr + d2);
@@ -455,9 +456,9 @@ inline void _vec_softmax_backward<BFloat16>(
                   output_fvec0 * (grad_output_fvec0 - sum_fvec0);
               fVec grad_input_fvec1 =
                   output_fvec1 * (grad_output_fvec1 - sum_fvec1);
-              bVec grad_input_bvec =
-                  convert_float_bfloat16(grad_input_fvec0, grad_input_fvec1);
-              grad_input_bvec.store(grad_input_ptr + d2);
+              Vec grad_input_vec =
+                  vec::convert_from_float<scalar_t>(grad_input_fvec0, grad_input_fvec1);
+              grad_input_vec.store(grad_input_ptr + d2);
             }
             for (; d2 < size; d2++) {
               grad_input_ptr[d2] = output_buffer_ptr[d2] * (grad_output_buffer_ptr[d2] - tmp_sum_data[d2]);
@@ -467,8 +468,9 @@ inline void _vec_softmax_backward<BFloat16>(
       });
 }
 
-template <typename scalar_t>
-inline void _vec_log_softmax_backward(
+template<typename scalar_t>
+inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_log_softmax_backward(
     scalar_t* grad_input_data_base,
     scalar_t* grad_output_data_base,
     scalar_t* output_data_base,
@@ -486,7 +488,7 @@ inline void _vec_log_softmax_backward(
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
+        auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -548,32 +550,32 @@ inline void _vec_log_softmax_backward(
       });
 }
 
-template <>
-inline void _vec_log_softmax_backward<BFloat16>(
-    BFloat16* grad_input_data_base,
-    BFloat16* grad_output_data_base,
-    BFloat16* output_data_base,
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_log_softmax_backward(
+    scalar_t* grad_input_data_base,
+    scalar_t* grad_output_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
-  using bVec = vec::Vectorized<BFloat16>;
+  using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
   int64_t CHUNK_SIZE = std::max<int64_t>(
-      BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
-  CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
+      BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
+  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   parallel_for(
       0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
-        std::unique_ptr<float[]> buffer(new float[CHUNK_SIZE]);
+        auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
 
         // thread local buffer that holds grad_output data in float32
-        std::unique_ptr<float[]> grad_output_buffer(
-            new float[dim_size * CHUNK_SIZE]);
+        auto grad_output_buffer = std::make_unique<float[]>(dim_size * CHUNK_SIZE);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
         for (int64_t i = begin; i < end; i++) {
@@ -585,7 +587,7 @@ inline void _vec_log_softmax_backward<BFloat16>(
           // init
           fVec zero_fvec = fVec(float(0));
           int64_t d0 = 0;
-          for (; d0 < size - (size % bVec::size()); d0 += bVec::size()) {
+          for (; d0 < size - (size % Vec::size()); d0 += Vec::size()) {
             zero_fvec.store(tmp_sum_data + d0);
             zero_fvec.store(tmp_sum_data + d0 + fVec::size());
           }
@@ -595,18 +597,17 @@ inline void _vec_log_softmax_backward<BFloat16>(
 
           // compute sum of grad_output
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
-            BFloat16* grad_output_ptr = grad_output_data_base +
+            scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             float* grad_output_buffer_ptr =
                 grad_output_buffer_data + dim_idx * CHUNK_SIZE;
 
             int64_t d1 = 0;
-            for (; d1 < size - (size % bVec::size()); d1 += bVec::size()) {
-              bVec grad_output_bvec = bVec::loadu(grad_output_ptr + d1);
-              fVec grad_output_fvec0, grad_output_fvec1;
-              std::tie(grad_output_fvec0, grad_output_fvec1) =
-                  convert_bfloat16_float(grad_output_bvec);
+            for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
+              Vec grad_output_vec = Vec::loadu(grad_output_ptr + d1);
+              auto [grad_output_fvec0, grad_output_fvec1] =
+                  vec::convert_to_float<scalar_t>(grad_output_vec);
               fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d1);
               fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d1 + fVec::size());
               sum_fvec0 += grad_output_fvec0;
@@ -630,17 +631,16 @@ inline void _vec_log_softmax_backward<BFloat16>(
           for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
-            BFloat16* output_ptr = output_data_base + offset;
-            BFloat16* grad_input_ptr = grad_input_data_base + offset;
+            scalar_t* output_ptr = output_data_base + offset;
+            scalar_t* grad_input_ptr = grad_input_data_base + offset;
             float* grad_output_buffer_ptr =
                 grad_output_buffer_data + dim_idx * CHUNK_SIZE;
 
             int64_t d2 = 0;
-            for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
-              bVec output_bvec = bVec::loadu(output_ptr + d2);
-              fVec output_fvec0, output_fvec1;
-              std::tie(output_fvec0, output_fvec1) =
-                  convert_bfloat16_float(output_bvec);
+            for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
+              Vec output_vec = Vec::loadu(output_ptr + d2);
+              auto [output_fvec0, output_fvec1] =
+                  vec::convert_to_float<scalar_t>(output_vec);
               fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d2);
               fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d2 + fVec::size());
               fVec grad_output_fvec0 = fVec::loadu(grad_output_buffer_ptr + d2);
@@ -650,9 +650,9 @@ inline void _vec_log_softmax_backward<BFloat16>(
                   grad_output_fvec0 - output_fvec0.exp() * sum_fvec0;
               fVec grad_input_fvec1 =
                   grad_output_fvec1 - output_fvec1.exp() * sum_fvec1;
-              bVec grad_input_bvec =
-                  convert_float_bfloat16(grad_input_fvec0, grad_input_fvec1);
-              grad_input_bvec.store(grad_input_ptr + d2);
+              Vec grad_input_vec =
+                  vec::convert_from_float<scalar_t>(grad_input_fvec0, grad_input_fvec1);
+              grad_input_vec.store(grad_input_ptr + d2);
             }
             for (; d2 < size; d2++) {
               grad_input_ptr[d2] = grad_output_buffer_ptr[d2] -
@@ -682,18 +682,20 @@ struct vec_host_softmax_lastdim {
   }
 };
 
-inline void _vec_softmax(
-    BFloat16* input_data_base,
-    BFloat16* output_data_base,
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax(
+    scalar_t* input_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<float>;
-  using Vec_bf16 = vec::Vectorized<BFloat16>;
+  using Vec16 = vec::Vectorized<scalar_t>;
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   int64_t grain_size = internal::GRAIN_SIZE / dim_size;
-  int vectorized_step = Vec_bf16().size(); // Currently, we only support BFloat16 in this special implementation
+  int vectorized_step = Vec16().size(); // Currently, we only support BFloat16/Half in this special implementation
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
@@ -706,20 +708,20 @@ inline void _vec_softmax(
           int64_t inner_idx = idx % inner_size;
           if (((inner_idx + vectorized_step) <= inner_size) && ((idx + vectorized_step) <= end)) {
             // Vectorization
-            BFloat16* input_data =
+            scalar_t* input_data =
                 input_data_base + outer_idx * outer_stride + inner_idx;
-            BFloat16* output_data =
+            scalar_t* output_data =
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
-            Vec_bf16 max_vec_bf16 = Vec_bf16::loadu(input_data);
-            std::tuple<Vec, Vec> convert_result = convert_bfloat16_float(max_vec_bf16);
+            Vec16 max_vec_bf16 = Vec16::loadu(input_data);
+            std::tuple<Vec, Vec> convert_result = vec::convert_to_float<scalar_t>(max_vec_bf16);
             Vec max_vec_o1 = std::get<0>(convert_result);
             Vec max_vec_o2 = std::get<1>(convert_result);
             std::get<0>(convert_result).store(temp_vec_input_data);
             std::get<1>(convert_result).store(temp_vec_input_data + Vec().size());
             for (const auto d : c10::irange(1, dim_size)) {
-              Vec_bf16 input_vec_bf16 = Vec_bf16::loadu(input_data + d * dim_stride);
-              convert_result = convert_bfloat16_float(input_vec_bf16);
+              Vec16 input_vec_bf16 = Vec16::loadu(input_data + d * dim_stride);
+              convert_result = vec::convert_to_float<scalar_t>(input_vec_bf16);
               max_vec_o1 = vec::maximum(max_vec_o1, std::get<0>(convert_result));
               max_vec_o2 = vec::maximum(max_vec_o2, std::get<1>(convert_result));
               std::get<0>(convert_result).store(temp_vec_input_data + d*vectorized_step);
@@ -745,7 +747,7 @@ inline void _vec_softmax(
               Vec output_vec_o2 = Vec::loadu(temp_vec_output_data + d*vectorized_step + Vec().size());
               output_vec_o1 = output_vec_o1/sum_vec_o1;
               output_vec_o2 = output_vec_o2/sum_vec_o2;
-              Vec_bf16 output_vec_bf16 = convert_float_bfloat16(output_vec_o1, output_vec_o2);
+              Vec16 output_vec_bf16 = vec::convert_from_float<scalar_t>(output_vec_o1, output_vec_o2);
               output_vec_bf16.store(output_data + d * dim_stride);
             }
             idx += vectorized_step;
@@ -759,9 +761,9 @@ inline void _vec_softmax(
             for (const auto i : c10::irange(tail_number)) {
               outer_idx = (idx + i) / inner_size;
               inner_idx = (idx + i) % inner_size;
-              BFloat16* input_data =
+              scalar_t* input_data =
                   input_data_base + outer_idx * outer_stride + inner_idx;
-              BFloat16* output_data =
+              scalar_t* output_data =
                   output_data_base + outer_idx * outer_stride + inner_idx;
               // Step1: Get max score
               float max_input = float(input_data[0]);
@@ -774,12 +776,12 @@ inline void _vec_softmax(
               for (const auto d : c10::irange(dim_size)) {
                 temp_output_data = std::exp(input_data[d * dim_stride] - max_input);
                 sum_data += temp_output_data;
-                output_data[d * dim_stride] = c10::BFloat16(temp_output_data);
+                output_data[d * dim_stride] = scalar_t(temp_output_data);
               }
               // Step3: Unify
               for (const auto d : c10::irange(dim_size)) {
                 output_data[d * dim_stride] =
-                    c10::BFloat16(float(output_data[d * dim_stride])/sum_data);
+                    scalar_t(float(output_data[d * dim_stride])/sum_data);
               }
             }
             idx += tail_number;
@@ -788,8 +790,9 @@ inline void _vec_softmax(
       });
 }
 
-template <typename scalar_t>
-inline void _vec_softmax(
+template<typename scalar_t>
+inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_softmax(
     scalar_t* input_data_base,
     scalar_t* output_data_base,
     int64_t outer_size,
@@ -881,8 +884,9 @@ inline void _vec_softmax(
 // Parallel on {outer_size, num_chunks} and do vertical reduction on each block of
 // {dim_size, CHUNK_SIZE}, block size (128KB) selected to be L2 hit.
 //
-template <typename scalar_t>
-inline void _vec_logsoftmax(
+template<typename scalar_t>
+inline typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_logsoftmax(
     scalar_t* input_data_base,
     scalar_t* output_data_base,
     int64_t outer_size,
@@ -897,7 +901,7 @@ inline void _vec_logsoftmax(
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer which holds vertical reduction result: max and sum.
-    std::unique_ptr<scalar_t []> buffer(new scalar_t[CHUNK_SIZE * 2]);
+    auto buffer = std::make_unique<scalar_t []>(CHUNK_SIZE * 2);
     scalar_t* input_max_data = buffer.get();
     scalar_t* tmp_sum_data = buffer.get() + CHUNK_SIZE;
 
@@ -984,28 +988,29 @@ inline void _vec_logsoftmax(
   });
 }
 
-template <>
-inline void _vec_logsoftmax<BFloat16>(
-    BFloat16* input_data_base,
-    BFloat16* output_data_base,
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
+_vec_logsoftmax(
+    scalar_t* input_data_base,
+    scalar_t* output_data_base,
     int64_t outer_size,
     int64_t inner_size,
     int64_t dim_size) {
-  using bVec = vec::Vectorized<BFloat16>;
+  using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(BFloat16), bVec::size());
-  CHUNK_SIZE = CHUNK_SIZE / bVec::size() * bVec::size();
+  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
+  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
 
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
-    std::unique_ptr<float []> buffer(new float[CHUNK_SIZE * 2]);
+    auto buffer = std::make_unique<float []>(CHUNK_SIZE * 2);
     float* input_max_data = buffer.get();
     float* tmp_sum_data = buffer.get() + CHUNK_SIZE;
 
     // thread local buffer that holds input data in float32 to save next 2 dtype conversion
-    std::unique_ptr<float []> input_buffer(new float[dim_size * CHUNK_SIZE]);
+    auto input_buffer = std::make_unique<float []>(dim_size * CHUNK_SIZE);
     float* input_buffer_data = input_buffer.get();
 
     // init
@@ -1018,7 +1023,7 @@ inline void _vec_logsoftmax<BFloat16>(
       fVec zero_fvec = fVec(float(0));
       fVec min_fvec = fVec(-std::numeric_limits<float>::infinity());
       int64_t d0 = 0;
-      for (; d0 < size - (size % bVec::size()); d0 += bVec::size()) {
+      for (; d0 < size - (size % Vec::size()); d0 += Vec::size()) {
         min_fvec.store(input_max_data + d0);
         min_fvec.store(input_max_data + d0 + fVec::size());
         zero_fvec.store(tmp_sum_data + d0);
@@ -1031,15 +1036,14 @@ inline void _vec_logsoftmax<BFloat16>(
 
       // compute max
       for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
-        BFloat16* input_ptr = input_data_base + outer_idx * dim_size * inner_size
+        scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
 
         int64_t d1 = 0;
-        for (; d1 < size - (size % bVec::size()); d1 += bVec::size()) {
-          bVec data_bvec = bVec::loadu(input_ptr + d1);
-          fVec data_fvec0, data_fvec1;
-          std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+        for (; d1 < size - (size % Vec::size()); d1 += Vec::size()) {
+          Vec data_vec = Vec::loadu(input_ptr + d1);
+          auto [data_fvec0, data_fvec1] = vec::convert_to_float<scalar_t>(data_vec);
           fVec max_fvec0 = fVec::loadu(input_max_data + d1);
           fVec max_fvec1 = fVec::loadu(input_max_data + d1 + fVec::size());
           max_fvec0 = fVec::blendv(max_fvec0, data_fvec0, data_fvec0 > max_fvec0);
@@ -1064,7 +1068,7 @@ inline void _vec_logsoftmax<BFloat16>(
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
 
         int64_t d2 = 0;
-        for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
+        for (; d2 < size - (size % Vec::size()); d2 += Vec::size()) {
           fVec data_fvec0 = fVec::loadu(input_buffer_ptr + d2);
           fVec data_fvec1 = fVec::loadu(input_buffer_ptr + d2 + fVec::size());
           fVec sum_fvec0 = fVec::loadu(tmp_sum_data + d2);
@@ -1089,11 +1093,11 @@ inline void _vec_logsoftmax<BFloat16>(
       // compute x - max - sum
       for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
-        BFloat16* output_ptr = output_data_base + outer_idx * dim_size * inner_size
+        scalar_t* output_ptr = output_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;
 
         int64_t d3 = 0;
-        for (; d3 < size - (size % bVec::size()); d3 += bVec::size()) {
+        for (; d3 < size - (size % Vec::size()); d3 += Vec::size()) {
           fVec data_fvec0 = fVec::loadu(input_buffer_ptr + d3);
           fVec data_fvec1 = fVec::loadu(input_buffer_ptr + d3 + fVec::size());
           fVec max_fvec0 = fVec::loadu(input_max_data + d3);
@@ -1102,11 +1106,11 @@ inline void _vec_logsoftmax<BFloat16>(
           fVec sum_fvec1 = fVec::loadu(tmp_sum_data + d3 + fVec::size());
           fVec out_fvec0 = data_fvec0 - max_fvec0 - sum_fvec0;
           fVec out_fvec1 = data_fvec1 - max_fvec1 - sum_fvec1;
-          bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
-          out_bvec.store(output_ptr + d3);
+          Vec out_vec = vec::convert_from_float<scalar_t>(out_fvec0, out_fvec1);
+          out_vec.store(output_ptr + d3);
         }
         for (; d3 < size; d3++) {
-          output_ptr[d3] = BFloat16(input_buffer_ptr[d3] - input_max_data[d3] - tmp_sum_data[d3]);
+          output_ptr[d3] = scalar_t(input_buffer_ptr[d3] - input_max_data[d3] - tmp_sum_data[d3]);
         }
       }
     }
@@ -1196,14 +1200,14 @@ struct vec_host_softmax_backward {
 static void softmax_lastdim_kernel_impl(
     const Tensor& result,
     const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, self.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
       "softmax_lastdim_kernel_impl",
       [&] { vec_host_softmax_lastdim<scalar_t, false>::apply(result, self); });
 }
 
 static void softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, self.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
     "softmax_kernel_impl",
     [&] { vec_softmax<scalar_t, false>::apply(result, self, dim); });
 }
@@ -1211,14 +1215,14 @@ static void softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_
 static void log_softmax_lastdim_kernel_impl(
     const Tensor& result,
     const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, self.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
       "log_softmax_lastdim_kernel_impl",
       [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self); });
 }
 
 static void log_softmax_kernel_impl(const Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, self.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(),
     "softmax_kernel_impl",
     [&] { vec_softmax<scalar_t, true>::apply(result, self, dim); });
 }
@@ -1227,8 +1231,8 @@ static void softmax_backward_lastdim_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(),
       "softmax_backward_lastdim_kernel_impl", [&] {
         vec_host_softmax_backward_lastdim<scalar_t, false>::apply(
             grad_input, grad, output);
@@ -1239,8 +1243,8 @@ static void log_softmax_backward_lastdim_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(),
       "log_softmax_backward_lastdim_kernel_impl", [&] {
         vec_host_softmax_backward_lastdim<scalar_t, true>::apply(
             grad_input, grad, output);
@@ -1252,8 +1256,9 @@ static void softmax_backward_kernel_impl(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       grad.scalar_type(),
       "softmax_backward_kernel_impl",
       [&] {
@@ -1267,8 +1272,9 @@ static void log_softmax_backward_kernel_impl(
     const Tensor& grad,
     const Tensor& output,
     int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       grad.scalar_type(),
       "log_softmax_backward_kernel_impl",
       [&] {
@@ -1279,19 +1285,19 @@ static void log_softmax_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-REGISTER_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
-REGISTER_DISPATCH(
+ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(
     softmax_backward_lastdim_kernel,
     &softmax_backward_lastdim_kernel_impl);
-REGISTER_DISPATCH(
+ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_lastdim_kernel,
     &log_softmax_backward_lastdim_kernel_impl);
 
-REGISTER_DISPATCH(softmax_kernel, &softmax_kernel_impl);
-REGISTER_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl);
-REGISTER_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
-REGISTER_DISPATCH(
+ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_kernel,
     &log_softmax_backward_kernel_impl);
 } // namespace at::native

@@ -15,7 +15,7 @@ class Weibull(TransformedDistribution):
 
     Example:
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Weibull(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Weibull distribution with scale=1, concentration=1
         tensor([ 0.4784])

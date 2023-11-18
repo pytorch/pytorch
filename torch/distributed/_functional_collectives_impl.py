@@ -4,7 +4,7 @@ import weakref
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from typing import List, cast
+from typing import List, Optional, cast
 
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
@@ -145,6 +145,16 @@ Kernel implementations (for eager runtime only) - should never be traced by torc
 These functions should all be bound to dispatcher ops.  During tracing, the op itself should be
 captured in the graph and the backend should implement the op however it prefers.
 """
+def _broadcast(self, src, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
+    work = dist.broadcast(inplace_tensor, src, group=group, async_op=True)
+    _register_tensor_work(inplace_tensor, work)
+
+    return inplace_tensor
+
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, group_size):
     op = _str_to_reduce_op(reduceOp)
@@ -304,3 +314,30 @@ def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op,
         work = c10d.reduce_scatter_tensor(out_tensor, shard, op=op, group=group, async_op=async_op)
         work_list.append(work)
     return work_list
+
+
+def _all_to_all_single(
+    input: torch.Tensor,
+    output_split_sizes: Optional[List[int]],
+    input_split_sizes: Optional[List[int]],
+    tag: str,
+    ranks: List[int],
+    group_size: int,
+):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+
+    if output_split_sizes is not None:
+        torch._check(input.dim() >= 1, lambda: f"Expected input to have at least 1 dim but got {input.dim()} dim")
+        out_size = list(input.size())
+        out_size[0] = sum(output_split_sizes)
+        out_tensor = input.new_empty(out_size)
+    else:
+        out_tensor = input.new_empty(input.size())
+
+    work = c10d.all_to_all_single(
+        out_tensor, input, output_split_sizes=output_split_sizes,
+        input_split_sizes=input_split_sizes, group=group, async_op=True
+    )
+    _register_tensor_work(out_tensor, work)
+
+    return out_tensor
