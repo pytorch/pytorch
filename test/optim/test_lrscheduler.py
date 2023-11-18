@@ -6,7 +6,6 @@ import pickle
 from functools import partial
 
 import torch
-import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.optim import Adam, SGD
@@ -108,7 +107,7 @@ class TestLRScheduler(TestCase):
                     init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr
                 ]
 
-        optimizer = torch.optim.SGD([torch.rand(1)], lr=1)
+        optimizer = SGD([torch.rand(1)], lr=1)
 
         with self.assertRaises(TypeError):
             scheduler = MultiStepLR(optimizer, gamma=1, milestones=[10, 20])
@@ -348,7 +347,7 @@ class TestLRScheduler(TestCase):
         from torch.nn import Parameter
 
         epochs = 10
-        optimizer = torch.optim.SGD(
+        optimizer = SGD(
             [Parameter(torch.randn(2, 2, requires_grad=True))], 0.1
         )
         targets = [[0.1] * 3 + [0.01] * 3 + [0.001] * 3 + [0.0001]]
@@ -729,7 +728,7 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
 
     def test_sequentiallr4(self):
-        optimizer = torch.optim.SGD([torch.tensor(0.5)], lr=0.1)
+        optimizer = SGD([torch.tensor(0.5)], lr=0.1)
         prev_lr = optimizer.param_groups[0]["lr"]
 
         schedulers = [
@@ -1511,7 +1510,7 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
-            adam_opt = optim.Adam(self.net.parameters())
+            adam_opt = Adam(self.net.parameters())
             scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
     def test_cycle_lr_removed_after_out_of_scope(self):
@@ -1521,7 +1520,7 @@ class TestLRScheduler(TestCase):
         gc.disable()
 
         def test():
-            adam_opt = optim.Adam(self.net.parameters())
+            adam_opt = Adam(self.net.parameters())
             scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
             return weakref.ref(scheduler)
 
@@ -1530,7 +1529,7 @@ class TestLRScheduler(TestCase):
         gc.enable()
 
     def test_cycle_lr_state_dict_picklable(self):
-        adam_opt = optim.Adam(self.net.parameters())
+        adam_opt = Adam(self.net.parameters())
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
         self.assertIsInstance(scheduler._scale_fn_ref, types.FunctionType)
         state = scheduler.state_dict()
@@ -1538,7 +1537,7 @@ class TestLRScheduler(TestCase):
         pickle.dumps(state)
 
     def test_cycle_lr_scale_fn_restored_from_state_dict(self):
-        adam_opt = optim.Adam(self.net.parameters())
+        adam_opt = Adam(self.net.parameters())
 
         # Case 1: Built-in mode
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2")
@@ -1651,7 +1650,7 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_with_adam(self):
         old_opt = self.opt
-        self.opt = optim.Adam(
+        self.opt = Adam(
             [
                 {"params": self.net.conv1.parameters()},
                 {"params": self.net.conv2.parameters(), "lr": 0.5},
@@ -2195,7 +2194,7 @@ class TestLRScheduler(TestCase):
         optim_lr = 0.5
 
         model = torch.nn.Linear(2, 1)
-        optimizer = torch.optim.SGD(model.parameters(), lr=optim_lr)
+        optimizer = SGD(model.parameters(), lr=optim_lr)
         lr_scheduler_1 = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=20, eta_min=0.1
         )
