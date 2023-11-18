@@ -108,7 +108,6 @@ def is_magic_method(op):
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: List[ir.IRNode]
     scheduler: "torch._inductor.scheduler.Scheduler"
-    wrapper_code: WrapperCodeGen
 
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -208,6 +207,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
         self.extern_node_serializer: Optional[
