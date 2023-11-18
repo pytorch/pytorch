@@ -2109,6 +2109,8 @@ class ShapeEnv:
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
+            do_not_specialize_zero_one=True,
+            positive=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
