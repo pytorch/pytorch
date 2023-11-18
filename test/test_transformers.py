@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import List, Tuple, Optional
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -1444,7 +1445,7 @@ class TestSDPAFailureModes(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
     def test_invalid_inputs_different_datatypes(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Different datatypes
@@ -1455,7 +1456,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
         # Different devices
         shape = (1, 4, 8, 16)
@@ -1464,7 +1465,7 @@ class TestSDPAFailureModes(NNTestCase):
         value = torch.randn(shape, dtype=torch.float16, device='cpu')
         self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
     def test_invalid_inputs_1_dimensional_inputs(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # 1 dimensional input
@@ -2460,18 +2461,18 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(attn_mask.grad, attn_mask_ref.grad.to(attn_mask.grad.dtype),
                          atol=grad_attn_mask_atol, rtol=grad_attn_mask_rtol)
 
-    @parametrize("batch_size", [1,8])
-    @parametrize("seq_len_q", [128,256,512,1024,640,1026,2048]) #deivisible by block m
-    @parametrize("seq_len_k", [128,256,512,1024,640,1025,2048]) #deivisible by block n
-    @parametrize("head_dim", [64]) #match OORT head dim
-    @parametrize("is_causal", [True,False])
-    @parametrize("dropout_p", [0.0])
-    @parametrize("dtype", [torch.float16,torch.bfloat16])#, torch.bfloat16])
-    @parametrize("scale", [None,'l1'])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    @parametrize("batch_size", [1, 8])
+    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
+    @parametrize("head_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
+    @parametrize("is_causal", [True, False])
+    @parametrize("dropout_p", [0.0, 0.22, 0.48])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("scale", [None, "l1"])
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str):
-        print("TESTING test_flash_attention_vs_math_ref_grads")
 
         if isSM86or89Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
@@ -2543,39 +2544,40 @@ class TestSDPACudaOnly(NNTestCase):
         if isSM86or89Device and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
-        # out.backward(upstream_grad)
-        # out_ref.backward(upstream_grad.to(out_ref.dtype))
-        # out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        out.backward(upstream_grad)
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # See [Note] Fused Tolerances above
         output_fudge_factor = 3 if head_dim % 8 != 0 else 1
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
 
         # TODO: Investigate why grad_q needs larger tolerances
-        # query_fudge_factor = 4
-        # grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
+        query_fudge_factor = 4
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
-        # grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad)
-        # value_fudge_factor = 2
-        # grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad)
+        value_fudge_factor = 2
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        # self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-        #                  atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        # self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-        #                  atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        # self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-        #                  atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [256, 512, 1024])
     @parametrize("seq_len_k", [256, 512, 1024])
-    @parametrize("head_dim", [64])
+    @parametrize("head_dim", [32, 64])
     @parametrize("is_causal", [True, False])
-    @parametrize("dropout_p", [0.0])
+    @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16,])
     @parametrize("scale", [None, "l1"])
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
+    @parametrize("fused_kernel", get_platform_specific_sdpa())
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
                                                          is_causal: bool,
@@ -2649,8 +2651,8 @@ class TestSDPACudaOnly(NNTestCase):
         out = output_tuple[0]
         upstream_grad = torch.rand_like(out, requires_grad=False)
         s.wait_stream(torch.cuda.current_stream())
-        #with torch.cuda.stream(s):
-            #out.backward(upstream_grad)
+        with torch.cuda.stream(s):
+            out.backward(upstream_grad)
         for x in (query, key, value):
             x.grad = None
         g = torch.cuda.CUDAGraph()
@@ -2692,12 +2694,12 @@ class TestSDPACudaOnly(NNTestCase):
                     dropout_mask=dropout_mask)[0]
 
 
-        #g1 = torch.cuda.CUDAGraph()
-        #with torch.cuda.graph(g1):
-            #out.backward(upstream_grad)
-        #g1.replay()
-        #out_ref.backward(upstream_grad.to(out_ref.dtype))
-        #out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        g1 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g1):
+            out.backward(upstream_grad)
+        g1.replay()
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # [Note] Fused Tolerances
         # Establish the numerical error between the "true" high precision math output
@@ -2708,25 +2710,25 @@ class TestSDPACudaOnly(NNTestCase):
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
         # Fudge Factor when dropout is enabled
-        #dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
 
-        #query_fudge_factor = dropout_fudge_factor
-        #grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
+        query_fudge_factor = dropout_fudge_factor
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         # TODO: Investigate why grad_k needs larger tolerances
-        #key_fudge_factor = 8 * dropout_fudge_factor
-        #grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
+        key_fudge_factor = 8 * dropout_fudge_factor
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
-        #value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-        #grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+        value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        # self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-        #                  atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        # self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-        #                  atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        # self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-        #                  atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
