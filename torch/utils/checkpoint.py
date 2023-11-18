@@ -1164,19 +1164,29 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     A :class:`TorchDispatchMode` to implement selective activation checkpointing
     that's compatible with torch.compile. Used together with _CachedTorchDispatchMode.
     """
-    def __init__(self, policy_fn, storage):
-        self.policy_fn = policy_fn
+    def __init__(self, no_recompute_policy_fn, must_recompute_policy_fn, storage):
+        self.no_recompute_policy_fn = no_recompute_policy_fn
+        self.must_recompute_policy_fn = must_recompute_policy_fn
         self.storage = storage
 
     def push_into_storage(self, out, func, args, kwargs):
         out_detached = tree_map(_detach, out)
         self.storage[func].append(out_detached)
 
-    def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
+    def _handle_compile_in_forward_ctx(self, no_recompute, must_recompute, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
-        if should_not_recompute:
+        assert not (no_recompute and must_recompute)
+        """
+        Meaning of node.meta["recompute"] values:
+        -1: must recompute
+        0: must not recompute
+        >0: prefer recompute, but partitioner makes the final decision based on heuristics
+        """
+        if no_recompute:
             fx_traceback.current_meta["recompute"] = 0
+        if must_recompute:
+            fx_traceback.current_meta["recompute"] = -1
         # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
         # we decide and handle recomputation in the partitioner.
         out = func(*args, **kwargs)
@@ -1186,11 +1196,12 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
+        no_recompute = self.no_recompute_policy_fn("forward", func, *args, **kwargs)
+        must_recompute = self.must_recompute_policy_fn("forward", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
+            return self._handle_compile_in_forward_ctx(no_recompute, must_recompute, func, args, kwargs)
         else:
-            if should_not_recompute:
+            if no_recompute:
                 out = func(*args, **kwargs)
                 self.push_into_storage(out, func, args, kwargs)
             else:
@@ -1203,8 +1214,9 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
     A :class:`TorchDispatchMode` to implement selective activation checkpointing
     that's compatible with torch.compile. Used together with _CachingTorchDispatchMode.
     """
-    def __init__(self, policy_fn, storage):
-        self.policy_fn = policy_fn
+    def __init__(self, no_recompute_policy_fn, must_recompute_policy_fn, storage):
+        self.no_recompute_policy_fn = no_recompute_policy_fn
+        self.must_recompute_policy_fn = must_recompute_policy_fn
         self.storage = storage
 
     def pop_from_storage(self, func, args, kwargs):
@@ -1212,7 +1224,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         out = self.storage[func].pop(0)
         return out
 
-    def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
+    def _handle_compile_in_recompute_ctx(self, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
         out = self.pop_from_storage(func, args, kwargs)
@@ -1221,18 +1233,18 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
+            return self._handle_compile_in_recompute_ctx(func, args, kwargs)
         else:
-            if should_not_recompute:
+            no_recompute = self.no_recompute_policy_fn("recompute", func, *args, **kwargs)
+            if no_recompute:
                 out = self.pop_from_storage(func, args, kwargs)
             else:
                 out = func(*args, **kwargs)
             return out
 
 
-def context_fn_gen(policy_fn):
+def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
     """
     A helper function to generate a pair of contexts to be later passed into
     `torch.utils.checkpoint` API. Useful for implementing selective checkpointing + torch.compile
@@ -1254,6 +1266,7 @@ def context_fn_gen(policy_fn):
         A pair of generated contexts.
 
     Example:
+        TODO: update example
         >>> # xdoctest: +REQUIRES(LINUX)
         >>>
         >>> def get_custom_policy():
@@ -1282,8 +1295,19 @@ def context_fn_gen(policy_fn):
         >>>
         >>> compiled_fn = torch.compile(fn)
     """
+    assert not (no_recompute_policy_fn is None and must_recompute_policy_fn is None), "TODO add error msg"
+
+    def noop_policy(mode, func, *args, **kwargs):
+        return False
+
+    if no_recompute_policy_fn is None:
+        no_recompute_policy_fn = noop_policy
+
+    if must_recompute_policy_fn is None:
+        must_recompute_policy_fn = noop_policy
+
     storage: Dict[Any, List[Any]] = defaultdict(list)
-    return _CachingTorchDispatchMode(policy_fn, storage), _CachedTorchDispatchMode(policy_fn, storage)
+    return _CachingTorchDispatchMode(no_recompute_policy_fn, must_recompute_policy_fn, storage), _CachedTorchDispatchMode(no_recompute_policy_fn, must_recompute_policy_fn, storage)
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and

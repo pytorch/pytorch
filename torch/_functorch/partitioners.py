@@ -22,19 +22,28 @@ import functools
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
+"""
+Meaning of node.meta["recompute"] values:
+-1: must recompute
+0: must not recompute
+>0: prefer recompute, but partitioner makes the final decision based on heuristics
+"""
 def must_recompute(node):
-    return node.meta.get("recompute", False)
+    return node.meta.get("recompute", 0) == -1
+
+def prefer_recompute(node):
+    return node.meta.get("recompute", 0) > 0
 
 def has_recomputable_ops(fx_g):
     found = False
     for node in fx_g.graph.nodes:
-        if must_recompute(node):
+        if prefer_recompute(node):
             return True
     return False
 
 def has_recomputable_rng_ops(fx_g):
     for node in fx_g.graph.nodes:
-        if must_recompute(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+        if prefer_recompute(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
             return True
     return False
 
@@ -531,7 +540,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
-            must_recompute(node)
+            prefer_recompute(node)
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
@@ -610,9 +619,9 @@ def cleanup_recompute_tags(joint_module):
     non-recomputable to allow for that.
     """
     for node in joint_module.graph.nodes:
-        if must_recompute(node):
+        if prefer_recompute(node):
             for user in node.users:
-                if must_recompute(user) and user.meta["recompute"] > node.meta["recompute"]:
+                if prefer_recompute(user) and user.meta["recompute"] > node.meta["recompute"]:
                     node.meta["recompute"] = 0
     return joint_module
 
@@ -834,22 +843,39 @@ def min_cut_rematerialization_partition(
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
+    edge_map = {}
+    # NOTE: `nx_graph.add_edge` inherently doesn't check whether the edge already exists (it will just overwrite any existing)
+    # We use our own map to have better detection for duplicate edges.
+    def add_edge(u, v, capacity):
+        assert (u, v) not in edge_map
+        nx_graph.add_edge(u, v, capacity=capacity)
+        edge_map[(u, v)] = True
+
     for node in full_bw_graph.nodes:
         if node.op == 'output':
             continue
 
         if node in required_bw_nodes:
-            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+            add_edge(node.name + "_in", "sink", capacity=math.inf)
+            edge_map[(node.name + "_in", "sink")]
             continue
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+            add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # If a node can't be recomputed (too expensive or involves randomness),
-        # we prevent it from being recomputed by adding an inf edge to the source
-        # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
-        if ban_recomputation(node) and node in required_fw_nodes:
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        if node in required_fw_nodes:
+            if must_recompute(node):
+                # If user explicitly say they want to recompute a node, we honor it
+                # by adding an 0-capacity edge from the source and an inf edge to the sink.
+                # This way, X_in node is guaranteed to be part of the subgraph that contains "sink",
+                # thus guaranteeing that X op will be recomputed.
+                add_edge("source", node.name + "_in", capacity=0)
+                add_edge(node.name + "_in", "sink", capacity=math.inf)
+            elif ban_recomputation(node):
+                # If a node can't be recomputed (too expensive or involves randomness),
+                # we prevent it from being recomputed by adding an inf edge to the source
+                # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
+                add_edge("source", node.name + "_in", capacity=math.inf)
 
         # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
@@ -863,9 +889,13 @@ def min_cut_rematerialization_partition(
             weight = get_node_weight(node)
 
         # Creates the weights on the "node" edge
-        nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
+        add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
-            nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+            add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+
+    import pickle
+    with open('nx_graph.pkl', 'wb') as file:
+        pickle.dump(nx_graph, file)
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
@@ -880,10 +910,15 @@ def min_cut_rematerialization_partition(
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
     cut_nodes = set()
+    print(f"cutset: {cutset}")
     for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4]
-        node_name = node_in[:-3]
-        cut_nodes.add(node_name)
+        print(f"node_in: {node_in}")
+        print(f"node_out: {node_out}")
+        if node_in[:-3] == node_out[:-4]:
+            node_name = node_in[:-3]
+            cut_nodes.add(node_name)
+        else:
+            assert node_in == "source" and node_out[-3:] == "_in"
 
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
