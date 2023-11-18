@@ -616,7 +616,7 @@ _save_config_ignore = {
 }
 
 if TYPE_CHECKING:
-    from torch._dynamo.config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 
