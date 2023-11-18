@@ -246,28 +246,30 @@ def _private_register_pytree_node(
 register_pytree_node = _register_pytree_node
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_namedtuple(obj: Union[object, type]) -> bool:
     """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
     cls = obj if isinstance(obj, type) else type(obj)
     return is_namedtuple_class(cls)
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_namedtuple_class(cls: type) -> bool:
     """Return whether the class is a subclass of namedtuple."""
     return (
         isinstance(cls, type)
         and issubclass(cls, tuple)
         and isinstance(getattr(cls, "_fields", None), tuple)
-        and all(isinstance(field, str) for field in cls._fields)  # type: ignore[attr-defined]
+        and all(type(field) is str for field in cls._fields)  # type: ignore[attr-defined]
+        and callable(getattr(cls, "_make", None))
+        and callable(getattr(cls, "_asdict", None))
     )
 
 
 _T_co = TypeVar("_T_co", covariant=True)
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 class structseq(tuple, Generic[_T_co]):  # type: ignore[misc]
     """A generic type stub for CPython's ``PyStructSequence`` type."""
 
@@ -287,20 +289,20 @@ class structseq(tuple, Generic[_T_co]):  # type: ignore[misc]
         raise NotImplementedError
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_structseq(obj: Union[object, type]) -> bool:
     """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
     cls = obj if isinstance(obj, type) else type(obj)
     return is_structseq_class(cls)
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_structseq_class(cls: type) -> bool:
     """Return whether the class is a class of PyStructSequence."""
     if (
         isinstance(cls, type)
         # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
-        and cls.__base__ is tuple
+        and cls.__bases__ == (tuple,)
         # Check PyStructSequence members
         and isinstance(getattr(cls, "n_sequence_fields", None), int)
         and isinstance(getattr(cls, "n_fields", None), int)
