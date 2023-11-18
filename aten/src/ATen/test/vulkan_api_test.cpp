@@ -4,8 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
 #include <c10/util/ArrayRef.h>
 
@@ -313,8 +311,8 @@ TEST_F(VulkanAPITest, zero_dim_tensor_1) {
 
 TEST_F(VulkanAPITest, zero_dim_tensor_2) {
   float v = 3.14f;
-  auto cpu = at::empty({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
-  auto vk = at::empty({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+  auto cpu = at::zeros({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
+  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
 
   ASSERT_TRUE(almostEqual(cpu, vk.cpu()));
 }
@@ -2614,6 +2612,79 @@ TEST_F(VulkanAPITest, layer_norm_4d) {
       {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
 }
 
+void test_native_layer_norm(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef normalized_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    const float eps) {
+  c10::InferenceMode mode;
+
+  const auto input_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu =
+      at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_vulkan = weight_cpu.vulkan();
+
+  const auto bias_cpu =
+      at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_vulkan = bias_cpu.vulkan();
+
+  const auto output_cpu = at::native_layer_norm(
+      input_cpu, normalized_shape, weight_cpu, bias_cpu, eps);
+  const auto output_vulkan = at::native_layer_norm(
+      input_vulkan, normalized_shape, weight_vulkan, bias_vulkan, eps);
+
+  const auto check0 =
+      almostEqual(std::get<0>(output_cpu), std::get<0>(output_vulkan).cpu());
+  const auto check1 =
+      almostEqual(std::get<1>(output_cpu), std::get<1>(output_vulkan).cpu());
+  const auto check2 =
+      almostEqual(std::get<2>(output_cpu), std::get<2>(output_vulkan).cpu());
+
+  if (!check0) {
+    std::cout
+        << "the first output of native_layer_norm: layer_norm is incorrect"
+        << std::endl;
+    showRtol(std::get<0>(output_cpu), std::get<0>(output_vulkan).cpu());
+  }
+  if (!check1) {
+    std::cout << "the second output of native_layer_norm: mean is incorrect"
+              << std::endl;
+    showRtol(std::get<1>(output_cpu), std::get<1>(output_vulkan).cpu());
+  }
+  if (!check2) {
+    std::cout
+        << "the third output of native_layer_norm: 1/sqrt(var+eps) is incorrect"
+        << std::endl;
+    showRtol(std::get<2>(output_cpu), std::get<2>(output_vulkan).cpu());
+  }
+
+  ASSERT_TRUE(check0 && check2 && check2);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_2d) {
+  test_native_layer_norm({5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_3d) {
+  test_native_layer_norm({11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_native_layer_norm({11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, native_layer_norm_4d) {
+  test_native_layer_norm({3, 11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_native_layer_norm({3, 11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_native_layer_norm(
+      {3, 11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+  test_native_layer_norm(
+      {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
+}
+
 TEST_F(VulkanAPITest, leaky_relu) {
   for (const auto negative_slope : {0.01, 0.001, 1.0, -0.001}) {
     const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3217,6 +3288,48 @@ TEST_F(VulkanAPITest, mm) {
   const auto m1_vulkan = m1_cpu.vulkan();
   const auto out_vulkan = m1_vulkan.mm(m2_cpu);
 
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mm_m2_is_variable) {
+  int n = 19;
+  int p = 25;
+  int m = 21;
+  const auto m1_cpu = at::rand({n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({p, m}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto out_cpu = m1_cpu.mm(m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+
+  const auto out_vulkan = m1_vulkan.mm(m2_vulkan);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mm_m1_m2_variable) {
+  int n = 19;
+  int p = 25;
+  int m = 21;
+  const auto m1_cpu = at::rand({n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({p, m}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto out_cpu = at::mm(m1_cpu, m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+
+  const auto out_vulkan = at::mm(m1_vulkan, m2_vulkan);
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
     showRtol(out_cpu, out_vulkan.cpu());
@@ -4692,7 +4805,7 @@ TEST_F(VulkanAPITest, normal_) {
 
 TEST_F(VulkanAPITest, normal_large) {
   float a_mean = 1.0;
-  float a_std = 0.001;
+  float a_std = 0.01;
 
   auto a_vulkan =
       at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();

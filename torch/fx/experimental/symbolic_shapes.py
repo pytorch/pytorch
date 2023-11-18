@@ -42,6 +42,8 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
+from torch._logging import LazyString
+
 InputList = List
 DimList = List
 
@@ -52,7 +54,7 @@ class GuardOnDataDependentSymNode(RuntimeError):
 
 import sympy
 from sympy.printing.str import StrPrinter
-from sympy.printing.precedence import precedence
+from sympy.printing.precedence import precedence, PRECEDENCE
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -61,7 +63,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols",
+    "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -77,6 +79,7 @@ def uninteresting_files():
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
+        torch.fx.experimental.sym_node,
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
@@ -101,9 +104,14 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-def hint_int(a):
+def hint_int(a, fallback=None):
+    """
+    Retrieve the hint for an int (based on the underlying real values as observed
+    at runtime).  If no hint is available (e.g., because data dependent shapes),
+    if fallback is not None, use that instead (otherwise raise an error).
+    """
     if isinstance(a, torch.SymInt):
-        return a.node.require_hint()
+        return a.node.require_hint(fallback)
     assert type(a) is int, a
     return a
 
@@ -274,6 +282,20 @@ def parallel_and(*args):
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
+
+def sym_eq(x, y):
+    """
+    Like ==, but when run on list/tuple, it will recursively test equality
+    and use sym_and to join the results together, without guarding.
+    """
+    if (isinstance(x, tuple) and isinstance(y, tuple)) or (isinstance(x, list) and isinstance(y, list)):
+        if len(x) != len(y):
+            return False
+        return functools.reduce(operator.and_, map(sym_eq, x, y), True)
+    elif isinstance(x, (int, torch.SymInt)) and isinstance(y, (int, torch.SymInt)):
+        return x == y
+    else:
+        raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
@@ -596,6 +618,7 @@ class DimDynamic(Enum):
     # Treat the dimension statically based on its hint
     STATIC = 2
 
+
 # NB: These constraints affect both clients and backends: given some
 # constraint C, the client must pass inputs that satisfy the constraint,
 # while a backend must not introduce guards BEYOND this constraint.
@@ -703,6 +726,35 @@ class EqualityConstraint(Constraint):
 
     def is_equal(self, source1, source2):
         return self._find(source1) == self._find(source2)
+
+@dataclass(frozen=True)
+class CreateSymbolicPolicy:
+    """
+    Data structure specifying how we should create symbols in
+    ``create_symbolic_sizes_strides_storage_offset``; e.g., should
+    they be static or dynamic.
+
+    This is an abstract base class because we are probably going to add
+    another version of this that says "use exactly these SymInts, don't
+    allocate fresh symbols."
+    """
+    pass
+
+
+@dataclass(frozen=True)
+class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
+    """
+    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    a policy determination as given by ``DimDynamic`` and ``DimConstraint``.
+    This will cause fresh symbols to be allocated
+    """
+    dynamic_sizes: DimList[DimDynamic]
+    constraint_sizes: DimList[DimConstraint] = None
+    # TODO: add storage offset and stride policy
+
+    def __post_init__(self):
+        if self.constraint_sizes is None:
+            object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
@@ -859,6 +911,15 @@ class ShapeGuardPrinter(StrPrinter):
         self.symbol_to_source = symbol_to_source
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
+
+    def _print_Not(self, expr):
+        return 'not %s' % (self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
+
+    def _print_And(self, expr):
+        return self.stringify(expr.args, " and ", PRECEDENCE["And"])
+
+    def _print_Or(self, expr):
+        return self.stringify(expr.args, " or ", PRECEDENCE["Or"])
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
@@ -1867,18 +1928,20 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex_size: Sequence[int],
                            source: Source,
-                           dynamic_dims: DimList[DimDynamic],
-                           constraint_dims: DimList[DimConstraint]) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, dynamic_dims, constraint_dims)
+                           policy: CreateSymbolicPolicy
+                           ) -> List[sympy.Expr]:
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, policy)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
                                           source: Source,
-                                          dynamic_dims: DimList[DimDynamic],
-                                          constraint_dims: List[DimConstraint]
+                                          policy: CreateSymbolicPolicy,
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
+        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        dynamic_dims = policy.dynamic_sizes
+        constraint_dims = policy.constraint_sizes
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
@@ -1891,8 +1954,7 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy: Optional[CreateSymbolicPolicy] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1954,8 +2016,7 @@ class ShapeEnv:
             ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            policy=policy,
         )
 
     @record_shapeenv_event()
@@ -1967,15 +2028,13 @@ class ShapeEnv:
         is_dim_dynamic: Sequence[bool],
         source: Source,
         *,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy: Optional[CreateSymbolicPolicy] = None,
     ):
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
-        if constraint_dims is None:
+        if policy is None:
             constraint_dims = [None] * dim
-        if dynamic_dims is None:
             dynamic_dims = []
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
@@ -1988,20 +2047,24 @@ class ShapeEnv:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+
+        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        constraint_dims = policy.constraint_sizes
+        dynamic_dims = policy.dynamic_sizes
 
         # TODO: make this configurable from outside policy; we made a policy
         # decision here where if all sizes are static, we are going to
         # specialize all of the inner strides/offset too. We don't have to
-        # do this, and arguably we should ALWAYS allow for dynamic offset,
-        # this is cheap.
+        # do this.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_strides = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
 
-        assert len(dynamic_dims) == dim
+        assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, dynamic_dims, constraint_dims)
+        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, policy)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex_stride):
             if val in (0, 1):
@@ -2033,7 +2096,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
+                    dynamic_dim=dynamic_strides,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2053,7 +2116,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_strides_offset,
+            dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
@@ -2468,6 +2531,7 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
+            log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
@@ -3155,22 +3219,28 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0], floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    new_var = self._find(r[1])
-                    ok = False
-                    if self.is_unbacked_symint(free[0]):
-                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                        # s0 - i0 - i1.  Arguably this should be OK but the
-                        # runtime assert machinery is very delicate right now
-                        # so this causes things to fail e.g.,
-                        # test_split_unbacked_sizes
-                        ok = len(free_unbacked_symbols(new_var)) <= 1
-                    else:
-                        # Never substitute backed with unbacked
-                        ok = len(free_unbacked_symbols(new_var)) == 0
-                    if ok:
-                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                # short-circuit when no solving is needed
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                    self._set_replacement(lhs, self._find(rhs))
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                    self._set_replacement(rhs, self._find(lhs))
+                else:
+                    r = try_solve(expr, free[0], floordiv_inequality=False)
+                    if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                        new_var = self._find(r[1])
+                        ok = False
+                        if self.is_unbacked_symint(free[0]):
+                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                            # s0 - i0 - i1.  Arguably this should be OK but the
+                            # runtime assert machinery is very delicate right now
+                            # so this causes things to fail e.g.,
+                            # test_split_unbacked_sizes
+                            ok = len(free_unbacked_symbols(new_var)) <= 1
+                        else:
+                            # Never substitute backed with unbacked
+                            ok = len(free_unbacked_symbols(new_var)) == 0
+                        if ok:
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3179,6 +3249,32 @@ class ShapeEnv:
                 r = try_solve(expr, mod_expr, floordiv_inequality=False)
                 if r is not None and r[1] == 0:
                     self._add_divisible(mod_expr)
+                    # This is a little bit of extra logic to make things like
+                    # torch.empty(i0, q).view(c, -1, q) work out
+                    p, q = mod_expr.args
+                    if isinstance(q, sympy.Number) and isinstance(p, sympy.Mul) and len(p.args) == 2:
+                        c, i0 = p.args
+                        # Given Mod(c * i0, q) == 0
+                        if (
+                            isinstance(c, sympy.Number) and
+                            isinstance(i0, sympy.Symbol) and
+                            self.is_unbacked_symint(i0)
+                        ):
+                            # We have Mod(i0, q / c) == 0, which means we can
+                            # rewrite i0 as (q / gcd(q, c)) * i1
+                            d = q / sympy.gcd(q, c)
+                            i1 = self.create_unbacked_symint().node.expr
+                            # Propagate the value ranges.  It doesn't really
+                            # matter if we use truediv or floordiv, because we
+                            # have established divisibility.
+                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.var_to_range[i0], ValueRanges.wrap(d)
+                            )
+                            self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.runtime_var_to_range[i0], ValueRanges.wrap(d)
+                            )
+                            self._set_replacement(i0, d * i1)
+
             except NotImplementedError:
                 pass
         return

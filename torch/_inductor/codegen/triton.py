@@ -2202,7 +2202,7 @@ class TritonScheduling(BaseScheduling):
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
                 fusion_log.debug(
-                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
+                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2213,7 +2213,7 @@ class TritonScheduling(BaseScheduling):
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
                 fusion_log.debug(
-                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
+                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2530,7 +2530,7 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
@@ -2651,7 +2651,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code
@@ -2696,7 +2696,7 @@ class TritonScheduling(BaseScheduling):
                     subkernel,
                 )
 
-                with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                with V.set_kernel_handler(subkernel):
                     for node in node_schedule:
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
@@ -2850,6 +2850,9 @@ class TritonScheduling(BaseScheduling):
     def flush(self):
         pass
 
+    def ready_to_flush(self) -> bool:
+        return False
+
     def benchmark_fused_nodes(self, nodes):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2870,7 +2873,7 @@ class TritonScheduling(BaseScheduling):
             n.last_usage = set()
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

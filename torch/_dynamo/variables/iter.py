@@ -23,8 +23,7 @@ class RepeatIteratorVariable(IteratorVariable):
 
     # Repeat needs no mutation, clone self
     def next_variables(self, tx):
-        # add_options will clone self.item
-        return self.item.add_options(self), self
+        return self.item.clone(), self
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -42,7 +41,7 @@ class CountIteratorVariable(IteratorVariable):
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         next_iter = self.clone(item=next_item)
         tx.replace_all(self, next_iter)
-        return self.item.add_options(self), next_iter
+        return self.item, next_iter
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -82,7 +81,7 @@ class CycleIteratorVariable(IteratorVariable):
                 tx.replace_all(self, next_iter)
                 if self.item is None:
                     return next_iter.next_variables(tx)
-                return self.item.add_options(self), next_iter
+                return self.item, next_iter
             except StopIteration:
                 next_iter = self.clone(iterator=None)
                 # this is redundant as next_iter will do the same
@@ -95,7 +94,7 @@ class CycleIteratorVariable(IteratorVariable):
                 item=self.saved[self.saved_index],
             )
             tx.replace_all(self, next_iter)
-            return self.item.add_options(self), next_iter
+            return self.item, next_iter
         else:
             raise StopIteration
-        return self.item.add_options(self), next_iter
+        return self.item, next_iter
