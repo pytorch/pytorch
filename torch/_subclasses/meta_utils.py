@@ -238,11 +238,7 @@ class MetaConverter:
             t, src, inner_policy=policy
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                if (
-                    policy == inner_policy
-                    and isinstance(t, FakeTensor)
-                    and t.fake_mode.shape_env is shape_env
-                ):
+                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size(), t.stride(), t.storage_offset())
@@ -255,12 +251,6 @@ class MetaConverter:
             else:
                 assert inner_policy is None
             return (t.size(), t.stride(), t.storage_offset())
-
-        # see expired-storages
-        self.check_expired_count += 1
-        if self.check_expired_count >= self.check_expired_frequency:
-            self.check_for_expired_weak_storages()
-            self.check_expired_count = 0
 
         def empty_create(
             inner_t,
@@ -282,6 +272,12 @@ class MetaConverter:
                 dtype=inner_t.dtype,
                 device="meta",
             )
+
+        # see expired-storages
+        self.check_expired_count += 1
+        if self.check_expired_count >= self.check_expired_frequency:
+            self.check_for_expired_weak_storages()
+            self.check_expired_count = 0
 
         def get_symbolic_ragged_size(nt, source):
             # must be a singleton symint
@@ -307,11 +303,26 @@ class MetaConverter:
             return ragged_size
 
         # Meta-ifies a nested tensor, maintaining proper view relationships.
-        # Assumes any dense base has already been meta-ified.
-        def metafy_nt(t, dense_base=None):
-            # For nested tensors, manually do transform_subclass
-            # so we can insert some special processing on ctx and
-            # do view handling for values with a dense base
+        # Assumes any base has already been meta-ified.
+        def metafy_nt(t, meta_base=None):
+            if meta_base is not None and meta_base.is_nested:
+                # Easy case: for a NT base, just replay the view func
+                # on the meta-ified base.
+                #
+                # Nested tensors do not support as_strided, and
+                # hence,always have _view_func available.
+                #
+                # The unsafe version of _view_func omits
+                # checking whether the base passed in has the same
+                # metadata as the original base the view_func
+                # was originally executed with. (1) It is OK here,
+                # because we're calling it on the meta-ified base,
+                # so the metadata is guaranteed to be the same.
+                # (2) It is necessary because we don't actually
+                # want to guard on the base's metadata here.
+                return t._view_func_unsafe(meta_base)
+
+            # Meta-ify the NT metadata
             attrs, ctx = t.__tensor_flatten__()
             transformed_tensors_dict = {}
             orig_shape_env = None
@@ -339,8 +350,8 @@ class MetaConverter:
                         ),
                     )
 
-                    if dense_base is not None:
-                        # For this case, values should be a symbolic view of base.
+                    if meta_base is not None:
+                        # base is a dense tensor, and values should be a symbolic view of base.
                         # Since both values and base are dense, we can use as_strided().
                         (
                             inner_sizes,
@@ -352,7 +363,7 @@ class MetaConverter:
                             inner_policy=inner_policy,
                         )
 
-                        transformed_tensors_dict[attr] = dense_base.as_strided(
+                        transformed_tensors_dict[attr] = meta_base.as_strided(
                             inner_sizes, inner_strides, inner_storage_offset
                         )
                         continue
@@ -387,7 +398,7 @@ class MetaConverter:
                 ctx["ragged_size"] = get_symbolic_ragged_size(t, source)
             meta_nt = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
-            if dense_base is None:
+            if meta_base is None:
                 return meta_nt
 
             # We have a dense base; maintain proper view relationship
@@ -530,21 +541,7 @@ class MetaConverter:
                         # recreate this situation.
                         def _view_from_base(base, t):
                             if t.is_nested:
-                                if base.is_nested:
-                                    # Nested tensors do not support as_strided, and
-                                    # hence,always have _view_func available.
-                                    #
-                                    # The unsafe version of _view_func omits
-                                    # checking whether the base passed in has the same
-                                    # metadata as the original base the view_func
-                                    # was originally executed with. (1) It is OK here,
-                                    # because we're calling it on the meta-ified base,
-                                    # so the metadata is guaranteed to be the same.
-                                    # (2) It is necessary because we don't actually
-                                    # want to guard on the base's metadata here.
-                                    return t._view_func_unsafe(base)
-                                else:
-                                    return metafy_nt(t, dense_base=base)
+                                return metafy_nt(t, meta_base=base)
                             else:
                                 # TODO: Handle dense view of NT when we return a proper view for
                                 # e.g. values()
