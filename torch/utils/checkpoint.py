@@ -1299,7 +1299,8 @@ def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
         >>>
         >>> compiled_fn = torch.compile(fn)
     """
-    assert not (no_recompute_policy_fn is None and must_recompute_policy_fn is None), "TODO add error msg"
+    assert not (no_recompute_policy_fn is None and must_recompute_policy_fn is None), \
+        "At least one of no_recompute_policy_fn and must_recompute_policy_fn needs to be specified."
 
     def noop_policy(mode, func, *args, **kwargs):
         return False
