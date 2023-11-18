@@ -891,7 +891,7 @@ class BuiltinVariable(VariableTracker):
                 items = user_cls()
                 for x in arg.unpack_var_sequence(tx):
                     k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
+                    k = ConstDictVariable.get_key(tx, k)
                     items.update({k: v})
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
@@ -1218,18 +1218,55 @@ class BuiltinVariable(VariableTracker):
             and name_var.value == "zeroed_out"
         ):
             obj.mutable_local = MutableLocal()
-            return val.add_options(self, obj, name_var)
+            return val
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            name = name_var.as_python_constant()
-            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
-                unimplemented(
-                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
-                )
-            tx.output.side_effects.store_attr(obj, name, val)
+            if isinstance(obj, variables.TensorVariable):
+                from .builder import wrap_fx_proxy
+
+                name = name_var.as_python_constant()
+                if name == "data":
+                    # Remove the old reference in tracked fakes - if we don't do this
+                    # new .data value size and shape differences will cause
+                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
+                    # coming out of set_() below will be a new one, and get
+                    # installed in tracked fakes.
+                    to_remove = []
+                    for tf in tx.output.tracked_fakes:
+                        if tf.source == obj.source:
+                            to_remove.append(tf)
+                    for tf in to_remove:
+                        tx.output.tracked_fakes.remove(tf)
+
+                    # Step 1 - disable grad
+                    version = obj.as_proxy().node.meta["example_value"]._version
+                    with dynamo_disable_grad(tx), torch.no_grad():
+                        # Step 2 - call `set_`
+                        out = wrap_fx_proxy(
+                            tx,
+                            tx.output.create_proxy(
+                                "call_function",
+                                torch.Tensor.set_,
+                                *proxy_args_kwargs([obj, val], {}),
+                            ),
+                        )
+                    # Step 3 - drop the version counter - this is a hack required to get
+                    # .data setting to play correctly with the autograd engine.
+                    if version > 0:
+                        verion = version - 1
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch._C._autograd._unsafe_set_version_counter,
+                        (out.as_proxy(), version),
+                        {},
+                    )
+                    # This handles options prop, guards and ends with a clone
+                    # Step 4 - replace all reference to the current object with the new one
+                    return tx.replace_all(obj, out)
+
+            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

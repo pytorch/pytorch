@@ -237,9 +237,7 @@ class NNModuleVariable(VariableTracker):
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             elif istype(subobj, types.GetSetDescriptorType):
                 assert source
-                return VariableBuilder(tx, source)(subobj.__get__(base)).add_options(
-                    options
-                )
+                return VariableBuilder(tx, source)(subobj.__get__(base))
             else:
                 unimplemented(
                     f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
@@ -352,7 +350,7 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
-
+        options = {}
         key = self.module_key
         module = tx.output.get_submodule(key)
 
@@ -792,7 +790,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         key = self.module_key
-        options = VariableTracker.propagate(self, args, kwargs.values())
+        options = {}
 
         named_embed = functools.partial(
             _named_embed,
@@ -835,7 +833,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             # Route this to produce a ListIteratorVariable instead of getting the generator
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
+            )
         return super().var_getattr(tx, name)
 
     def as_python_constant(self):

@@ -67,8 +67,8 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
-    def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)]
+    def getitem_const(self, tx, arg: VariableTracker):
+        return self.items[ConstDictVariable.get_key(tx, arg)]
 
     def call_method(
         self,
@@ -154,7 +154,7 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             newval = dict(val)
-            result = newval.pop(ConstDictVariable.get_key(args[0]))
+            result = newval.pop(ConstDictVariable.get_key(tx, args[0]))
             tx.replace_all(self, self.modifed(newval))
             return result
         elif (
@@ -173,12 +173,12 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(tx, args[0]) in self.items
         ):
-            return self.items[ConstDictVariable.get_key(args[0])]
+            return self.items[ConstDictVariable.get_key(tx, args[0])]
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items
+                ConstDictVariable.get_key(tx, args[0]) in self.items
             )
         elif name == "__contains__":
             content = args[0]
@@ -447,7 +447,7 @@ class SetVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
 
     def as_python_constant(self):
@@ -806,7 +806,7 @@ class PythonSysModulesVariable(VariableTracker):
         return real_dict.call_method(tx, name, args, kwargs)
 
     def _contains_helper(self, tx, key: VariableTracker):
-        k = ConstDictVariable.get_key(key)
+        k = ConstDictVariable.get_key(tx, key)
         has_key = k in sys.modules
         install_guard(
             self.make_guard(

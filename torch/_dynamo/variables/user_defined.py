@@ -83,7 +83,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             name == "WORLD"
             and self.value is torch.distributed.distributed_c10d.GroupMember
         ):
-            return ProcessGroupVariable(self.value.WORLD).add_options(options)
+            return ProcessGroupVariable(self.value.WORLD)
         return super().var_getattr(tx, name)
 
     def call_method(
@@ -586,7 +586,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return UserDefinedClassVariable(type(self.value), **options)
 
         if source:
-            return VariableBuilder(tx, source)(subobj).add_options(options)
+            return VariableBuilder(tx, source)(subobj)
         if torch.distributed.is_available():
             if (
                 subobj.__class__.__name__

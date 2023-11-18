@@ -683,8 +683,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.nn_modules[name] = target
                     break
                 name = f"{base}_{i}"
-            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
-            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
             vt = variables.nn_module.FSDPManagedNNModuleVariable(
                 target,
                 name,

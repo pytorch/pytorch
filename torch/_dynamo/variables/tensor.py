@@ -151,12 +151,9 @@ class TensorVariable(VariableTracker):
             return check_type(tensor_type)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        options = VariableTracker.propagate(self)
         val = self.as_proxy().node.meta["example_value"]
         result = hasattr(val, name)
-        return variables.ConstantVariable(result, **options).add_guard(
-            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
-        )
+        return variables.ConstantVariable(result)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -533,9 +530,9 @@ class TensorVariable(VariableTracker):
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
             # TODO: I think this branch is dead
             if len(args) == 1:
-                return constant_result.getitem_const(args[0])
+                return constant_result.getitem_const(tx, args[0])
             elif args:
-                return TupleVariable([constant_result.getitem_const(a) for a in args])
+                return TupleVariable([constant_result.getitem_const(tx, a) for a in args])
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:
