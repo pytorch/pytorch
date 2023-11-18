@@ -2809,18 +2809,9 @@ class CppKernelProxy(CppKernel):
 
 
 class CppScheduling(BaseScheduling):
-    # ctypes limits the number of args to 1024, refer to:
-    # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
-    # We set a conservative threshold here.
-    MAX_FUSED_KERNEL_ARGS_NUM = 500
-
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.get_kernel_group()
-        self._ready_to_flush = False
-
-    def _set_flush_status(self, status: bool):
-        self._ready_to_flush = status
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
@@ -2867,23 +2858,12 @@ class CppScheduling(BaseScheduling):
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
-        args_num = self._get_scheduled_num_args()
-        if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
-            self._set_flush_status(True)
-
-    def _get_scheduled_num_args(self):
-        return self.kernel_group.get_num_args()
-
-    def ready_to_flush(self):
-        return self._ready_to_flush
-
     def codegen_sync(self):
         pass
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
         self.get_kernel_group()
-        self._set_flush_status(False)
 
 
 class KernelGroup:
@@ -2904,11 +2884,6 @@ class KernelGroup:
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
-
-    def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
-        args_num = len(arg_defs)
-        return args_num
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
