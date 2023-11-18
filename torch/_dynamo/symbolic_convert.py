@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
-    allowed_functions,
     config,
     exc,
     logging as torchdynamo_logging,
@@ -2260,24 +2259,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with __self__")
 
-        if func.get_name() == "patched_init":
-            unimplemented("Patched init cannot be inlined.")
-
-        try:
-            func_value = func.get_function()
-        except NotImplementedError:
-            func_value = None
-
-        if (
-            func.get_name() == "__torch_function__"
-            or func_value is torch._tensor._convert
-        ):
-            return skipfiles.SkipResult(False, "Allow __torch_function__")
-
-        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
-            unimplemented(f"inlining disallowed: {func_value}")
-
-        result = skipfiles.check_verbose(func, allow_torch=True)
+        result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
