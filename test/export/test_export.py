@@ -1612,6 +1612,87 @@ def forward(self, arg0_1):
         inp = (torch.randn(2, 8),)
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
 
+    def test_export_with_fake_tensor_inputs(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+    def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        # Manualy set the fake_device of fake tensors.
+        x.fake_device = torch.device('cuda:0')
+        for n, p in model.named_parameters():
+            p.fake_device = torch.device('cuda:0')
+
+        # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
+        # doesn't quite work well with aot_autograd right now due to some logic fails
+        # the check in call getDeviceGuardImpl in InputMetadata.
+        x.requires_grad = False
+        for n, p in model.named_parameters():
+            p.requires_grad = False
+
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+
+    def test_export_graph_with_no_inputs(self):
+        # We saw this pattern when users want to export
+        # a graph that initlizes the states of a model.
+        def f():
+            return torch.randn(3, 4), torch.randn(3, 4)
+
+        ep = torch.export.export(f, ())
+        a, b = ep()
+        self.assertEqual(a.size(), torch.Size([3, 4]))
+        self.assertEqual(b.size(), torch.Size([3, 4]))
+
 
 if __name__ == '__main__':
     run_tests()
