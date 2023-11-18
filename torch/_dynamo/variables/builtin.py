@@ -909,8 +909,10 @@ class BuiltinVariable(VariableTracker):
             )
         unimplemented(f"dict(): {args} {kwargs}")
 
-    def call_zip(self, tx, *args):
+    def call_zip(self, tx, *args, **kwargs):
         if all(x.has_unpack_var_sequence(tx) for x in args):
+            if kwargs['strict'] and not isinstance(kwargs['strict'], bool ):
+                raise TypeError("strict should be bool") 
             items = [
                 variables.TupleVariable(list(item))
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
