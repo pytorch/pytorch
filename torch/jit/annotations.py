@@ -13,7 +13,6 @@ from typing import Type
 import torch
 
 from torch._C import (
-    _GeneratorType,
     AnyType,
     AwaitType,
     BoolType,
@@ -199,7 +198,7 @@ def check_fn(fn, loc):
 
 
 def _eval_no_call(stmt, glob, loc):
-    """Evaluate statement as long as it does not contain any method/function calls"""
+    """Evaluate statement as long as it does not contain any method/function calls."""
     bytecode = compile(stmt, "", mode="eval")
     for insn in dis.get_instructions(bytecode):
         if "CALL" in insn.opname:
@@ -210,7 +209,7 @@ def _eval_no_call(stmt, glob, loc):
 
 
 def parse_type_line(type_line, rcb, loc):
-    """Parses a type annotation specified as a comment.
+    """Parse a type annotation specified as a comment.
 
     Example inputs:
         # type: (Tensor, torch.Tensor) -> Tuple[Tensor]
@@ -240,7 +239,7 @@ def parse_type_line(type_line, rcb, loc):
 
 
 def get_type_line(source):
-    """Tries to find the line containing a comment with the type annotation."""
+    """Try to find the line containing a comment with the type annotation."""
     type_comment = "# type:"
 
     lines = source.split("\n")
@@ -307,7 +306,7 @@ def get_type_line(source):
 
 
 def split_type_line(type_line):
-    """Splits the comment with the type annotation into parts for argument and return types.
+    """Split the comment with the type annotation into parts for argument and return types.
 
     For example, for an input of:
         # type: (Tensor, torch.Tensor) -> Tuple[Tensor, Tensor]
@@ -327,7 +326,7 @@ def split_type_line(type_line):
 
 
 def try_real_annotations(fn, loc):
-    """Tries to use the Py3.5+ annotation syntax to get the type."""
+    """Try to use the Py3.5+ annotation syntax to get the type."""
     try:
         # Note: anything annotated as `Optional[T]` will automatically
         # be returned as `Union[T, None]` per
@@ -466,7 +465,7 @@ def try_ann_to_type(ann, loc, rcb=None):
         return FloatType.get()
     if ann is complex:
         return ComplexType.get()
-    if ann is int:
+    if ann is int or ann is torch.SymInt:
         return IntType.get()
     if ann is str:
         return StringType.get()
@@ -480,8 +479,6 @@ def try_ann_to_type(ann, loc, rcb=None):
         return InterfaceType(ann.__torch_script_interface__)
     if ann is torch.device:
         return DeviceObjType.get()
-    if ann is torch.Generator:
-        return _GeneratorType.get()
     if ann is torch.Stream:
         return StreamObjType.get()
     if ann is torch.dtype:

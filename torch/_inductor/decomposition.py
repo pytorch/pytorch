@@ -246,7 +246,7 @@ def cat(tensors, dim=0):
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return tensors[0].clone()
+        return filtered_tensors[0].clone()
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
@@ -348,7 +348,7 @@ def get_like_layout(
     tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
 ) -> torch.memory_format:
     # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
+    if memory_format is torch.preserve_format or memory_format is None:
         return utils.suggest_memory_format(tensor)
     else:
         return memory_format
