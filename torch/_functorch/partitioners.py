@@ -843,13 +843,14 @@ def min_cut_rematerialization_partition(
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
-    edge_map = {}
-    # NOTE: `nx_graph.add_edge` inherently doesn't check whether the edge already exists (it will just overwrite any existing)
-    # We use our own map to have better detection for duplicate edges.
+    edge_set = set()
+
+    # NOTE: `nx_graph.add_edge` inherently doesn't check whether the edge already exists
+    # (it will just overwrite any existing). We use our own set to prevent duplicate edges.
     def add_edge(u, v, capacity):
-        assert (u, v) not in edge_map
+        assert (u, v) not in edge_set
         nx_graph.add_edge(u, v, capacity=capacity)
-        edge_map[(u, v)] = True
+        edge_set.add((u, v))
 
     for node in full_bw_graph.nodes:
         if node.op == 'output':
@@ -857,7 +858,6 @@ def min_cut_rematerialization_partition(
 
         if node in required_bw_nodes:
             add_edge(node.name + "_in", "sink", capacity=math.inf)
-            edge_map[(node.name + "_in", "sink")]
             continue
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
@@ -867,8 +867,8 @@ def min_cut_rematerialization_partition(
             if must_recompute(node):
                 # If user explicitly say they want to recompute a node, we honor it
                 # by adding an 0-capacity edge from the source and an inf edge to the sink.
-                # This way, X_in node is guaranteed to be part of the subgraph that contains "sink",
-                # thus guaranteeing that X op will be recomputed.
+                # This way, X_in node is guaranteed to be part of the subgraph that contains "sink"
+                # after the cut, thus guaranteeing that X op will be recomputed.
                 add_edge("source", node.name + "_in", capacity=0)
                 add_edge(node.name + "_in", "sink", capacity=math.inf)
             elif ban_recomputation(node):
@@ -906,14 +906,13 @@ def min_cut_rematerialization_partition(
         cutset.update((u, v) for v in nbrs if v in non_reachable)
 
     cut_nodes = set()
-    print(f"cutset: {cutset}")
     for node_in, node_out in cutset:
-        print(f"node_in: {node_in}")
-        print(f"node_out: {node_out}")
         if node_in[:-3] == node_out[:-4]:
+            # Case 1: the cut is between X_in and X_out (meaning X is not recomputed)
             node_name = node_in[:-3]
             cut_nodes.add(node_name)
         else:
+            # Case 2: the cut is between source and X_in (meaning X is recomputed)
             assert node_in == "source" and node_out[-3:] == "_in"
 
     # To make this stuff deterministic
