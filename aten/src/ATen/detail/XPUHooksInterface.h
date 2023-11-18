@@ -2,7 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
-
+#include <ATen/core/Generator.h>
 #include <c10/util/Registry.h>
 
 #include <cstddef>
@@ -65,6 +65,18 @@ struct TORCH_API XPUHooksInterface {
         false,
         "Cannot get XPU DL device without Intel Extension for Pytorch. ",
         XPU_HELP);
+  }
+
+  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
+  }
+
+  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
+  }
+
+  virtual int getNumGPUs() const {
+    return 0;
   }
 };
 

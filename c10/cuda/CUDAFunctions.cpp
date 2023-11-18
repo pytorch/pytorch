@@ -148,9 +148,9 @@ void warn_or_error_on_sync() {
   }
 }
 
-c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
+c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
-  int64_t current_device_index = current_device();
+  auto current_device_index = current_device();
   if (current_device_index >= 0) {
     if (hasPrimaryContext(current_device_index)) {
       return current_device_index;
@@ -167,18 +167,18 @@ c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
 }
 
 namespace _internal {
-bool dummyHasPrimaryContext(C10_UNUSED int64_t device_index) {
+bool dummyHasPrimaryContext(C10_UNUSED DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
-bool (*hasPrimaryContext)(int64_t) = dummyHasPrimaryContext;
+bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 
 // Private api to be called from CUDAHooks.cpp
-C10_CUDA_API void setHasPrimaryContext(bool (*func)(int64_t)) {
+C10_CUDA_API void setHasPrimaryContext(bool (*func)(DeviceIndex)) {
   hasPrimaryContext = func ? func : dummyHasPrimaryContext;
 }
 } // namespace _internal
 
-bool hasPrimaryContext(int64_t device_index) {
+bool hasPrimaryContext(DeviceIndex device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 

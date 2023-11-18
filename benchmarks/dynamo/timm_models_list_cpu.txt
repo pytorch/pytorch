@@ -44,7 +44,7 @@ resmlp_12_224,128
 resnest101e,64
 rexnet_100,128
 sebotnet33ts_256,64
-SelecSls42b,128
+selecsls42b,128
 spnasnet_100,32
 swin_base_patch4_window7_224,64
 swsl_resnext101_32x16d,32

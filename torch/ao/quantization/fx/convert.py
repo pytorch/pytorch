@@ -131,7 +131,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32] and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -454,7 +454,15 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     return (
-        (dtype in [torch.quint8, torch.qint8, torch.qint32] and (not is_dynamic)) or  # type: ignore[return-value]
+        (dtype in [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32
+        ] and (not is_dynamic)) or  # type: ignore[return-value]
         is_dynamic or
         dtype == torch.float16
     )

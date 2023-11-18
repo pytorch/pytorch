@@ -1,7 +1,7 @@
 """
 This file includes private common utilities for FSDP.
 """
-
+import logging
 import traceback
 import warnings
 import weakref
@@ -24,13 +24,14 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -69,10 +70,10 @@ class _FSDPDeviceHandle:
             try:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
-            except AttributeError:
+            except AttributeError as exc:
                 raise AttributeError(
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
-                )
+                ) from exc
         else:
             self.__backend = backend
 
@@ -91,10 +92,10 @@ class _FSDPDeviceHandle:
     def __getattr__(self, __name: str) -> Any:
         try:
             return getattr(self.__backend, __name)
-        except AttributeError:
+        except AttributeError as exc:
             raise AttributeError(
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
-            )
+            ) from exc
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
@@ -141,6 +142,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -349,6 +351,32 @@ def _get_param_to_fqns(
         [key for key, _ in _named_parameters_with_duplicates(model)],
         param_to_unflat_param_names,
     )
+
+
+@no_type_check
+def _log_post_backward_hook(
+    state: _FSDPState, handle: "FlatParamHandle", log: logging.Logger
+) -> None:
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_fqns = _get_handle_fqns_from_root(state, handle)
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+
+
+@no_type_check
+def _get_handle_fqns_from_root(
+    state: _FSDPState, handle: "FlatParamHandle"
+) -> Optional[List[str]]:
+    if handle is None:
+        return None
+    param_to_fqn = state._exec_order_data.param_to_fqn
+    handle_params = handle.flat_param._params  # only populated for use_orig_params
+    param_fqns = [
+        fqn for fqn_list in [param_to_fqn[p] for p in handle_params] for fqn in fqn_list
+    ]
+    return param_fqns
 
 
 def _apply_to_modules(

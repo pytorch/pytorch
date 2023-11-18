@@ -1,4 +1,4 @@
-r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter
+r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
@@ -81,6 +81,7 @@ class _DatasetKind:
 
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
+
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
     """
 
@@ -122,8 +123,7 @@ def _share_dist_seed(generator, pg):
 
 class DataLoader(Generic[T_co]):
     r"""
-    Data loader. Combines a dataset and a sampler, and provides an iterable over
-    the given dataset.
+    Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
     The :class:`~torch.utils.data.DataLoader` supports both map-style and
     iterable-style datasets with single- or multi-process loading, customizing
@@ -210,6 +210,7 @@ class DataLoader(Generic[T_co]):
     .. _multiprocessing context:
         https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
+
     dataset: Dataset[T_co]
     batch_size: Optional[int]
     num_workers: int
@@ -598,26 +599,7 @@ class _BaseDataLoaderIter:
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-
-        # NOTE [RNG re-seeding in Dataloader workers]
-        # When num_workers > 0, we need to ensure that all RNGs are different across workers.
-        # That concerns the builtin random module, numpy RNG, and torch Generators.
-        # We do that by generating a base seed (one per Generator), and we then re-seed the Generators in `_worker_loop()`.
-        # - For the default Generator, we sample its base seed just below (self._base_seed) via the `generator`
-        #   parameter that was passed to `Dataloader(...)`.
-        #   We also use this _base_seed to re-seed the numpy and builtin RNGs.
-        # - For all other Generator objects g, their base seed should only depend on g, not on the `generator` parameter.
-        #
-        # We generate _base_seed for the default Generator here, but for the other Generators, we generate their seed
-        # later in _worker_loop(). Why? Because if we were generating the seeds here, we would have to give _worker_loop()
-        # a Generator -> base_seed mapping, and that is really difficult to do (a simple dict would fail because Generators
-        # can't be pickled, and other solutions get very complex very fast).
-        self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
-        for g in _utils.worker._non_default_cpu_generators():
-            # We just consume the RNG here. This is to ensure different RNGs for consecutive epochs.
-            # The base seed for those generators will be generated with _worker_loop().
-            _utils.worker._generate_seed(generator=g)
-
+        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
@@ -697,7 +679,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
-    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
     #
@@ -960,7 +942,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   # No need to check main thread. If this thread is alive, the main loader
     #   # thread must be alive, because this thread is set as daemonic.
     #   While `pin_memory_thread_done_event` is not set:
-    #     Get from `index_queue`.
+    #     Get from `worker_result_queue`.
     #       If timed out, continue to get in the next iteration.
     #       Otherwise, process data.
     #       While `pin_memory_thread_done_event` is not set:

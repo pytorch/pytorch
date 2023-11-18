@@ -1,5 +1,7 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
@@ -32,6 +34,8 @@ void init_p2p_access_cache(int64_t num_devices) {
 }  // namespace detail
 
 bool get_p2p_access(int dev, int dev_to_access) {
+  at::globalContext().lazyInitCUDA();
+
   TORCH_CHECK(dev >= 0 || dev < num_devices_,
               dev, " is not a device");
   TORCH_CHECK(dev_to_access >= 0 || dev_to_access < num_devices_,

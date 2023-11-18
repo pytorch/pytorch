@@ -280,10 +280,7 @@ static Tensor _mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -407,7 +404,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   int64_t dim = input_t.ndimension() - 2;
@@ -470,7 +467,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     ideep::post_ops po;
     po.append_binary(it_binary->second, other_desc);
     if (unary_attr_value != "none") {
-      po.append_eltwise(1.0, unary_alg, 0.f, 0.f);
+      po.append_eltwise(unary_alg, 0.f, 0.f);
     }
     op_attr.set_post_ops(po);
 
@@ -578,7 +575,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -689,10 +686,7 @@ Tensor _mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
@@ -727,7 +721,7 @@ Tensor _mkldnn_convolution_transpose(
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
         b,
@@ -738,9 +732,10 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding_expanded, output_padding_expanded),
         dilation.vec(),
         groups,
+        use_channels_last,
         op_attr);
   } else {
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
         output_sizes,
@@ -750,6 +745,7 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding_expanded, output_padding_expanded),
         dilation.vec(),
         groups,
+        use_channels_last,
         op_attr);
   }
   if (input.is_mkldnn()) {
@@ -988,7 +984,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
-  ideep::convolution_transpose_backward_data::compute(
+  ideep::convolution_transpose_backward_data::compute_v3(
       grad_y,
       w,
       input_size.vec(),
@@ -997,7 +993,8 @@ Tensor mkldnn_convolution_transpose_backward_input(
       padding.vec(),
       padding_r(padding, output_padding),
       dilation.vec(),
-      groups);
+      groups,
+      is_channels_last);
 
   if (grad_output.is_mkldnn()) {
     return MKLDNNTensor(grad_x, grad_output.options());
@@ -1024,7 +1021,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   if (bias_defined) {
-    ideep::convolution_transpose_backward_weights::compute(
+    ideep::convolution_transpose_backward_weights::compute_v3(
         x,
         grad_y,
         weight_size.vec(),
@@ -1034,9 +1031,10 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         padding.vec(),
         padding_r(padding, output_padding),
         dilation.vec(),
-        groups);
+        groups,
+        is_channels_last);
   } else {
-    ideep::convolution_transpose_backward_weights::compute(
+    ideep::convolution_transpose_backward_weights::compute_v3(
         x,
         grad_y,
         weight_size.vec(),
@@ -1045,7 +1043,8 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         padding.vec(),
         padding_r(padding, output_padding),
         dilation.vec(),
-        groups);
+        groups,
+        is_channels_last);
   }
 
   if (!is_channels_last) {
@@ -1061,18 +1060,21 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
-    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,3> output_mask)
 {
-  bool is_channels_last = mkldnn_conv_use_channels_last(input, weight);
-  auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), is_channels_last);
+  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
+  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
   const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", dim);
+
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = mkldnn_convolution_transpose_backward_input(

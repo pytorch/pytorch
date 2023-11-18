@@ -529,8 +529,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.size('N'), 2)
         self.assertEqual(t.size('C'), 5)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name*'):
-            t.size(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.size('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
@@ -540,8 +538,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.stride('N'), 3 * 5)
         self.assertEqual(t.stride('C'), 1)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-            t.stride(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.stride('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
@@ -2054,6 +2050,13 @@ class TestNamedTensor(TestCase):
 
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
+
+    def test_support_device_named_grad(self):
+        named_tensor = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'NYI: named tensors only support CPU, CUDA'):
+            named_tensor.rename_('N', 'C')
+            named_tensor.names = ['N', 'C']
+            named_tensor = torch.randn(3, 3, device='meta', names=['N', 'C'])
 
 
 if __name__ == '__main__':

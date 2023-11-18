@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
 from typing_extensions import TypeAlias
@@ -58,7 +58,6 @@ class _ExperimentalConfig:
         profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
         performance_events: List[str] = ...,
-        privateuse1_config: Dict = ...,
         enable_cuda_sync_events: bool = ...,
     ) -> None: ...
 
@@ -232,3 +231,8 @@ def gather_traceback(python: bool, script: bool, cpp: bool) -> CapturedTraceback
 def symbolize_tracebacks(
     to_symbolize: List[CapturedTraceback],
 ) -> List[List[Dict[str, str]]]: ...
+
+class _RecordFunctionFast:
+    def __init__(self, name: str) -> None: ...
+    def __enter__(self) -> None: ...
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...

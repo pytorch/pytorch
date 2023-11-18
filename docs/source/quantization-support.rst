@@ -31,7 +31,7 @@ Preparing model for quantization
     :nosignatures:
     :template: classtemplate.rst
 
-    fuse_modules
+    fuse_modules.fuse_modules
     QuantStub
     DeQuantStub
     QuantWrapper

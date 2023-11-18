@@ -139,6 +139,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
                     int64_t,
+                    bool,
                     int64_t)>();
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
@@ -148,6 +149,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.rootTensor,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -247,12 +249,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                 at::Tensor&,
                 at::Tensor&,
-                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                bool,
+                int64_t)>();
 
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
-        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this)));
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.asyncOp,
+        opts.timeout.count()));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -331,12 +337,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const std::vector<std::vector<at::Tensor>>&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
+                    bool,
                     int64_t)>();
     return std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -374,12 +382,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                bool,
                 int64_t)>();
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -678,18 +688,22 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
+  const std::string& getGroupName() const;
+  void setGroupName(const std::string& name);
+  void enableCollectivesTiming();
+
+  void release_resources() override;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  const c10::intrusive_ptr<c10d::Store> store_;
+  c10::intrusive_ptr<c10d::Store> store_;
   const int rank_;
   const int size_;
   const c10::intrusive_ptr<Options> options_;
   const BackendType backendType_;
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.

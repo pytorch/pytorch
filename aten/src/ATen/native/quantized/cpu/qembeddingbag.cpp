@@ -108,18 +108,38 @@ at::Tensor& embedding_lookup_fallback_impl(
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
         uint32_t scale_val_int32 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
         scale_val_int32 = scale_val_int32 |
           (scale_bias[0]) |
           (scale_bias[1] << 8) |
           (scale_bias[2] << 16) |
           (scale_bias[3] << 24);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        scale_val_int32 = scale_val_int32 |
+          (scale_bias[3]) |
+          (scale_bias[2] << 8) |
+          (scale_bias[1] << 16) |
+          (scale_bias[0] << 24);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
         float scale_val = (reinterpret_cast<float*>(&scale_val_int32))[0];
         uint32_t bias_val_int32 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
         bias_val_int32 = bias_val_int32 |
           (scale_bias[4]) |
           (scale_bias[5] << 8) |
           (scale_bias[6] << 16) |
           (scale_bias[7] << 24);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        bias_val_int32 = bias_val_int32 |
+          (scale_bias[7]) |
+          (scale_bias[6] << 8) |
+          (scale_bias[5] << 16) |
+          (scale_bias[4] << 24);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
         float bias_val = (reinterpret_cast<float*>(&bias_val_int32))[0];
         scale = weight_val * scale_val;
         bias = weight_val * bias_val;
@@ -127,14 +147,30 @@ at::Tensor& embedding_lookup_fallback_impl(
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half);
         uint16_t scale_val_int16 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
         scale_val_int16 = scale_val_int16 |
           (scale_bias[0]) |
           (scale_bias[1] << 8);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        scale_val_int16 = scale_val_int16 |
+          (scale_bias[1]) |
+          (scale_bias[0] << 8);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
         at::Half scale_val = (reinterpret_cast<at::Half*>(&scale_val_int16))[0];
         uint16_t bias_val_int16 = 0;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
         bias_val_int16 = bias_val_int16 |
           (scale_bias[2]) |
           (scale_bias[3] << 8);
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        bias_val_int16 = bias_val_int16 |
+          (scale_bias[3]) |
+          (scale_bias[2] << 8);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
         at::Half bias_val = (reinterpret_cast<at::Half*>(&bias_val_int16))[0];
         scale = weight_val * scale_val;
         bias = weight_val * bias_val;

@@ -339,6 +339,7 @@ Tensor class reference
     Tensor.digamma
     Tensor.digamma_
     Tensor.dim
+    Tensor.dim_order
     Tensor.dist
     Tensor.div
     Tensor.div_
@@ -574,6 +575,7 @@ Tensor class reference
     Tensor.reciprocal_
     Tensor.record_stream
     Tensor.register_hook
+    Tensor.register_post_accumulate_grad_hook
     Tensor.remainder
     Tensor.remainder_
     Tensor.renorm
