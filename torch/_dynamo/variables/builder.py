@@ -30,7 +30,7 @@ from torch.fx.experimental.symbolic_shapes import (
     CreateSymbolicPolicy,
     DimConstraint,
     DimDynamic,
-    FreshCreateSymbolicPolicy,
+    KnownCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
@@ -1586,22 +1586,32 @@ class TrackedFake:
 
 # Performs automatic dynamic dim determination.
 # Returns a CreateSymbolicPolicy
-def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
+def _automatic_dynamic(e, tx, source, static_shapes) -> CreateSymbolicPolicy:
+    name = source.name()
+    prior_policy = tx.output.tracing_context.tensor_to_policy.get(e, None)
+    source_to_symint_node_cache = (
+        prior_policy.source_to_symint_node_cache if prior_policy else None
+    )
+
     if static_shapes:
-        return FreshCreateSymbolicPolicy(
+        return KnownCreateSymbolicPolicy(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
     if any(isinstance(s, SymInt) for s in e.size()):
-        return FreshCreateSymbolicPolicy(
+        return KnownCreateSymbolicPolicy(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
             ],
             constraint_sizes=[None] * e.dim(),
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # Prep for automatic dynamic
@@ -1732,9 +1742,11 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return FreshCreateSymbolicPolicy(
+    return KnownCreateSymbolicPolicy(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
+        tensor_source=source,
+        source_to_symint_node_cache=source_to_symint_node_cache,
     )
 
 
@@ -1752,7 +1764,10 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
         policy = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
+            policy = _automatic_dynamic(e, tx, source, static_shapes)
+
+        if policy:
+            tx.output.tracing_context.tensor_to_policy[e] = policy
 
         log.debug(
             "wrap_to_fake %s %s %s %s",

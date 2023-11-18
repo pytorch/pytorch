@@ -2295,3 +2295,14 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
     )
+
+
+def to_fake_tensor(t, fake_mode):
+    policy = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_policy:
+            policy = tracing_context.tensor_to_policy[t]
+            source = policy.tensor_source
+
+    return fake_mode.from_tensor(t, static_shapes=False, policy=policy, source=source)

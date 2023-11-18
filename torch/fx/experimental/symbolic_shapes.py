@@ -63,7 +63,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy",
+    "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy", "KnownCreateSymbolicPolicy"
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -727,6 +727,11 @@ class EqualityConstraint(Constraint):
     def is_equal(self, source1, source2):
         return self._find(source1) == self._find(source2)
 
+
+def _assert_policy(policy):
+    assert isinstance(policy, CreateSymbolicPolicy), "Invalid policy object"
+    assert type(policy) != CreateSymbolicPolicy, "Illegal usage of policy ABC"
+
 @dataclass(frozen=True)
 class CreateSymbolicPolicy:
     """
@@ -755,6 +760,31 @@ class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
     def __post_init__(self):
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
+
+
+@dataclass(frozen=True)
+class KnownCreateSymbolicPolicy(FreshCreateSymbolicPolicy):
+    """
+    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    a policy determination as given by a cache of Source:Symbol. A cache hit
+    will reuse a stored symbol, and a cache miss will write to this cache.
+
+    This behaves like FreshCreateSymbolicPolicy, except the cache supersedes the
+    other values - dynamic_sizes and constraint_sizes will not be read if we cache
+    hit.
+
+    It is the cache owners responsibility to maintain the lifecycle of the cache
+    w/r/t different shape_envs, clearing, etc.
+    """
+    tensor_source: Source = None
+    source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
+
+    def __post_init__(self):
+        # The None default is annoying, but required because of dataclass limitations
+        assert self.tensor_source is not None
+        if not self.source_to_symint_node_cache:
+            object.__setattr__(self, 'source_to_symint_node_cache', {})
+
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
@@ -1930,7 +1960,7 @@ class ShapeEnv:
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        _assert_policy(policy)
         dynamic_dims = policy.dynamic_sizes
         constraint_dims = policy.constraint_sizes
         size = []
@@ -2038,9 +2068,10 @@ class ShapeEnv:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            # Policy is None - set one
             policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
-
-        assert isinstance(policy, FreshCreateSymbolicPolicy)
+        # We got a FreshCreateSymbolicPolicy
+        _assert_policy(policy)
         constraint_dims = policy.constraint_sizes
         dynamic_dims = policy.dynamic_sizes
 
@@ -2093,7 +2124,7 @@ class ShapeEnv:
         assert all(x is not None for x in stride)
 
         sym_sizes = [
-            self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i))
+            self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i), policy=policy)
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
         sym_stride = []
@@ -2102,14 +2133,14 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)
-            ))
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                policy=policy))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
-        ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+        ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), policy=policy)
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
@@ -2122,7 +2153,10 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
+            policy: Optional[CreateSymbolicPolicy] = None,
     ):
+        source_name = source.name() if source else None
+
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -2136,11 +2170,19 @@ class ShapeEnv:
         else:
             fx_node = None
 
+        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
+            if source_name in policy.source_to_symint_node_cache:
+                return policy.source_to_symint_node_cache[source_name]
+
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
-            return int(sym)
-        return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            out = int(sym)
+        else:
+            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+        if isinstance(policy, KnownCreateSymbolicPolicy) and source_name:
+            policy.source_to_symint_node_cache[source_name] = out
+        return out
 
     @record_shapeenv_event()
     def create_unspecified_symint_and_symbol(self, value, source, dynamic_dim):
