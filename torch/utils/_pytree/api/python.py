@@ -304,8 +304,8 @@ def is_structseq_class(cls: type) -> bool:
         # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
         and cls.__bases__ == (tuple,)
         # Check PyStructSequence members
-        and isinstance(getattr(cls, "n_sequence_fields", None), int)
         and isinstance(getattr(cls, "n_fields", None), int)
+        and isinstance(getattr(cls, "n_sequence_fields", None), int)
         and isinstance(getattr(cls, "n_unnamed_fields", None), int)
     ):
         try:
