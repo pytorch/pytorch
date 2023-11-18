@@ -2190,9 +2190,8 @@ class Scheduler:
 
             self.available_buffer_names.update(node.get_names())
 
-            if device is not None:
-                if self.get_backend(device).ready_to_flush():
-                    self.flush()
+            if device is not None and self.get_backend(device).ready_to_flush():
+                self.flush()
 
         self.flush()
 
