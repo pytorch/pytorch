@@ -491,6 +491,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf: Union[ir.Buffer, ir.TensorBox]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -504,7 +505,7 @@ class BaseSchedulerNode:
             # Kind of a lazy way to get the MultiOutput nodes corresponding to
             # a MultiOutputLayout
             if isinstance(buf.layout, MultiOutputLayout):
-                users = self.scheduler.name_to_node[buf.name].users
+                users = self.scheduler.name_to_node[buf.get_name()].users
                 buf_elems = sum(get_buf_elems(user.node.node) for user in users)
             else:
                 buf_elems = get_buf_elems(buf)
@@ -1216,7 +1217,7 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device = None
+        self.current_device: torch.device = None  # type: ignore[assignment]
         self.buffer_names_to_free = set()
 
         # fx graph node to the position it appears in the graph
@@ -2012,7 +2013,7 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
             elif name in V.graph.graph_inputs:
                 storage = V.graph.graph_inputs[name].data
-                assert storage.is_input_buffer()
+                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
                 V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
