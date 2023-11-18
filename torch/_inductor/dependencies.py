@@ -240,7 +240,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # if k in free_symbols
         }
         index_vars = [*var_ranges.keys()]
-        sizes = tuple(*var_ranges.values())
+        sizes = tuple(var_ranges.values())
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
