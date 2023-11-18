@@ -2134,6 +2134,7 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            device = None
             try:
                 log.debug(
                     "Generating code for node %s with estimated runtime %f",
@@ -2188,6 +2189,9 @@ class Scheduler:
                 self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
+
+            if device is not None and self.get_backend(device).ready_to_flush():
+                self.flush()
 
         self.flush()
 
@@ -2244,6 +2248,13 @@ class BaseScheduling:
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
         raise NotImplementedError()
+
+    def ready_to_flush(self) -> bool:
+        """
+        Check whether the backend is request scheduler flush the generated kernel.
+        If not support, please return False.
+        """
+        return False
 
     def flush(self):
         """
