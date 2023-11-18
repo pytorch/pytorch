@@ -132,13 +132,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        continue-on-error: true
-        with:
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
-
       - name: Test
         id: test
         shell: bash
@@ -161,6 +154,8 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -188,7 +183,9 @@ jobs:
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          test_config: ${{ matrix.config }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Print remaining test logs
         shell: bash

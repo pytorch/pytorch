@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,8
+torchrec_dlrm,pass,6
 
 
 
@@ -210,7 +210,7 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_accuracy,36
 
 
 
