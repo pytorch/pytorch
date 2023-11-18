@@ -1177,12 +1177,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if func in _ignored_ops:
             return func(*args, **kwargs)
         assert not (no_recompute and must_recompute)
-        """
-        Meaning of node.meta["recompute"] values:
-        -1: must recompute
-        0: must not recompute
-        >0: prefer recompute, but partitioner makes the final decision based on heuristics
-        """
         if no_recompute:
             fx_traceback.current_meta["recompute"] = 0
         if must_recompute:
@@ -1269,16 +1263,26 @@ def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
         TODO: update example
         >>> # xdoctest: +REQUIRES(LINUX)
         >>>
-        >>> def get_custom_policy():
+        >>> def get_custom_policy(func_list=None):
+        >>>     def _custom_policy(mode, func, *args, **kwargs):
+        >>>         return func in func_list
+        >>>     return _custom_policy
+        >>>
+        >>> def selective_checkpointing_context_fn():
         >>>     no_recompute_list = [
         >>>         torch.ops.aten.mm.default,
         >>>     ]
-        >>>     def custom_policy(mode, func, *args, **kwargs):
-        >>>         return func in no_recompute_list
-        >>>     return custom_policy
-        >>>
-        >>> def selective_checkpointing_context_fn():
-        >>>     return context_fn_gen(get_custom_policy())
+        >>>     must_recompute_list = [
+        >>>         torch.ops.aten.sigmoid.default,
+        >>>     ]
+        >>>     return context_fn_gen(
+        >>>         no_recompute_policy_fn=get_custom_policy(
+        >>>             func_list=no_recompute_list
+        >>>         ),
+        >>>         must_recompute_policy_fn=get_custom_policy(
+        >>>             func_list=must_recompute_list
+        >>>         ),
+        >>>     )
         >>>
         >>> def gn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
