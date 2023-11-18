@@ -1260,7 +1260,6 @@ def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
         A pair of generated contexts.
 
     Example:
-        TODO: update example
         >>> # xdoctest: +REQUIRES(LINUX)
         >>>
         >>> def get_custom_policy(func_list=None):
