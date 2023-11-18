@@ -13,6 +13,10 @@ inputs:
     required: true
     type: string
     description: JSON description of what test configs to run.
+  job-name:
+    type: string
+    required: false
+    default: ""
 
 outputs:
   test-matrix:
@@ -56,6 +60,7 @@ runs:
 
     - name: Get the job name
       id: get-job-name
+      if: inputs.job-name == ''
       continue-on-error: true
       shell: bash
       run: |
@@ -91,7 +96,12 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
+        JOB_NAME: ${{ inputs.job-name == '' && steps.get-job-name.outputs.job-name || inputs.job-name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TAG: ${{ steps.parse-ref.outputs.tag }}
+        EVENT_NAME: ${{ github.event_name }}
+        SCHEDULE: ${{ github.event.schedule }}
+        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -103,11 +113,11 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
-          --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}" \
-          --branch "${{ github.event.workflow_run.head_branch }}"
+          --pr-number "${PR_NUMBER}" \
+          --tag "${TAG}" \
+          --event-name "${EVENT_NAME}" \
+          --schedule "${SCHEDULE}" \
+          --branch "${HEAD_BRANCH}"
 
     - name: Print the filtered test matrix
       shell: bash

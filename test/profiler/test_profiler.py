@@ -1159,22 +1159,34 @@ class TestProfiler(TestCase):
             nn.ReLU(),
         )
         inputs = torch.randn(40, 16, 18, 260)
-        with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
+        nested_tensor = torch.nested.nested_tensor(
+            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
+        )
+        with _profile(
+            record_shapes=True, with_flops=True, use_kineto=kineto_available()
+        ) as prof:
             model(inputs)
-        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+            # test that nested tensor won't cause exception during flop compute
+            nested_tensor = nested_tensor + nested_tensor
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10
+        )
         self.assertIn("Total MFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
-        with profile(activities=[
+        with profile(
+            activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA],
-                record_shapes=True,
-                with_flops=True,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            with_flops=True,
         ) as kineto_profiler:
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1)
+            sort_by="self_cuda_time_total", row_limit=-1
+        )
         self.assertIn("Total MFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
@@ -1428,6 +1440,34 @@ class TestProfiler(TestCase):
         self._test_profiler_tracing(False)
         if kineto_available():
             self._test_profiler_tracing(True)
+
+    def test_profiler_op_event_args(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        with _profile(record_shapes=True) as prof:
+            a = torch.ones((64, 32), dtype=torch.float32)
+            c = torch.cat([a, a]).sin()
+        with TemporaryFileName(mode="w+") as fname:
+
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                events = j["traceEvents"]
+                for e in events:
+                    if e["name"] == "aten::ones":
+                        args = e["args"]
+                        self.assertEqual(
+                            args["Input type"],
+                            ["ScalarList", "Scalar", "", "", "Scalar"],
+                        )
+                        self.assertEqual(
+                            args["Concrete Inputs"], ["[64, 32]", "6", "", "", "False"]
+                        )
+
+                    if e["name"] == "aten::cat":
+                        args = e["args"]
+                        self.assertEqual(args["Input Dims"], [[[64, 32], [64, 32]], []])
+                        self.assertEqual(args["Input type"], ["TensorList", "Scalar"])
+
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
@@ -1687,6 +1727,94 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(found, "Expected to find aten::as_strided but did not")
         finally:
             torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+
+    def test_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf1"):
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf1"]), 4)
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2")
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf2"]), 4)
+
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3")
+            for _ in range(4):
+                try:
+                    with cm:
+                        x.add(y)
+                        raise ValueError()
+                        x.relu()
+                except ValueError:
+                    pass
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf3"]), 4)
+        self.assertFalse(any((e.name and "relu" in e.name) for e in p.events()))
+
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf4"):
+                    x.add(y)
+                    with torch._C._profiler._RecordFunctionFast("add_test_fast_rf5"):
+                        x.relu()
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf4"]), 4)
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf5"]), 4)
+
+    def test_is_profiler_enabled(self):
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with torch.autograd.profiler.profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+    def test_guarded_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("guarded_rff")
+            for _ in range(4):
+                if torch.autograd.profiler._is_profiler_enabled:
+                    with cm:
+                        x.add(y)
+                else:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_event_list(self):
+        # AFAIK event list is part of legacy profiler and/or used when kineto is not available.
+        # This test has basic sanity checks to test against obvious regressions.
+        x, y = (torch.rand((4, 4), requires_grad=True, device="cuda") for _ in range(2))
+        with profile(with_stack=True) as p:
+            z = (x @ y).relu().sum()
+            z.backward()
+
+        event_list = torch.autograd.profiler_util.EventList(p.events())
+        # event_list._build_tree()
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                json.load(f)
+
+        event_list.table()
 
 
 def find_node_with_name(nodes, name):

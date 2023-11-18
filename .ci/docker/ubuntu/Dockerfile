@@ -17,13 +17,6 @@ ARG LLVMDEV
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
-# (optional) Install thrift.
-ARG THRIFT
-COPY ./common/install_thrift.sh install_thrift.sh
-RUN if [ -n "${THRIFT}" ]; then bash ./install_thrift.sh; fi
-RUN rm install_thrift.sh
-ENV INSTALLED_THRIFT ${THRIFT}
-
 # Install user
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
@@ -152,6 +145,14 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
+
+ARG EXECUTORCH
+# Build and install executorch
+COPY ./common/install_executorch.sh install_executorch.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/executorch.txt executorch.txt
+RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
+RUN rm install_executorch.sh common_utils.sh executorch.txt
 
 ARG ONNX
 # Install ONNX dependencies

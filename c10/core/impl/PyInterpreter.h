@@ -127,8 +127,8 @@ struct C10_API PyInterpreterVTable {
   virtual std::string name() const = 0;
 
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
-  virtual void decref(PyObject* pyobj, bool is_tensor) const = 0;
+  // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
+  virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
@@ -152,6 +152,11 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKey,
       torch::jit::Stack* stack) const = 0;
 
+  virtual void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const = 0;
+
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(
       const c10::OperatorHandle& op,
@@ -169,6 +174,7 @@ struct C10_API PyInterpreterVTable {
   virtual c10::IntArrayRef sizes(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const = 0;
   virtual c10::Layout layout(const TensorImpl* self) const = 0;
+  virtual int64_t numel(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;

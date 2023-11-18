@@ -128,13 +128,10 @@ def report_compile_source_on_error():
             tb.tb_next = tb_next
             tb_next = tb
 
-        raise exc.with_traceback(tb_next)
+        raise exc.with_traceback(tb_next)  # noqa: TRY200
 
 def shorten_filename(fn, *, base=None):
-    """
-    Shorten a source filepath, under the assumption that anything under torch/
-    directory is "obvious" and doesn't need to be shown to user.
-    """
+    """Shorten a source filepath, with the assumption that torch/ subdirectories don't need to be shown to user."""
     if base is None:
         base = os.path.dirname(os.path.dirname(__file__))
     # Truncate torch/foo.py to foo.py
@@ -147,8 +144,9 @@ def shorten_filename(fn, *, base=None):
 
 def format_frame(frame, *, base=None, line=False):
     """
-    Format a FrameSummary in a short way, without printing full absolute path
-    or code.  The idea is the result fits on a single line.
+    Format a FrameSummary in a short way, without printing full absolute path or code.
+
+    The idea is the result fits on a single line.
     """
     extra_line = ""
     if line:
@@ -156,39 +154,35 @@ def format_frame(frame, *, base=None, line=False):
     return f"{extra_line}{shorten_filename(frame.filename, base=base)}:{frame.lineno} in {frame.name}"
 
 def format_traceback_short(tb):
-    """
-    Format a TracebackType in a short way, printing only the inner-most frame.
-    """
+    """Format a TracebackType in a short way, printing only the inner-most frame."""
     return format_frame(traceback.extract_tb(tb)[-1])
 
 class CapturedTraceback:
-    __slots__ = ['tb', 'skip', '_summary']
+    __slots__ = ['tb', 'skip']
 
     def __init__(self, tb, skip=0):
         self.tb = tb
         self.skip = skip
-        # Cached StackSummary; this mostly exists so CapturedTraceback
-        # can be reliably pickled and then printed later
-        self._summary = None
+
+    def cleanup(self):
+        self.tb = None
 
     def summary(self):
         import torch._C._profiler
 
-        if self._summary is None:
-            assert self.tb is not None
-            self._summary = _extract_symbolized_tb(
-                torch._C._profiler.symbolize_tracebacks([self.tb])[0],
-                self.skip
-            )
-        return self._summary
+        if self.tb is None:
+            # TODO: Maybe indicate that the traceback was elided?
+            return traceback.StackSummary()
+
+        return _extract_symbolized_tb(
+            torch._C._profiler.symbolize_tracebacks([self.tb])[0],
+            self.skip
+        )
 
     def __getstate__(self):
-        # Force populate summary
-        self.summary()
         return (None, {
             'tb': None,  # TB is not pickleable
             'skip': self.skip,
-            '_summary': self._summary
         })
 
     @staticmethod
@@ -236,17 +230,15 @@ class CapturedTraceback:
         rs: List[Optional[List[str]]] = []
         delayed_idxs = []
         for i, tb in enumerate(tbs):
-            if tb._summary is not None:
-                rs.append(traceback.format_list(tb._summary))
+            if tb.tb is None:
+                rs.append([])
             else:
                 rs.append(None)
                 delayed_idxs.append(i)
 
         stbs = torch._C._profiler.symbolize_tracebacks([tbs[i].tb for i in delayed_idxs])
         for i, stb in zip(delayed_idxs, stbs):
-            tb = tbs[i]
-            tb._summary = _extract_symbolized_tb(stb, tb.skip)
-            rs[i] = traceback.format_list(tb._summary)
+            rs[i] = traceback.format_list(tbs[i].summary())
 
         return rs
 

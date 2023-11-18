@@ -17,6 +17,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   VirtualGuardImpl(const DeviceGuardImplInterface* impl) : impl_(impl) {}
 
   // Copying and moving is OK!
+  VirtualGuardImpl(const VirtualGuardImpl&) = default;
+  VirtualGuardImpl& operator=(const VirtualGuardImpl&) = default;
+  VirtualGuardImpl(VirtualGuardImpl&&) noexcept = default;
+  VirtualGuardImpl& operator=(VirtualGuardImpl&&) noexcept = default;
 
   DeviceType type() const override {
     return impl_->type();

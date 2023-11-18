@@ -1,3 +1,4 @@
+#include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
 #include <array>
@@ -6,87 +7,76 @@
 namespace c10 {
 
 SymNode SymBool::toSymNodeImpl() const {
-  TORCH_CHECK(is_symbolic());
+  TORCH_CHECK(is_heap_allocated());
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
 SymNode SymBool::wrap_node(const SymNode& base) const {
-  if (is_symbolic()) {
-    return toSymNodeImpl();
+  if (auto ma = maybe_as_bool()) {
+    return base->wrap_bool(*ma);
   } else {
-    return base->wrap_bool(as_bool_unchecked());
+    return toSymNodeImpl();
   }
 }
 
-static std::array<SymNode, 2> normalize_symbools(
-    const SymBool& a_,
-    const SymBool& b_) {
-  SymNode a, b;
-  if (a_.is_symbolic())
-    a = a_.toSymNodeImpl();
-  if (b_.is_symbolic())
-    b = b_.toSymNodeImpl();
+#define DEFINE_BINARY(API, OP, METHOD, RET)                              \
+  RET SymBool::API(const SymBool& sci) const {                           \
+    if (auto ma = maybe_as_bool()) {                                     \
+      if (auto mb = sci.maybe_as_bool()) {                               \
+        return RET(OP(*ma, *mb));                                        \
+      } else {                                                           \
+        auto b = sci.toSymNodeImpl();                                    \
+        return RET(b->wrap_bool(*ma)->METHOD(b));                        \
+      }                                                                  \
+    } else {                                                             \
+      if (auto mb = sci.maybe_as_bool()) {                               \
+        auto a = toSymNodeImplUnowned();                                 \
+        return RET(a->METHOD(a->wrap_bool(*mb)));                        \
+      } else {                                                           \
+        return RET(toSymNodeImplUnowned()->METHOD(sci.toSymNodeImpl())); \
+      }                                                                  \
+    }                                                                    \
+  }
 
-  SymNodeImpl* common = a ? a.get() : b.get();
-  if (!a) {
-    a = common->wrap_bool(a_.as_bool_unchecked());
-  }
-  if (!b) {
-    b = common->wrap_bool(b_.as_bool_unchecked());
-  }
-  return {std::move(a), std::move(b)};
-}
-
-SymBool SymBool::sym_and(const SymBool& sci) const {
-  if (!is_symbolic() && !sci.is_symbolic()) {
-    return SymBool(data_ && sci.data_);
-  }
-  auto res = normalize_symbools(*this, sci);
-  return SymBool(res[0]->sym_and(res[1]));
-}
-
-SymBool SymBool::sym_or(const SymBool& sci) const {
-  if (!is_symbolic() && !sci.is_symbolic()) {
-    return SymBool(data_ || sci.data_);
-  }
-  auto res = normalize_symbools(*this, sci);
-  return SymBool(res[0]->sym_or(res[1]));
-}
+// clang-format off
+DEFINE_BINARY(sym_and, std::logical_and<>(), sym_and, SymBool)
+DEFINE_BINARY(sym_or, std::logical_or<>(), sym_or, SymBool)
+// clang-format on
 
 SymBool SymBool::sym_not() const {
-  if (!is_symbolic()) {
-    return SymBool(!data_);
+  if (auto ma = maybe_as_bool()) {
+    return SymBool(!*ma);
   }
   return SymBool(toSymNodeImpl()->sym_not());
 }
 
 std::ostream& operator<<(std::ostream& os, const SymBool& s) {
-  if (s.is_symbolic()) {
-    os << s.toSymNodeImpl()->str();
+  if (auto ma = s.maybe_as_bool()) {
+    os << *ma;
   } else {
-    os << s.as_bool_unchecked();
+    os << s.toSymNodeImpl()->str();
   }
   return os;
 }
 
 bool SymBool::guard_bool(const char* file, int64_t line) const {
-  if (!is_symbolic()) {
-    return data_;
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
   }
   SymNode a = toSymNodeImpl();
   return a->guard_bool(file, line);
 }
 
 bool SymBool::expect_true(const char* file, int64_t line) const {
-  if (!is_symbolic()) {
-    return data_;
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
   }
   SymNode a = toSymNodeImpl();
   return a->expect_true(file, line);
 }
 
 bool SymBool::has_hint() const {
-  if (!is_symbolic()) {
+  if (auto ma = maybe_as_bool()) {
     return true;
   }
   return toSymNodeImpl()->has_hint();

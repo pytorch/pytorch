@@ -12,7 +12,11 @@ try:
     from transformers import modeling_outputs
     from transformers.configuration_utils import PretrainedConfig
     from transformers.file_utils import ModelOutput
-    from transformers.modeling_outputs import BaseModelOutput
+    from transformers.modeling_outputs import (
+        BaseModelOutput,
+        BaseModelOutputWithPastAndCrossAttentions,
+        BaseModelOutputWithPoolingAndCrossAttentions,
+    )
 except ImportError:
     modeling_outputs = None
 
@@ -160,6 +164,83 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @maybe_skip
+    def test_HF_bert_model_output(self):
+        class BertPooler(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = torch.nn.Linear(768, 768).to("cuda")
+                self.activation = torch.nn.Tanh()
+
+            def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+                # We "pool" the model by simply taking the hidden state corresponding
+                # to the first token.
+                first_token_tensor = hidden_states[:, 0]
+                pooled_output = self.dense(first_token_tensor)
+                pooled_output = self.activation(pooled_output)
+                return pooled_output
+
+        class BertEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                hidden_states: torch.Tensor,
+            ) -> BaseModelOutputWithPastAndCrossAttentions:
+                return BaseModelOutputWithPastAndCrossAttentions(
+                    last_hidden_state=hidden_states,
+                    past_key_values=None,
+                    hidden_states=None,
+                    attentions=None,
+                    cross_attentions=None,
+                )
+
+        class BertModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = BertEncoder()
+                self.pooler = BertPooler()
+
+            def forward(
+                self,
+                sequence_output: torch.Tensor,
+            ) -> BaseModelOutputWithPoolingAndCrossAttentions:
+                encoder_outputs = self.encoder(sequence_output)
+                # test __getitem__ and to_tuple
+                sequence_output = encoder_outputs[0]
+                pooled_output = (
+                    self.pooler(sequence_output) if self.pooler is not None else None
+                )
+                # test CustomDictVariable.create
+                result = BaseModelOutputWithPoolingAndCrossAttentions(
+                    last_hidden_state=sequence_output,
+                    pooler_output=pooled_output,
+                    past_key_values=encoder_outputs.past_key_values,
+                    hidden_states=encoder_outputs.hidden_states,
+                    attentions=encoder_outputs.attentions,
+                    cross_attentions=encoder_outputs.cross_attentions,
+                )
+                # test __setattr__
+                result.pooler_output = pooled_output
+                # test __setitem__
+                result["pooler_output"] = pooled_output
+                return result
+
+        sequence_output = torch.rand(1, 12, 768).to("cuda")
+        model = BertModel()
+        orig_result = model(sequence_output)
+        compiled_model = torch.compile(model, backend="eager")
+        compiled_result = compiled_model(sequence_output)
+        self.assertTrue(
+            torch.allclose(
+                orig_result.last_hidden_state, compiled_result.last_hidden_state
+            )
+        )
+        self.assertTrue(
+            torch.allclose(orig_result.pooler_output, compiled_result.pooler_output)
+        )
 
 
 if __name__ == "__main__":

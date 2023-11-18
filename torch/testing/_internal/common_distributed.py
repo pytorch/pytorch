@@ -353,6 +353,7 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
+    use_libuv=False
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
@@ -365,7 +366,7 @@ def create_tcp_store(
         )
     else:
         return c10d.TCPStore(
-            addr, port, world_size, is_master, wait_for_workers=wait_for_workers
+            addr, port, world_size, is_master, wait_for_workers=wait_for_workers, use_libuv=use_libuv
         )
 
 
@@ -862,7 +863,7 @@ def has_efa() -> bool:
 
     try:
         EFA_PROBE_RESULT = (
-            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False).returncode == 0
         )
     except FileNotFoundError:
         EFA_PROBE_RESULT = False

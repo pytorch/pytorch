@@ -73,9 +73,10 @@ def get_source_partitions(
         # function, or the type of module if the node is decomposed from a leaf
         # module
 
-        if (source_fn := node.meta.get("source_fn", None)) is None:
+        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None:
             continue
 
+        source_fn = source_fn_st[-1]
         if source_fn[1] not in wanted_sources:
             continue
 

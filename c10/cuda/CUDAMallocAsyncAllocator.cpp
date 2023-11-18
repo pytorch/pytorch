@@ -632,6 +632,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachAllocatorTraceTracker. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   std::shared_ptr<AllocatorState> getCheckpointState(int device, MempoolId_t id)
       override {
     TORCH_CHECK(
@@ -867,6 +874,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
   std::string name() override {
     return "cudaMallocAsync";
+  }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
   }
 };
 

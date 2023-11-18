@@ -2,8 +2,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <iostream>
-
 namespace py = pybind11;
 
 namespace torch {
@@ -151,6 +149,7 @@ std::vector<py::object> py_symbolize(
   }
 
   std::vector<py::object> result;
+  result.reserve(to_symbolize.size());
   for (const auto& sc : to_symbolize) {
     result.push_back(py_unique_frames.at(cached_frames.at(sc)));
   }

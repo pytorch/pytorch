@@ -195,6 +195,7 @@ std::string _memory_snapshot_pickled() {
   IValue frames_s = "frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
+  IValue time_us_s = "time_us";
 
   auto empty_frames = new_list();
 
@@ -229,9 +230,11 @@ std::string _memory_snapshot_pickled() {
 
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
+    auto address = segmentInfo.address;
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
+      blockDict.insert(address_s, address);
       blockDict.insert(size_s, blockInfo.size);
       blockDict.insert(requested_size_s, blockInfo.requested_size);
       blockDict.insert(
@@ -240,7 +243,7 @@ std::string _memory_snapshot_pickled() {
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
       add_frame_key(blockDict, blockInfo.context_when_allocated);
-
+      address += blockInfo.size;
       blocks.push_back(blockDict);
     }
     segmentDict.insert(blocks_s, blocks);
@@ -308,6 +311,7 @@ std::string _memory_snapshot_pickled() {
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }
+      trace_entry.insert(time_us_s, te.time_.t_);
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);

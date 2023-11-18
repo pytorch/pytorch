@@ -14,6 +14,7 @@ import copy
 import pickle
 import shutil
 import pathlib
+import platform
 from copy import deepcopy
 from itertools import product
 
@@ -24,7 +25,7 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 
 from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
     TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -785,7 +786,8 @@ class serialization_method:
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
-    def _test_serialization_new_format_old_format_compat(self, device, weights_only):
+    @parametrize("weights_only", (True, False))
+    def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
         def test(f_new, f_old):
@@ -799,14 +801,10 @@ class TestBothSerialization(TestCase):
             x_old_load = torch.load(f_old, weights_only=weights_only)
             self.assertEqual(x_old_load, x_new_load)
 
-        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
-            test(f_new, f_old)
-
-    def test_serialization_new_format_old_format_compat(self, device):
-        self._test_serialization_new_format_old_format_compat(device, False)
-
-    def test_serialization_new_format_old_format_compat_safe(self, device):
-        self._test_serialization_new_format_old_format_compat(device, True)
+        with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
+            with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+                test(f_new, f_old)
+            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -1057,9 +1055,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
         #       as nullptr storage is disabled.
-        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
-                   ' are currently unsafe and thus disabled')
-        with self.assertRaisesRegex(RuntimeError, err_msg):
+        with self.assertRaisesRegex(RuntimeError, 'ZeroTensor is not serializable'):
             _save_load_check(t)
 
     def test_serialization_byteorder_mark(self):
@@ -3860,6 +3856,47 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_bom))
             self.assertTrue(torch.equal(tensor_be_no_bom, tensor_le_bom))
             self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
+
+    @unittest.skipIf(platform.machine() != 's390x', "s390x-specific test")
+    def test_serialization_warning_s390x(self):
+        data_be_no_bom = (b'PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x19\x00\t\x00tensor.double.BE/data.pklFB\x05\x00ZZZZZ\x80\x02'
+                          b'ctorch._utils\n_rebuild_tensor_v2\nq\x00((X\x07\x00\x00\x00storageq\x01ctorch\n'
+                          b'DoubleStorage\nq\x02X\x01\x00\x00\x000q\x03X\x03\x00\x00\x00cpuq\x04K\x04tq\x05'
+                          b'QK\x00K\x02K\x02\x86q\x06K\x02K\x01\x86q\x07\x89ccollections\nOrderedDict\nq\x08'
+                          b')Rq\ttq\nRq\x0b.PK\x07\x08S\xd3\xba&\x9b\x00\x00\x00\x9b\x00\x00\x00PK\x03\x04\x00'
+                          b'\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x00\x17\x00 \x00tensor.double.BE/data/0FB\x1c\x00ZZZZZZZZZZZZZZZZZZZZZZZZZZZZ'
+                          b'?\xc9^|\xff\xa4v\x97\xbf\xe9\xb0\x8dP\x8c\xbc\xce\xbf\xd3\xdb\xb7[\xef\x0e\xdc?\xde'
+                          b'\x00\xf9Q\x08\xb14PK\x07\x083@\x82/ \x00\x00\x00 \x00\x00\x00PK\x03\x04\x00\x00'
+                          b'\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x18\x00\x1a\x00tensor.double.BE/versionFB\x16\x00ZZZZZZZZZZZZZZZZZZZZZZ3\nPK\x07'
+                          b'\x08\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00PK\x01\x02\x00\x00\x00\x00\x08\x08'
+                          b'\x00\x00\x00\x00\x00\x00S\xd3\xba&\x9b\x00\x00\x00\x9b\x00\x00\x00\x19\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00tensor.double.BE/da'
+                          b'ta.pklPK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00\x00\x003@\x82/ '
+                          b'\x00\x00\x00 \x00\x00\x00\x17\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\xeb\x00\x00\x00tensor.double.BE/data/0PK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00'
+                          b'\x00\x00\x00\x00\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00\x18\x00\x00\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x00\x00p\x01\x00\x00tensor.double.BE/versionPK\x06\x06'
+                          b',\x00\x00\x00\x00\x00\x00\x00\x1e\x03-\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\xd2\x00\x00\x00\x00'
+                          b'\x00\x00\x00\xd2\x01\x00\x00\x00\x00\x00\x00PK\x06\x07\x00\x00\x00\x00\xa4\x02\x00'
+                          b'\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x03\x00\x03\x00'
+                          b'\xd2\x00\x00\x00\xd2\x01\x00\x00\x00\x00')
+
+        current_load_endian = get_default_load_endianness()
+
+        buf_be_no_bom = io.BytesIO(data_be_no_bom)
+
+        try:
+            set_default_load_endianness(None)
+            with self.assertWarnsRegex(UserWarning, "The default load endianness for checkpoints "
+                                       "without a byteorder mark on big endian machines "
+                                       "was changed from 'native' to 'little' endian"):
+                tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")

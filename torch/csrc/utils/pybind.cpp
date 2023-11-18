@@ -30,9 +30,7 @@ py::handle type_caster<c10::SymInt>::cast(
     const c10::SymInt& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (auto m = si.maybe_as_int()) {
-    return py::cast(*m).release();
-  } else {
+  if (si.is_symbolic()) {
     auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
         si.toSymNodeImplUnowned());
     if (py_node) {
@@ -46,6 +44,9 @@ py::handle type_caster<c10::SymInt>::cast(
       }
       return torch::get_symint_class()(inner).release();
     }
+  } else {
+    auto m = si.maybe_as_int();
+    return py::cast(*m).release();
   }
 }
 
@@ -98,14 +99,14 @@ py::handle type_caster<c10::SymBool>::cast(
     const c10::SymBool& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (si.is_symbolic()) {
+  if (auto m = si.maybe_as_bool()) {
+    return py::cast(*m).release();
+  } else {
     // TODO: generalize this to work with C++ backed class
     auto* py_node =
         dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
     TORCH_INTERNAL_ASSERT(py_node);
     return torch::get_symbool_class()(py_node->getPyObj()).release();
-  } else {
-    return py::cast(si.as_bool_unchecked()).release();
   }
 }
 

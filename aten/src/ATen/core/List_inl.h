@@ -198,7 +198,7 @@ typename List<T>::internal_const_reference_type List<T>::operator[](size_type po
 template<class T>
 typename List<T>::internal_reference_type List<T>::operator[](size_type pos) {
   static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
-  return {impl_->list.begin() + pos};
+  return {impl_->list.begin() + static_cast<typename decltype(impl_->list)::difference_type>(pos)};
 }
 
 template<class T>

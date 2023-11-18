@@ -22,6 +22,10 @@ struct THPVariable {
   // Hooks to be run on backwards pass (corresponds to Python attr
   // '_backwards_hooks', set by 'register_hook')
   PyObject* backward_hooks = nullptr;
+  // Hooks to be run in the backwards pass after accumulate grad,
+  // i.e., after the .grad has been set (corresponds to Python attr
+  // '_post_accumulate_grad_hooks', set by 'register_post_accumulate_grad_hook')
+  PyObject* post_accumulate_grad_hooks = nullptr;
 };
 
 TORCH_PYTHON_API void registerPythonTensorClass(

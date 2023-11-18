@@ -625,6 +625,7 @@ inline DispatchKey computeDispatchKey(
   const auto layout_ = layout_or_default(layout);
   const auto device_ = device_or_default(device);
   switch (layout_) {
+    case Layout::Jagged:
     case Layout::Strided: {
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {
