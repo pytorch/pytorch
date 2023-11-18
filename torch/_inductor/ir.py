@@ -4351,7 +4351,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
 
         # serialize_outputs
         def handle_single_output(return_type, output):
@@ -4378,7 +4378,7 @@ class FallbackKernel(ExternKernelAlloc):
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
         target = self.op_overload
-        returns = target._schema.returns
+        returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, self.outputs)]

@@ -161,13 +161,13 @@ def is_concrete_bool(a: Union[bool, SymBool]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
-def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
+def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # singleton ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, sympy.Basic):
+    elif isinstance(val, sympy.Expr):
         yield val
     elif isinstance(val, (int, float, bool)):
         pass

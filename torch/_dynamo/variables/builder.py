@@ -1742,7 +1742,8 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             # TODO: We should probably support this for nested tensors too
             policy = _automatic_dynamic(e, tx, source, static_shapes)
 
-        tx.output.tracing_context.tensor_to_policy[e] = policy
+        if policy:
+            tx.output.tracing_context.tensor_to_policy[e] = policy
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
