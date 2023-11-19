@@ -4999,6 +4999,7 @@ else:
 
     # Tests `torch._lazy_clone` which creates a COW (copy-on-write) tensor
     @skipXLA
+    @skipIfTorchInductor("Test fails if run individually, but runs for complex dtype masks the rest")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)

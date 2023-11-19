@@ -5,7 +5,6 @@
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <climits>
