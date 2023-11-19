@@ -287,6 +287,9 @@ class SymInt:
     def __sym_float__(self):
         raise AssertionError("type stub not overridden")
 
+    def __neg__(self):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return str(self.node)
 
