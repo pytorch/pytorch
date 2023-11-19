@@ -47,7 +47,8 @@ def _get_cxx_compiler():
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
     else:
-        compiler = os.environ.get("CXX", "c++")
+        from .codecache import cpp_compiler
+        compiler = cpp_compiler
     return compiler
 
 
