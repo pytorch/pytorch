@@ -1023,12 +1023,13 @@ class CheckFunctionManager:
 
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
             extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
-                    if fs.filename not in uninteresting_files():
+                    if fs.filename in uninteresting_files():
                         break
                 else:
                     extra = f"  # {format_frame(fs, line=True)}"
@@ -1056,6 +1057,7 @@ class CheckFunctionManager:
 
             if not log_only:
                 code_parts.append(code)
+                verbose_code_parts.append(f"{code:<60}{extra}")
 
         seen = set()
         for gcl in builder.code:
@@ -1175,6 +1177,7 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
+        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
             "G": builder.scope["G"],
@@ -1274,7 +1277,7 @@ def get_guard_fail_reason(
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
     reasons: List[str] = []
-    for part in guard_fn.code_parts:
+    for part in guard_fn.verbose_code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
