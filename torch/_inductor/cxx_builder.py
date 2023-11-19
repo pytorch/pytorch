@@ -31,7 +31,7 @@ def _create_if_dir_not_exist(path_dir):
                 raise RuntimeError(f"Fail to create path {path_dir}")
 
 
-def _get_dir_name_from_path(file_path):
+def get_dir_name_from_path(file_path):
     dir_name = os.path.dirname(file_path)
     return dir_name
 
@@ -91,16 +91,14 @@ def _get_windows_runtime_libs():
 
 class BuildTarget:
     __name = None
-    __project_root = None
     __sources = []
     __definations = []
     __include_dirs = []
     __CFLAGS = []
     __LDFLAGS = []
     __libraries = []
-    __build_directory = None
+    __output_directory = None
     __is_shared = False
-    __is_static = True
 
     # OS info
     def is_windows(self):

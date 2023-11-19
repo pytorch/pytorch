@@ -38,6 +38,7 @@ from threading import Thread
 from time import sleep, time
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from .cxx_builder import BuildTarget, get_dir_name_from_path
 
 import torch
 
@@ -1032,6 +1033,10 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_path = input_path[:-3] + "so"
+            output_dir = get_dir_name_from_path(output_path)
+            cxx_target = BuildTarget()
+            cxx_target.target(name=key, sources=[input_path], output_directory=output_dir)            
+
             build_cmd = shlex.split(
                 cpp_compile_command(
                     input_path, output_path, warning_all=False, vec_isa=self
