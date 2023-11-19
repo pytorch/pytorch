@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -29,7 +29,8 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestPatternMatcher(TestCase):
@@ -584,11 +585,10 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @inductor_config.patch(joint_graph_constant_folding=True)
     def test_pointless_cumsum(self):
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
-
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -1067,6 +1067,5 @@ class TestPatternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests(triton=True)
+    if IS_LINUX and HAS_CUDA:
+        run_tests()
