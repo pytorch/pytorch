@@ -42,11 +42,13 @@ log = logging.getLogger(__name__)
 if has_triton_package():
     import triton
     from triton import Config
+    from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 else:
     Config = object
     triton = None
     KernelInterface = object
+    OutOfResources = object
 
 if has_triton():
     from triton.runtime.jit import get_cuda_stream
@@ -182,11 +184,20 @@ class CachingAutotuner(KernelInterface):
             self.launchers = []
             compiled_binaries = []
             for c in self.configs:
-                compiled_binary, launcher = self._precompile_config(
-                    c, warm_cache_only_with_cc
-                )
+                try:
+                    compiled_binary, launcher = self._precompile_config(
+                        c, warm_cache_only_with_cc
+                    )
+                except OutOfResources:
+                    # Skip the config if we run out of resource
+                    continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
+
+            if len(self.launchers) == 0:
+                raise RuntimeError(
+                    "No valid triton configs. Report a fatal compilation error"
+                )
 
             seen_configs = set(self.configs)
 
@@ -301,9 +312,7 @@ class CachingAutotuner(KernelInterface):
             for i, arg in enumerate(self.fn.arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = list(self.fn.arg_names)
-        while def_args and def_args[-1] in cfg.kwargs:
-            def_args.pop()
+        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
         scope = {
             "grid_meta": cfg.kwargs,
@@ -449,6 +458,8 @@ class CachingAutotuner(KernelInterface):
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
+            # User defined triton kernels will have arbitrary kwarg names
+            "meta": launcher.config.kwargs,
         }
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
@@ -595,7 +606,7 @@ class DebugAutotuner(CachingAutotuner):
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
             return
         super().run(*args, grid=grid, stream=stream)

@@ -5,7 +5,7 @@ import functools
 import inspect
 import os
 import re
-from itertools import count
+from itertools import chain, count
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
@@ -20,7 +20,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer
+from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -49,6 +49,10 @@ def buffer_reuse_key(node: ir.Buffer):
 
 
 def is_int(s: str):
+    # Cpp code gen adds L at the end of ints
+    # Lets remove it for checking whether we have an int or not
+    if s and s[-1] == "L":
+        s = s[:-1]
     try:
         int(s)
     except ValueError:
@@ -343,7 +347,7 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
-        self.user_defined_kernel_count = 0
+        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
         self.unbacked_symbol_decls = set()
 
         self.write_header()
@@ -500,8 +504,9 @@ class WrapperCodeGen(CodeGen):
             ending = f".clone(){ending}"
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
-            f"{self.declare}{output_name} = {extern_kernel.kernel}({', '.join(args)}){ending}"
+            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
         if (
             self.supports_intermediate_hooks
@@ -828,13 +833,26 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def get_unique_kernel_name(self, name: str) -> str:
-        new_name = f"{name}_{self.user_defined_kernel_count}"
-        self.user_defined_kernel_count += 1
-        return new_name
-
-    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         original_name = kernel.__name__
+
+        # Distinguish between different functions using function id
+        cache_key = [id(kernel.fn)]
+        for arg in kwargs.values():
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+                cache_key.append(arg.get_dtype())
+            elif len(configs) > 0:
+                # We need to key on non tensor arg only in autotune mode
+                cache_key.append(arg)
+        cache_key = tuple(cache_key)
+
+        if cache_key in self.user_defined_kernel_cache:
+            return self.user_defined_kernel_cache[cache_key]
+
+        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Add to the cache for the next use
+        self.user_defined_kernel_cache[cache_key] = name
+
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
@@ -849,7 +867,6 @@ class WrapperCodeGen(CodeGen):
         )
         compile_wrapper.newline()
 
-        from ..ir import Buffer
         from .common import SizeArg, TensorArg
 
         signature: List[Union[TensorArg, SizeArg]] = []
@@ -861,20 +878,22 @@ class WrapperCodeGen(CodeGen):
             ):
                 constants[key] = arg
                 continue
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
                     TensorArg(key, arg.codegen_reference(), arg.get_dtype())
                 )
             else:
                 signature.append(SizeArg(key, arg))
         index_dtype = "tl.int32"
+        inductor_meta = {
+            "kernel_name": name,
+        }
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": constants,
             "configs": [config_of(signature)],
-            "kernel_name": name,
         }
         configs = [
             {
@@ -888,6 +907,7 @@ class WrapperCodeGen(CodeGen):
             f"""
             @user_autotune(
                 configs={configs!r},
+                inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
                 filename=__file__
             )
@@ -929,6 +949,7 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.getvalue(),
             metadata,
         )
+        return name
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
@@ -1018,9 +1039,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, ComputedBuffer):
-            return s.codegen_reference()
-        elif isinstance(s, InputBuffer):
+        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -1300,13 +1319,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("#include <c10/util/generic_math.h>")
+
         from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
         self.header.splice(
             f"""
-            static int64_t align(int64_t nbytes) {{
+            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
             """
@@ -1463,7 +1484,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in self.src_to_kernel.values():
+        for kernel in chain(
+            self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+        ):
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1704,7 +1727,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        self.generate_c_shim_extern_kernel_call(extern_kernel.kernel, args)
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.codegen_kernel_name(), args
+        )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
@@ -1730,8 +1755,26 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        raise AssertionError(
-            "User defined triton kernels are not supported in CPP mode"
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            grid=grid_decision,
+            device_index=V.graph.scheduler.current_device.index,
+            cuda=True,
+            triton=True,
         )
 
     def generate_scatter_fallback(
@@ -2125,11 +2168,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         new_int_args.extend([str(a) for a in arg])
                 else:
                     assert isinstance(
-                        arg_type.getElementType(), static_arg_types
+                        arg_type.getElementType(), static_arg_types  # type: ignore[arg-type]
                     ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
             else:
                 assert isinstance(
-                    arg_type, static_arg_types
+                    arg_type, static_arg_types  # type: ignore[arg-type]
                 ), f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
 
         for arg, arg_type in zip(raw_args, arg_types):
@@ -2295,9 +2338,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, ComputedBuffer):
-            return val.codegen_reference()
-        elif isinstance(val, InputBuffer):
+        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
@@ -2428,7 +2469,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
-            for kernel in self.src_to_kernel.values():
+            for kernel in chain(
+                self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+            ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
         return super().generate(is_inference)
@@ -2456,15 +2499,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(
-                arg,
-                (
-                    sympy.Integer,
-                    sympy.Symbol,
-                    SymbolicCallArg,
-                ),
-            ):
+            if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Expr):
+                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
