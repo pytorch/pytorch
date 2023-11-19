@@ -732,9 +732,8 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        if opt_ctx.dtype is not None:
-            dtype = opt_ctx.dtype
+        assert opt_ctx and opt_ctx.dtype is not None
+        dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -744,9 +743,8 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def index_expr(expr, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        if opt_ctx.dtype is not None:
-            dtype = opt_ctx.dtype
+        assert opt_ctx and opt_ctx.dtype is not None
+        dtype = opt_ctx.dtype
         return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
@@ -1645,8 +1643,11 @@ class CppVecKernel(CppKernel):
         :param var: buffer to store into.
         :index: index into the `var`.
         """
-        # TODO: turn it on when tmp_acc_vec uses CppCSEVariable
-        # assert isinstance(value, CppCSEVariable) and value.is_vec, value
+        # when value's type is str (e.g., welford reduction), caller should make sure
+        # it is a vector
+        assert isinstance(value, str) or (
+            isinstance(value, CppCSEVariable) and value.is_vec
+        ), value
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
