@@ -1727,6 +1727,7 @@ def compile_file(
     input_files = [
         os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
     ]
+    print("!!!!!cmd: ", cmd)
     try:
         if config.is_fbcode():
             # Need to copy our header into the same folder as the sourcecode.
