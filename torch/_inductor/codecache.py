@@ -38,7 +38,6 @@ from threading import Thread
 from time import sleep, time
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
-from .cxx_builder import BuildTarget, get_dir_name_from_path
 
 import torch
 
@@ -52,6 +51,7 @@ from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from .cxx_builder import BuildTarget, get_dir_name_from_path
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -1035,7 +1035,9 @@ cdll.LoadLibrary("__lib_path__")
             output_path = input_path[:-3] + "so"
             output_dir = get_dir_name_from_path(output_path)
             cxx_target = BuildTarget()
-            cxx_target.target(name=key, sources=[input_path], output_directory=output_dir)
+            cxx_target.target(
+                name=key, sources=[input_path], output_directory=output_dir
+            )
             print("!!! new: ", cxx_target.get_build_cmd())
 
             build_cmd = shlex.split(

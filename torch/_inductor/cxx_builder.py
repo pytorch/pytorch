@@ -1,5 +1,6 @@
 import errno
 import os
+import platform
 import shlex
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import sysconfig
 from pathlib import Path
 from typing import List
 
+import torch
 from torch._inductor import config, exc
 
 if config.is_fbcode():
@@ -32,6 +34,7 @@ else:
 
     def use_global_cache() -> bool:
         return False
+
 
 # initialize variables for compilation
 _IS_LINUX = sys.platform.startswith("linux")
@@ -128,6 +131,14 @@ class BuildTarget:
     __output_directory = None
     __is_shared = False
 
+    __warning_all: bool = (True,)
+    __include_pytorch: bool = (False,)
+    # vec_isa: VecISA = invalid_vec_isa,
+    __cuda: bool = (False,)
+    __aot_mode: bool = (False,)
+    __compile_only: bool = (False,)
+    __use_absolute_path: bool = (False,)
+
     # OS info
     def is_windows(self):
         return _IS_WINDOWS
@@ -140,7 +151,7 @@ class BuildTarget:
 
     # File types
     def __get_shared_flag(self):
-        SHARED_FLAG = "DLL" if _IS_WINDOWS else "shared"
+        SHARED_FLAG = ["DLL"] if _IS_WINDOWS else ["shared", "fPIC"]
         return SHARED_FLAG
 
     def get_shared_lib_ext(self):
@@ -176,7 +187,7 @@ class BuildTarget:
                     cmd_libraries += f"{lib}.lib "
                 else:
                     cmd_libraries += f"-l{lib} "
-                    
+
         if len(self.__lib_dirs) != 0:
             for lib_dir in self.__lib_dirs:
                 if _IS_WINDOWS:
@@ -205,20 +216,27 @@ class BuildTarget:
                 else:
                     cmd_ldflags += f"-{ldflag} "
 
-        return cmd_include_dirs, cmd_libraries, cmd_definations, cmd_cflags, cmd_ldflags, cmd_lib_dirs
+        return (
+            cmd_include_dirs,
+            cmd_libraries,
+            cmd_definations,
+            cmd_cflags,
+            cmd_ldflags,
+            cmd_lib_dirs,
+        )
 
     # Config
     def add_sources(self, sources: List[str]):
         for i in sources:
             self.__sources.append(i)
-            
+
     def add_includes(self, includes: List[str]):
         for i in includes:
             self.__include_dirs.append(i)
-            
+
     def add_lib_dirs(self, lib_dirs: List[str]):
         for i in lib_dirs:
-            self.__lib_dirs.append(i)            
+            self.__lib_dirs.append(i)
 
     def add_libraries(self, libraries: List[str]):
         for i in libraries:
@@ -252,6 +270,13 @@ class BuildTarget:
         libraries: List[str] = [],
         output_directory: str = None,
         is_shared: bool = True,
+        warning_all: bool = True,
+        include_pytorch: bool = False,
+        # vec_isa: VecISA = invalid_vec_isa,
+        cuda: bool = False,
+        aot_mode: bool = False,
+        compile_only: bool = False,
+        use_absolute_path: bool = False,
     ) -> bool:
         self.__name = name
         self.__sources = sources
@@ -263,12 +288,20 @@ class BuildTarget:
         self.__output_directory = output_directory
         self.__is_shared = is_shared
 
+        self.__warning_all = warning_all
+        self.__include_pytorch = include_pytorch
+        # vec_isa: VecISA = invalid_vec_isa,
+        self.__cuda = cuda
+        self.__aot_mode = aot_mode
+        self.__compile_only = compile_only
+        self.__use_absolute_path = use_absolute_path
+
     def _get_build_root_dir(self):
         if self.__output_directory is None:
             build_root = os.path.dirname(os.path.abspath(__file__))
         else:
             build_root = self.__output_directory
-        _create_if_dir_not_exist(build_root)            
+        _create_if_dir_not_exist(build_root)
         return build_root
 
     def get_target_file_path(self):
@@ -277,9 +310,9 @@ class BuildTarget:
             file_ext = self.get_shared_lib_ext()
         else:
             file_ext = self.get_exec_ext()
-            
+
         target_file = f"{self.__name}{file_ext}"
-        target_file = os.path.join(build_root, target_file)   
+        target_file = os.path.join(build_root, target_file)
         return target_file
 
     def get_build_cmd(self):
@@ -287,13 +320,24 @@ class BuildTarget:
             raise RuntimeError("target name should not be None.")
 
         if self.__is_shared:
-            self.add_ldflags([self.__get_shared_flag()])
+            self.add_ldflags(self.__get_shared_flag())
 
         if _IS_WINDOWS:
             self.add_libraries(_get_windows_runtime_libs())
-            
-        self._config_include_and_linking_paths()
-        
+
+        self._config_include_and_linking_paths(
+            include_pytorch=self.__include_pytorch,
+            cuda=self.__cuda,
+            aot_mode=self.__aot_mode,
+        )
+        self._config_torch_build_options(
+            warning_all=self.__warning_all,
+            cuda=self.__cuda,
+            aot_mode=self.__aot_mode,
+            compile_only=self.__compile_only,
+            use_absolute_path=self.__use_absolute_path,
+        )
+
         target_file = self.get_target_file_path()
 
         compiler = _get_cxx_compiler()
@@ -350,14 +394,192 @@ class BuildTarget:
         build_cmd = self.get_build_cmd()
         run_command_line(build_cmd, cwd=build_temp_dir)
         _remove_dir(build_temp_dir)
-        
-    def _config_include_and_linking_paths(self,
-    include_pytorch: bool = False,
-    # vec_isa: VecISA = invalid_vec_isa,
-    cuda: bool = False,
-    aot_mode: bool = False,
+
+    def _config_torch_build_options(
+        self,
+        warning_all: bool = True,
+        # vec_isa: VecISA = invalid_vec_isa,
+        cuda: bool = False,
+        aot_mode: bool = False,
+        compile_only: bool = False,
+        use_absolute_path: bool = False,
+    ):
+        '''
+        if isinstance(input, str):
+            input = [input]
+        ipaths_str = " ".join(["-I" + p for p in ipaths])
+        if config.is_fbcode():
+            if aot_mode and not use_absolute_path:
+                inp_name = input
+                out_name = output
+            else:
+                # We need to copy any absolute-path torch includes
+                inp_name = [os.path.basename(i) for i in input]
+                out_name = os.path.basename(output)
+            linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
+            linker_paths = " ".join(["-B" + p for p in linker_paths])
+        else:
+            inp_name = input
+            out_name = output
+            linker_paths = ""  # let the compiler pick
+        inp_name_str = " ".join(inp_name)
+        return re.sub(
+            r"[ \n]+",
+            " ",
+            f"""
+                {cpp_compiler()} {inp_name_str} {get_shared(shared)}
+                {get_warning_all_flag(warning_all)} {cpp_flags()}
+                {get_glibcxx_abi_build_flags()}
+                {ipaths_str} {lpaths} {libs} {build_arch_flags}
+                {macros} {linker_paths}
+                {optimization_flags()}
+                {use_custom_generated_macros()}
+                {use_fb_internal_macros()}
+                {use_standard_sys_dir_headers()}
+                {get_compile_only(compile_only)}
+                -o {out_name}
+            """,
+        ).strip()
+        '''
+        # get_shared -- done
+
+        # get_warning_all_flag
+        if not _IS_WINDOWS:
+            # return "-Wall" if warning_all else ""
+            self.add_cflags(["Wall"]) if self.__warning_all else ""
+
+        # cpp_flags
+        """
+        flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
+        if is_clang():
+            flags.append("-Werror=ignored-optimization-argument")
+        return " ".join(flags)
+        """
+        if _IS_WINDOWS:
+            self.add_cflags(["std:c++17"])
+        else:
+            self.add_cflags(["std=c++17", "Wno-unused-variable", "Wno-unknown-pragmas"])
+
+        from .codecache import is_clang
+
+        if is_clang():
+            self.add_cflags(["Werror=ignored-optimization-argument"])
+
+        # get_glibcxx_abi_build_flags
+        if not _IS_WINDOWS:
+            # return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
+            self.add_cflags(
+                ["D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+            )
+
+        # optimization_flags
+        """
+        base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
+        base_flags += " -ffast-math -fno-finite-math-only"
+
+        if config.is_fbcode():
+            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
+            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
+            # We will fix it later by exposing the lib path.
+            return base_flags
+
+        if sys.platform == "darwin":
+            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+            # Also, `-march=native` is unrecognized option on M1
+            base_flags += " -Xclang"
+        else:
+            if platform.machine() == "ppc64le":
+                base_flags += " -mcpu=native"
+            else:
+                base_flags += " -march=native"
+
+        # Internal cannot find libgomp.so
+        if not config.is_fbcode():
+            base_flags += " -fopenmp"
+        return base_flags
+        """
+        if config.is_fbcode():
+            if _IS_WINDOWS:
+                self.add_cflags(["O2"])
+            else:
+                self.add_cflags(
+                    ["O0", "g"]
+                ) if config.aot_inductor.debug_compile else self.add_cflags(
+                    ["O3", "DNDEBUG"]
+                )
+
+        if sys.platform == "darwin":
+            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+            # Also, `-march=native` is unrecognized option on M1
+            # base_flags += " -Xclang"
+            self.add_cflags(["Xclang"])
+        else:
+            if platform.machine() == "ppc64le":
+                # base_flags += " -mcpu=native"
+                self.add_cflags(["mcpu=native"])
+            else:
+                # base_flags += " -march=native"
+                self.add_cflags(["march=native"])
+
+        # Internal cannot find libgomp.so
+        if not config.is_fbcode():
+            if _IS_WINDOWS:
+                self.add_cflags(["openmp"])
+            else:
+                # base_flags += " -fopenmp"
+                self.add_cflags(["fopenmp"])
+
+            # use_custom_generated_macros
+            # return "-D C10_USING_CUSTOM_GENERATED_MACROS"
+            self.add_defination(" C10_USING_CUSTOM_GENERATED_MACROS")
+
+        # use_fb_internal_macros
+        """
+        if config.is_fbcode():
+            openmp_lib = build_paths.openmp_lib()
+            preprocessor_flags = " ".join(
+                (
+                    "-D C10_USE_GLOG",
+                    "-D C10_USE_MINIMAL_GLOG",
+                    "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+                )
+            )
+            return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"
+        else:
+            return ""
+        """
+        if config.is_fbcode():
+            openmp_lib = build_paths.openmp_lib()
+            self.add_libraries(openmp_lib)
+
+            self.add_defination(" C10_USE_GLOG")
+            self.add_defination(" C10_USE_MINIMAL_GLOG")
+            self.add_defination(" C10_DISABLE_TENSORIMPL_EXTENSIBILITY")
+
+        # use_standard_sys_dir_headers
+        """
+        if config.is_fbcode():
+            return "-nostdinc"
+        else:
+            return ""
+        """
+        if config.is_fbcode():
+            self.add_cflags(["nostdinc"])
+
+            # get_compile_only
+            # return "-c" if compile_only else ""
+            if self.__compile_only and not _IS_WINDOWS:
+                self.add_cflags(["c"])
+
+    def _config_include_and_linking_paths(
+        self,
+        include_pytorch: bool = False,
+        # vec_isa: VecISA = invalid_vec_isa,
+        cuda: bool = False,
+        aot_mode: bool = False,
     ):
         from .codecache import cpp_prefix_path
+
         if (
             config.is_fbcode()
             and "CUDA_HOME" not in os.environ
@@ -408,9 +630,11 @@ class BuildTarget:
                                     if "libcudart_static.a" in files:
                                         lpaths[i] = os.path.join(path, root)
                                         # lpaths.append(os.path.join(lpaths[i], "stubs"))
-                                        self.add_lib_dirs(os.path.join(lpaths[i], "stubs"))
+                                        self.add_lib_dirs(
+                                            os.path.join(lpaths[i], "stubs")
+                                        )
                                         break
-            '''
+            """
             macros = vec_isa.build_macro()
             if macros:
                 if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -422,15 +646,15 @@ class BuildTarget:
                             f"-D CPU_CAPABILITY_{cap}",
                             f"-D HAVE_{cap}_CPU_DEFINITION",
                         ]
-                    )            
-            '''
+                    )
+            """
 
             if aot_mode and cuda:
-                '''
+                """
                 if macros is None:
                     macros = ""
-                macros += " -D USE_CUDA"                
-                '''
+                macros += " -D USE_CUDA"
+                """
                 self.add_defination("USE_CUDA")
 
             if cuda:
@@ -459,7 +683,9 @@ class BuildTarget:
                 # ToDo: xuhan
                 # check the `OMP_PREFIX` environment first
                 if os.getenv("OMP_PREFIX") is not None:
-                    header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                    header_path = os.path.join(
+                        os.getenv("OMP_PREFIX"), "include", "omp.h"
+                    )
                     valid_env = os.path.exists(header_path)
                     if valid_env:
                         ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
@@ -475,7 +701,9 @@ class BuildTarget:
                     omp_available = is_conda_llvm_openmp_installed()
                     if omp_available:
                         conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                        ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                        ipaths.append(
+                            os.path.join(os.getenv("CONDA_PREFIX"), "include")
+                        )
                         lpaths.append(conda_lib_path)
                         # Prefer Intel OpenMP on x86 machine
                         if os.uname().machine == "x86_64" and os.path.exists(
@@ -507,23 +735,23 @@ class BuildTarget:
         if config.is_fbcode():
             # ipaths.append(build_paths.sleef())
             self.add_includes(build_paths.sleef())
-            #ipaths.append(build_paths.openmp())
-            self.add_includes(build_paths.openmp())            
+            # ipaths.append(build_paths.openmp())
+            self.add_includes(build_paths.openmp())
             # ipaths.append(build_paths.cc_include())
-            self.add_includes(build_paths.cc_include())            
+            self.add_includes(build_paths.cc_include())
             # ipaths.append(build_paths.libgcc())
-            self.add_includes(build_paths.libgcc())            
+            self.add_includes(build_paths.libgcc())
             # ipaths.append(build_paths.libgcc_arch())
-            self.add_includes(build_paths.libgcc_arch())            
+            self.add_includes(build_paths.libgcc_arch())
             # ipaths.append(build_paths.libgcc_backward())
-            self.add_includes(build_paths.libgcc_backward())            
+            self.add_includes(build_paths.libgcc_backward())
             # ipaths.append(build_paths.glibc())
-            self.add_includes(build_paths.glibc())            
+            self.add_includes(build_paths.glibc())
             # ipaths.append(build_paths.linux_kernel())
-            self.add_includes(build_paths.linux_kernel())            
+            self.add_includes(build_paths.linux_kernel())
             # ipaths.append(build_paths.cuda())
             self.add_includes(build_paths.cuda())
-            
+
             # We also need to bundle includes with absolute paths into a remote directory
             # (later on, we copy the include paths from cpp_extensions into our remote dir)
             # ipaths.append("include")
