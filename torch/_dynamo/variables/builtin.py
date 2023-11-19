@@ -903,12 +903,13 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1
         if all(x.has_unpack_var_sequence(tx) for x in args):
+            unpacked = [arg.unpack_var_sequence(tx) for arg in args]
+            if kwargs.pop("strict", False) and len(unpacked) > 0:
+                if not all(len(u) == len(unpacked[0]) for u in unpacked):
+                    raise UserError(ValueError, "zip() has one argument of len differing from others")
             items = [
                 variables.TupleVariable(list(item))
-                for item in zip(
-                    *[arg.unpack_var_sequence(tx) for arg in args],
-                    strict=kwargs.pop("strict", False),
-                )
+                for item in zip(*unpacked)
             ]
             return variables.TupleVariable(items)
 

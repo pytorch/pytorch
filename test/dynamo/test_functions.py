@@ -2550,7 +2550,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError, "zip().*longer than"
+            torch._dynamo.exc.UserError, "zip()"
         ):
             opt_fn(x, ys[:1], zs)
 
