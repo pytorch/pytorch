@@ -912,6 +912,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             arg.node.meta["val"] = self.current_node.meta["val"]
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        if "example_value" in self.current_node.meta:
+            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -925,6 +927,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if "example_value" in self.current_node.meta:
+            result_proxy.node.meta["example_value"] = self.current_node.meta[
+                "example_value"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
