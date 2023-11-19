@@ -1174,6 +1174,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
 
+    # TODO: this is a generic pass that should live outside of Dynamo
     def insert_deferred_runtime_asserts(self) -> None:
         """
         During tracing, we may have discovered that some data-dependent values
@@ -1187,8 +1188,19 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # We are going to mutate the dict
         ras_by_symbol = self.shape_env.deferred_runtime_asserts.copy()
         symbol_to_proxy = {}
+        placeholders = set()
+        last_placeholder = None
         for node in self.graph.nodes:
-            with self.graph.inserting_after(node):
+            if node.op != "placeholder":
+                last_placeholder = node
+                break
+            placeholders.add(node)
+        assert last_placeholder is not None
+        for node in self.graph.nodes:
+            # Placeholders can match symbols, but when we destructure them
+            # with size we have to make sure we insert the nodes after all
+            # the placeholders
+            with self.graph.inserting_after(node if node not in placeholders else last_placeholder):
                 if "example_value" not in node.meta:
                     continue
 
@@ -1223,7 +1235,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         match_symbol(s, lambda: self.graph.call_method("size", (node, i)))
                     for i, s in enumerate(t.stride()):
                         match_symbol(s, lambda: self.graph.call_method("stride", (node, i)))
-                    match_symbol(s, lambda: self.graph.call_method("storage_offset", (node,)))
+                    match_symbol(t.storage_offset(), lambda: self.graph.call_method("storage_offset", (node,)))
 
                 for i0 in defs:
                     ras = ras_by_symbol.pop(i0, [])
