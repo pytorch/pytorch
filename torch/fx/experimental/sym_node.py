@@ -17,8 +17,6 @@ import sys
 from functools import lru_cache
 from typing import Optional, Type, TYPE_CHECKING, Union
 
-import torch
-
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
     sym_float,
@@ -400,6 +398,44 @@ class SymNode:
         return False
 
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    if hasattr(a, "__sym_sqrt__"):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
+
+# TODO: this probably needs the sizes-strides eval functions
+METHOD_TO_OPERATOR = {
+    "abs": operator.abs,
+    "add": operator.add,
+    "and": operator.and_,
+    "ceil": math.ceil,
+    "eq": operator.eq,
+    "floor": math.floor,
+    "floordiv": operator.floordiv,
+    "ge": operator.ge,
+    "gt": operator.gt,
+    "le": operator.le,
+    "lshift": operator.lshift,
+    "lt": operator.lt,
+    "mod": operator.mod,
+    "mul": operator.mul,
+    "ne": operator.ne,
+    "neg": operator.neg,
+    "or": operator.or_,
+    "pow": operator.pow,
+    "rshift": operator.rshift,
+    "sub": operator.sub,
+    "sym_float": sym_float,
+    "sym_ite": sym_ite,
+    "sym_max": sym_max,
+    "sym_min": sym_min,
+    "sym_not": sym_not,
+    "sym_sqrt": sym_sqrt,
+    "truediv": operator.truediv,
+}
+
 unary_magic_methods = {
     "abs",
     "sym_float",
@@ -410,7 +446,6 @@ unary_magic_methods = {
     "sym_not",
 }
 
-
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
 only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
@@ -418,15 +453,7 @@ only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
-magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {
-    "sym_float",
-    "sym_sqrt",
-    "sym_min",
-    "sym_max",
-    "sym_not",
-    "sym_ite",
-}
+
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 
@@ -628,13 +655,6 @@ magic_methods = {
 }
 
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
-
-
 def sympy_is_contiguous(sizes, strides):
     dim = len(sizes)
     return sympy_is_contiguous_generic(sizes, strides, list(range(dim - 1, -1, -1)))
@@ -771,17 +791,7 @@ def wrap_node(x):
 
 
 def method_to_operator(method):
-    if method in magic_methods_on_operator_with_trailing_underscore:
-        method_attr = f"{method}_"
-    else:
-        method_attr = method
-    if method in magic_methods_on_submodule:
-        op = getattr(torch.fx.experimental.sym_node, method_attr)
-    elif method in magic_methods_on_math:
-        op = getattr(math, method_attr)
-    else:
-        op = getattr(operator, method_attr)
-    return op
+    return METHOD_TO_OPERATOR[method]
 
 
 def _make_node_magic(method, func):
