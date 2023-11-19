@@ -1029,10 +1029,9 @@ class CheckFunctionManager:
             extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
-                    if fs.filename in uninteresting_files():
+                    if fs.filename not in uninteresting_files():
+                        extra = f"  # {format_frame(fs, line=True)}"
                         break
-                else:
-                    extra = f"  # {format_frame(fs, line=True)}"
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
@@ -1107,6 +1106,7 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
+            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
             tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
