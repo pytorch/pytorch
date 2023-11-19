@@ -2870,6 +2870,7 @@ coverage_ignore_classes = [
     "ShapeGuardPrinter",
     "StrictMinMaxConstraint",
     "SymDispatchMode",
+    "CreateSymbolicPolicy",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",

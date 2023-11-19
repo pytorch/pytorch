@@ -8878,7 +8878,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
@@ -8891,7 +8891,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
             disable_fastpath = True
             if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, **{"ord": ord, "disable_fastpath": disable_fastpath})
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
@@ -9479,7 +9479,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
@@ -9801,14 +9801,7 @@ def wrapper_set_seed(op, *args, **kwargs):
     """
     with freeze_rng_state():
         torch.manual_seed(42)
-        output = op(*args, **kwargs)
-
-        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
-            # We need to call mark step inside freeze_rng_state so that numerics
-            # match eager execution
-            torch._lazy.mark_step()
-
-        return output
+        return op(*args, **kwargs)
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -11175,10 +11168,10 @@ op_db: List[OpInfo] = [
                     supports_rhs_python_scalar=False,
                     error_inputs_func=error_inputs_complex,
                     skips=(
-                        # Test doesn't account for complex's type promotion semantics
+                        # Tests don't account for complex's type promotion semantics
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
-                    )),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
@@ -12635,6 +12628,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # PyTorch's heaviside does not appear to propagate NaNs
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
@@ -12671,6 +12665,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values'),
@@ -15998,6 +15993,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
                         # GradcheckError: Jacobian computed with forward mode mismatch for output 0 with respect to input 0
                         # Numerical:
                         #  tensor([[0.]], dtype=torch.float64)
@@ -18350,14 +18346,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             # Lazy tensor failures
             DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-            # These tests fail only when built with ASAN
-            DecorateInfo(unittest.skip("Fails with ASAN"), 'TestLazyOpInfo', 'test_correctness', active_if=TEST_WITH_ASAN),
-            DecorateInfo(
-                unittest.skip("Fails with ASAN"),
-                'TestLazyOpInfo',
-                'test_correctness_with_reusing_ir',
-                active_if=TEST_WITH_ASAN
-            ),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
         ),
     ),
     OpInfo(
@@ -20783,6 +20773,8 @@ python_ref_db = [
         skips=(
             # RuntimeError: Expected divisor (b) to be on the same device (cuda:0) as dividend (a), but it is found on cpu!
             DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+            # FIXME output 0: meta disagrees with real impl
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20899,6 +20891,8 @@ python_ref_db = [
                          dtypes=(torch.float16,)),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
                          'TestBinaryUfuncs', 'test_reference_numerics'),
+            # FIXME output 0: meta disagrees with real impl
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20983,6 +20977,7 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestBinaryUfuncs',
                          'test_reference_numerics_extremal_values'),
@@ -21321,16 +21316,18 @@ python_ref_db = [
         torch_opinfo_name="complex",
         error_inputs_func=partial(error_inputs_complex, is_ref=True),
         skips=(
-            # Test doesn't account for complex's type promotion semantics
+            # Tests don't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs._conversions.polar",
         torch_opinfo_name="polar",
         skips=(
-            # Test doesn't account for complex's type promotion semantics
+            # Tests don't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
