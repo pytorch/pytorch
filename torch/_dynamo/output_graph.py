@@ -29,6 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -1209,8 +1210,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # Placeholders can match symbols, but when we destructure them
             # with size we have to make sure we insert the nodes after all
             # the placeholders
-            with self.graph.inserting_after(
-                node if node not in placeholders else last_placeholder
+            with self.graph.inserting_before(
+                node.next if node not in placeholders else last_placeholder.next
             ):
                 if "example_value" not in node.meta:
                     continue
@@ -1234,6 +1235,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 def match_symbol(symint, cb):
                     if (
                         isinstance(symint, torch.SymInt)
+                        and isinstance(symint.node, SymNode)
                         and isinstance(s := symint.node.expr, sympy.Symbol)
                         and s not in symbol_to_proxy
                         and s in needed_symbols
@@ -1272,20 +1274,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                             res = sympy_interp(
                                 PythonReferenceAnalysis, symbol_to_proxy, ra.expr
                             ).node
-                            with self.graph.inserting_after(res):
-                                res2 = self.graph.call_function(
-                                    torch.ops.aten.scalar_tensor.default, (res,)
-                                )
-                            with self.graph.inserting_after(res2):
-                                self.graph.call_function(
-                                    torch.ops.aten._assert_async.msg,
-                                    # TODO: use ra.msg here, but it's pretty
-                                    # useless right now
-                                    (
-                                        res2,
-                                        f"Deferred runtime assertion failed {ra.expr}",
-                                    ),
-                                )
+                            res2 = self.graph.call_function(
+                                torch.ops.aten.scalar_tensor.default, (res,)
+                            )
+                            self.graph.call_function(
+                                torch.ops.aten._assert_async.msg,
+                                # TODO: use ra.msg here, but it's pretty
+                                # useless right now
+                                (
+                                    res2,
+                                    f"Deferred runtime assertion failed {ra.expr}",
+                                ),
+                            )
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
