@@ -56,16 +56,14 @@ PyObject* THPGradientEdgeClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// Throw a python_error with the PyErr state persisted, so that we
-// don't lose the error state if the GIL is released when we don't
-// have a PyThreadState created beforehand, this is made so that
-// even for pure C++ thread without a pre-created PyThreadState could
-// also capture the correct error message.
-// TODO: This is a temporary approach to allow C++ thread to correctly
-// capture Python Error in autograd, remove this when c10 thread pool
-// allow to do one time initialization.
-// see discussion in https://github.com/pytorch/pytorch/pull/34845
-// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+// TODO: We shouldn't need to call this function because the engine
+// can already persist the errors for us. This still seems to be
+// needed for the DistEngine however.
+//
+// python test/distributed/rpc/test_tensorpipe_agent.py -k
+// test_backward_autograd_engine_error
+//
+// See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
   python_error err;
   err.persist();
