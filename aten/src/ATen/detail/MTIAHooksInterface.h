@@ -1,22 +1,14 @@
 #pragma once
 
-#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/Registry.h>
 
-#include <cstddef>
-#include <functional>
-#include <memory>
+#include <string>
 
 namespace at {
 class Context;
 }
-
-// We use forward declaration here instead of #include <ATen/dlpack.h> to avoid
-// leaking DLPack implementation detail to every project that includes `ATen/Context.h`, which in turn
-// would lead to a conflict when linked with another project using DLPack (for example TVM)
-struct DLDevice_;
 
 namespace at {
 
