@@ -25,7 +25,7 @@ def save_state_dict(
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """
-    Saves a distributed model in SPMD style.
+    Save a distributed model in SPMD style.
 
     This function is different from ``torch.save()`` as it handles
     ``ShardedTensor`` by having each rank only save their local shards.
@@ -82,7 +82,6 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)

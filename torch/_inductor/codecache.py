@@ -65,7 +65,7 @@ if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
 
-    from torch._inductor.fb.utils import (  # type: ignore[import]
+    from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
@@ -418,7 +418,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format = suggest_memory_format(t)
+    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     if not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
@@ -682,9 +682,7 @@ class FxGraphCache:
         """
         Helper to get the shape env from the tracing context.
         """
-        tracing_context = torch._guards.TracingContext.get()
-        assert tracing_context is not None
-        return tracing_context.fake_mode.shape_env
+        return torch._guards.TracingContext.get().fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -889,7 +887,7 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs: List[Any]) -> Any:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.gcc()
+        return build_paths.cc()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -1394,8 +1392,8 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
-    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
-    if not config.is_fbcode():
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.aot_inductor.abi_compatible:
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
 
@@ -1442,6 +1440,7 @@ def cpp_compile_command(
     if isinstance(input, str):
         input = [input]
     ipaths_str = " ".join(["-I" + p for p in ipaths])
+    clang_flags = ""
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1450,8 +1449,12 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
-        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
-        linker_paths = " ".join(["-B" + p for p in linker_paths])
+        assert is_clang()
+        # Use clang runtime instead of libgcc
+        clang_flags += " --rtlib=compiler-rt"
+        clang_flags += " -fuse-ld=lld"
+        linker_paths = "-B" + build_paths.glibc_lib()
+        linker_paths += " -L" + build_paths.glibc_lib()
     else:
         inp_name = input
         out_name = output
@@ -1465,7 +1468,7 @@ def cpp_compile_command(
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths}
+            {macros} {linker_paths} {clang_flags}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -2396,13 +2399,13 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str, device: str = "cuda"
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            device_interface = get_interface_for_device(device)
-            device = torch.device(device, device_interface.current_device())
+            device_interface = get_interface_for_device(device_str)
+            device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device

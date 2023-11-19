@@ -1,0 +1,72 @@
+diff --git a/third_party/cutlass b/third_party/cutlass
+index 44c704eae85..6f47420213f 160000
+--- a/third_party/cutlass
++++ b/third_party/cutlass
+@@ -1 +1 @@
+-Subproject commit 44c704eae85da352d277d6f092f41412772f70e4
++Subproject commit 6f47420213f757831fae65c686aa471749fa8d60
+diff --git a/third_party/fbgemm b/third_party/fbgemm
+index d4eec11d72a..70c6e83c29f 160000
+--- a/third_party/fbgemm
++++ b/third_party/fbgemm
+@@ -1 +1 @@
+-Subproject commit d4eec11d72a2280cdf22b77561ba9b6f594cdd7e
++Subproject commit 70c6e83c29f67278751abd0e28433c50743ccbe9
+diff --git a/third_party/kineto b/third_party/kineto
+index a30ca3f9509..49e854d805d 160000
+--- a/third_party/kineto
++++ b/third_party/kineto
+@@ -1 +1 @@
+-Subproject commit a30ca3f9509c2cfd28561abbca51328f0bdf9014
++Subproject commit 49e854d805d916b2031e337763928d2f8d2e1fbf
+diff --git a/third_party/onnx b/third_party/onnx
+index ccde5da8138..0c296085f9f 160000
+--- a/third_party/onnx
++++ b/third_party/onnx
+@@ -1 +1 @@
+-Subproject commit ccde5da81388ffa770ca98b64e07f803ad089414
++Subproject commit 0c296085f9f65f0f8ef7aec7b9eed55faf37dc40
+diff --git a/torch/_dynamo/output_graph.py b/torch/_dynamo/output_graph.py
+index 1e44d8bc346..29b54119d54 100644
+--- a/torch/_dynamo/output_graph.py
++++ b/torch/_dynamo/output_graph.py
+@@ -1509,6 +1509,7 @@ class SubgraphTracer(fx.Tracer):
+ 
+             # official from_list stub doesn't have new-style type
+             msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
++            print("MESSAGES", msgs)
+             rv.node.stack_trace = "".join(msgs)
+ 
+         return rv
+diff --git a/torch/_guards.py b/torch/_guards.py
+index fe3a10d663b..eb7471b6c48 100644
+--- a/torch/_guards.py
++++ b/torch/_guards.py
+@@ -224,7 +224,7 @@ class Guard:
+             'guard_types': {self.guard_types},
+             'code': {self.code_list},
+             'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
+-            'guarded_class': {self.guarded_class_weakref}
++            'guarded_class': {self.guarded_class_weakref},
+         }}
+         """
+         return s
+@@ -238,6 +238,10 @@ class Guard:
+         output += f"    Code List: {self.code_list}\n"
+         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
+         output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
++        user_stack = self.user_stack.format()
++        user_stack = user_stack[0].split('\n') if len(user_stack) > 0 else []
++        user_stack = user_stack[1] if len(user_stack) > 1 else None
++        output += f"    User Stack: {user_stack}"
+         return output
+ 
+     def create(self, builder: GuardBuilderBase):
+@@ -491,6 +495,7 @@ class GuardsSet:
+             guard.stack = CapturedTraceback.extract(skip=1 + skip)
+         if guard.user_stack is None:
+             guard.user_stack = TracingContext.extract_stack()
++        print("GUARD", guard)
+         self.inner.add(guard)
+ 
+     def update(self, *others: Set[Guard]):

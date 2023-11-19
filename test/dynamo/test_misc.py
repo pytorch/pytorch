@@ -217,6 +217,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, inplace1, 2, expected_ops=3)
 
+    def test_inplace_desugaring(self):
+        def inplace_on_literals(y):
+            x0 = 1
+            x0 += y
+            x1 = 1
+            x1 -= y
+            return x0, x1
+
+        torch._dynamo.testing.standard_test(
+            self, inplace_on_literals, 1, expected_ops=2
+        )
+
     def test_unpack4(self):
         def unpack4(a, b):
             a = a[:5, :]
@@ -699,7 +711,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: "id" not in line and "lookup_backend" not in line,
+            lambda line: not any(
+                banned in line for banned in ["id", "lookup_backend", "config_hash"]
+            ),
             sorted(guard_code),
         )
         self.assertExpectedInline(
@@ -804,6 +818,25 @@ utils_device.CURRENT_DEVICE == None""",
         def f(x):
             y = x.item()
             torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbolic_shape_rel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(x.shape[0] == 1)
+            torch._check(x.shape[0] != 2)
+            torch._check(x.shape[0] >= 0)
+            torch._check(x.shape[0] > 0)
+            torch._check(x.shape[0] < 4)
+            torch._check(x.shape[0] <= 3)
             return torch.arange(0, y)
 
         f(torch.tensor([3]))
@@ -1969,6 +2002,19 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
 
+    def test_trace_ndarray_frame_2(self):
+        # no tensors/ndarray as inputs in the frame
+        def fn(x):
+            print("graph break.")
+            return 2 * np.arange(x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = 8
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_numpy_non_torch_dtype(self):
         # test that we gracefully graph break on dtypes
         # that do not have pytorch equivalents.
@@ -2000,10 +2046,9 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
         self.assertEqual(cnts.frame_count, 1)
 
+    # cache size limit needs to be larger than the `dtypes` list size
+    @torch._dynamo.config.patch(cache_size_limit=12)
     def test_dtypes_no_graphbreaks(self):
-        # cache size limit needs to be larger than the `dtypes` list size
-        torch._dynamo.config.cache_size_limit = 12
-
         dtypes = [
             # floats
             float,
@@ -2033,11 +2078,10 @@ utils_device.CURRENT_DEVICE == None""",
 
             self.assertEqual(cnts.frame_count, 1)  # no graph break
 
+    # setting the config value makes the PRNG identical to numpy's
+    # NB this may involve a graph break
+    @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_numpy_random_config_to_numpy(self):
-        # setting the config value makes the PRNG identical to numpy's
-        # NB this may involve a graph break
-        torch._dynamo.config.use_numpy_random_stream = True
-
         @torch.compile
         def fn():
             return np.random.uniform(size=13)
@@ -4484,13 +4528,15 @@ def fn():
         def count_graph_break_msgs(msgs):
             return sum(msg.find("Graph break") != -1 for msg in msgs)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
-            torch._dynamo.config.verbose = True
+        with self.assertLogs(
+            logger="torch._dynamo", level=logging.DEBUG
+        ) as log, torch._dynamo.config.patch(verbose=True):
             f1(torch.randn(10), torch.randn(10))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
-            torch._dynamo.config.verbose = False
+        with self.assertLogs(
+            logger="torch._dynamo", level=logging.DEBUG
+        ) as log, torch._dynamo.config.patch(verbose=False):
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
 
