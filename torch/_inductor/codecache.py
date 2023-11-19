@@ -1032,7 +1032,7 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            # output_path = input_path[:-3] + "so"
+            output_path = input_path[:-3] + "so"
             output_dir = get_dir_name_from_path(input_path)
             print("!!!! dbg: ", output_dir)
             cxx_target = BuildTarget()
@@ -1041,18 +1041,17 @@ cdll.LoadLibrary("__lib_path__")
             )
             print("!!! new: ", cxx_target.get_build_cmd())
 
-            '''
             build_cmd = shlex.split(
                 cpp_compile_command(
                     input_path, output_path, warning_all=False, vec_isa=self
                 )
             )            
-            '''
+            
             try:
                 # Check build result
-                # compile_file(input_path, output_path, build_cmd)
-                cxx_target.build()
-                output_path = cxx_target.get_target_file_path()
+                compile_file(input_path, output_path, build_cmd)
+                # cxx_target.build()
+                # output_path = cxx_target.get_target_file_path()
                 subprocess.check_call(
                     [
                         sys.executable,

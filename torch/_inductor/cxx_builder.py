@@ -119,7 +119,7 @@ def _get_windows_runtime_libs():
         "advapi32",
     ]
 
-from .codecache import VecISA, InvalidVecISA
+from .codecache import VecISA, VecAVX2, VecAVX512, InvalidVecISA
 invalid_vec_isa = InvalidVecISA()
         
 class BuildTarget:
@@ -293,7 +293,7 @@ class BuildTarget:
 
         self.__warning_all = warning_all
         self.__include_pytorch = include_pytorch
-        self.__vec_isa  = invalid_vec_isa,
+        self.__vec_isa  = vec_isa,
         self.__cuda = cuda
         self.__aot_mode = aot_mode
         self.__compile_only = compile_only
@@ -396,8 +396,8 @@ class BuildTarget:
         build_temp_dir = os.path.join(build_root, _BUILD_TEMP_DIR)
         _create_if_dir_not_exist(build_temp_dir)
 
+        build_cmd = self.get_build_cmd()
         try:
-            build_cmd = self.get_build_cmd()
             run_command_line(build_cmd, cwd=build_temp_dir)
             
         except subprocess.CalledProcessError as e:
@@ -612,7 +612,7 @@ class BuildTarget:
 
         if _IS_LINUX and (
             include_pytorch
-            # or vec_isa != invalid_vec_isa
+            or vec_isa != invalid_vec_isa
             or cuda
             or config.cpp.enable_kernel_profile
         ):
