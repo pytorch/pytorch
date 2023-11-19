@@ -338,7 +338,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
                 "instruction_shape" : str(op.tile_description.math_instruction.instruction_shape),
-                "acc_type": str(op.tile_description.math_instruction.instruction_shape.element_accumulator.name),
             }
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
