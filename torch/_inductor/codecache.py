@@ -1035,7 +1035,8 @@ cdll.LoadLibrary("__lib_path__")
             output_path = input_path[:-3] + "so"
             output_dir = get_dir_name_from_path(output_path)
             cxx_target = BuildTarget()
-            cxx_target.target(name=key, sources=[input_path], output_directory=output_dir)            
+            cxx_target.target(name=key, sources=[input_path], output_directory=output_dir)
+            print("!!! new: ", cxx_target.get_build_cmd())
 
             build_cmd = shlex.split(
                 cpp_compile_command(
