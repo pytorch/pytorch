@@ -618,13 +618,13 @@ print("arf")
 
         self.assertIn(
             """\
-L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):  # test/dynamo/test_logging.py""",
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
             record_str,
         )
         self.assertIn(
             """\
     triggered by the following guard failure(s):\n\
-    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):  # test/dynamo/test_logging.py""",
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
             record_str,
         )
 
