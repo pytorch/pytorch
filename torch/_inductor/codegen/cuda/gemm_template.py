@@ -304,7 +304,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
@@ -318,7 +318,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
     ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
             return cutlass_lib.LayoutType.ColumnMajor
@@ -341,7 +341,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def has_tma_epilogue(op) -> bool:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         result = False
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
@@ -358,7 +358,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         See https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/examples/49_hopper_gemm_with_collective_builder/49_collective_builder.cu#L283-L285 # noqa: B950
         """
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
             return False
@@ -399,8 +399,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Bias: Optional[Buffer] = None,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.gemm_operation_extensions import (
             EmitGemmUniversal3xInstanceWithEVT,
@@ -528,7 +528,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         # Skip simt kernels
         if (
@@ -617,8 +617,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
@@ -782,8 +782,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             epilogue_nodes = []
 
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation
