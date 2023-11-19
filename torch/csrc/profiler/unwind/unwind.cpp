@@ -34,8 +34,6 @@ Stats stats() {
 #include <linux/limits.h>
 #include <algorithm>
 #include <climits>
-#include <iostream>
-#include <unordered_map>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -43,7 +41,6 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
 #include <torch/csrc/profiler/unwind/fde.h>
-#include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 

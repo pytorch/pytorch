@@ -2991,14 +2991,14 @@ class TestBroadcast(TestCase):
         # gh-13455
         arrs = [np.empty((5, 6, 7))]
         mit = np.broadcast(*arrs)
-        mit2 = np.broadcast(*arrs, **{})
+        mit2 = np.broadcast(*arrs, **{})  # noqa: PIE804
         assert_equal(mit.shape, mit2.shape)
         assert_equal(mit.ndim, mit2.ndim)
         assert_equal(mit.nd, mit2.nd)
         assert_equal(mit.numiter, mit2.numiter)
         assert_(mit.iters[0].base is mit2.iters[0].base)
 
-        assert_raises(ValueError, np.broadcast, 1, **{"x": 1})
+        assert_raises(ValueError, np.broadcast, 1, **{"x": 1})  # noqa: PIE804
 
     @skip(reason="error messages do not match.")
     def test_shape_mismatch_error_message(self):

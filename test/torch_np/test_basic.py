@@ -18,8 +18,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -219,13 +217,6 @@ class TestOneArrAndShape(TestCase):
 
 
 one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.ndim)]
-one_arg_scalar_funcs_xfail = [
-    (w.size, _np.size),
-    subtest(
-        (w.shape, _np.shape), decorators=[xfail] if TEST_WITH_TORCHDYNAMO else []
-    ),  # XXX fails under dynamo
-    (w.ndim, _np.ndim),
-]
 
 
 @instantiate_parametrized_tests
@@ -241,7 +232,7 @@ class TestOneArrToScalar(TestCase):
         assert not isinstance(ta, w.ndarray)
         assert ta == tn
 
-    @parametrize("func, np_func", one_arg_scalar_funcs_xfail)
+    @parametrize("func, np_func", one_arg_scalar_funcs)
     def test_toscalar_list(self, func, np_func):
         t = [[1, 2, 3], [4, 5, 6]]
         ta = func(t)
