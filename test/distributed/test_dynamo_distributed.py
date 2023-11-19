@@ -669,6 +669,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         Ensures that we get the right number of splits and that the respective
         context managers' effects are applied to the computation.
         """
+        try:
+            torch.autocast(torch.device(self.device).type, torch.bfloat16)
+            torch.autocast(torch.device(self.device).type, torch.float16)
+        except Exception:
+            self.skipTest("Need both bfloat16, float16 support on device")
 
         ctx_managers_outer = [
             (
