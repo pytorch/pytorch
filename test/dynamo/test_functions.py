@@ -2535,6 +2535,25 @@ def forward(self, x_1, output_1):
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
+    def test_zip_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in zip(ys, zs, strict=True):
+                x += y * z
+            return x
+
+        opt_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
+
+        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError, "zip().*longer than"
+        ):
+            opt_fn(x, ys[:1], zs)
+
     def test_compare_constant_and_tensor(self):
         for op in [
             operator.lt,
