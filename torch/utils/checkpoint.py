@@ -1192,6 +1192,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         no_recompute = self.no_recompute_policy_fn("forward", func, *args, **kwargs)
         must_recompute = self.must_recompute_policy_fn("forward", func, *args, **kwargs)
+        assert not (no_recompute and must_recompute), f"{func} cannot be both no_recompute and must_recompute at the same time"
         if _is_compiling(func, args, kwargs):
             return self._handle_compile_in_forward_ctx(no_recompute, must_recompute, func, args, kwargs)
         else:
@@ -1246,14 +1247,23 @@ def context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
     The generated context functions also work in eager mode.
 
     Args:
-        policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
+        no_recompute_policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
             to decide whether a particular op should be recomputed in backward pass or not.
             In eager mode:
-                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If policy_fn(...) returns False, the op is guaranteed to be recomputed.
+                If no_recompute_policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If no_recompute_policy_fn(...) returns False, the op is guaranteed to be recomputed.
             In torch.compile mode:
-                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If policy_fn(...) returns False, the op may or may not be recomputed
+                If no_recompute_policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If no_recompute_policy_fn(...) returns False, the op may or may not be recomputed
+                (it's up to the partitioner to decide).
+        must_recompute_policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
+            to decide whether a particular op should be recomputed in backward pass or not.
+            In eager mode:
+                If must_recompute_policy_fn(...) returns True, the op is guaranteed to be recomputed.
+                If must_recompute_policy_fn(...) returns False, the op is guaranteed to NOT be recomputed.
+            In torch.compile mode:
+                If must_recompute_policy_fn(...) returns True, the op is guaranteed to be recomputed.
+                If must_recompute_policy_fn(...) returns False, the op may or may not be recomputed
                 (it's up to the partitioner to decide).
 
     Returns:
