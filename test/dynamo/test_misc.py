@@ -734,7 +734,9 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split("\n"):
+utils_device.CURRENT_DEVICE == None""".split(
+            "\n"
+        ):
             self.assertIn(
                 line,
                 guard_code_str,
