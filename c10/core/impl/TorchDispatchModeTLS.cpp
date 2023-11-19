@@ -3,6 +3,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 #include <utility>
 
@@ -10,20 +11,6 @@ namespace c10 {
 namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
-
-bool TorchDispatchModeTLS::any_pre_dispatch_modes_set(bool skip_infra_modes) {
-  if (!torchDispatchModeState.pre_dispatch_stack_.empty())
-    return true;
-  if (!skip_infra_modes) {
-    for (const auto i : c10::irange(
-             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-      if (torchDispatchModeState.pre_dispatch_infra_modes_[i] != c10::nullopt) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
 
 bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())
@@ -40,22 +27,12 @@ bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
 }
 
 void TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
-    std::shared_ptr<SafePyObject> mode,
-    bool is_pre_dispatch) {
-  if (is_pre_dispatch) {
-    if (!any_pre_dispatch_modes_set()) {
-      c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, true);
-    }
-    torchDispatchModeState.pre_dispatch_stack_.push_back(std::move(mode));
-    return;
-  }
-
+    std::shared_ptr<SafePyObject> mode) {
   if (!any_modes_set()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, true);
   }
-
   torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
@@ -80,60 +57,38 @@ const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack(
         }
       }
     }
-    TORCH_CHECK(out, "trying to pop from empty mode stack");
-    if (!any_pre_dispatch_modes_set()) {
-      c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, false);
-    }
-    return out;
-  }
-  if (!torchDispatchModeState.stack_.empty()) {
-    out = torchDispatchModeState.stack_.back();
-    torchDispatchModeState.stack_.pop_back();
+    // Why do we have to do it unconditionally?
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, false);
   } else {
-    for (int64_t i =
-             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
-         i >= 0;
-         --i) {
-      if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
-        out = std::move(torchDispatchModeState.infra_modes_[i].value());
-        torchDispatchModeState.infra_modes_[i] = c10::nullopt;
-        break;
+    if (!torchDispatchModeState.stack_.empty()) {
+      out = torchDispatchModeState.stack_.back();
+      torchDispatchModeState.stack_.pop_back();
+    } else {
+      for (int64_t i =
+               static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
+           i >= 0;
+           --i) {
+        if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+          out = std::move(torchDispatchModeState.infra_modes_[i].value());
+          torchDispatchModeState.infra_modes_[i] = c10::nullopt;
+          break;
+        }
       }
+    }
+
+    TORCH_CHECK(out, "trying to pop from empty mode stack");
+    if (!any_modes_set()) {
+      c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
+      c10::impl::tls_set_dispatch_key_included(
+          DispatchKey::PythonTLSSnapshot, false);
     }
   }
 
-  TORCH_CHECK(out, "trying to pop from empty mode stack");
-  if (!any_modes_set()) {
-    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
-    c10::impl::tls_set_dispatch_key_included(
-        DispatchKey::PythonTLSSnapshot, false);
-  }
   return out;
 }
 
 const std::tuple<std::shared_ptr<SafePyObject>, TorchDispatchModeKey>
-TorchDispatchModeTLS::pop_highest_infra_mode(bool is_pre_dispatch) {
-  if (is_pre_dispatch) {
-    for (int64_t i =
-             static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
-         i >= 0;
-         --i) {
-      if (torchDispatchModeState.pre_dispatch_infra_modes_[i] != c10::nullopt) {
-        auto out_mode =
-            torchDispatchModeState.pre_dispatch_infra_modes_[i].value();
-        torchDispatchModeState.pre_dispatch_infra_modes_[i] = c10::nullopt;
-        if (!any_pre_dispatch_modes_set()) {
-          c10::impl::tls_set_dispatch_key_included(
-              DispatchKey::PreDispatch, false);
-        }
-        return std::make_tuple(
-            std::move(out_mode), static_cast<TorchDispatchModeKey>(i));
-      }
-    }
-    TORCH_CHECK(
-        false,
-        "Called pop_highest_infra_mode, but no infra modes were active in PreDispatch stack.")
-  }
+TorchDispatchModeTLS::pop_highest_infra_mode() {
   for (int64_t i = static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
        i >= 0;
        --i) {
@@ -242,29 +197,28 @@ void TorchDispatchModeTLS::set_mode(
         to_string(mode_key),
         ", but one already exists");
 
-    if (!any_pre_dispatch_modes_set()) {
-      c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, true);
-    }
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, true);
 
     torchDispatchModeState
         .pre_dispatch_infra_modes_[static_cast<size_t>(mode_key)] = mode;
 
-  } else {
-    TORCH_CHECK(
-        torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] ==
-            c10::nullopt,
-        "trying to set the current ",
-        to_string(mode_key),
-        ", but one already exists");
-
-    if (!any_modes_set()) {
-      c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
-      c10::impl::tls_set_dispatch_key_included(
-          DispatchKey::PythonTLSSnapshot, true);
-    }
-
-    torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] = mode;
+    return;
   }
+
+  TORCH_CHECK(
+      torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] ==
+          c10::nullopt,
+      "trying to set the current ",
+      to_string(mode_key),
+      ", but one already exists");
+
+  if (!any_modes_set()) {
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonTLSSnapshot, true);
+  }
+
+  torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] = mode;
 }
 
 const c10::optional<std::shared_ptr<SafePyObject>> TorchDispatchModeTLS::
@@ -275,12 +229,12 @@ const c10::optional<std::shared_ptr<SafePyObject>> TorchDispatchModeTLS::
     torchDispatchModeState
         .pre_dispatch_infra_modes_[static_cast<size_t>(mode_key)] =
         c10::nullopt;
-    if (out.has_value() && !any_pre_dispatch_modes_set()) {
+
+    if (out.has_value()) {
       c10::impl::tls_set_dispatch_key_included(DispatchKey::PreDispatch, false);
     }
     return out;
   }
-
   auto out = torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] =
       c10::nullopt;

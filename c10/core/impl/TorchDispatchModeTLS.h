@@ -19,8 +19,7 @@ struct C10_API TorchDispatchModeTLS {
   // If you're pushing an infra mode onto the stack, we expect
   // you to use set_mode
   static void push_non_infra_mode_onto_stack(
-      std::shared_ptr<SafePyObject> mode,
-      bool is_pre_dispatch = false);
+      std::shared_ptr<SafePyObject> mode);
   // Pops the top mode of the stack,
   // giving precedence to user modes before attempting to pop
   // any infra modes
@@ -29,7 +28,7 @@ struct C10_API TorchDispatchModeTLS {
   // Returns the highest-priority infra mode on the stack,
   // along with its mode key.
   static const std::tuple<std::shared_ptr<SafePyObject>, TorchDispatchModeKey>
-  pop_highest_infra_mode(bool is_pre_dispatch = false);
+  pop_highest_infra_mode();
 
   static const std::shared_ptr<SafePyObject>& get_stack_at(
       int64_t idx,
@@ -51,7 +50,6 @@ struct C10_API TorchDispatchModeTLS {
   static void set_state(TorchDispatchModeTLS state);
 
   static bool any_modes_set(bool skip_infra_modes = false);
-  static bool any_pre_dispatch_modes_set(bool skip_infra_modes = false);
 
  private:
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;

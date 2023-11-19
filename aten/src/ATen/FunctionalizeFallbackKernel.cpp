@@ -7,6 +7,7 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -25,7 +26,6 @@
 #include <ATen/ops/_unsafe_view.h>
 
 #include <c10/core/DispatchKey.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 #include <utility>
 #endif
