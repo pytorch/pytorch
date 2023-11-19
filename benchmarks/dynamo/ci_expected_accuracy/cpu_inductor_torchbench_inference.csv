@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,56
 
 
 
-detectron2_fcos_r_50_fpn,fail_to_run,11
+detectron2_fcos_r_50_fpn,pass,44
 
 
 
@@ -138,10 +138,6 @@ hf_GPT2,pass,0
 
 
 
-hf_GPT2_large,infra_error,0
-
-
-
 hf_Reformer,pass,5
 
 
@@ -182,7 +178,7 @@ opacus_cifar10,pass,0
 
 
 
-phi_1_5,pass,0
+phi_1_5,pass,74
 
 
 

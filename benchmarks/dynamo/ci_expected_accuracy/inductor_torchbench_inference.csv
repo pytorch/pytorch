@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,fail_to_run,11
+detectron2_fcos_r_50_fpn,pass,42
 
 
 
@@ -278,7 +278,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,pass,17
 
 
 

@@ -178,11 +178,10 @@ init_command = [
 ]
 
 [[linter]]
-code = 'MYPYNOFOLLOW'
+code = 'MYPYINDUCTOR'
 include_patterns = [
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
-    'torch/_C/_dynamo/**/*.py',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -194,8 +193,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--config=mypy-nofollow.ini',
-    '--code=MYPYNOFOLLOW',
+    '--config=mypy-inductor.ini',
+    '--code=MYPYINDUCTOR',
     '--',
     '@{{PATHSFILE}}'
 ]
