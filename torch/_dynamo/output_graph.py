@@ -29,10 +29,10 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv, free_unbacked_symbols
-from torch.utils.weak import WeakTensorKeyDictionary
+from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -1185,6 +1185,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         pass insert them into the graph as proper tests.
         """
         # TODO: Request simplification on runtime asserts before emitting them
+
         # We are going to mutate the dict
         ras_by_symbol = self.shape_env.deferred_runtime_asserts.copy()
         symbol_to_proxy = {}
@@ -1196,11 +1197,21 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 break
             placeholders.add(node)
         assert last_placeholder is not None
+
+        # Identify what symbols we need to reify.  This isn't strictly needed
+        # but helps reduce churn on the graph
+        needed_symbols: Set[sympy.Symbol] = set()
+        for ras in ras_by_symbol.values():
+            for ra in ras:
+                needed_symbols.update(free_symbols(ra.expr))
+
         for node in self.graph.nodes:
             # Placeholders can match symbols, but when we destructure them
             # with size we have to make sure we insert the nodes after all
             # the placeholders
-            with self.graph.inserting_after(node if node not in placeholders else last_placeholder):
+            with self.graph.inserting_after(
+                node if node not in placeholders else last_placeholder
+            ):
                 if "example_value" not in node.meta:
                     continue
 
@@ -1222,20 +1233,28 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 # to be matched from placeholders
                 def match_symbol(symint, cb):
                     if (
-                        isinstance(symint, torch.SymInt) and
-                        isinstance(i0 := symint.node.expr, sympy.Symbol) and
-                        i0 not in symbol_to_proxy
+                        isinstance(symint, torch.SymInt)
+                        and isinstance(s := symint.node.expr, sympy.Symbol)
+                        and s not in symbol_to_proxy
+                        and s in needed_symbols
                     ):
-                        symbol_to_proxy[i0] = fx.Proxy(cb())
-                        defs.append(i0)
+                        symbol_to_proxy[s] = fx.Proxy(cb())
+                        defs.append(s)
 
                 match_symbol(node.meta["example_value"], lambda: node)
                 if isinstance(t := node.meta["example_value"], torch.Tensor):
                     for i, s in enumerate(t.size()):
-                        match_symbol(s, lambda: self.graph.call_method("size", (node, i)))
+                        match_symbol(
+                            s, lambda: self.graph.call_method("size", (node, i))
+                        )
                     for i, s in enumerate(t.stride()):
-                        match_symbol(s, lambda: self.graph.call_method("stride", (node, i)))
-                    match_symbol(t.storage_offset(), lambda: self.graph.call_method("storage_offset", (node,)))
+                        match_symbol(
+                            s, lambda: self.graph.call_method("stride", (node, i))
+                        )
+                    match_symbol(
+                        t.storage_offset(),
+                        lambda: self.graph.call_method("storage_offset", (node,)),
+                    )
 
                 for i0 in defs:
                     ras = ras_by_symbol.pop(i0, [])
@@ -1250,15 +1269,22 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         else:
                             # Convert the sympy expression into a sequence of FX
                             # nodes
-                            res = sympy_interp(PythonReferenceAnalysis, symbol_to_proxy, ra.expr).node
+                            res = sympy_interp(
+                                PythonReferenceAnalysis, symbol_to_proxy, ra.expr
+                            ).node
                             with self.graph.inserting_after(res):
-                                res2 = self.graph.call_function(torch.ops.aten.scalar_tensor.default, (res,))
+                                res2 = self.graph.call_function(
+                                    torch.ops.aten.scalar_tensor.default, (res,)
+                                )
                             with self.graph.inserting_after(res2):
                                 self.graph.call_function(
                                     torch.ops.aten._assert_async.msg,
                                     # TODO: use ra.msg here, but it's pretty
                                     # useless right now
-                                    (res2, f"Deferred runtime assertion failed {ra.expr}")
+                                    (
+                                        res2,
+                                        f"Deferred runtime assertion failed {ra.expr}",
+                                    ),
                                 )
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:

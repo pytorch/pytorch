@@ -3504,7 +3504,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_fn(inp, other, alpha=alpha, out=compile_out)
             self.assertTrue(same(out, compile_out))
 
-    @torch._dynamo.config.patch(capture_scalar_outputs = True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_deferred_runtime_asserts(self):
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
