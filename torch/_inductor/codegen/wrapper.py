@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -359,7 +359,7 @@ class WrapperCodeGen(CodeGen):
                 self.write_constant(name, hashed)
 
         self.allocated = set()
-        self.freed = set()
+        self.freed: Set[str] = set()
 
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
@@ -653,7 +653,9 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
         )
 
-    def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
+    def codegen_inputs(
+        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+    ):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
