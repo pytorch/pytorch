@@ -906,11 +906,11 @@ class BuiltinVariable(VariableTracker):
             unpacked = [arg.unpack_var_sequence(tx) for arg in args]
             if kwargs.pop("strict", False) and len(unpacked) > 0:
                 if not all(len(u) == len(unpacked[0]) for u in unpacked):
-                    raise UserError(ValueError, "zip() has one argument of len differing from others")
-            items = [
-                variables.TupleVariable(list(item))
-                for item in zip(*unpacked)
-            ]
+                    raise UserError(
+                        ValueError,
+                        "zip() has one argument of len differing from others",
+                    )
+            items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_enumerate(self, tx, *args):

@@ -2542,16 +2542,21 @@ def forward(self, x_1, output_1):
                 x += y * z
             return x
 
-        opt_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
+        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
 
         x = torch.ones(3)
         ys = [1.0, 2.0, 3.0]
         zs = [2.0, 5.0, 8.0]
 
         self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, "zip()"
-        ):
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys[:1], zs)
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "zip().*longer"):
             opt_fn(x, ys[:1], zs)
 
     def test_compare_constant_and_tensor(self):
