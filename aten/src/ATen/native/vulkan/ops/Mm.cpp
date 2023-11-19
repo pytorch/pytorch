@@ -2,6 +2,9 @@
 #include <ATen/native/vulkan/ops/Utils.h>
 
 #include <ATen/Context.h>
+#include <ATen/native/vulkan/api/Tensor.h>
+#include <ATen/native/vulkan/api/Types.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -13,10 +16,76 @@ namespace {
 using namespace api::utils;
 using namespace at::native::vulkan::ops;
 
-vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
+vTensor pack_inputs_using_height_packing(const Tensor& input_arg) {
+  TORCH_INTERNAL_ASSERT(
+      !input_arg.is_quantized(),
+      "Vulkan Linear not usable! "
+      "Reason: Input packing only supports non-quantized tensors.");
+  TORCH_INTERNAL_ASSERT(
+      input_arg.dim() == 2,
+      "Vulkan Linear not usable! "
+      "Reason: Input packing only supports 2D tensors.");
+
+  Tensor input = input_arg;
+  if (input.is_cpu()) {
+    input = input.vulkan();
   }
+
+  TORCH_CHECK(input.is_vulkan(), "Input must be on Vulkan device!");
+
+  vTensor v_input = convert(input);
+  if (v_input.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_input = packing::convert_image_channels_packed_to_width_packed(v_input);
+  }
+
+  TORCH_CHECK(
+      v_input.gpu_memory_layout() == api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      "After packing, the v_input must be in TENSOR_WIDTH_PACKED format");
+
+  return v_input;
+}
+
+vTensor pack_weights_using_height_packing(const Tensor& weight_arg) {
+  // Only non-batch, non-quantized tensors are supported
+  TORCH_INTERNAL_ASSERT(
+      !weight_arg.is_quantized(),
+      "Vulkan Linear not usable! "
+      "Reason: Weight packing only supports non-quantized tensors.");
+  TORCH_INTERNAL_ASSERT(
+      weight_arg.dim() == 2,
+      "Vulkan Linear not usable! "
+      "Reason: Weight packing only supports 2D tensors.");
+
+  Tensor weight = weight_arg;
+
+  if (weight.is_cpu()) {
+    weight = weight.vulkan();
+  }
+
+  TORCH_CHECK(weight.is_vulkan(), "Weight must be on Vulkan device!");
+
+  vTensor v_weight = convert(weight);
+  if (v_weight.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_weight =
+        packing::convert_image_channels_packed_to_height_packed(v_weight);
+  }
+
+  TORCH_CHECK(
+      v_weight.gpu_memory_layout() ==
+          api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED,
+      "After packing, the v_weight must be in TENSOR_HEIGHT_PACKED format");
+
+  return v_weight;
+}
+
+vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
+  if (!weight_arg.is_quantized() && !use_batch) {
+    return pack_weights_using_height_packing(weight_arg);
+  }
+
+  // Rest of the logic are either quantized or batched.
 
   bool quantized = false;
   switch (weight_arg.scalar_type()) {
@@ -38,30 +107,35 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         "Vulkan Linear not usable! "
         "Reason: Unable to perform weight packing with batch; the input tensor of a batch of matrices should contain 3 dimensions: batch, height, width.");
   }
-
   /* Source */
-  const int64_t src_kb_sz =
-      use_batch ? w_sizes[Layout::BatchMatrices::batch] : 1;
-  const int64_t src_kw_sz = use_batch ? w_sizes[Layout::BatchMatrices::width]
-                                      : w_sizes[Layout::Parameter::width];
-  const int64_t src_kh_sz = use_batch ? w_sizes[Layout::BatchMatrices::height]
-                                      : w_sizes[Layout::Parameter::height];
+  int64_t src_kb_sz = 0;
+  int64_t src_kw_sz = 0;
+  int64_t src_kh_sz = 0;
+  /* Destination */
+  int64_t dst_kb_sz = 0;
+  int64_t dst_kw_sz = 0;
+  int64_t dst_kh_sz = 0;
+  std::vector<int64_t> dst_vtensor_sizes;
+  /* Source */
+  src_kb_sz = use_batch ? w_sizes[Layout::BatchMatrices::batch] : 1;
+  src_kw_sz = use_batch ? w_sizes[Layout::BatchMatrices::width]
+                        : w_sizes[Layout::Parameter::width];
+  src_kh_sz = use_batch ? w_sizes[Layout::BatchMatrices::height]
+                        : w_sizes[Layout::Parameter::height];
 
   /* Destination */
-  const int64_t dst_kb_sz = src_kb_sz;
-  const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
-  const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
-
-  vTensor v_weight{
-      context,
-      {
-          dst_kb_sz,
-          4,
-          dst_kh_sz,
-          dst_kw_sz,
-      },
-      weight_arg.scalar_type(),
+  dst_kb_sz = src_kb_sz;
+  dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+  dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+  dst_vtensor_sizes = {
+      dst_kb_sz,
+      4,
+      dst_kh_sz,
+      dst_kw_sz,
   };
+
+  vTensor v_weight{context, dst_vtensor_sizes, weight_arg.scalar_type()};
+
   if (quantized) {
     v_weight.set_is_quantized();
     v_weight.set_scale(weight_arg.q_scale());
@@ -78,7 +152,7 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
         src_kw_sz,
         dst_kh_sz,
         dst_kw_sz);
-  } else {
+  } else if (use_batch) {
     stage_pack_weights<float>(
         context,
         v_weight,
@@ -127,15 +201,11 @@ vTensor pack_biases(
         src_kw_sz = b_sizes[Layout::BatchMatrices::batch];
         src_kh_sz = 1;
       }
-    } else {
-      src_kb_sz = 1;
-      if (bias.sizes().size() == 2) {
-        src_kw_sz = b_sizes[Layout::Parameter::width];
-        src_kh_sz = b_sizes[Layout::Parameter::height];
-      } else {
-        src_kw_sz = b_sizes[Layout::Parameter::height];
-        src_kh_sz = 1;
-      }
+    } else if (bias.scalar_type() == at::kFloat) {
+      // if it is float/unquantized and not batch case, we use improved
+      // algorithm with no packed bias for compiler-optimizable broadcasting
+      return convert(bias.vulkan());
+      ;
     }
     const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
 
@@ -358,7 +428,7 @@ Tensor run_addmm_context(
       input_arg.dim() == 2 ? input_arg : reshape_to_2d(input_arg);
   const Tensor input =
       input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
-  const vTensor& v_input = convert(input);
+  const vTensor& v_input = pack_inputs_using_height_packing(input);
 
   const vTensor& packed_v_weight = convert(
       linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
@@ -383,10 +453,16 @@ Tensor run_addmm_context(
        (packed_v_weight.is_quantized() && v_input.is_quantized())),
       "run_addmm_context called for quantized version with unquantized input");
 
+  TORCH_CHECK(
+      (quantized ||
+       packed_v_weight.gpu_memory_layout() ==
+           api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED),
+      "run_addmm_context called for non-quantized version with unpacked weight");
+
   vTensor v_output{
       context,
       {
-          v_input.sizes()[Layout::Parameter::height],
+          input_arg_2d.sizes()[Layout::Parameter::height],
           unpacked_weight_sizes[Layout::Parameter::width],
       },
       input_arg.scalar_type(),
@@ -453,15 +529,14 @@ Tensor run_addmm_context(
     } else {
       compute_shader = VK_KERNEL(addmm);
       const struct {
-        uvec3 size;
-        int32_t K;
+        uvec3 shader_extents;
+        uint32_t tensor_row_size;
         uvec3 bias_size;
         int32_t _;
         vec2 multiplier;
       } block{
           v_output.extents(),
-          safe_downcast<int32_t>(
-              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents().data[0u],
           packed_v_bias.extents(),
           0,
           {
@@ -469,11 +544,11 @@ Tensor run_addmm_context(
               beta,
           },
       };
+
       params = api::UniformParamsBuffer(context, block);
     }
 
     api::PipelineBarrier pipeline_barrier{};
-
     context->submit_compute_job(
         // shader descriptor
         compute_shader,
@@ -481,10 +556,10 @@ Tensor run_addmm_context(
         pipeline_barrier,
         // global work group size
         {
-            safe_downcast<uint32_t>(div_up(
-                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
-                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+            safe_downcast<uint32_t>(div_up(
+                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
             1,
         },
         // local work group size
@@ -545,12 +620,11 @@ Tensor run_addmm_context(
           : VK_KERNEL(quantized_mm_quint8);
     } else {
       const struct {
-        uvec3 size;
-        int32_t K;
+        uvec3 shader_extents;
+        uint32_t tensor_row_size;
       } block_no_bias{
           v_output.extents(),
-          safe_downcast<int32_t>(
-              div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+          v_input.extents().data[0u],
       };
       params = api::UniformParamsBuffer(context, block_no_bias);
       compute_shader = VK_KERNEL(mm);
@@ -565,10 +639,10 @@ Tensor run_addmm_context(
         pipeline_barrier,
         // global work group size
         {
-            safe_downcast<uint32_t>(div_up(
-                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
-                div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+            safe_downcast<uint32_t>(div_up(
+                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
             1,
         },
         // local work group size

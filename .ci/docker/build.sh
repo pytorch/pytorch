@@ -155,13 +155,13 @@ case "$image" in
     CONDA_CMAKE=yes
     ONNX=yes
     ;;
-  pytorch-linux-focal-py3-clang9-android-ndk-r19c)
+  pytorch-linux-focal-py3-clang9-android-ndk-r21e)
     ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
-    ANDROID_NDK_VERSION=r19c
+    ANDROID_NDK_VERSION=r21e
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
@@ -202,7 +202,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.4.2
+    ROCM_VERSION=5.6
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -213,7 +213,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=5.7
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -265,6 +265,12 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
+    ;;
+  pytorch-linux-jammy-py3-clang12-executorch)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=12
+    CONDA_CMAKE=yes
+    EXECUTORCH=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
@@ -367,6 +373,7 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+       --build-arg "EXECUTORCH=${EXECUTORCH}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

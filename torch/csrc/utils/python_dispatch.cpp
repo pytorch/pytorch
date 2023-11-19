@@ -368,18 +368,20 @@ void initDispatchBindings(PyObject* module) {
           "define",
           [](const py::object& self,
              const char* schema,
-             const char* alias_analysis) {
+             const char* alias_analysis,
+             const std::vector<at::Tag>& tags) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
-                std::move(parsed_schema), {}, register_or_verify());
+                std::move(parsed_schema), tags, register_or_verify());
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
           },
           "",
           py::arg("schema"),
-          py::arg("alias_analysis") = "")
+          py::arg("alias_analysis") = "",
+          py::arg("tags") = std::vector<at::Tag>())
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
@@ -771,6 +773,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+  m.def("_dispatch_pystub", [](const char* name, const char* overload) {
+    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+        c10::OperatorName(name, overload));
+  });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
@@ -807,6 +813,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
   });
 
   using c10::impl::TorchDispatchModeKey;

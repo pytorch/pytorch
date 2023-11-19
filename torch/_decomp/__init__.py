@@ -8,7 +8,7 @@ import torch
 import torch.library
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 
 __all__ = [
     "decomposition_table",
@@ -182,7 +182,7 @@ def register_decomposition(
             _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(register, aten_op)
+        pytree.tree_map_(register, aten_op)
         return fn
 
     return decomposition_decorator
@@ -325,6 +325,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
+            aten._lazy_clone,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
             aten.lerp,
@@ -438,5 +439,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._weight_norm_interface,
         ]
     )

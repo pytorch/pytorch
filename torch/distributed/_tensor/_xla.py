@@ -57,7 +57,7 @@ def convert_to_xla_mesh(dt_mesh: DeviceMesh) -> "Mesh":
     Example (1x4 logical device mesh topology):
       ```
       dt_mesh = DeviceMesh("xla", [[1, 2, 3, 4]])
-      dt_mesh.mesh.shape
+      dt_mesh.shape
       >> torch.Size([1, 4])
 
       mesh = convert_to_xla_mesh(dt_mesh)

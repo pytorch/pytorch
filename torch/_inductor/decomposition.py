@@ -1,6 +1,7 @@
 import functools
 import logging
 import math
+import sys
 import typing
 from typing import Optional
 
@@ -245,7 +246,7 @@ def cat(tensors, dim=0):
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return tensors[0].clone()
+        return filtered_tensors[0].clone()
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
@@ -309,6 +310,20 @@ def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
+@register_decomposition(aten.amax)
+def amax(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.any(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
+
+
+@register_decomposition(aten.amin)
+def amin(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.all(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
+
+
 @register_decomposition([aten.narrow_copy])
 def narrow_copy(self, dim, start, length):
     return torch.narrow(self, dim, start, length).clone()
@@ -333,7 +348,7 @@ def get_like_layout(
     tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
 ) -> torch.memory_format:
     # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
+    if memory_format is torch.preserve_format or memory_format is None:
         return utils.suggest_memory_format(tensor)
     else:
         return memory_format
@@ -423,6 +438,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -452,6 +469,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -474,7 +493,10 @@ def dequantize_per_tensor_tensor_decomp_impl(
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
         x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
-        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        if sys.byteorder == "little":
+            return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        else:
+            return ((x << 24) + (y << 16) + (z << 8) + w).view(torch.float32)[..., None]
 
     scales = bitcast_u8_to_f32(packed[..., -8:-4])
     offsets = bitcast_u8_to_f32(packed[..., -4:])
