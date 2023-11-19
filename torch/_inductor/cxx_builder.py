@@ -224,27 +224,31 @@ class BuildTarget:
             build_root = os.path.dirname(os.path.abspath(__file__))
         else:
             build_root = self.__output_directory
+        _create_if_dir_not_exist(build_root)            
         return build_root
 
-    def get_build_cmd(self):
-        if self.__name is None:
-            raise RuntimeError("target name should not be None.")
-
+    def get_target_file_path(self):
         build_root = self._get_build_root_dir()
-
         if self.__is_shared:
             file_ext = self.get_shared_lib_ext()
             self.add_ldflags([self.__get_shared_flag()])
         else:
             file_ext = self.get_exec_ext()
+            
+        target_file = f"{self.__name}{file_ext}"
+        target_file = os.path.join(build_root, target_file)            
+
+    def get_build_cmd(self):
+        if self.__name is None:
+            raise RuntimeError("target name should not be None.")
+
+        if self.__is_shared:
+            self.add_ldflags([self.__get_shared_flag()])
 
         if _IS_WINDOWS:
             self.add_libraries(_get_windows_runtime_libs())
-
-        target_file = f"{self.__name}{file_ext}"
-        target_file = os.path.join(build_root, target_file)
-
-        _create_if_dir_not_exist(build_root)
+            
+        target_file = self.get_target_file_path()
 
         compiler = _get_cxx_compiler()
         (
