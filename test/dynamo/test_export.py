@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
+    FreshCreateSymbolicPolicy,
     ShapeEnv,
 )
 from torch.testing._internal import common_utils
@@ -3247,7 +3248,10 @@ def forward(self, x):
                 shape_env=shape_env,
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
+                    ),
                 )
                 for i, size in enumerate(size_tests):
                     pred = fake_x.size(0) == size

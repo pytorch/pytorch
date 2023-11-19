@@ -5316,6 +5316,30 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter3(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 1, 9223372036854775807, 2)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 4]),
+                torch.randn([1, 2]),
+            ],
+        )
+
+    def test_slice_scatter4(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 2, 9223372036854775807, 3)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 9]),
+                torch.randn([1, 3]),
+            ],
+        )
+
     def test_scatter1(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b)

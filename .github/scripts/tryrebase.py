@@ -51,7 +51,7 @@ def post_already_uptodate(
 
 def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
-) -> None:
+) -> bool:
     branch = f"pull/{pr.pr_num}/head"
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
@@ -68,6 +68,7 @@ def rebase_onto(
         push_result = repo._run_git("push", "-f", remote_url, refspec)
     if "Everything up-to-date" in push_result:
         post_already_uptodate(pr, repo, onto_branch, dry_run)
+        return False
     else:
         gh_post_comment(
             pr.org,
@@ -78,11 +79,12 @@ def rebase_onto(
             + "git pull --rebase`)",
             dry_run=dry_run,
         )
+        return True
 
 
 def rebase_ghstack_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
-) -> None:
+) -> bool:
     if (
         subprocess.run(
             [sys.executable, "-m", "ghstack", "--help"],
@@ -117,6 +119,7 @@ def rebase_ghstack_onto(
 
     if dry_run:
         print("Don't know how to dry-run ghstack")
+        return False
     else:
         ghstack_result = subprocess.run(["ghstack"], capture_output=True, check=True)
         push_result = ghstack_result.stdout.decode("utf-8")
@@ -168,6 +171,8 @@ def rebase_ghstack_onto(
             in push_result
         ):
             post_already_uptodate(pr, repo, onto_branch, dry_run)
+            return False
+        return True
 
 
 def additional_rebase_failure_info(e: Exception) -> str:
@@ -224,9 +229,10 @@ def main() -> None:
     try:
         if pr.is_ghstack_pr():
             with git_config_guard(repo):
-                rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+                rc = rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
-            rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+        sys.exit(0 if rc else 1)
 
     except Exception as e:
         msg = f"Rebase failed due to {e}"

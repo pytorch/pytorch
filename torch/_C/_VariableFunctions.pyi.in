@@ -1,4 +1,5 @@
 # ${generated_comment}
+# mypy: disable-error-code="type-arg"
 
 import builtins
 from typing import (
