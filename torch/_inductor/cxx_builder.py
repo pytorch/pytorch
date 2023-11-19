@@ -7,14 +7,12 @@ import sys
 import sysconfig
 from pathlib import Path
 from typing import List
-import copy
 
 import torch
 from torch._inductor import config, exc
 
 if config.is_fbcode():
     from triton.fb import build_paths
-    from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (  # type: ignore[import]
         log_global_cache_errors,
@@ -120,9 +118,12 @@ def _get_windows_runtime_libs():
         "advapi32",
     ]
 
-from .codecache import VecISA, VecAVX2, VecAVX512, InvalidVecISA
+
+from .codecache import InvalidVecISA, VecISA
+
 invalid_vec_isa = InvalidVecISA()
-        
+
+
 class BuildTarget:
     __name = None
     __sources = []
@@ -305,7 +306,6 @@ class BuildTarget:
             build_root = os.path.dirname(os.path.abspath(__file__))
         else:
             build_root = self.__output_directory
-        _create_if_dir_not_exist(build_root)
         return build_root
 
     def get_target_file_path(self):
@@ -398,9 +398,10 @@ class BuildTarget:
         _create_if_dir_not_exist(build_temp_dir)
 
         build_cmd = self.get_build_cmd()
+        print("!!! xu's builder: ", build_cmd)
         try:
             run_command_line(build_cmd, cwd=build_temp_dir)
-            
+
         except subprocess.CalledProcessError as e:
             output = e.output.decode("utf-8")
             openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -415,7 +416,7 @@ class BuildTarget:
                     " with `include/omp.h` under it."
                 )
                 output += instruction
-            raise exc.CppCompileError(build_cmd, output) from e        
+            raise exc.CppCompileError(build_cmd, output) from e
         _remove_dir(build_temp_dir)
 
     def _config_torch_build_options(
@@ -661,7 +662,7 @@ class BuildTarget:
             if macros:
                 if config.is_fbcode() and vec_isa != invalid_vec_isa:
                     cap = str(vec_isa).upper()
-                    '''
+                    """
                     macros = " ".join(
                         [
                             vec_isa.build_arch_flags(),
@@ -669,15 +670,15 @@ class BuildTarget:
                             f"-D CPU_CAPABILITY_{cap}",
                             f"-D HAVE_{cap}_CPU_DEFINITION",
                         ]
-                    )                    
-                    '''
+                    )
+                    """
                     cflag_list = vec_isa.build_arch_flags().split()
                     self.add_cflags(cflag_list)
-                    
+
                     self.add_defination(" CPU_CAPABILITY={cap}")
                     self.add_defination(" CPU_CAPABILITY_{cap}")
                     self.add_defination(" HAVE_{cap}_CPU_DEFINITION")
-                    
+
                 macro_list = macros.split()
                 for i in macro_list:
                     self.add_defination(i)

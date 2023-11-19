@@ -85,6 +85,7 @@ else:
     def use_global_cache() -> bool:
         return False
 
+
 _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
@@ -1019,7 +1020,7 @@ cdll.LoadLibrary("__lib_path__")
         return self._macro
 
     def build_arch_flags(self) -> str:
-        return (self._arch_flags_linux if not _IS_WINDOWS else self._arch_flags_windows)
+        return self._arch_flags_linux if not _IS_WINDOWS else self._arch_flags_windows
 
     def __hash__(self) -> int:
         return hash(str(self))
@@ -1030,6 +1031,7 @@ cdll.LoadLibrary("__lib_path__")
             return config.cpp.vec_isa_ok
 
         from .cxx_builder import BuildTarget, get_dir_name_from_path
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -1040,18 +1042,22 @@ cdll.LoadLibrary("__lib_path__")
             output_dir = get_dir_name_from_path(input_path)
             cxx_target = BuildTarget()
             cxx_target.target(
-                name=key, sources=[input_path], output_directory=output_dir, warning_all=False, vec_isa=self
+                name=key,
+                sources=[input_path],
+                output_directory=output_dir,
+                warning_all=False,
+                vec_isa=self,
             )
             print("!!! new: ", cxx_target.get_build_cmd())
-            
-            '''
+
+            """
             build_cmd = shlex.split(
                 cpp_compile_command(
                     input_path, output_path, warning_all=False, vec_isa=self
                 )
-            )                
-            '''        
-            
+            )
+            """
+
             try:
                 # Check build result
                 # compile_file(input_path, output_path, build_cmd)
@@ -1290,20 +1296,20 @@ def get_include_and_linking_paths(
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
-    def format_define_string(def_val_str:str):
+    def format_define_string(def_val_str: str):
         def_list = def_val_str.split()
         def_fmt = ""
         for i in def_list:
-            def_fmt+=f" -D{i} "
-        return def_fmt            
-    
-    def format_cflag_string(cflag_val_str:str):
+            def_fmt += f" -D{i} "
+        return def_fmt
+
+    def format_cflag_string(cflag_val_str: str):
         cflag_list = cflag_val_str.split()
         cflag_fmt = ""
         for i in cflag_list:
-            cflag_fmt+=f" -{i} "
-        return cflag_fmt                
-    
+            cflag_fmt += f" -{i} "
+        return cflag_fmt
+
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -1470,6 +1476,7 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
 ) -> str:
+    # raise "hahaha"
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
@@ -1836,8 +1843,18 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
+        from .cxx_builder import BuildTarget, get_dir_name_from_path
+
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+
+        cxx_target_0 = BuildTarget()
+        cxx_target_0.target(
+            name="", sources="i", output_directory="o", vec_isa=picked_vec_isa
+        )
+        cpp_command = cxx_target_0.get_build_cmd()
+        # print("!!! cpp_command: ", cpp_command)
+
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
@@ -1845,14 +1862,28 @@ class CppCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = input_path[:-3] + "so"
+                output_dir = get_dir_name_from_path(input_path)
+                cxx_target_1 = BuildTarget()
+                cxx_target_1.target(
+                    name=key,
+                    sources=[input_path],
+                    output_directory=output_dir,
+                    warning_all=False,
+                    vec_isa=picked_vec_isa,
+                )
+                output_path = cxx_target_1.get_target_file_path()
+                # output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
+                    """
                     cmd = shlex.split(
                         cpp_compile_command(
                             input=input_path, output=output_path, vec_isa=picked_vec_isa
                         )
                     )
                     compile_file(input_path, output_path, cmd)
+                    """
+                    cxx_target_1.build()
+
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
 
