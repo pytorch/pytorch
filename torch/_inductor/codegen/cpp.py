@@ -718,6 +718,10 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        if opt_ctx.dtype is not None:
+            dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -734,6 +738,10 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        if opt_ctx.dtype is not None:
+            dtype = opt_ctx.dtype
         return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
@@ -859,6 +867,7 @@ class CppVecOverrides(CppOverrides):
                 has_vector = any(
                     arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
                 )
+                new_args = args
                 if has_scalar and has_vector:
                     # broadcast scalar args to vector if needed
                     new_args = []
@@ -869,8 +878,9 @@ class CppVecOverrides(CppOverrides):
                             new_args.append(new_arg)
                         else:
                             new_args.append(arg)
+                if has_vector:
                     return func(*new_args, **kwargs)
-                if has_scalar and not has_vector:  # TODO: should be `not has_vector`
+                else:
                     # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
                     scalar_func = getattr(
@@ -878,7 +888,6 @@ class CppVecOverrides(CppOverrides):
                     )
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
-                return func(*args, **kwargs)
 
             return wrapper
 
@@ -1100,18 +1109,6 @@ class CppVecOverrides(CppOverrides):
         return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
 
     @staticmethod
-    def constant(val, dtype):
-        # TODO: move the logic to CppOverrides
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        proposed_dtype = opt_ctx.dtype
-        assert proposed_dtype in [
-            torch.float,
-            torch.int32,
-        ]
-        return CppOverrides.constant(val, proposed_dtype)
-
-    @staticmethod
     def relu(x):
         bug = config.cpp.inject_relu_bug_TESTING_ONLY
         if bug == "compile_error":
@@ -1186,10 +1183,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
-        # TODO: handle this in the wrap
-        if not isinstance(x, CppCSEVariable) or not x.is_vec:
-            return CppOverrides.to_dtype(x, dtype, src_dtype)
-
         assert dtype in [
             torch.bool,
             torch.float,
@@ -1274,16 +1267,6 @@ class CppVecOverrides(CppOverrides):
             )
         csevar.update_on_args("masked", (mask, body, other, result), {})
         return csevar
-
-    @staticmethod
-    def index_expr(expr, dtype):
-        # TODO: handle this in the CppOverrides
-        assert dtype == torch.int64
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        assert opt_ctx.dtype == torch.int32
-        assert opt_ctx.is_most_inner_loop_irrevelant
-        return CppOverrides.index_expr(expr, torch.int32)
 
 
 class CppKernel(Kernel):
@@ -1855,7 +1838,10 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             self.reduction_suffix.writelines(store_lines)
 
     def broadcast(self, scalar_var: CppCSEVariable):
-        assert not scalar_var.is_vec
+        assert (
+            not scalar_var.is_vec
+            and self.itervars[self.tiling_idx] not in scalar_var.relevant_itervars
+        )
         if scalar_var.dtype == torch.bool:
             vec_var = self.cse.generate(
                 self.compute, f"to_float_mask({scalar_var.name})"
@@ -1865,7 +1851,6 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 self.compute,
                 f"at::vec::Vectorized<{DTYPE_TO_CPP[scalar_var.dtype]}>({scalar_var.name})",
             )
-        # TODO: factor out a function to copy metadata from another variable
         vec_var.dtype = scalar_var.dtype
         vec_var.relevant_itervars = scalar_var.relevant_itervars
         vec_var.is_vec = True
