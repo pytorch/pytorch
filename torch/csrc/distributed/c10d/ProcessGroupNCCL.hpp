@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -716,6 +717,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Map from ncclUniqueId to appropriate communicator.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       ncclIdToCommMap_;
+
+  c10::intrusive_ptr<IntraNodeComm> intraNodeComm_;
 
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;

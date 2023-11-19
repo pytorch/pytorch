@@ -226,8 +226,8 @@ at::Tensor oneShotAllReduce(
     std::array<void*, kMaxDevices> buffers,
     std::array<uint32_t*, kMaxDevices> barriers,
     uint32_t barrierFlag,
-    uint32_t rank,
-    uint32_t worldSize);
+    size_t rank,
+    size_t worldSize);
 
 at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
   // TODO: check size
