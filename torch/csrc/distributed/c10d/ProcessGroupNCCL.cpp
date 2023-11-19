@@ -40,9 +40,9 @@ namespace c10d {
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 DebugInfoWriter::DebugInfoWriter(int rank) {
-  const char* fileName = parseEnvVarString(
-      "TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(std::string(fileName), rank);
+  std::string fileName = getCvarString(
+      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+  filename_ = c10::str(fileName, rank);
 }
 
 DebugInfoWriter::~DebugInfoWriter() = default;
@@ -400,7 +400,7 @@ struct NCCLTraceBuffer {
     return instance;
   }
   NCCLTraceBuffer() {
-    max_entries_ = parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0);
+    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     enabled_ = max_entries_ > 0;
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
@@ -953,24 +953,24 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
+  blockingWait_ = getCvarBool(NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
+      getCvarInt(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
+  desyncDebug_ = getCvarBool(NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
-  heartbeatTimeoutInSec_ = parseEnvVarIntDefault(
-      TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  heartbeatTimeoutInSec_ =
+      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
-      parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
+      getCvarBool(NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
-  avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
+  avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
-      parseEnvVarFlag(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK);
+      getCvarBool(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
   if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
@@ -999,7 +999,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+  if (getCvarBool(ENABLE_NCCL_HEALTH_CHECK, false)) {
     // Perform health check by initializing dummy communicators and destroying
     // them. This will help indicate any NCCL-related issues prior to the first
     // collective.
@@ -1015,27 +1015,28 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   init();
   const std::string OFF = "OFF";
-  const char* torch_distributed_debug =
-      parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
-  const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO)
-      << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options: "
-      << "NCCL version: " << getNcclVersion()
-      << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-      << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-      << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-      << ", NCCL_BLOCKING_WAIT: " << blockingWait_
-      << ", TIMEOUT(ms): " << options_->timeout.count()
-      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
-      << ", TORCH_DISTRIBUTED_DEBUG: " << std::string(torch_distributed_debug)
+  std::string torch_distributed_debug =
+      getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
+  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
+  LOG(INFO) << "[Rank " << rank_
+            << "] ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion()
+            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-      << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-      << useTensorRegisterAllocatorHook_
+            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << useTensorRegisterAllocatorHook_
 #endif
-      << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", NCCL_DEBUG: " << std::string(nccl_debug)
-      << ", ID=" << this->getID();
+            << ", TORCH_NCCL_ENABLE_MONITORING: "
+            << monitorThreadEnabled_.load()
+            << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -1325,7 +1326,7 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR)
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
-  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
+  if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
@@ -1925,7 +1926,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
   if (getRank() == 0) {
-    LOG(INFO) << "NCCL_DEBUG: " << parse_env("NCCL_DEBUG");
+    LOG(INFO) << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
   }
 
   // See [Group Start/End Note]
