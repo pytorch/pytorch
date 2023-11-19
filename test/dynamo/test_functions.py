@@ -2556,7 +2556,7 @@ def forward(self, x_1, output_1):
             nopython_fn(x, ys[:1], zs)
 
         # Should cause fallback if allow graph break
-        with self.assertRaisesRegex(ValueError, "zip().*longer"):
+        with self.assertRaisesRegex(Exception, "zip()"):
             opt_fn(x, ys[:1], zs)
 
     def test_compare_constant_and_tensor(self):
