@@ -107,7 +107,6 @@ def is_magic_method(op):
 
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: List[ir.IRNode]
-    scheduler: "torch._inductor.scheduler.Scheduler"
 
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -225,6 +224,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cpp_wrapper = cpp_wrapper
         self.aot_mode = aot_mode
         self.graph_id = graph_id
+        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
