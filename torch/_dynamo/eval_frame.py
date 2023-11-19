@@ -42,7 +42,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tenso
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
-    FreshCreateSymbolicPolicy,
+    StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -157,7 +157,7 @@ DONT_WRAP_FILES = {
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
-) -> List[CacheEntry]:  # type: ignore[valid-type]
+) -> List[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
      stored in this code.
@@ -892,7 +892,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
                     arg.node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i],
-                        policy=FreshCreateSymbolicPolicy(
+                        symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
                                 DimDynamic.DYNAMIC
                                 if d in flat_args_dynamic_dims[i]
@@ -912,6 +912,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             arg.node.meta["val"] = self.current_node.meta["val"]
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        if "example_value" in self.current_node.meta:
+            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -925,6 +927,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if "example_value" in self.current_node.meta:
+            result_proxy.node.meta["example_value"] = self.current_node.meta[
+                "example_value"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
