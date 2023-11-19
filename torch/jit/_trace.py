@@ -1040,7 +1040,7 @@ def trace_module(
 
         if check_trace and check_inputs is None:
             # Copy the inputs, in-case there is any in-place mutation
-            check_inputs = [torch._dynamo.utils.clone_inputs(inputs)]
+            check_inputs = [copy.deepcopy(inputs)]
 
         for method_name, example_inputs in inputs.items():
             if method_name == "forward":
