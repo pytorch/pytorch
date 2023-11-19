@@ -85,6 +85,9 @@ else:
     def use_global_cache() -> bool:
         return False
 
+_IS_LINUX = sys.platform.startswith("linux")
+_IS_MACOS = sys.platform.startswith("darwin")
+_IS_WINDOWS = sys.platform == "win32"
 
 LOCK_TIMEOUT = 600
 
@@ -966,7 +969,8 @@ def is_apple_clang() -> bool:
 class VecISA:
     _bit_width: int
     _macro: str
-    _arch_flags: str
+    _arch_flags_linux: str
+    _arch_flags_windows: str
     _dtype_nelements: Dict[torch.dtype, int]
 
     # Note [Checking for Vectorized Support in Inductor]
@@ -1015,7 +1019,7 @@ cdll.LoadLibrary("__lib_path__")
         return self._macro
 
     def build_arch_flags(self) -> str:
-        return self._arch_flags
+        return (self._arch_flags_linux if not _IS_WINDOWS else self._arch_flags_windows)
 
     def __hash__(self) -> int:
         return hash(str(self))
@@ -1071,7 +1075,8 @@ cdll.LoadLibrary("__lib_path__")
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags_linux = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags_windows = "arch:AVX512"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
@@ -1084,7 +1089,8 @@ class VecAVX512(VecISA):
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _arch_flags_linux = "-mavx2 -mfma"
+    _arch_flags_windows = "arch:AVX2"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1097,7 +1103,9 @@ class VecAVX2(VecISA):
 class VecZVECTOR(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_ZVECTOR CPU_CAPABILITY=ZVECTOR HAVE_ZVECTOR_CPU_DEFINITION"
-    _arch_flags = "-mvx -mzvector"
+    _arch_flags_linux = "-mvx -mzvector"
+    # TODO: check on Windows
+    _arch_flags_windows = ""
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1109,7 +1117,8 @@ class VecZVECTOR(VecISA):
 class InvalidVecISA(VecISA):
     _bit_width = 0
     _macro = ""
-    _arch_flags = ""
+    _arch_flags_linux = ""
+    _arch_flags_windows = ""
     _dtype_nelements = {}
 
     def __str__(self) -> str:
