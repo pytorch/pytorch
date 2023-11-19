@@ -133,6 +133,19 @@ DTYPE_LOWP_FP = [
 ]
 
 
+def value_to_cpp(value, cpp_type):
+    if value == float("-inf"):
+        return f"-std::numeric_limits<{cpp_type}>::infinity()"
+    elif value == float("inf"):
+        return f"std::numeric_limits<{cpp_type}>::infinity()"
+    elif isinstance(value, bool):
+        return f"static_cast<{cpp_type}>({str(value).lower()})"
+    elif math.isnan(value):
+        return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
+    else:
+        return f"static_cast<{cpp_type}>({repr(value)})"
+
+
 def reduction_init(reduction_type, dtype):
     if dtype in DTYPE_LOWP_FP:
         # Since load promotes all half-precision inputs to float, the initial
@@ -726,15 +739,7 @@ class CppOverrides(OpOverrides):
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
             dtype = torch.float32
-        if val == float("inf"):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-        elif val == float("-inf"):
-            return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-        elif math.isnan(val):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
-        elif val is True or val is False:
-            return ops.to_dtype(str(val).lower(), dtype)
-        return ops.to_dtype(repr(val), dtype)
+        return value_to_cpp(val, DTYPE_TO_CPP[dtype])
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -758,19 +763,7 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
 
         # Use the lambda's return type as the type of other
-        type = f"decltype({body_var}())"
-
-        if other == float("-inf"):
-            other_code = f"-std::numeric_limits<{type}>::infinity()"
-        elif other == float("inf"):
-            other_code = f"std::numeric_limits<{type}>::infinity()"
-        elif isinstance(other, bool):
-            other_code = f"static_cast<{type}>({str(other).lower()})"
-        elif math.isnan(other):
-            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
-        else:
-            other_code = f"static_cast<{type}>({repr(other)})"
-
+        other_code = value_to_cpp(other, f"decltype({body_var}())")
         return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
@@ -867,7 +860,7 @@ class CppVecOverrides(CppOverrides):
                 has_vector = any(
                     arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
                 )
-                new_args = args
+                new_args = list(args)
                 if has_scalar and has_vector:
                     # broadcast scalar args to vector if needed
                     new_args = []
@@ -1239,32 +1232,22 @@ class CppVecOverrides(CppOverrides):
         code.writeline(";")
         V.kernel.compute.splice(code)
 
-        if other == float("-inf"):
-            other_code = (
-                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
-            )
-        elif other == float("inf"):
-            other_code = (
-                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
-            )
-        elif math.isnan(other):
-            other_code = (
-                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
-            )
-        else:
-            other_code = f"at::vec::Vectorized<float>({other!r})"
+        other_code = value_to_cpp(other, "float")
+        other_code_vec = f"at::vec::Vectorized<float>({other_code})"
 
         if result.is_vec:
-            other_code = f"at::vec::Vectorized<float>({other_code})"
             type = f"decltype({var}())"
             float_mask = f"to_float_mask({new_mask})"
             csevar = V.kernel.cse.generate(
-                V.kernel.compute, f"{type}::blendv({other_code}, {var}(), {float_mask})"
+                V.kernel.compute,
+                f"{type}::blendv({other_code_vec}, {var}(), {float_mask})",
             )
         else:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {var}() : {other_code}"
             )
+        # `result` is explicitly added to the args for correct propagation
+        # of relevant itervars and vectorization status.
         csevar.update_on_args("masked", (mask, body, other, result), {})
         return csevar
 
