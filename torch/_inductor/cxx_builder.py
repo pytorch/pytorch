@@ -661,6 +661,7 @@ class BuildTarget:
             if macros:
                 if config.is_fbcode() and vec_isa != invalid_vec_isa:
                     cap = str(vec_isa).upper()
+                    '''
                     macros = " ".join(
                         [
                             vec_isa.build_arch_flags(),
@@ -668,7 +669,11 @@ class BuildTarget:
                             f"-D CPU_CAPABILITY_{cap}",
                             f"-D HAVE_{cap}_CPU_DEFINITION",
                         ]
-                    )
+                    )                    
+                    '''
+                    cflag_list = vec_isa.build_arch_flags().split()
+                    self.add_cflags(cflag_list)
+                    
                     self.add_defination(" CPU_CAPABILITY={cap}")
                     self.add_defination(" CPU_CAPABILITY_{cap}")
                     self.add_defination(" HAVE_{cap}_CPU_DEFINITION")
@@ -693,7 +698,8 @@ class BuildTarget:
                     # libs += ["c10_cuda", "cuda", "torch_cuda"]
                     self.add_libraries(["c10_cuda", "cuda", "torch_cuda"])
             build_arch_flags = vec_isa.build_arch_flags()
-            print("!!!! build_arch_flags: ", build_arch_flags)
+            cflag_list = build_arch_flags.split()
+            self.add_cflags(cflag_list)
         else:
             # Note - this is effectively a header only inclusion. Usage of some header files may result in
             # symbol not found, if those header files require a library.

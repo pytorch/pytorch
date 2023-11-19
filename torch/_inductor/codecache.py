@@ -1075,7 +1075,7 @@ cdll.LoadLibrary("__lib_path__")
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "CPU_CAPABILITY_AVX512"
-    _arch_flags_linux = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags_linux = "mavx512f mavx512dq mavx512vl mavx512bw mfma"
     _arch_flags_windows = "arch:AVX512"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
@@ -1089,7 +1089,7 @@ class VecAVX512(VecISA):
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_AVX2"
-    _arch_flags_linux = "-mavx2 -mfma"
+    _arch_flags_linux = "mavx2 mfma"
     _arch_flags_windows = "arch:AVX2"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1103,7 +1103,7 @@ class VecAVX2(VecISA):
 class VecZVECTOR(VecISA):
     _bit_width = 256
     _macro = "CPU_CAPABILITY_ZVECTOR CPU_CAPABILITY=ZVECTOR HAVE_ZVECTOR_CPU_DEFINITION"
-    _arch_flags_linux = "-mvx -mzvector"
+    _arch_flags_linux = "mvx mzvector"
     # TODO: check on Windows
     _arch_flags_windows = ""
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
@@ -1293,8 +1293,15 @@ def get_include_and_linking_paths(
         def_list = def_val_str.split()
         def_fmt = ""
         for i in def_list:
-            def_fmt+=f"-D{i}"
+            def_fmt+=f" -D{i} "
         return def_fmt            
+    
+    def format_cflag_string(cflag_val_str:str):
+        cflag_list = cflag_val_str.split()
+        cflag_fmt = ""
+        for i in cflag_list:
+            cflag_fmt+=f" -{i} "
+        return cflag_fmt                
     
     if (
         config.is_fbcode()
@@ -1351,7 +1358,7 @@ def get_include_and_linking_paths(
                 cap = str(vec_isa).upper()
                 macros = " ".join(
                     [
-                        vec_isa.build_arch_flags(),
+                        format_cflag_string(vec_isa.build_arch_flags()),
                         f"-D CPU_CAPABILITY={cap}",
                         f"-D CPU_CAPABILITY_{cap}",
                         f"-D HAVE_{cap}_CPU_DEFINITION",
@@ -1368,7 +1375,7 @@ def get_include_and_linking_paths(
                 libs += ["cuda"]
             else:
                 libs += ["c10_cuda", "cuda", "torch_cuda"]
-        build_arch_flags = vec_isa.build_arch_flags()
+        build_arch_flags = format_cflag_string(vec_isa.build_arch_flags())
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
