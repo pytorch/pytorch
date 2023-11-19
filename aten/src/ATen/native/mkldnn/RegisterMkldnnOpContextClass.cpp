@@ -1,12 +1,14 @@
-#include <ATen/Tensor.h>
-#include <ATen/native/mkldnn/ConvPrepack.h>
-#include <ATen/native/mkldnn/OpContext.h>
-#include <torch/custom_class.h>
-#include <torch/library.h>
+#include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
 
+#include <ATen/Tensor.h>
+#include <ATen/native/mkldnn/ConvPrepack.h>
+#include <ATen/native/mkldnn/OpContext.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <torch/custom_class.h>
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 namespace mkldnn {
