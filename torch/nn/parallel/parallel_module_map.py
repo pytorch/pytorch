@@ -3,9 +3,9 @@ from typing import Any, Dict, List, Optional, Sequence, Union, cast
 from ..modules import Module
 from torch.nn.parallel.parallel_apply import parallel_apply
 
-__all__ = ['parallel_map']
+__all__ = ['parallel_module_map']
 
-def parallel_map(
+def parallel_module_map(
     modules: Sequence[Module],
     input: Any,
     kwargs_tup: Optional[Union[Sequence[Dict[str, Any]], Dict[str, Any]]] = None,
