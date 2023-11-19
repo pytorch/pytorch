@@ -27,8 +27,8 @@ The exporter is designed to be modular and extensible. It is composed of the fol
   - **ONNX Registry**: :class:`OnnxRegistry` is the registry of ONNX operators and functions.
   - **FX Graph Extractor**: :class:`FXGraphExtractor` extracts the FX graph from the PyTorch model.
   - **Fake Mode**: :class:`ONNXFakeContext` is a context manager that enables fake mode for large scale models.
-  - **ONNX Export Output**: :class:`ExportOutput` is the output of the exporter that contains the exported ONNX graph and diagnostics.
-  - **ONNX Export Output Serializer**: :class:`ExportOutputSerializer` serializes the exported model to a file.
+  - **ONNX Program**: :class:`ONNXProgram` is the output of the exporter that contains the exported ONNX graph and diagnostics.
+  - **ONNX Program Serializer**: :class:`ONNXProgramSerializer` serializes the exported model to a file.
   - **ONNX Diagnostic Options**: :class:`DiagnosticOptions` has a set of options that control the diagnostics emitted by the exporter.
 
 Dependencies
@@ -74,17 +74,17 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
   model = MLPModel()
   tensor_x = torch.rand((97, 8), dtype=torch.float32)
-  export_output = torch.onnx.dynamo_export(model, tensor_x)
+  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
 
 As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_export` with an instance of the model and its input.
-The exporter will then return an instance of :class:`torch.onnx.ExportOutput` that contains the exported ONNX graph along with extra information.
+The exporter will then return an instance of :class:`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
 
-The in-memory model available through ``export_output.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
-The ONNX model may then be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ExportOutput.save` API.
+The in-memory model available through ``onnx_program.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
+The ONNX model may then be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ONNXProgram.save` API.
 
 .. code-block:: python
 
-  export_output.save("mlp.onnx")
+  onnx_program.save("mlp.onnx")
 
 Inspecting the ONNX model using GUI
 -----------------------------------
@@ -140,10 +140,13 @@ API Reference
 
 .. autofunction:: torch.onnx.enable_fake_mode
 
-.. autoclass:: torch.onnx.ExportOutput
+.. autoclass:: torch.onnx.ONNXProgram
     :members:
 
-.. autoclass:: torch.onnx.ExportOutputSerializer
+.. autoclass:: torch.onnx.ONNXProgramSerializer
+    :members:
+
+.. autoclass:: torch.onnx.InvalidExportOptionsError
     :members:
 
 .. autoclass:: torch.onnx.OnnxExporterError

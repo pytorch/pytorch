@@ -669,7 +669,7 @@ class TraceTrainStepTest(DTensorTestBase):
         train_step(mod, opt, inp)
         for node in train_step._compiled_obj.gm.graph.nodes:
             if node.target == torch.ops.aten.expand.default:
-                # backward grad expandion op should match local batch size
+                # backward grad expansion op should match local batch size
                 # instead of global batch size.
                 self.assertEqual(node.args[1], [2, 10])
 

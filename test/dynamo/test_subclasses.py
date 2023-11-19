@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
+import itertools
 import unittest
 
 import torch
@@ -13,11 +13,22 @@ import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    FreshCreateSymbolicPolicy,
+    ShapeEnv,
+)
+from torch.nested._internal.nested_tensor import (
+    jagged_from_list,
+    jagged_from_tensor_and_lengths,
+    ViewBufferFromNested,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
 class MockSubclass(torch.Tensor):
@@ -26,6 +37,30 @@ class MockSubclass(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+class DummyNDim(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.ndim.__get__:
+            return 10
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class SigmoidToExpSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.sigmoid:
+            return super().__torch_function__(torch.Tensor.exp, types, args, kwargs)
+
+        return super().__torch_function__(func, types, args, kwargs)
 
 
 class EagerRecordGraphAndInputs:
@@ -39,22 +74,18 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
-@contextlib.contextmanager
-def preserve_subclass_config():
-    old_subclass_set = set(torch._dynamo.config.traceable_tensor_subclasses)
-    try:
-        torch._dynamo.config.traceable_tensor_subclasses.add(MockSubclass)
-        yield
-    finally:
-        torch._dynamo.config.traceable_tensor_subclasses.clear()
-        torch._dynamo.config.traceable_tensor_subclasses.update(old_subclass_set)
+GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._exit_stack.enter_context(preserve_subclass_config())
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch(
+                "traceable_tensor_subclasses", GLOBAL_TEST_SUBCLASSES
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -65,6 +96,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             with torch._C.DisableTorchFunctionSubclass():
                 torch._dynamo.graph_break()
+                return torch._C._is_torch_function_enabled(), torch.add(x, 1.0)
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
+
+    def test_torch_function_state_nested(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                with torch._C.DisableTorchFunctionSubclass():
+                    x = x + 1
+                # Should reset to the outer state (disabled) after exiting ctx manager
                 return torch._C._is_torch_function_enabled(), torch.add(x, 1.0)
 
         input = torch.ones(2, 2)
@@ -115,16 +159,162 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        torch._dynamo.config.traceable_tensor_subclasses.add(LocalSubclass)
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
 
-        @torch.compile(backend="eager", fullgraph=True)
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return LocalSubclass(torch.add(x, 1.0))
+
+            input = torch.ones(2, 2)
+
+            res = fn(input)
+            self.assertIsInstance(res, LocalSubclass)
+
+    def test_torch_function_call_on_method(self):
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = x.as_subclass(SigmoidToExpSubclass)
+        wrapped2 = y.as_subclass(SigmoidToExpSubclass)
+
+        def fn(w):
+            return w.sigmoid()
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped2)
+        res_exp2 = z.exp()
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, res_exp2)
+
+    def test_user_overidden_method_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                x.sigmoid()
+
+        msg = (
+            "Accessing overridden method/attribute sigmoid on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_user_overidden_attr_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            ndim = 10
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
+
+        msg = (
+            "Accessing overridden method/attribute ndim on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_user_overidden_property_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            def __init__(self):
+                self._ndim = 10
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            @property
+            def ndim(self):
+                return self._ndim
+
+            @ndim.setter
+            def ndim(self, value):
+                self._ndim = value
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
+
+        msg = (
+            "Accessing overridden method/attribute ndim on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_overridden_method_guarding(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+        @torch.compile(backend="eager")
         def fn(x):
-            return LocalSubclass(torch.add(x, 1.0))
+            return x.sigmoid()
 
-        input = torch.ones(2, 2)
+        with torch._dynamo.config.patch(
+            error_on_recompile=True, traceable_tensor_subclasses={LocalSubclass}
+        ):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+            fn(x)
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
 
-        res = fn(input)
-        self.assertIsInstance(res, LocalSubclass)
+        with torch._dynamo.config.patch(
+            traceable_tensor_subclasses={LocalSubclass}
+        ), self.assertRaisesRegex(
+            TypeError,
+            "'bool' object is not callable",
+        ):
+            LocalSubclass.sigmoid = False
+            fn(x)
+
+    def test_torch_function_call_on_attr(self):
+        x = torch.ones(2, 2)
+        wrapped = x.as_subclass(DummyNDim)
+
+        def fn(w):
+            return w.ndim + torch.ones(2)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, torch.ones(2) + 10)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
@@ -146,10 +336,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 shape_env=shape_env
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 x1_fake = fake_mode.from_tensor(
-                    x1, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x1,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 opt_f(x_fake)
                 opt_f(x1_fake)
@@ -176,7 +372,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
-                        inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                        inp,
+                        policy=FreshCreateSymbolicPolicy(
+                            [dim_dynamic for i in range(x.dim())]
+                        ),
                     )
                     opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
@@ -441,7 +640,7 @@ class GraphModule(torch.nn.Module):
             context = torch._guards.TracingContext.get()
             val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
-            # Grab info on sources and guards from the shapenv
+            # Grab info on sources and guards from the shapeenv
             nonlocal lower_bound_str
             nonlocal upper_bound_str
             nonlocal curr_var_to_val
@@ -508,7 +707,10 @@ class GraphModule(torch.nn.Module):
                 shape_env=shape_env
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    x,
+                    policy=FreshCreateSymbolicPolicy(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    ),
                 )
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
@@ -606,14 +808,29 @@ class GraphModule(torch.nn.Module):
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
-    def _get_jagged_tensor(self, nested_size, offsets):
+    def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
         # Makes a jagged tensor with N constituent tensors with size
         # as specified ((S0, S1, S2), D)
         D = nested_size[1]
         out = []
         for s in nested_size[0]:
-            out.append(torch.randn(s, D, requires_grad=True, dtype=torch.float64))
+            out.append(
+                torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
+            )
         return jagged_from_list(out, offsets)
+
+    def _get_nc_jagged_tensor(self, inner_dim, starts, lengths, requires_grad=True):
+        # Makes a jagged tensor with N constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        max_dim = (starts + lengths).max()
+        values_tensor = torch.randn(
+            starts.shape[0],
+            max_dim.item(),
+            inner_dim,
+            requires_grad=requires_grad,
+            dtype=torch.float64,
+        )
+        return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
         compile_count = [0]
@@ -660,13 +877,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
-    def test_binary_recompiles_due_to_duck_sizing(self):
-        # Even though the input is unused, we still guard due to duck sizing
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
-
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
@@ -678,14 +888,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         def fn1(nt1, nt2):
             return (nt1 + nt2).sin().cos()
 
-        compiled_f = torch.compile(
-            fn1, fullgraph=True, backend="aot_eager", dynamic=True
-        )
+        compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
         out = compiled_f(nt, nt2)
         out_buffer = ViewBufferFromNested.apply(out)
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-        out_ref = compiled_f(nt, nt2)
+        out_ref = fn1(nt, nt2)
         out_buffer_ref = ViewBufferFromNested.apply(out_ref)
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 
@@ -724,6 +932,73 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         # tensors are different.
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
+
+    def _get_views(self):
+        # There are three cases to consider here based on the logic in
+        # meta_utils.py
+        #
+        # (1) basic case:
+        # view is not a leaf and has the same requires grad as its basic case
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+        self.assertEqual(x.is_leaf, False)
+        yield x.unsqueeze(-1)
+
+        # (2) leaf view case:
+        # the view has to be a leaf (w/ requires_grad True or requires_grad False)
+        # base w/ requires_grad True or requires_grad False
+        for requires_grad_1, requires_grad_2 in itertools.product(
+            [True, False], repeat=2
+        ):
+            x, _ = self._get_jagged_tensor(
+                ((2, 3, 4), 3), None, requires_grad=requires_grad_1
+            )
+            with torch.no_grad():
+                x_view = x.unsqueeze(-1)
+                # The issue is this doesn't quite work
+                x_view.requires_grad_(requires_grad_2)
+            yield x_view
+
+        # (3) obscure case:
+        # view is not a leaf (implies requires_grad True)
+        # base w/ requires_grad False)
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
+        # intermediate leaf view
+        with torch.no_grad():
+            x_view = x.unsqueeze(-1)
+        x_view.requires_grad_(True)
+        x_view_view = x_view.unsqueeze(-1)
+        yield x_view_view
+
+    def test_inputs_to_compiled_fn_are_views(self):
+        for nt_view in self._get_views():
+
+            def fn(x):
+                return x.sin()
+
+            out_ref = fn(nt_view)
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend="aot_eager", dynamic=True
+            )
+            out = compile_fn(nt_view)
+
+            # Check metadata and values are correct
+            self.assertTrue(out.size() == out_ref.size())
+            self.assertTrue(out.stride() == out_ref.stride())
+            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+
+            # Check that no guards are incurred
+            def backend(gm, args):
+                context = torch._guards.TracingContext.get()
+                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
+                self.assertEqual(len(val_to_guards), 0)
+                return gm
+
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend=backend, dynamic=True
+            )
+            out = compile_fn(nt_view)
 
 
 if __name__ == "__main__":

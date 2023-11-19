@@ -76,12 +76,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  pytorch-linux-focal-py3-clang9-android-ndk-r19c-build:
-    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang9-android-ndk-r21e-build:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r21e-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r21e-build
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -174,3 +174,45 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
         ]}
+
+  linux-jammy-py3-clang12-executorch-build:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
+      test-matrix: |
+        { include: [
+          { config: "executorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-jammy-py3-clang12-executorch-test:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3-clang12-executorch-build
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
+
+  linux-focal-rocm5_7-py3_8-build:
+    name: linux-focal-rocm5.7-py3.8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-rocm5.7-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+        ]}
+
+  linux-focal-rocm5_7-py3_8-test:
+    name: linux-focal-rocm5.7-py3.8
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-focal-rocm5_7-py3_8-build
+    with:
+      build-environment: linux-focal-rocm5.7-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.test-matrix }}
+      tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd"

@@ -1159,22 +1159,34 @@ class TestProfiler(TestCase):
             nn.ReLU(),
         )
         inputs = torch.randn(40, 16, 18, 260)
-        with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
+        nested_tensor = torch.nested.nested_tensor(
+            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
+        )
+        with _profile(
+            record_shapes=True, with_flops=True, use_kineto=kineto_available()
+        ) as prof:
             model(inputs)
-        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+            # test that nested tensor won't cause exception during flop compute
+            nested_tensor = nested_tensor + nested_tensor
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10
+        )
         self.assertIn("Total MFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
-        with profile(activities=[
+        with profile(
+            activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA],
-                record_shapes=True,
-                with_flops=True,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            with_flops=True,
         ) as kineto_profiler:
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1)
+            sort_by="self_cuda_time_total", row_limit=-1
+        )
         self.assertIn("Total MFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
@@ -1784,6 +1796,25 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     x.add(y)
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_event_list(self):
+        # AFAIK event list is part of legacy profiler and/or used when kineto is not available.
+        # This test has basic sanity checks to test against obvious regressions.
+        x, y = (torch.rand((4, 4), requires_grad=True, device="cuda") for _ in range(2))
+        with profile(with_stack=True) as p:
+            z = (x @ y).relu().sum()
+            z.backward()
+
+        event_list = torch.autograd.profiler_util.EventList(p.events())
+        # event_list._build_tree()
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                json.load(f)
+
+        event_list.table()
 
 
 def find_node_with_name(nodes, name):

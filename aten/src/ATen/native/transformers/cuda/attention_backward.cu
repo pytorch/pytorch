@@ -6,6 +6,7 @@
 #include <ATen/TensorOperators.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>
@@ -95,6 +96,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
@@ -113,9 +116,11 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
-    return std::make_tuple(dQuery, dKey, dValue);
+    return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   }
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
@@ -129,14 +134,14 @@ _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& bias, // additive attention bias
+    const c10::optional<at::Tensor>& kernel_bias, // additive attention bias
     const at::Tensor& out,
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_q,
+    const c10::optional<at::Tensor>& cu_seqlens_q_dummy,
     // (Mode 1MHK only) [b+1]: cu_seqlens_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_k,
+    const c10::optional<at::Tensor>& cu_seqlens_k_dummy,
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_q,
     // (Mode 1MHK only) Maximum sequence length across batches
@@ -153,6 +158,14 @@ _efficient_attention_backward(
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+  // This path is used when we directly call _efficient_attention_forward
+  // from python.
+  // This is needed because SaveVariable automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
+  bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
+  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
+  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
@@ -494,7 +507,7 @@ _efficient_attention_backward(
                  }));
   TORCH_CHECK(kernel_launched, "cutlassB: no kernel found to launch!");
   AT_CUDA_CHECK(cudaGetLastError());
-  return std::make_tuple(grad_q, grad_k, grad_v, grad_bias);
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
   #endif
   TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -549,7 +562,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   grad_k = grad_k.transpose(1,2);
   grad_v = grad_v.transpose(1,2);
 
-  return std::make_tuple(grad_q, grad_k, grad_v);
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
 
 
