@@ -648,7 +648,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
         # Try to put 'find_range' in a new assignment
         best_candidates.append(prev_best_assignment + [[find_range]])
 
-        ret = min(best_candidates, key=lambda x: get_memory_usage(x))
+        ret = min(best_candidates, key=get_memory_usage)
         return ret
 
     if not counter:

@@ -1186,12 +1186,14 @@ def unfold(x, dimension, size, step):
     if ndim == 0:
         return slice_(unsqueeze(x, 0), end=size)
 
+    dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_leq(size, dim_size)
     sizevars.guard_lt(0, step)
 
-    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
-    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+    new_dim_size = FloorDiv(dim_size - size, step) + 1
+    if sizevars.size_hint(dim_size) > 0:
+        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -1966,21 +1968,21 @@ def bucketize(
 
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
     )
     return args, kwargs
 
@@ -2080,7 +2082,8 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-
+make_fallback(torch.ops.aten._efficient_attention_forward.default)
+make_fallback(torch.ops.aten._efficient_attention_backward.default)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2330,7 +2333,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(end - start + (step - 1), step)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -2874,7 +2877,9 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index.Tensor)(x, indices)
+        return fallback_handler(aten.index.Tensor, add_to_fallback_set=False)(
+            x, indices
+        )
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -2909,10 +2914,18 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    if is_triton(values) and (
-        accumulate is True or torch.are_deterministic_algorithms_enabled()
-    ):
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    if is_triton(values) and (accumulate or deterministic):
         V.graph.disable_cudagraphs = True
+        msg = (
+            "index put with accumulate."
+            if not deterministic
+            else "deterministic index put."
+        )
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -3086,6 +3099,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
+            and src.get_device().type == torch.device("cuda").type
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
@@ -3679,7 +3693,8 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
 
 fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default
+    aten.max_pool2d_with_indices.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3765,7 +3780,8 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward.default
+    aten.max_pool2d_with_indices_backward.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3986,7 +4002,9 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
+fallback_adaptive_avg_pool2d = fallback_handler(
+    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -4108,7 +4126,9 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4205,7 +4225,9 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
+fallback_avg_pool2d_backward = fallback_handler(
+    aten.avg_pool2d_backward.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4494,7 +4516,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = denom - correction
+        denom = sympy.Max(denom - correction, 0)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -4553,7 +4575,8 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     def scale_fn(data):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
-        return data / (N - c)
+        zero = ops.constant(0, dtype)
+        return data / ops.maximum(zero, N - c)
 
     var = make_pointwise(scale_fn)(m2)
 
@@ -4607,9 +4630,13 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
-fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
-fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
+fallback_pow_tensor_tensor = fallback_handler(
+    aten.pow.Tensor_Tensor, add_to_fallback_set=False
+)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar, add_to_fallback_set=False)
+fallback_pow_tensor_scalar = fallback_handler(
+    aten.pow.Tensor_Scalar, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.pow, broadcast=True)
@@ -5030,19 +5057,33 @@ register_inplace(aten.__ixor__, aten.__xor__)
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min, max):
     tracing_context = torch._guards.TracingContext.get()
-    assert tracing_context is not None
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
 
 
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
-    return a.get_size()[dim]
+    val = V.graph.current_node.meta["val"]
+    # Note [Can val be an int?]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~
+    # In principle, someone could construct an FX graph where
+    # a call to size/stride has a val that is a plain int (not
+    # SymInt).  However, we will maintain the invariant that
+    # this is not possible: if you are constructing an FX graph
+    # where there is a call to size/stride that returns an
+    # int, but you KNOW that int must always be a constant,
+    # then you do not need trace that call at all (and just
+    # constant propagate the integer as is.)
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
-    return a.get_stride()[dim]
+    val = V.graph.current_node.meta["val"]
+    # See Note [Can val be an int?]
+    assert isinstance(val, torch.SymInt)
+    return val.node.expr
 
 
 @register_lowering(aten.sym_numel)

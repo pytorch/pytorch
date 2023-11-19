@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._pytree.api.cxx import tree_map_only
+    from torch.utils._cxx_pytree import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -402,6 +402,10 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def wait(self) -> torch.Tensor:
+        wait_tensor(self.elem)
+        return self.elem
+
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
         return self.elem
@@ -435,6 +439,8 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def numpy(self):
+        return self.wait().numpy()
 
 """
 Utils and infrastructure for tracing support

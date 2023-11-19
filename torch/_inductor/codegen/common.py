@@ -311,8 +311,8 @@ class ExprPrinter(Printer):
         else:  # exp == 0
             return "1"
 
-    def _print_Unequality(self, expr):
-        return " != ".join(map(self.paren, map(self._print, expr.args)))
+    def _print_Relational(self, expr):
+        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -1171,7 +1171,7 @@ class OptimizationContext:
     # Load value as mask
     is_load_as_mask: bool = False
 
-    dtype: torch.dtype = None
+    dtype: Optional[torch.dtype] = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 

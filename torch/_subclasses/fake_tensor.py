@@ -7,18 +7,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from weakref import ReferenceType
 
 import torch
@@ -48,11 +37,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
-
-if TYPE_CHECKING:
-    # Import the following modules during type checking to enable code intelligence features
-    # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -326,11 +310,9 @@ class FakeTensorConverter:
         t,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        policy=None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -365,10 +347,8 @@ class FakeTensorConverter:
             t,
             shape_env=shape_env,
             callback=mk_fake_tensor,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -402,10 +382,8 @@ class FakeTensorConverter:
         *,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        policy=None,
         memoized_only=False,
     ):
         return self.from_real_tensor(
@@ -413,10 +391,8 @@ class FakeTensorConverter:
             t,
             make_constant,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
@@ -706,7 +682,6 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 
 
 # takes in multiple-devices, dont default to default device handling
-@register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -716,7 +691,6 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 
 
 # same with multi_device_op_default, but return the input
-@register_op_impl(aten.index_put_.default)
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
@@ -728,6 +702,27 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten.index_put.default)
+@register_op_impl(aten.index_put_.default)
+def index_put_impl(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values = new_kwargs["values"]
+    self_device = new_kwargs["input"].fake_device
+    torch._check(
+        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
+    )
+
+    out = run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    if func is aten.index_put_.default:
+        return new_kwargs["input"]
+    else:
+        return out
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -1857,10 +1852,8 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         *,
         static_shapes=None,
-        ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        policy=None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1869,18 +1862,14 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
+            assert policy is None, "cannot set both static_shapes and policy"
             shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
