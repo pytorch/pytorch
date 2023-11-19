@@ -2535,6 +2535,9 @@ def forward(self, x_1, output_1):
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
+    @unittest.skipIf(
+        sys.version_info < (3, 9), "zip strict kwargs not implemented for Python < 3.9"
+    )
     def test_zip_strict(self):
         def fn(x, ys, zs):
             x = x.clone()
@@ -2556,7 +2559,7 @@ def forward(self, x_1, output_1):
             nopython_fn(x, ys[:1], zs)
 
         # Should cause fallback if allow graph break
-        with self.assertRaisesRegex(Exception, "zip()"):
+        with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
 
     def test_compare_constant_and_tensor(self):
