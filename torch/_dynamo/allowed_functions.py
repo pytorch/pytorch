@@ -259,7 +259,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch.masked.maskedtensor",
             "torch.nn.init",
             "torch.nn.modules.module",
-            "torch.nn.parallel",
+            # "torch.nn.parallel",
             "torch.nn.utils",
             "torch.multiprocessing",
             "torch.onnx",

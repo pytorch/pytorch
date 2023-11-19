@@ -1147,6 +1147,11 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
+                    else:
+                        from .builder import wrap_fx_proxy
+                        # Intermediaries grad, should be okay?
+                        print("GRAD ACCESS NO SOURCE?", obj.as_proxy().node.meta["example_value"].grad)
+                        return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
                 unimplemented("tensor grad")
             else:
                 from .builder import wrap_fx_proxy
@@ -1259,7 +1264,7 @@ class BuiltinVariable(VariableTracker):
                     tx.output.create_proxy(
                         "call_function",
                         torch._C._autograd._unsafe_set_version_counter,
-                        (out.as_proxy(), version),
+                        (out.as_proxy(), 0),
                         {},
                     )
                     # This handles options prop, guards and ends with a clone
@@ -1623,3 +1628,16 @@ class BuiltinVariable(VariableTracker):
         return tx.inline_user_function_return(
             SourcelessBuilder()(tx, polyfill.all), args, kwargs
         )
+
+import contextlib
+@contextlib.contextmanager
+def dynamo_disable_grad(tx):
+    from . import GradModeVariable
+
+    org_value = torch.is_grad_enabled()
+    gmv = GradModeVariable.create(tx, False)
+    try:
+        gmv.enter(tx)
+        yield
+    finally:
+        gmv.exit(tx)

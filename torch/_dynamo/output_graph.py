@@ -1163,6 +1163,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return result
 
     def remove_unused_graphargs(self) -> None:
+        return
         assert self.should_exit
         # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):

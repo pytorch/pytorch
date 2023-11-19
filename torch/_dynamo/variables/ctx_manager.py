@@ -188,11 +188,11 @@ class GradModeVariable(ContextWrappingVariable):
         assert len(values) == 1
         value = values[0]
         # Coalesce grad mode mutations
-        if torch.is_grad_enabled() != value:
-            tx.output.create_node(
-                "call_function", torch._C._set_grad_enabled, (value,), {}
-            )
-            torch._C._set_grad_enabled(value)
+        # if torch.is_grad_enabled() != value:
+        tx.output.create_node(
+            "call_function", torch._C._set_grad_enabled, (value,), {}
+        )
+        torch._C._set_grad_enabled(value)
 
     def module_name(self):
         return "torch"
