@@ -87,6 +87,29 @@ namespace at {
  *
  */
 
+struct CUDAGeneratorState {
+  uint64_t seed_;
+  uint64_t philox_offset_per_thread_;
+  int64_t* seed_extragraph_;
+  int64_t* offset_extragraph_;
+  uint32_t offset_intragraph_;
+  bool graph_expects_this_gen_;
+
+  CUDAGeneratorState(
+      uint64_t seed = default_rng_seed_val,
+      uint64_t philox_offset_per_thread = 0,
+      int64_t* seed_extragraph = nullptr,
+      int64_t* offset_extragraph = nullptr,
+      uint32_t offset_intragraph = 0,
+      bool graph_expects_this_gen = false)
+      : seed_(seed),
+        philox_offset_per_thread_(philox_offset_per_thread),
+        seed_extragraph_(seed_extragraph),
+        offset_extragraph_(offset_extragraph),
+        offset_intragraph_(offset_intragraph),
+        graph_expects_this_gen_(graph_expects_this_gen) {}
+};
+
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
@@ -101,11 +124,27 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
+
+  // Registers a new state with the generator and returns its index.
+  size_t register_state_with_index(const c10::TensorImpl& new_state) override;
+  void set_state_index(size_t index) override;
+  size_t get_state_index() const override;
+
+  std::vector<uint64_t> seed_list() const;
+
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
-  void capture_prologue(int64_t* seed_extragraph, int64_t* offset_extragraph);
-  uint64_t capture_epilogue();
+  void capture_prologue(
+      const std::vector<int64_t*>& seeds_device_ptr,
+      const std::vector<int64_t*>& offsets_device_ptr);
+  std::vector<uint64_t> capture_epilogue();
+
+  // Generates a PhiloxCudaState with a specified increment, and increment
+  // current state
   PhiloxCudaState philox_cuda_state(uint64_t increment);
+  // Creates a list of PhiloxCudaState objects, and increments on all state.
+  std::vector<PhiloxCudaState> philox_cuda_state_list(
+      std::vector<uint64_t> increment_list);
 
   bool reset_rnn_state() {
     return !no_reset_rnn_state_.test_and_set();
@@ -117,14 +156,13 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   static c10::DeviceType device_type();
 
-private:
+ private:
   CUDAGeneratorImpl* clone_impl() const override;
-  uint64_t seed_ = default_rng_seed_val;
-  uint64_t philox_offset_per_thread_ = 0;
-  int64_t* seed_extragraph_{};
-  int64_t* offset_extragraph_{};
-  uint32_t offset_intragraph_ = 0;
-  bool graph_expects_this_gen_ = false;
+  CUDAGeneratorState& state();
+  const CUDAGeneratorState& state() const;
+
+  size_t current_state_id_ = 0;
+  std::vector<CUDAGeneratorState> states_;
   std::atomic_flag no_reset_rnn_state_;
 };
 

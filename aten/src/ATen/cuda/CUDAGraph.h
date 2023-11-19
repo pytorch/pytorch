@@ -82,10 +82,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // captures if needed.
   int capture_dev_;
 
-  // RNG state trackers
-  at::Tensor seed_extragraph_;
-  at::Tensor offset_extragraph_;
-  uint64_t wholegraph_increment_;
+
+  // RNG state trackers for each state index
+  std::vector<at::Tensor> seed_extragraph_list_;
+  std::vector<at::Tensor> offset_extragraph_list_;
+  std::vector<uint64_t> wholegraph_increment_list_;
 };
 
 } // namespace cuda

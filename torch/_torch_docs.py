@@ -13722,6 +13722,63 @@ Example::
 """,
 )
 
+add_docstr(
+    torch.Generator.set_state_index,
+    r"""
+Generator.set_state_index(index) -> void
+
+Sets the generator's current state to the one identified by the provided index.
+
+Arguments:
+    index (int): The desired state index.
+
+Example::
+
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_other = torch.Generator(device='cuda')
+    >>> g_cuda.set_state_index(g_cuda_other.get_state_index())
+""",
+)
+
+add_docstr(
+    torch.Generator.get_state_index,
+    r"""
+Generator.get_state_index() -> int
+
+Returns the index of the generator's current state.
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
+    to restore a Generator to a specific point in time.
+
+Example::
+
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda.get_state_index()
+""",
+)
+
+add_docstr(
+    torch.Generator.register_state_with_index,
+    r"""
+Generator.register_state_with_index(new_state) -> int
+
+Registers a new state with the generator and returns its index.
+
+Arguments:
+    new_state (torch.ByteTensor): The desired state.
+
+Returns:
+    index (int): The state index of the registered new state.
+
+
+Example::
+
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_other = torch.Generator(device='cuda')
+    >>> g_cuda.register_state_with_index(g_cuda_other.get_state_index())
+""",
+)
 
 add_docstr(
     torch.Generator.manual_seed,

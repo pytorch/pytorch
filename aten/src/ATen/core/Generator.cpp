@@ -13,4 +13,9 @@ at::Tensor Generator::get_state() const {
   return at::Tensor::wrap_tensor_impl(this->impl_->get_state());
 }
 
+size_t Generator::register_state_with_index(const at::Tensor& new_state) {
+  TORCH_CHECK(new_state.defined(), "Undefined tensor is not allowed");
+  return this->impl_->register_state_with_index(*new_state.unsafeGetTensorImpl());
+}
+
 } // namespace at

@@ -6,7 +6,10 @@
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <thread>
+#include <vector>
 
 namespace at::cuda {
 
@@ -101,11 +104,19 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
   auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  seed_extragraph_ = at::empty({1}, options);
-  offset_extragraph_ = at::empty({1}, options);
+  std::vector<uint64_t> seeds = gen->seed_list();
+  std::vector<int64_t*> seeds_device_ptr, offsets_device_ptr;
+  for (auto seed : seeds) {
+    auto seed_extragraph = at::empty({1}, options);
+    auto offset_extragraph = at::empty({1}, options);
+    seed_extragraph_list_.push_back(seed_extragraph);
+    offset_extragraph_list_.push_back(offset_extragraph);
 
-  seed_extragraph_.fill_(int64_t(gen->current_seed()));
-  gen->capture_prologue(seed_extragraph_.data_ptr<int64_t>(), offset_extragraph_.mutable_data_ptr<int64_t>());
+    seed_extragraph.fill_(int64_t(seed));
+    seeds_device_ptr.emplace_back(seed_extragraph.data_ptr<int64_t>());
+    offsets_device_ptr.emplace_back(offset_extragraph.data_ptr<int64_t>());
+  }
+  gen->capture_prologue(seeds_device_ptr, offsets_device_ptr);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -221,7 +232,7 @@ void CUDAGraph::capture_end() {
               "Default CUDA RNG generator on current device at capture end "
               "is different from default generator on current device "
               "when capture began");
-  wholegraph_increment_ = gen->capture_epilogue();
+  wholegraph_increment_list_ = gen->capture_epilogue();
 
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
@@ -254,14 +265,18 @@ void CUDAGraph::replay() {
   // Just like any RNG consumer kernel!
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  PhiloxCudaState rng_engine_inputs;
+  std::vector<PhiloxCudaState> rng_engine_inputs_list;
   {
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
+    rng_engine_inputs_list =
+        gen->philox_cuda_state_list(wholegraph_increment_list_);
   }
-  seed_extragraph_.fill_(int64_t(gen->current_seed()));
-  offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
-
+  std::vector<uint64_t> seeds = gen->seed_list();
+  for (size_t i = 0; i < seeds.size(); i++) {
+    seed_extragraph_list_[i].fill_(int64_t(seeds[i]));
+    offset_extragraph_list_[i].fill_(
+        int64_t(rng_engine_inputs_list[i].offset_.val));
+  }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 

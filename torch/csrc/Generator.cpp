@@ -143,6 +143,65 @@ uint64_t unpack_uint64(PyObject* pyobj) {
   return unsigned_obj;
 }
 
+static PyObject* THPGenerator_getStateIndex(PyObject* _self, PyObject* noargs) {
+  using namespace torch::autograd;
+  HANDLE_TH_ERRORS
+  auto& gen = ((THPGenerator*)_self)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  uint64_t index = gen.get_state_index();
+
+  return THPUtils_packUInt64(index);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_setStateIndex(
+    PyObject* _self,
+    PyObject* _new_state_index) {
+  using namespace torch::autograd;
+
+  HANDLE_TH_ERRORS
+  if (!THPUtils_checkLong(_new_state_index)) {
+    throw torch::TypeError(
+        "expected a long, but got %s", Py_TYPE(_new_state_index)->tp_name);
+  }
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+  uint64_t new_state_index = unpack_uint64(_new_state_index);
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  gen.set_state_index(new_state_index);
+
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_RegisterStateWithIndex(
+    PyObject* _self,
+    PyObject* _new_state) {
+  using namespace torch::autograd;
+
+  HANDLE_TH_ERRORS
+  if (!THPVariable_Check(_new_state)) {
+    throw torch::TypeError(
+        "expected a torch.ByteTensor, but got %s",
+        Py_TYPE(_new_state)->tp_name);
+  }
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+  const auto& new_state_tensor = THPVariable_Unpack(_new_state);
+
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  auto index = gen.register_state_with_index(new_state_tensor);
+
+  return THPUtils_packUInt64(index);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
@@ -218,6 +277,12 @@ static struct PyGetSetDef THPGenerator_properties[] = {
 static PyMethodDef THPGenerator_methods[] = {
     {"get_state", THPGenerator_getState, METH_NOARGS, nullptr},
     {"set_state", THPGenerator_setState, METH_O, nullptr},
+    {"get_state_index", THPGenerator_getStateIndex, METH_NOARGS, nullptr},
+    {"set_state_index", THPGenerator_setStateIndex, METH_O, nullptr},
+    {"register_state_with_index",
+     THPGenerator_RegisterStateWithIndex,
+     METH_O,
+     nullptr},
     {"set_offset", THPGenerator_setOffset, METH_O, nullptr},
     {"manual_seed", THPGenerator_manualSeed, METH_O, nullptr},
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
