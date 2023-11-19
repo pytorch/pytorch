@@ -134,13 +134,13 @@ class BuildTarget:
     __output_directory = None
     __is_shared = False
 
-    __warning_all: bool = (True,)
-    __include_pytorch: bool = (False,)
-    __vec_isa: VecISA = invalid_vec_isa,
-    __cuda: bool = (False,)
-    __aot_mode: bool = (False,)
-    __compile_only: bool = (False,)
-    __use_absolute_path: bool = (False,)
+    __warning_all: bool = True
+    __include_pytorch: bool = False
+    __vec_isa: VecISA = invalid_vec_isa
+    __cuda: bool = False
+    __aot_mode: bool = False
+    __compile_only: bool = False
+    __use_absolute_path: bool = False
 
     # OS info
     def is_windows(self):
