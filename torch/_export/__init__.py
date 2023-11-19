@@ -398,6 +398,9 @@ def capture_pre_autograd_graph(
 
 
 def _convert_input_to_fake(gm, args, kwargs):
+    if len(args) == 0 and len(kwargs) == 0 and len(dict(gm.named_parameters())) == 0 and len(dict(gm.named_buffers())) == 0:
+        return [], {}, {}, None
+
     fake_inps: List[torch.Tensor] = []
     fake_mode = None
     for node in gm.graph.nodes:
@@ -623,6 +626,9 @@ def _export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
+                assert dynamo_fake_mode is not None, (
+                    "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                )
                 node.meta["val"] = dynamo_fake_mode.from_tensor(attr, static_shapes=True)
 
     # When aot_export lifts the params, we lose the nn_module_stack
@@ -735,11 +741,14 @@ def _export(
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
-    }
+
+    # dynamo_fake_mode can be None if there's no placeholder in gm_torch_level
+    if dynamo_fake_mode:
+        gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names

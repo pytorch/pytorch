@@ -298,7 +298,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
-            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
+            **dict(mm_options(config, k, layout), ACC_TYPE="tl.int32"),
             suffix_args=1,
             epilogue_fn=V.ops.mul,
         )
