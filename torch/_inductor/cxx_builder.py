@@ -94,9 +94,10 @@ def _get_file_relative_path(project_root, src_file):
 
 def run_command_line(cmd_line, cwd=None):
     cmd = shlex.split(cmd_line)
-    status = subprocess.call(cmd, cwd=cwd, stderr=subprocess.STDOUT)
-
-    return status
+    try:
+        subprocess.check_call(cmd, cwd=cwd)
+    except subprocess.CalledProcessError as e:
+        raise exc.CppCompileError(cmd, e.output) from e
 
 
 def _get_windows_runtime_libs():
