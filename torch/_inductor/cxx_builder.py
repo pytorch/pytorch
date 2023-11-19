@@ -7,6 +7,7 @@ import sys
 import sysconfig
 from pathlib import Path
 from typing import List
+import copy
 
 import torch
 from torch._inductor import config, exc
@@ -293,7 +294,7 @@ class BuildTarget:
 
         self.__warning_all = warning_all
         self.__include_pytorch = include_pytorch
-        self.__vec_isa  = vec_isa,
+        self.__vec_isa = vec_isa
         self.__cuda = cuda
         self.__aot_mode = aot_mode
         self.__compile_only = compile_only
@@ -624,7 +625,7 @@ class BuildTarget:
                 sysconfig.get_config_var("LIBDIR")
             ]
             self.add_includes(ipaths)
-            self.add_lib_dirs([lpaths])
+            self.add_lib_dirs(lpaths)
 
             # No need to manually specify libraries in fbcode.
             if not config.is_fbcode():
@@ -671,6 +672,10 @@ class BuildTarget:
                     self.add_defination(" CPU_CAPABILITY={cap}")
                     self.add_defination(" CPU_CAPABILITY_{cap}")
                     self.add_defination(" HAVE_{cap}_CPU_DEFINITION")
+                    
+                macro_list = macros.split()
+                for i in macro_list:
+                    self.add_defination(i)
 
             if aot_mode and cuda:
                 """

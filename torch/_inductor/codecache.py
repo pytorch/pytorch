@@ -1039,7 +1039,7 @@ cdll.LoadLibrary("__lib_path__")
             cxx_target.target(
                 name=key, sources=[input_path], output_directory=output_dir, warning_all=False, vec_isa=self
             )
-            # print("!!! new: ", cxx_target.get_build_cmd())
+            print("!!! new: ", cxx_target.get_build_cmd())
 
             build_cmd = shlex.split(
                 cpp_compile_command(
