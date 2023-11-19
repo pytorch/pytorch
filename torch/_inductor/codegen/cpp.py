@@ -469,6 +469,8 @@ class CppCSEVariable(CSEVariable):
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
+            if name == "index_expr":
+                self._set_relevant_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         if (
