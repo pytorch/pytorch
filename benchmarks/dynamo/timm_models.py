@@ -21,7 +21,7 @@ def pip_install(package):
 try:
     importlib.import_module("timm")
 except ModuleNotFoundError:
-    print("Installing Pytorch Image Models...")
+    print("Installing PyTorch Image Models...")
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
     from timm import __version__ as timmversion
@@ -150,7 +150,6 @@ def refresh_model_names():
     all_models_family = populate_family(all_models)
     docs_models_family = populate_family(docs_models)
 
-    # print(docs_models_family.keys())
     for key in docs_models_family:
         del all_models_family[key]
 
@@ -178,6 +177,10 @@ class TimmRunner(BenchmarkRunner):
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
+    @property
+    def force_fp16_for_bf16_models(self):
+        return set()
+
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -189,11 +192,6 @@ class TimmRunner(BenchmarkRunner):
             drop_path_rate=None,
             drop_block_rate=None,
             pretrained=True,
-            # global_pool=kwargs.pop('gp', 'fast'),
-            # num_classes=kwargs.pop('num_classes', None),
-            # drop_rate=kwargs.pop('drop', 0.),
-            # drop_path_rate=kwargs.pop('drop_path', None),
-            # drop_block_rate=kwargs.pop('drop_block', None),
         )
         return model
 
@@ -212,7 +210,6 @@ class TimmRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 
-        # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
         model = self._download_model(model_name)
 
@@ -304,7 +301,6 @@ class TimmRunner(BenchmarkRunner):
         return tolerance, cosine
 
     def _gen_target(self, batch_size, device):
-        # return torch.ones((batch_size,) + (), device=device, dtype=torch.long)
         return torch.empty((batch_size,) + (), device=device, dtype=torch.long).random_(
             self.num_classes
         )
