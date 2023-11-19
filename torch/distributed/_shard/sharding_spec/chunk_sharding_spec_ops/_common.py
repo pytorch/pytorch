@@ -18,9 +18,7 @@ from torch.distributed.nn.functional import (
 
 
 def _chunk_sharding_spec_check(spec, op):
-    """
-    For the given op implementation check if the sharding spec is ChunkShardingSpec.
-    """
+    """For the given op implementation check if the sharding spec is ChunkShardingSpec."""
     if not isinstance(spec, ChunkShardingSpec):
         raise NotImplementedError(
             f"Only ChunkShardingSpec supported for '{op.__name__}'."
@@ -31,7 +29,7 @@ def _register_sharded_op_on_local_tensor(
     op, early_stop_func=None, extra_check=None, customized_func=None
 ):
     """
-    Handles ``__torch_function__`` dispatch for ops which are performed on
+    Handle ``__torch_function__`` dispatch for ops which are performed on
     the single local tensor of the sharded tensor such as op like
     ``torch.nn.functional.softmax`` or ``torch.Tensor.view``.
 
@@ -95,6 +93,7 @@ def _handle_col_wise_sharding_base(
 ):
     """
     For col-wise sharding of weight, lots of logic are common.
+
     So we extract the common logic and put in this function:
     Step 1. To get input from each rank and
     Step 2. To perform the op on the concatenated tensor.
@@ -158,8 +157,8 @@ def _handle_col_wise_sharding_base(
 
 def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg):
     """
-    For col-wise sharding of weight, we need to distribute
-    results to each rank. We do them in this function.
+    Distribute results to each rank for col-wise sharding of weight.
+
     Note that, if the index in the Sharding Spec is not equal to
     the rank number, we need to do the rearrangement based on the
     order given by the Sharding Spec (placement).
@@ -229,8 +228,8 @@ def _handle_max_norm_col_wise(
     pg,
 ):
     """
-    For col-wise sharding of weight, we need to aggregate the
-    norm across all ranks before we can perform the proper re-norm.
+    Aggregate the norm across all ranks for col-wise sharding of weight before we can perform the proper re-norm.
+
     Note that, the max_norm logic is only applied to the embedding
     indices that are looked up and not the whole shard.
 
@@ -300,10 +299,10 @@ def _all_gather_base_input(input, pg):
 
 def _handle_row_wise_mask(gather_inp, padding_idx, weight, world_size, rank):
     """
-    Mask the input for embedding look-up for IDs which are not stored
-    on the current rank. This function also adjust the ``padding_idx``
-    so that it is only used on the rank where the corresponding row is
-    stored.
+    Mask the input for embedding look-up for IDs which are not stored on the current rank.
+
+    This function also adjust the ``padding_idx``
+    so that it is only used on the rank where the corresponding row is stored.
 
     Note that, with ``max_norm`` flag on, only weights of rows being
     looked up will be re-normed. So we need an extra row for masked ID

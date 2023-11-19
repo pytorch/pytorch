@@ -58,7 +58,7 @@ def _register_sharded_op_on_local_shards(
     op, early_stop_func=None, extra_check=None, customized_func=None
 ):
     """
-    Handles ``__torch_function__`` dispatch for ops which are performed on
+    Handle ``__torch_function__`` dispatch for ops which are performed on
     each shard of the sharded tensor such as elementwise op like
     ``torch.nn.functional.gelu`` or ``torch.nn.functional.relu``.
 

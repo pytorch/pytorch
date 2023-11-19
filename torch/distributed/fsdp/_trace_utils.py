@@ -33,8 +33,9 @@ class TracingConfig:
 
 class _ParamUsageInfo(NamedTuple):
     """
-    This is used for ``_ExecutionInfo.module_to_param_usage_infos`` to record
-    execution information. The ``dict`` maps modules to a list of these
+    This is used for ``_ExecutionInfo.module_to_param_usage_infos`` to record execution information.
+
+    The ``dict`` maps modules to a list of these
     ``_ParamUsageInfo`` instances, where each instance represents a group of
     parameters used together.
 
@@ -122,8 +123,9 @@ class _ExecOrderTracer:
         kwargs: Dict[str, Any],
     ) -> Any:
         """
-        Overrides ``call_module`` to save execution information to
-        ``exec_info``. Note that ``call_module`` is called during symbolic
+        Override ``call_module`` to save execution information to ``exec_info``.
+
+        Note that ``call_module`` is called during symbolic
         tracing for each non-root module.
 
         Args:
@@ -170,8 +172,9 @@ class _ExecOrderTracer:
         proxy_factory_fn: Optional[Callable[[torch.fx.Node], torch.fx.Proxy]] = None,
     ) -> torch.fx.Proxy:
         """
-        Overrides ``create_proxy`` to save execution information to
-        ``exec_info``. Note that ``create_proxy`` is called during symbolic
+        Override ``create_proxy`` to save execution information to ``exec_info``.
+
+        Note that ``create_proxy`` is called during symbolic
         tracing for each leaf function/method/module.
 
         Args:

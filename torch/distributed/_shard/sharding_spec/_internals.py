@@ -4,10 +4,7 @@ from torch.distributed._shard.metadata import ShardMetadata
 
 
 def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
-    """
-    Checks if two shards overlap.
-    """
-
+    """Check if two shards overlap."""
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D
     # shard, we would check if one shard is above or on the left of the
@@ -70,7 +67,7 @@ def _find_1d_overlapping_shards(
 
 def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
     """
-    Ensures none of the shards overlap with each other.
+    Ensure none of the shards overlap with each other.
 
     Args:
         shards(List[ShardMetadata]): List of :class:`ShardMetadata` objects representing
@@ -112,7 +109,7 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
 
 def check_tensor(shards_metadata, tensor_dims) -> None:
     """
-    Checks if the shards_metadata is compatible with the provided tensor dims.
+    Check if the shards_metadata is compatible with the provided tensor dims.
 
     Args:
         shards_metadata(List[ShardMetadata]): List of :class:`ShardMetadata`
@@ -121,7 +118,6 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
     Raises:
         ``ValueError`` if not compatible.
     """
-
     # If the tensor's volume matches the total volume of all shards and
     # all shard boundaries are within tensor dims, we have a compatible
     # sharding spec for this tensor. Note that we have already verified
@@ -155,7 +151,7 @@ def check_tensor(shards_metadata, tensor_dims) -> None:
 
 def get_split_size(dim_size, chunks):
     """
-    Computes the split size inline with ``torch.chunk``
+    Compute the split size inline with ``torch.chunk``.
 
     Args:
         dim_size(int): Size of the dimension being chunked.
@@ -168,8 +164,7 @@ def get_split_size(dim_size, chunks):
 
 def get_chunked_dim_size(dim_size, split_size, idx):
     """
-    Computes the dim size of the chunk for provided ``idx`` given ``dim_size``
-    and ``split_size``.
+    Compute the dim size of the chunk for provided ``idx`` given ``dim_size`` and ``split_size``.
 
     Args:
         dim_size(int): Size of the dimension being chunked.
@@ -183,8 +178,7 @@ def get_chunked_dim_size(dim_size, split_size, idx):
 
 def get_chunk_sharding_params(sharding_dim_size, world_size, spec, rank):
     """
-    Generate the start pos and offset length for the current rank for
-    chunk sharding.
+    Generate the start pos and offset length for the current rank for chunk sharding.
 
     Args:
         sharding_dim_size(int): The dimension length which we shard on.

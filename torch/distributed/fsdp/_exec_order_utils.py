@@ -21,8 +21,9 @@ class _ExecOrderWarnStatus(Enum):
 
 class _ExecOrderData:
     """
-    This contains the data structures to track the execution order. We track
-    the pre-forward order on the *first* iteration for forward prefetching
+    This contains the data structures to track the execution order.
+
+    We track the pre-forward order on the *first* iteration for forward prefetching
     (which thus assumes static graph) and the post-forward order on *every*
     iteration for backward prefetching (which thus does not assume static
     graph but may be provide an incorrect order).
@@ -64,7 +65,8 @@ class _ExecOrderData:
         process_group: dist.ProcessGroup,
     ) -> None:
         """
-        Initializes the data structures needed for checking the forward order.
+        Initialize the data structures needed for checking the forward order.
+
         This should be called after a root FSDP instance has been set during
         lazy initialization.
         """
@@ -90,9 +92,9 @@ class _ExecOrderData:
         current_handle: FlatParamHandle,
     ) -> Optional[FlatParamHandle]:
         """
-        Returns a :class:`list` of the handles keys of the handles to backward
-        prefetch given the current handles key. If there are no valid handles
-        keys to prefetch, then this returns an empty :class:`list`.
+        Return a :class:`list` of the handles keys of the handles to backward prefetch given the current handles key.
+
+        If there are no valid handles keys to prefetch, then this returns an empty :class:`list`.
         """
         current_index = current_handle._post_forward_index
         if current_index is None:
@@ -111,9 +113,9 @@ class _ExecOrderData:
         current_handle: FlatParamHandle,
     ) -> Optional[FlatParamHandle]:
         """
-        Returns a :class:`list` of the handles keys of the handles to forward
-        prefetch given the current handles key. If there are no valid handles
-        keys to prefetch, then this returns an empty :class:`list`.
+        Return a :class:`list` of the handles keys of the handles to forward prefetch given the current handles key.
+
+        If there are no valid handles keys to prefetch, then this returns an empty :class:`list`.
         """
         current_index = current_handle._pre_forward_order_index
         if current_index is None:
@@ -129,7 +131,7 @@ class _ExecOrderData:
 
     def record_post_forward(self, handle: Optional[FlatParamHandle]) -> None:
         """
-        Records ``handles`` in the post-forward order, where ``handles`` should
+        Record ``handles`` in the post-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
         is empty, then it is omitted.
 
@@ -151,7 +153,7 @@ class _ExecOrderData:
         self, handle: Optional[FlatParamHandle], is_training: bool
     ) -> None:
         """
-        Records ``handles`` in the pre-forward order, where ``handles`` should
+        Record ``handles`` in the pre-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
         is empty, then it is omitted.
 
@@ -171,7 +173,7 @@ class _ExecOrderData:
 
     def _check_order(self, handle: FlatParamHandle, is_training: bool) -> None:
         """
-        Checks the forward execution order as long as ``is_training`` is
+        Check the forward execution order as long as ``is_training`` is
         ``True`` since checking in eval mode is not supported. This only checks
         if the distributed debug level is DETAIL.
 
@@ -308,7 +310,7 @@ class _ExecOrderData:
         handle: FlatParamHandle,
     ) -> Tuple[Optional[int], ...]:
         """
-        Returns the handle indices (i.e. indices into ``self.all_handles``)
+        Return the handle indices (i.e. indices into ``self.all_handles``)
         corresponding to the handles in ``handle``. An entry in the
         returned tuple is ``None`` if the handle is invalid.
         """
@@ -322,9 +324,9 @@ class _ExecOrderData:
         handle_indices: Tuple[int, ...],
     ) -> List[List[str]]:
         """
-        Returns a list of FQNs for each handle in ``handle_indices``. If a
-        handle index is invalid, then its FQNs are omitted from the returned
-        list.
+        Return a list of FQNs for each handle in ``handle_indices``.
+
+        If a handle index is invalid, then its FQNs are omitted from the returned list.
         """
         fqns: List[List[str]] = []
         for index in handle_indices:
@@ -340,8 +342,9 @@ class _ExecOrderData:
         handle: FlatParamHandle,
     ) -> List[List[str]]:
         """
-        Returns a list of FQNs for each handle in ``handles_key``. If a handle
-        is invalid, then its FQNs are omitted from the returned list.
+        Return a list of FQNs for each handle in ``handles_key``.
+
+        If a handle is invalid, then its FQNs are omitted from the returned list.
         """
         fqns: List[List[str]] = []
         if handle:
@@ -352,9 +355,9 @@ class _ExecOrderData:
 
     def next_iter(self):
         """
-        Advances the internal data structures per iteration. This should be
-        called in the post-backward callback since that marks the true end of
-        an iteration.
+        Advance the internal data structures per iteration.
+
+        This should be called in the post-backward callback since that marks the true end of an iteration.
         """
         self._iter += 1
         self.handles_post_forward_order.clear()

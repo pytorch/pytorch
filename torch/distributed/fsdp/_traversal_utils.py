@@ -33,9 +33,7 @@ traversal, whereas ``nn.Module`` has ``nn.Module.modules()`` for traversal.
 
 
 def _composable(module: nn.Module) -> bool:
-    """
-    Returns if ``module`` can compose with ``fully_shard``.
-    """
+    """Return if ``module`` can compose with ``fully_shard``."""
     # TODO: Add any other composable APIs that are mutually exclusive.
     registry = _get_registry(module)
     if registry is None:
@@ -50,7 +48,7 @@ def _get_fsdp_states_with_modules(
     module: nn.Module,
 ) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
-    Returns a tuple containing:
+    Return a tuple containing:
     1. A list of the ``_FSDPState`` instances in the module tree rooted at
     ``module`` without any duplicates and following the ``module.modules()``
     traversal order (which is assumed to be depth-first).
@@ -102,7 +100,7 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
 
 def _get_fsdp_handles(module: nn.Module) -> List:
     """
-    Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``
+    Return all ``FlatParamHandle`` s in the module tree rooted at ``module``
     following the rules in :func:`_get_fsdp_state`.
     """
     handles = [

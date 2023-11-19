@@ -11,12 +11,12 @@ def validate_param(param, param_name):
 @_sharded_op_impl(torch.nn.init.uniform_)
 def uniform_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensor in tensor.local_shards with values drawn from the uniform
-    distribution :math:`\mathcal{U}(a, b)`.
+    Fill the Tensor in tensor.local_shards with values drawn from the uniform distribution :math:`\mathcal{U}(a, b)`.
+
     Args:
         tensor: tensor sharded across devices
         a: the lower bound of the uniform distribution
-        b: the upper bound of the uniform distribution
+        b: the upper bound of the uniform distribution.
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
@@ -33,12 +33,12 @@ def uniform_(types, args=(), kwargs=None, pg=None):
 @_sharded_op_impl(torch.nn.init.normal_)
 def normal_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensors in tensor.local_shards with values drawn from the normal
+    Fill the Tensors in tensor.local_shards with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
     Args:
         tensor: tensor sharded across devices
         mean: the mean of the normal distribution
-        std: the standard deviation of the normal distribution
+        std: the standard deviation of the normal distribution.
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
@@ -55,7 +55,7 @@ def normal_(types, args=(), kwargs=None, pg=None):
 @_sharded_op_impl(torch.nn.init.kaiming_uniform_)
 def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the Tensors in tensor.local_shards with values according to the method
+    Fill the Tensors in tensor.local_shards with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
@@ -91,10 +91,11 @@ def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
 @_sharded_op_impl(torch.nn.init.constant_)
 def constant_(types, args=(), kwargs=None, pg=None):
     r"""
-    Fills the input ShardedTensor with the value \text{val}val.
+    Fill the input ShardedTensor with the value \text{val}val.
+
     Args:
         tensor: tensor sharded across devices
-        val: the value to fill the tensor with
+        val: the value to fill the tensor with.
     """
     validate_param(kwargs, "kwargs")
     sharded_tensor = kwargs["tensor"]
@@ -119,7 +120,7 @@ def register_tensor_creation_op(op):
     @_sharded_op_impl(op)
     def tensor_creation_op(types, args=(), kwargs=None, pg=None):
         """
-        Handles ``__torch_function__`` dispatch for tensor creation ops that
+        Handle ``__torch_function__`` dispatch for tensor creation ops that
         takes a ShardedTensor as argument, such as ``torch.zeros_like`` or
         ``torch.full_like``.
         """

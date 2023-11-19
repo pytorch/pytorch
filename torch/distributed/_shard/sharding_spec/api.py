@@ -23,10 +23,12 @@ if TYPE_CHECKING:
 
 class PlacementSpec(ABC):  # noqa: B024
     """
-    Base class representing the placement of an entity. Subclasses of this
-    class can be used to specify customized placements which might not be
+    Base class representing the placement of an entity.
+
+    Subclasses of this class can be used to specify customized placements which might not be
     covered by existing APIs.
     """
+
     pass
 
 
@@ -46,9 +48,8 @@ class DevicePlacementSpec(PlacementSpec):
             self.device = torch.distributed._remote_device(self.device)
 
 class ShardingSpec(ABC):
-    """
-    Base class representing sharding specifications.
-    """
+    """Base class representing sharding specifications."""
+
     @abstractmethod
     def build_metadata(self,
                        tensor_sizes: torch.Size,
@@ -90,16 +91,12 @@ class ShardingSpec(ABC):
 _CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
 
 def _has_custom_op(sharding_spec, op):
-    """
-    Returns whether or not the ShardingSpec has a custom op implementation.
-    """
+    """Return whether or not the ShardingSpec has a custom op implementation."""
     class_name = type(sharding_spec).__qualname__
     return class_name in _CUSTOM_SHARDING_SPEC_OPS and op in _CUSTOM_SHARDING_SPEC_OPS[class_name]
 
 def _dispatch_custom_op(sharding_spec, op: Callable, types, args, kwargs, process_group):
-    """
-    Calls the custom op for this ShardingSpec if it exists.
-    """
+    """Call the custom op for this ShardingSpec if it exists."""
     class_name = type(sharding_spec).__qualname__
     if not _has_custom_op(sharding_spec, op):
         raise RuntimeError(f'Custom op: {op} not registered for {class_name}')
@@ -109,9 +106,10 @@ def _dispatch_custom_op(sharding_spec, op: Callable, types, args, kwargs, proces
 def custom_sharding_spec_op(sharding_spec_class, func):
     """
     Decorator to allow custom registration of ops.
+
     Args:
         sharding_spec_class(type): The ShardingSpec for which we need to add this custom op.
-        func(Callable): The op to override (ex: torch.bmm)
+        func(Callable): The op to override (ex: torch.bmm).
     """
     class_name = sharding_spec_class.__qualname__
     if class_name not in _CUSTOM_SHARDING_SPEC_OPS:
@@ -169,6 +167,7 @@ class EnumerableShardingSpec(ShardingSpec):
 def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     """
     Infer the sharding spec from the metadata of each shard of a ShardedTensor.
+
     If the tensor is sharded only on one dimension, we can then verify whether it's
     a ChunkShardingSpec or not. The way to verify it is to first get the total length
     and perform a chunk sharding with the given placements to see if we can have the

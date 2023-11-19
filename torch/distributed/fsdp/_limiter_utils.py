@@ -6,8 +6,9 @@ import torch
 
 class _FreeEventQueue:
     """
-    This tracks all pending frees corresponding to inflight all-gathers. The
-    queueing pattern is iterative enqueues with a single dequeue per iteration
+    This tracks all pending frees corresponding to inflight all-gathers.
+
+    The queueing pattern is iterative enqueues with a single dequeue per iteration
     once the limit ``_max_num_inflight_all_gathers`` is reached.
     """
 

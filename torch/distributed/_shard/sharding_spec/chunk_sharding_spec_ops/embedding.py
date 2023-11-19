@@ -17,7 +17,8 @@ from ._common import (
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.embedding)
 def sharded_embedding(types, args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for ``torch.nn.functional.embedding``.
+    Handle ``__torch_function__`` dispatch for ``torch.nn.functional.embedding``.
+
     This method computes a sharded embedding lookup and has the following limitations:
 
     1. Supports only sharding of ``weight``.
@@ -138,7 +139,6 @@ def _validate_embedding_param(args, kwargs):
 
     Return: None.
     """
-
     input = args[0]
     weight = args[1]
     max_norm = kwargs.get("max_norm")
@@ -186,9 +186,10 @@ def _handle_col_wise_sharding(
     input, world_size, weight, local_shard, max_norm, norm_type, padding_idx, pg
 ):
     """
-    Entry-point function to handle the logic of col-wise sharding of weight
-    for embedding. (Detailed explanations of the logic can be found in
-    the comment for sharded_embedding.)
+    Entry-point function to handle the logic of col-wise sharding of weight for embedding.
+
+    (Detailed explanations of the logic can be found in
+    the comment for sharded_embedding.).
 
     Args:
         input: list of ID used for lookup and aggregation.
@@ -234,9 +235,10 @@ def _handle_row_wise_sharding(
     input, world_size, weight, local_shard, max_norm, norm_type, padding_idx, rank, pg
 ):
     """
-    Entry-point function to handle the logic of row-wise sharding of weight
-    for embedding. (Detailed explanations of the logic can be found in
-    the comment for sharded_embedding.)
+    Entry-point function to handle the logic of row-wise sharding of weight for embedding.
+
+    (Detailed explanations of the logic can be found in
+    the comment for sharded_embedding.).
 
     Args:
         input: list of ID used for lookup and aggregation.

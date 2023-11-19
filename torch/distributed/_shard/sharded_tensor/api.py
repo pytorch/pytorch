@@ -116,17 +116,14 @@ class ShardedTensorBase(torch.Tensor):
         return r
 
     def metadata(self) -> ShardedTensorMetadata:
-        """
-        Returns a :class:`ShardedTensorMetadata` object corresponding to the
-        metadata for the entire tensor.
-        """
+        """Return a :class:`ShardedTensorMetadata` object corresponding to the metadata for the entire tensor."""
         return self._metadata
 
     def local_shards(self) -> List[Shard]:
         """
-        Returns a list of :class:`Shard' corresponding to the
-        local shards for this rank. Returns an empty list if the current rank
-        does not host any shards for this Tensor.
+        Return a list of :class:`Shard' corresponding to the local shards for this rank.
+
+        Returns an empty list if the current rank does not host any shards for this Tensor.
         """
         return self._local_shards
 
@@ -138,11 +135,11 @@ class ShardedTensorBase(torch.Tensor):
         sharding_spec=None,
     ) -> ShardedTensorBase:
         """
-        Initialize a ShardedTensorBase with local shards and a global
-        ShardedTensorMetadata built on each rank.
+        Initialize a ShardedTensorBase with local shards and a global ShardedTensorMetadata built on each rank.
+
         Warning: This API is experimental and subject to change. It does
                  not do cross rank validations, and fully rely on the user
-                 for the correctness of sharded_tensor_metadata on each rank
+                 for the correctness of sharded_tensor_metadata on each rank.
         """
         shards_metadata = sharded_tensor_metadata.shards_metadata
         tensor_properties = sharded_tensor_metadata.tensor_properties
@@ -233,6 +230,7 @@ class ShardedTensor(ShardedTensorBase):
         individual GPU, via ``torch.cuda.set_device()``
 
     """
+
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
         self = super().__new__(cls, sharding_spec, *size, **kwargs)
         return self
@@ -361,7 +359,8 @@ class ShardedTensor(ShardedTensorBase):
     def _get_preferred_device(self) -> torch.device:
         """
         Return the preferred device to be used when creating tensors for collectives.
-        This method takes into account the associated process group
+
+        This method takes into account the associated process group.
         """
         if dist.get_backend(self._process_group) == dist.Backend.NCCL:
             return torch.device(torch.cuda.current_device())
@@ -375,8 +374,7 @@ class ShardedTensor(ShardedTensorBase):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         """
-        Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
-        sharded tensor.
+        Create a full :class:`Tensor` on rank ``dst`` by gathering all shards of the sharded tensor.
 
         The API needs to be called on all ranks in SPMD fashion. All ranks should have
         the same ``dst``. ``out`` should be a tensor of the same size as the overall
@@ -478,7 +476,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None
     ) -> ShardedTensor:
         """
-        Returns a copy of this object in CPU memory.
+        Return a copy of this object in CPU memory.
 
         If this ShardedTensor is already on CPU memory, then no copy is
         performed and original object is returned.
@@ -535,7 +533,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None
     ) -> ShardedTensor:
         """
-        Returns a copy of this object in CUDA memory, if the original ShardedTensor
+        Return a copy of this object in CUDA memory, if the original ShardedTensor
         is on CPU, we will move the local shard to the current GPU device of each
         process in a SPMD fashion.
         If this ShardedTensor is already on CUDA memory and local shards on each rank are
@@ -851,8 +849,7 @@ class ShardedTensor(ShardedTensorBase):
         sharding_spec=None,
     ) -> ShardedTensor:
         """
-        Initialize a ShardedTensor with local shards and a global
-        ShardedTensorMetadata built on each rank.
+        Initialize a ShardedTensor with local shards and a global ShardedTensorMetadata built on each rank.
 
         Warning: This API is experimental and subject to change. It does
                  not do cross rank validations, and fully rely on the user
@@ -983,15 +980,12 @@ class ShardedTensor(ShardedTensorBase):
         return sharded_tensor
 
     def sharding_spec(self) -> shard_spec.ShardingSpec:
-        """
-        Returns the ShardingSpec for the tensor.
-        """
+        """Return the ShardingSpec for the tensor."""
         return self._sharding_spec
 
     def reshard(self, resharding_spec: shard_spec.ShardingSpec) -> ShardedTensor:
         """
-        Reshard a sharded tensor given the ``resharding_spec``. For now, we only support
-        single local shard.
+        Reshard a sharded tensor given the ``resharding_spec``. For now, we only support single local shard.
 
         If ``resharding_spec`` is same as the original one, this becomes a no-op.
         If only ``resharding_spec`` shares the same sharding dim with the original one,
@@ -1148,9 +1142,7 @@ class ShardedTensor(ShardedTensorBase):
             f"kwargs: {kwargs} not supported for ShardedTensor!")
 
     def is_pinned(self) -> bool:  # type: ignore[override]
-        """
-        Returns True if the sharded tensor (each local shard) resides in pinned memory.
-        """
+        """Return True if the sharded tensor (each local shard) resides in pinned memory."""
         return self._metadata.tensor_properties.pin_memory
 
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
@@ -1158,9 +1150,9 @@ class ShardedTensor(ShardedTensorBase):
 
     def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
         """
-        Returns a Dict[int, RRef] with keys being the RPC rank and values
-        being RRefs to shards on that rank. Need to initialize the
-        RPC framework for this functionality.
+        Return a Dict[int, RRef] with keys being the RPC rank and values being RRefs to shards on that rank.
+
+        Need to initialize the RPC framework for this functionality.
 
         Raises an exception if ShardedTensor was created with ``init_rrefs=False``
         """
@@ -1178,9 +1170,8 @@ class ShardedTensor(ShardedTensorBase):
 
     @dataclass
     class ProcessGroupState:
-        """
-        State for ser-de of process group
-        """
+        """State for ser-de of process group."""
+
         local_rank: int
         global_rank: int
         local_world_size: int
@@ -1238,7 +1229,7 @@ class ShardedTensor(ShardedTensorBase):
 
 
 def _create_tensor_from_params(*size, local_device, tensor_properties: TensorProperties):
-    """ Helper to construct tensor from size, device and common params. """
+    """Help construct tensor from size, device and common params."""
     dtype = tensor_properties.dtype
     layout = tensor_properties.layout
     requires_grad = tensor_properties.requires_grad

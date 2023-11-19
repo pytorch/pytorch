@@ -9,7 +9,7 @@ def _annotate_modules_for_dynamo(
     use_orig_params: bool,
 ):
     """
-    Annotates the submodules in ``module`` 's tree, except those in
+    Annotate the submodules in ``module`` 's tree, except those in
     ``ignored_modules``, indicating that the submodules are FSDP-managed and
     saving the ``use_orig_params`` setting passed to the FSDP constructor.
     """

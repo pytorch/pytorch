@@ -10,8 +10,9 @@ from torch.distributed._shard.sharding_spec import ShardingSpec
 @dataclass
 class ShardingPlan:
     """
-    Representation of a sharding plan, describes how to shard a module
-    across hosts. `plan` is used to shard module parameters according to the spec provided,
+    Representation of a sharding plan, describes how to shard a module across hosts.
+
+    `plan` is used to shard module parameters according to the spec provided,
     `output_plan` and `return_local_tensor` are optional, they are used to specify the output
     layout of a module with a spec, and when to convert back to data parallel fashion.
 
@@ -61,21 +62,20 @@ class ShardingPlan:
         >>>    return_local_tensor=["fc2"]
         >>> )
     """
+
     plan: Dict[str, Union[ShardingSpec, Sharder]]
     output_plan: Optional[Dict[str, ShardingSpec]] = None
     return_local_tensor: Optional[List[str]] = None
 
 
 class ShardingPlanner(abc.ABC):
-    """
-    Default ShardingPlanner interface, can be extended and
-    implement advanced sharding strategies.
-    """
+    """Default ShardingPlanner interface, can be extended and implement advanced sharding strategies."""
+
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """
-        Given a nn.Module, define how to shard the module across
-        ranks, return a ShardingPlan
+        Given a nn.Module, define how to shard the module across ranks, return a ShardingPlan.
+
         Args:
             module (:class:`torch.nn.Module`):
                 The module to apply sharding to.

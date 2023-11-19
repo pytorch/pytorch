@@ -58,8 +58,7 @@ def st_is_meta(types, args=(), kwargs=None, pg=None):
 
 def sharded_type_as_check(*args, **kwargs):
     """
-    Perform extra checks for the sharded_type_as op such as the input needs to
-    be either a Tensor or ShardedTensor.
+    Perform extra checks for the sharded_type_as op such as the input needs to be either a Tensor or ShardedTensor.
 
     Args: same as ``torch.Tensor.type_as``.
 
@@ -84,7 +83,7 @@ def same_dtype(*args, **kwargs):
 
 def sharded_type_as(args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.type_as`` op.
+    Handle ``__torch_function__`` dispatch for the ``torch.Tensor.type_as`` op.
 
     Args: same as ``torch.Tensor.type_as``.
 
