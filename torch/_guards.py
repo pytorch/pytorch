@@ -619,7 +619,8 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
-        self.tensor_to_policy = WeakTensorKeyDictionary()
+        # See note [Tensor Fakification Caching]
+        self.tensor_to_context = WeakTensorKeyDictionary()
 
     @staticmethod
     @contextmanager
