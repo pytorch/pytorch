@@ -650,9 +650,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertExpectedInline(
-            guard_failure.reason,
+        self.assertIn(
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+            guard_failure.reason,
         )
 
     def test_builtin_abs(self):
@@ -716,9 +716,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ),
             sorted(guard_code),
         )
-        self.assertExpectedInline(
-            "\n".join(guard_code),
-            """\
+        guard_code_str = "\n".join(guard_code)
+
+        for line in """\
 2 <= L['x'].size()[0]
 L['x'] is L['y']
 L['x'].ndimension() == 2
@@ -734,8 +734,13 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""",
-        )
+utils_device.CURRENT_DEVICE == None""".split(
+            "\n"
+        ):
+            self.assertIn(
+                line,
+                guard_code_str,
+            )
 
     def test_fold(self):
         def fn(a):
@@ -818,6 +823,25 @@ utils_device.CURRENT_DEVICE == None""",
         def f(x):
             y = x.item()
             torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbolic_shape_rel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(x.shape[0] == 1)
+            torch._check(x.shape[0] != 2)
+            torch._check(x.shape[0] >= 0)
+            torch._check(x.shape[0] > 0)
+            torch._check(x.shape[0] < 4)
+            torch._check(x.shape[0] <= 3)
             return torch.arange(0, y)
 
         f(torch.tensor([3]))
@@ -5221,12 +5245,12 @@ def fn():
         self.assertTrue(guard_failure is not None)
         first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(
-                first_guard_failure,
+            self.assertIn(
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+                first_guard_failure,
             )
         else:
-            self.assertExpectedInline(first_guard_failure, """L['x'].size()[0] < 3""")
+            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -5254,9 +5278,9 @@ def fn():
         opt_fn(x2, y2)
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(
-                guard_failure[0],
+            self.assertIn(
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                guard_failure[0],
             )
         else:
             self.assertTrue(guard_failure is None)
@@ -5289,9 +5313,9 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertExpectedInline(
-            guard_failure[0],
+        self.assertIn(
             """len(L['x']) == 10""",
+            guard_failure[0],
         )
 
     def test_restore_graphstate(self):
