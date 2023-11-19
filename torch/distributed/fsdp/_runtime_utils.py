@@ -777,13 +777,13 @@ def _post_backward_hook(
             # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
             and not handle._force_full_precision
         ):
-            with torch.no_grad():
-                # flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
-                curr_version = flat_param.grad._version
-                flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
-                torch._C._autograd._unsafe_set_version_counter(
-                    flat_param.grad, curr_version
-                )
+            # with torch.no_grad():
+            flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+                # curr_version = flat_param.grad._version
+                # flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
+                # torch._C._autograd._unsafe_set_version_counter(
+                #     flat_param.grad, curr_version
+                # )
 
         if handle.uses_sharded_strategy:
             _reduce_grad(state, handle)

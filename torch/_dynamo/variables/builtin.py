@@ -1147,11 +1147,38 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
-                    else:
-                        from .builder import wrap_fx_proxy
-                        # Intermediaries grad, should be okay?
-                        print("GRAD ACCESS NO SOURCE?", obj.as_proxy().node.meta["example_value"].grad)
-                        return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
+
+                    # No match?
+                    try:
+                        return obj.var_getattr(tx, name).clone(source=source)
+                    except NotImplementedError:
+                        return GetAttrVariable(obj, name, **options)
+                    # from .builder import wrap_fx_proxy
+                    # # Intermediaries grad, should be okay?
+                    # # scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+                    # # out_param = eval(source.base.name(), scope)
+                    # # if out_param is not None:
+                    # #     print("PARAM GRAD?", out_param.grad)
+                    # # else:
+                    # #     print("OUT_PARAM NONE")
+                    # # print("GRAD ACCESS NO KNOWN INPUT SOURCE?", source.name(), obj.as_proxy().node.meta["example_value"].grad)
+                    # example_tensor = obj.as_proxy().node.meta["example_value"]
+                    # grad_val = example_tensor.grad
+                    # if grad_val is None:
+                    #     grad_val = torch.zeros(example_tensor.shape, dtype=example_tensor.dtype, device=example_tensor.device)
+                    # #     # return VariableBuilder(tx, source)(grad_val)
+
+                    # def get_grad(x):
+                    #     print("Getting grad", x, x.grad)
+                    #     return x
+
+                    # get_grad_proxy = tx.output.create_proxy(
+                    #     "call_function",
+                    #     get_grad,
+                    #     (obj.as_proxy(),),
+                    #     {},
+                    # )
+                    # return wrap_fx_proxy(tx, proxy=get_grad_proxy, example_value=grad_val, **options)
                 unimplemented("tensor grad")
             else:
                 from .builder import wrap_fx_proxy
@@ -1270,6 +1297,26 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
+                elif name_var.value == "grad":
+                    def update_grad(x, grad):
+                        print("Updating grad")
+                        x.grad = grad
+                        return x
+
+
+                    if isinstance(val, ConstantVariable):
+                        print("Setting grad", obj.source, obj.as_proxy().node.meta["example_value"].grad, "->", val.value)
+                        obj.as_proxy().node.meta["example_value"].grad = val.value
+                    else:
+                        print("Setting grad", obj.source, obj.as_proxy().node.meta["example_value"].grad, "->", val.as_proxy().node.meta['example_value'])
+                        tx.output.create_proxy(
+                            "call_function",
+                            update_grad,
+                            *proxy_args_kwargs([obj, val], {}),
+                        )
+                        # obj.as_proxy().node.meta["example_value"].grad = val.as_proxy().node.meta['example_value']
+
+
 
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val
