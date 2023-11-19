@@ -15,8 +15,9 @@ import torch
 import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
@@ -164,6 +165,7 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
+        example_inputs: Optional[List[torch.Tensor]] = None,
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
@@ -176,6 +178,7 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
+        self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
@@ -921,6 +924,46 @@ class GraphLowering(torch.fx.Interpreter):
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
+    def codegen_with_cpp_wrapper(self):
+        """
+        For CPU, the cpp wrapper codegen is done in one pass.
+        For GPU, the cpp wrapper codegen is done in two steps: JIT-compile the model with python
+        wrapper code and run it to generate autotuned kernel binaries in the first pass; and then
+        generate cpp wrapper code and compile it to a dynamic library in the second pass.
+        """
+        if "cuda" in self.device_types:
+            # first pass
+            self.cpp_wrapper = False
+            compiled = self.compile_to_module().call
+
+            def materialize(x):
+                if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    # Need concrete value to run dynamic shapes and tune the result
+                    return x.node.hint
+                elif isinstance(x, FakeTensor):
+                    return defake(x)
+                else:
+                    assert isinstance(
+                        x, torch.Tensor
+                    ), "Unknown type when creating real inputs"
+                    return x
+
+            with torch.utils._python_dispatch._disable_current_modes():
+                assert self.example_inputs is not None
+                real_inputs = [materialize(x) for x in self.example_inputs]
+                compiled(real_inputs)
+            del real_inputs
+
+            # second pass
+            # TODO: reuse self.scheduler from the first pass to speed up the second pass
+            self.cpp_wrapper = True
+            self.removed_buffers.clear()
+            self.inplaced_to_remove.clear()
+            return self.codegen()
+        else:
+            # cpu
+            return self.codegen()
+
     def codegen(self):
         from .scheduler import Scheduler
 
@@ -952,7 +995,9 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code, linemap = self.codegen()
+        code, linemap = (
+            self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+        )
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
         mod = PyCodeCache.load_by_key_path(
@@ -975,10 +1020,11 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode and self.cpp_wrapper:
+        if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code, linemap = self.codegen()
+            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
+            code, linemap = self.codegen_with_cpp_wrapper()
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
