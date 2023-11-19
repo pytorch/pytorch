@@ -119,7 +119,9 @@ def _get_windows_runtime_libs():
         "advapi32",
     ]
 
-
+from .codecache import VecISA, InvalidVecISA
+invalid_vec_isa = InvalidVecISA()
+        
 class BuildTarget:
     __name = None
     __sources = []
@@ -134,7 +136,7 @@ class BuildTarget:
 
     __warning_all: bool = (True,)
     __include_pytorch: bool = (False,)
-    # vec_isa: VecISA = invalid_vec_isa,
+    __vec_isa: VecISA = invalid_vec_isa,
     __cuda: bool = (False,)
     __aot_mode: bool = (False,)
     __compile_only: bool = (False,)
@@ -273,7 +275,7 @@ class BuildTarget:
         is_shared: bool = True,
         warning_all: bool = True,
         include_pytorch: bool = False,
-        # vec_isa: VecISA = invalid_vec_isa,
+        vec_isa: VecISA = invalid_vec_isa,
         cuda: bool = False,
         aot_mode: bool = False,
         compile_only: bool = False,
@@ -291,7 +293,7 @@ class BuildTarget:
 
         self.__warning_all = warning_all
         self.__include_pytorch = include_pytorch
-        # vec_isa: VecISA = invalid_vec_isa,
+        self.__vec_isa  = invalid_vec_isa,
         self.__cuda = cuda
         self.__aot_mode = aot_mode
         self.__compile_only = compile_only
@@ -328,11 +330,13 @@ class BuildTarget:
 
         self._config_include_and_linking_paths(
             include_pytorch=self.__include_pytorch,
+            vec_isa=self.__vec_isa,
             cuda=self.__cuda,
             aot_mode=self.__aot_mode,
         )
         self._config_torch_build_options(
             warning_all=self.__warning_all,
+            vec_isa=self.__vec_isa,
             cuda=self.__cuda,
             aot_mode=self.__aot_mode,
             compile_only=self.__compile_only,
@@ -392,14 +396,31 @@ class BuildTarget:
         build_temp_dir = os.path.join(build_root, _BUILD_TEMP_DIR)
         _create_if_dir_not_exist(build_temp_dir)
 
-        build_cmd = self.get_build_cmd()
-        run_command_line(build_cmd, cwd=build_temp_dir)
+        try:
+            build_cmd = self.get_build_cmd()
+            run_command_line(build_cmd, cwd=build_temp_dir)
+            
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf-8")
+            openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+            if openmp_problem and sys.platform == "darwin":
+                instruction = (
+                    "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                    "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                    "that has builtin OpenMP support;\n"
+                    "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                    "(3) install libomp via brew: `brew install libomp`;\n"
+                    "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                    " with `include/omp.h` under it."
+                )
+                output += instruction
+            raise exc.CppCompileError(build_cmd, output) from e        
         _remove_dir(build_temp_dir)
 
     def _config_torch_build_options(
         self,
         warning_all: bool = True,
-        # vec_isa: VecISA = invalid_vec_isa,
+        vec_isa: VecISA = invalid_vec_isa,
         cuda: bool = False,
         aot_mode: bool = False,
         compile_only: bool = False,
@@ -575,7 +596,7 @@ class BuildTarget:
     def _config_include_and_linking_paths(
         self,
         include_pytorch: bool = False,
-        # vec_isa: VecISA = invalid_vec_isa,
+        vec_isa: VecISA = invalid_vec_isa,
         cuda: bool = False,
         aot_mode: bool = False,
     ):
@@ -635,7 +656,6 @@ class BuildTarget:
                                             os.path.join(lpaths[i], "stubs")
                                         )
                                         break
-            """
             macros = vec_isa.build_macro()
             if macros:
                 if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -648,7 +668,9 @@ class BuildTarget:
                             f"-D HAVE_{cap}_CPU_DEFINITION",
                         ]
                     )
-            """
+                    self.add_defination(" CPU_CAPABILITY={cap}")
+                    self.add_defination(" CPU_CAPABILITY_{cap}")
+                    self.add_defination(" HAVE_{cap}_CPU_DEFINITION")
 
             if aot_mode and cuda:
                 """
@@ -665,7 +687,8 @@ class BuildTarget:
                 else:
                     # libs += ["c10_cuda", "cuda", "torch_cuda"]
                     self.add_libraries(["c10_cuda", "cuda", "torch_cuda"])
-            # build_arch_flags = vec_isa.build_arch_flags()
+            build_arch_flags = vec_isa.build_arch_flags()
+            print("!!!! build_arch_flags: ", build_arch_flags)
         else:
             # Note - this is effectively a header only inclusion. Usage of some header files may result in
             # symbol not found, if those header files require a library.
