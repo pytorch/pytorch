@@ -923,6 +923,16 @@ class TestSymbolicTracing(TestCase):
             lambda: interp.run(torch.randn(3, 3))
         )
 
+    def test_int_input(self):
+        def f(x, y):
+            return x.view(y)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 4), 12).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    view = torch.ops.aten.view.default(x_1, [y_1]);  x_1 = y_1 = None
+    return view""")
+
     def test_resize_from_zero(self):
         def f(x, y):
             x.resize_(y.size(0))
@@ -934,6 +944,16 @@ def forward(self, x_1, y_1):
     resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
     return None""")
 
+    def test_broadcast_shapes(self):
+        def f(x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0])
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 1), torch.empty(5)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    return (sym_size_int, sym_size_int_1)""")
 
     def test_unary(self):
         def f(x):
@@ -1265,6 +1285,13 @@ def forward(self, x_1, y_1):
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
+
+    def test_view_divisibility_unbacked(self):
+        def f(x):
+            i0 = x.item()
+            r = torch.zeros(i0, 192)
+            return r.view(12, -1, 192)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
@@ -1612,7 +1639,7 @@ L['a'].size()[0] < 20""")
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @torch.fx.experimental._config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
             assert t.shape[0] == 10
@@ -1688,10 +1715,19 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
+
+    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
+    xfail('dist', ''),
+    xfail('norm', ''),
+    xfail('linalg.vector_norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('renorm', ''),
+
+    xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
+    xfail('randint_like', ''),  # when unpacking SymInt, expected int but got s0
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
@@ -1719,6 +1755,11 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+
+    xfail('linalg.norm', ''),
+    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1727,6 +1768,73 @@ inplace_symbolic_tensor_failures = {
     # decomp not implemented
     xfail('unique', ''),
 }
+
+out_symbolic_tensor_failures = {
+    xfail('_native_batch_norm_legit', ''),
+    xfail('aminmax', ''),
+    xfail('angle', ''),
+    xfail('argmax', ''),
+    xfail('argmin', ''),
+    xfail('bmm', ''),
+    xfail('cummax', ''),
+    xfail('cummin', ''),
+    xfail('fft.fft2', ''),
+    xfail('fft.fftn', ''),
+    xfail('fft.ifft2', ''),
+    xfail('fft.ifftn', ''),
+    xfail('gather', ''),
+    xfail('i0', ''),
+    xfail('linalg.cholesky', ''),
+    xfail('linalg.cholesky_ex', ''),
+    xfail('linalg.det', ''),
+    xfail('linalg.det', 'singular'),
+    xfail('linalg.eigh', ''),
+    xfail('linalg.inv', ''),
+    xfail('linalg.inv_ex', ''),
+    xfail('linalg.ldl_factor', ''),
+    xfail('linalg.ldl_factor_ex', ''),
+    xfail('linalg.lu', ''),
+    xfail('linalg.lu_factor', ''),
+    xfail('linalg.lu_factor_ex', ''),
+    xfail('linalg.pinv', ''),
+    xfail('linalg.pinv', 'hermitian'),
+    xfail('linalg.qr', ''),
+    xfail('linalg.slogdet', ''),
+    xfail('linalg.solve_ex', ''),
+    xfail('linalg.svd', ''),
+    xfail('linalg.svdvals', ''),
+    xfail('lu', ''),
+    xfail('lu_unpack', ''),
+    xfail('max', 'reduction_with_dim'),
+    xfail('min', 'reduction_with_dim'),
+    xfail('mode', ''),
+    xfail('nn.functional.avg_pool2d', ''),
+    xfail('nn.functional.linear', ''),
+    xfail('qr', ''),
+    xfail('round', ''),
+    xfail('round', 'decimals_0'),
+    xfail('round', 'decimals_3'),
+    xfail('round', 'decimals_neg_3'),
+    xfail('scatter_add', ''),
+    xfail('scatter', ''),
+    xfail('sort', ''),
+    xfail('svd', ''),
+    xfail('take_along_dim', ''),
+    xfail('topk', ''),
+    xfail('triangular_solve', ''),
+    xfail('view_copy', ''),
+
+    # SymIntArrayRef expected to contain only concrete
+    xfail('ones', ''),
+    xfail('randn', ''),
+    xfail('zeros', ''),
+}
+
+out_symbolic_tensor_segfaults = {
+    skip('nanmean', ''),
+}
+
+out_symbolic_tensor_failures.update(out_symbolic_tensor_segfaults)
 
 # Copies inputs to inplace operations to avoid inplace modifications
 #   to leaves requiring gradient
@@ -1737,22 +1845,29 @@ def _get_safe_inplace(inplace_variant):
 
     return _fn
 
-def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
+def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, out=False):
     fn = _get_safe_inplace(op.get_inplace()) if inplace else op.op
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
 
     # Limit ourselves to first 100 inputs so symbolic tracing tests don't take too long
-    for sample_input in itertools.islice(sample_inputs_itr, 100):
+    count = 100
+    if out:
+        count = 5
+    for sample_input in itertools.islice(sample_inputs_itr, count):
         if inplace and sample_input.broadcasts_input:
             continue
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
+        if out:
+            expected = fn(*args, **kwargs)
+            kwargs['out'] = expected
 
         try:
             optests.make_fx_check(fn, args, kwargs, tracing_mode, self.assertEqual,
                                   randomize_data=True)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
+
 
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
@@ -1778,6 +1893,14 @@ class TestProxyTensorOpInfo(TestCase):
         if not op.get_inplace():
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
+
+    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
+        if not op.supports_out:
+            self.skipTest("Op doesn't support out")
+        _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
 only_for = ("cpu")
