@@ -303,7 +303,7 @@ def _calculate_fan_in_and_fan_out(tensor):
     num_input_fmaps = tensor.size(1)
     num_output_fmaps = tensor.size(0)
     receptive_field_size = 1
-    if tensor.dim() > 2:
+    if dimensions > 2:
         # math.prod is not always available, accumulate the product manually
         # we could use functools.reduce but that is not supported by TorchScript
         for s in tensor.shape[2:]:
