@@ -110,6 +110,7 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
+    "___nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -609,6 +610,12 @@ class GuardBuilder(GuardBuilderBase):
         assert guard.source is GuardSource.GLOBAL
         code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
         self.config_hash = config_hash
+        self._produce_guard_code(guard, code)
+
+    def NOT_NOPYTHON(self, guard: Guard):
+        # If this compiled entry is not one graph, it is a cache miss if the compiled object
+        # needs nopython. We only need to install this guard if there is a graph break.
+        code = ["not ___nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
