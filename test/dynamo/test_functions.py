@@ -1918,6 +1918,12 @@ def forward(self, x_1, output_1):
         # to be in the metadata, so there might be false negatives
         self.assertTrue("aten.copy" not in codes[0])
         self.assertTrue("aten.clone" not in codes[0])
+        # The following checks that there are only the tensor output is in
+        # the compiled graph
+        if dynamic and grad:
+            self.assertTrue("return (buf0, s0, )" in codes[0])
+        else:
+            self.assertTrue("return (buf0, )" in codes[0])
 
     @requires_cuda()
     @skipIfRocm
@@ -1989,13 +1995,19 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @skipIfRocm
-    def test_triton_kernel_None_arg(self):
+    def test_triton_kernel_various_args(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128})],
+            key=[],
+        )
         @triton.jit
         def pass_kernel(
             out_ptr,
-            dummy_None,
             n_elements,
+            dummy_None,
+            dummy_empty,
             BLOCK_SIZE: "tl.constexpr",
+            RANDOM_SIZE: "tl.constexpr",
         ):
             pass
 
@@ -2003,7 +2015,13 @@ def forward(self, x_1, output_1):
         def call_triton(output):
             n_elements = output.numel()
             grid = (n_elements,)
-            pass_kernel[grid](output, None, n_elements, BLOCK_SIZE=16)
+            pass_kernel[grid](
+                output,
+                n_elements,
+                None,
+                torch.empty_like(output),
+                RANDOM_SIZE=0,
+            )
             return output
 
         output = torch.randn(5, device="cuda")
