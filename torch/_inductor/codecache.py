@@ -1039,7 +1039,7 @@ cdll.LoadLibrary("__lib_path__")
             cxx_target.target(
                 name=key, sources=[input_path], output_directory=output_dir, warning_all=False, vec_isa=self
             )
-            print("!!! new: ", cxx_target.get_build_cmd())
+            # print("!!! new: ", cxx_target.get_build_cmd())
 
             build_cmd = shlex.split(
                 cpp_compile_command(
@@ -1070,7 +1070,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "-DCPU_CAPABILITY_AVX512"
+    _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
@@ -1083,7 +1083,7 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_AVX2"
+    _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1096,7 +1096,7 @@ class VecAVX2(VecISA):
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _macro = "CPU_CAPABILITY_ZVECTOR CPU_CAPABILITY=ZVECTOR HAVE_ZVECTOR_CPU_DEFINITION"
     _arch_flags = "-mvx -mzvector"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1280,6 +1280,13 @@ def get_include_and_linking_paths(
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
+    def format_define_string(def_val_str:str):
+        def_list = def_val_str.split()
+        def_fmt = ""
+        for i in def_list:
+            def_fmt+=f"-D{i}"
+        return def_fmt            
+    
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -1329,7 +1336,7 @@ def get_include_and_linking_paths(
                                     lpaths[i] = os.path.join(path, root)
                                     lpaths.append(os.path.join(lpaths[i], "stubs"))
                                     break
-        macros = vec_isa.build_macro()
+        macros = format_define_string(vec_isa.build_macro())
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
                 cap = str(vec_isa).upper()
