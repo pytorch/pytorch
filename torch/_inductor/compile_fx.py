@@ -55,7 +55,7 @@ from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.utils import time_and_log  # type: ignore[import]
+    from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str):
@@ -207,7 +207,7 @@ def count_bytes_inner(
         post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):  # type: ignore[call-arg]
+    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
@@ -516,10 +516,11 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
-        # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning,
-        # and for the forward pass, we have the real inputs to be used as example_inputs.
         graph = GraphLowering(
             gm,
+            # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
+            # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
+            # we currently use fake tensors and defake them later.
             example_inputs=V.real_inputs if is_inference else example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
@@ -539,7 +540,7 @@ def fx_codegen_and_compile(
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
                         output_strides.append(
-                            tuple(  # type: ignore[arg-type]
+                            tuple(
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
@@ -552,6 +553,9 @@ def fx_codegen_and_compile(
                 return compiled_fn
 
             if graph.disable_cudagraphs:
+                perf_hint_log.warning(
+                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
+                )
                 BoxedBool.disable(cudagraphs)
 
             compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
@@ -961,9 +965,7 @@ def compile_fx(
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,
             }
-        ), V.set_real_inputs(
-            example_inputs_
-        ):  # type: ignore[call-arg]
+        ), V.set_real_inputs(example_inputs_):
             inputs_ = example_inputs_
             if isinstance(model_, torch.fx.GraphModule):
                 fake_inputs = [
@@ -1160,7 +1162,7 @@ def compile_fx(
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
-    with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
     ), compiled_autograd.disable():
         return aot_autograd(

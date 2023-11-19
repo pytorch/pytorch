@@ -11,6 +11,7 @@ import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher, cache_dir
@@ -318,6 +319,21 @@ class AOTInductorTestsTemplate:
 
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
+
+    def test_simple_split(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        example_inputs = (torch.randn(2, 8, device=self.device),)
+        counters.clear()
+        self.check_model(Model(), example_inputs)
+        self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
     def test_missing_output(self):
         class Model(torch.nn.Module):
@@ -974,6 +990,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_dup_unbacked_sym_decl(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1214,6 +1231,7 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        # Need to support convolution
         "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
@@ -1240,6 +1258,7 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
+        # Need to support convolution
         "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
