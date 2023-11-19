@@ -302,9 +302,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
+            failure_reason,
         )
 
         # Reset failure reason
@@ -456,9 +456,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -512,9 +512,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
     @patch("torch._functorch.config.debug_assert", True)
@@ -550,9 +550,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -602,9 +602,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -651,9 +651,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
