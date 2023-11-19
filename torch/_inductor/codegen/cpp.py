@@ -445,22 +445,40 @@ class CppCSEVariable(CSEVariable):
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
-            self.set_relevant_itervars(args[1])
+            # args[1] is index
+            self._set_relevant_itervars(args[1])
         else:
-            self.relevant_itervars.update(*[arg.relevant_itervars for arg in args if isinstance(arg, CppCSEVariable)])
+            # propagate relevant itervars and is_vec from args
+            self.relevant_itervars.update(
+                *[
+                    arg.relevant_itervars
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable)
+                ]
+            )
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
-        if hasattr(V.interpreter, "current_node") and get_current_node_opt_ctx() is not None:
+        if (
+            hasattr(V.interpreter, "current_node")
+            and get_current_node_opt_ctx() is not None
+        ):
             self.dtype = get_current_node_opt_ctx().dtype
 
-    def set_relevant_itervars(self, index):
+    def _set_relevant_itervars(self, index: sympy.Expr):
+        """
+        Set the relevant itervars for this variable based on the `index` expression.
+        This includes the itervars directly used in the `index` as well as relevant itervars
+        of other cse variables used in the `index`.
+        """
         for s in index.free_symbols:
             if s in V.kernel.itervars:
                 self.relevant_itervars.add(s)
             elif s.name in V.kernel.cse.varname_map:
-                self.relevant_itervars.update(V.kernel.cse.varname_map[s.name].relevant_itervars)
+                self.relevant_itervars.update(
+                    V.kernel.cse.varname_map[s.name].relevant_itervars
+                )
 
-    def is_relevant(self, itervar):
+    def is_relevant(self, itervar: sympy.Symbol):
         return itervar in self.relevant_itervars
 
 
@@ -826,38 +844,46 @@ class CppVecOverrides(CppOverrides):
         self = super().__new__(cls)
 
         def wrap(func):
+            # `CppVecKernel` generates both scalar ops and vector ops according to
+            # whether the inputs are scalars or vectors while all ops in `CppVecOverrides`
+            # (except for "masked") assume the inputs are vectors. We wrap the ops in
+            # `CppVecOverrides` to broadcast scalar inputs to vectors if needed or fallback to
+            # `CppOverrides` when all inputs are scalars.
+            #
+            # Inputs to ops.masked are handled separately in its own function due to
+            # the need of recurive handling of masked body.
             def wrapper(*args, **kwargs):
-                has_scalar = any(not arg.is_vec for arg in args if isinstance(arg, CppCSEVariable))
-                has_vector = any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable))
+                has_scalar = any(
+                    not arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
+                )
+                has_vector = any(
+                    arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
+                )
                 if has_scalar and has_vector:
+                    # broadcast scalar args to vector if needed
                     new_args = []
                     for arg in args:
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
-                            # TODO: factor out the logic for broadcast
-                            if arg.dtype == torch.bool:
-                                new_arg = V.kernel.cse.generate(V.kernel.compute, f"to_float_mask({arg.name})")
-                            else:
-                                new_arg = V.kernel.cse.generate(V.kernel.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[arg.dtype]}>({arg.name})")
-                            # TODO: factor out a function to copy metadata from another variable
-                            new_arg.dtype = arg.dtype
-                            new_arg.relevant_itervars = arg.relevant_itervars
-                            new_arg.is_vec = True
+                            assert isinstance(V.kernel, CppVecKernel)
+                            new_arg = V.kernel.broadcast(arg)
                             new_args.append(new_arg)
                         else:
                             new_args.append(arg)
                     return func(*new_args, **kwargs)
-                if has_scalar and not has_vector:
+                if has_scalar and not has_vector:  # TODO: should be `not has_vector`
+                    # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
-                    return getattr(scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__))(*args, **kwargs)
+                    scalar_func = getattr(
+                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
+                    )
+                    assert scalar_func is not None
+                    return scalar_func(*args, **kwargs)
                 return func(*args, **kwargs)
-            if func.__name__ in ["masked"]:
-                # we handle ops.masked separately in its own function
-                # due to the special handling of masked body
-                return func
+
             return wrapper
 
         for name, method in vars(cls).items():
-            if getattr(method, '__class__', None) == staticmethod:
+            if getattr(method, "__class__", None) == staticmethod and name != "masked":
                 setattr(self, name, wrap(method.__func__))
         return self
 
@@ -1075,6 +1101,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def constant(val, dtype):
+        # TODO: move the logic to CppOverrides
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
         proposed_dtype = opt_ctx.dtype
@@ -1159,9 +1186,10 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
+        # TODO: handle this in the wrap
         if not isinstance(x, CppCSEVariable) or not x.is_vec:
             return CppOverrides.to_dtype(x, dtype, src_dtype)
-        
+
         assert dtype in [
             torch.bool,
             torch.float,
@@ -1237,14 +1265,19 @@ class CppVecOverrides(CppOverrides):
             other_code = f"at::vec::Vectorized<float>({other_code})"
             type = f"decltype({var}())"
             float_mask = f"to_float_mask({new_mask})"
-            csevar = V.kernel.cse.generate(V.kernel.compute, f"{type}::blendv({other_code}, {var}(), {float_mask})")
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute, f"{type}::blendv({other_code}, {var}(), {float_mask})"
+            )
         else:
-            csevar = V.kernel.cse.generate(V.kernel.compute, f"{mask} ? {var}() : {other_code}")
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute, f"{mask} ? {var}() : {other_code}"
+            )
         csevar.update_on_args("masked", (mask, body, other, result), {})
         return csevar
 
     @staticmethod
     def index_expr(expr, dtype):
+        # TODO: handle this in the CppOverrides
         assert dtype == torch.int64
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
@@ -1579,7 +1612,8 @@ class CppVecKernel(CppKernel):
             and stride_at(tiling_var, index) != 1
             or any(
                 self.cse.varname_map[s.name].is_relevant(tiling_var)
-                for s in index.free_symbols if s.name.startswith("tmp")
+                for s in index.free_symbols
+                if s.name.startswith("tmp")
             )
         )
         var_expr = (
@@ -1645,6 +1679,8 @@ class CppVecKernel(CppKernel):
         :param var: buffer to store into.
         :index: index into the `var`.
         """
+        # TODO: turn it on when tmp_acc_vec uses CppCSEVariable
+        # assert isinstance(value, CppCSEVariable) and value.is_vec, value
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
@@ -1674,16 +1710,16 @@ class CppVecKernel(CppKernel):
         assert "buf" in name
         assert mode is None
         assert isinstance(value, CppCSEVariable), value
-        dtype = V.graph.get_dtype(name)
         if not value.is_vec:
-            value = self.cse.generate(self.compute, f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({value})")
+            # this happens when we store a scalar into a vectorized buffer like "fill"
+            value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
         self.stores.writeline(
             DeferredLine(
                 name,
-                self.get_vec_store_line(value, var, index, dtype),
+                self.get_vec_store_line(value, var, index, V.graph.get_dtype(name)),
             )
         )
 
@@ -1817,6 +1853,23 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 )
             ]
             self.reduction_suffix.writelines(store_lines)
+
+    def broadcast(self, scalar_var: CppCSEVariable):
+        assert not scalar_var.is_vec
+        if scalar_var.dtype == torch.bool:
+            vec_var = self.cse.generate(
+                self.compute, f"to_float_mask({scalar_var.name})"
+            )
+        else:
+            vec_var = self.cse.generate(
+                self.compute,
+                f"at::vec::Vectorized<{DTYPE_TO_CPP[scalar_var.dtype]}>({scalar_var.name})",
+            )
+        # TODO: factor out a function to copy metadata from another variable
+        vec_var.dtype = scalar_var.dtype
+        vec_var.relevant_itervars = scalar_var.relevant_itervars
+        vec_var.is_vec = True
+        return vec_var
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2031,10 +2084,6 @@ class CppVecKernelChecker(CppVecKernel):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
 
-    def has_loop(self):
-        assert self.itervars is not None
-        return len(self.itervars) > 0
-
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
         if load_type == torch.bool:
@@ -2117,8 +2166,8 @@ class CppVecKernelChecker(CppVecKernel):
 
             var = self.cse.newvar()
 
-            if not self.has_loop():
-                self.disable_vec(f"not a loop")
+            if len(self.itervars) == 0:
+                self.disable_vec("not a loop")
                 return var
 
             if load_dtype in [torch.bool, torch.uint8] and not (
@@ -2131,8 +2180,10 @@ class CppVecKernelChecker(CppVecKernel):
                 return var
 
             if (
-                load_dtype not in self.load_supported_dtypes
-            ) and not self.is_load_integer_scalar_tensor(name, index) and index.has(self.itervars[self.tiling_idx]):
+                (load_dtype not in self.load_supported_dtypes)
+                and not self.is_load_integer_scalar_tensor(name, index)
+                and index.has(self.itervars[self.tiling_idx])
+            ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -2140,10 +2191,10 @@ class CppVecKernelChecker(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
-            if not self.has_loop():
-                self.disable_vec(f"not a loop")
+            if len(self.itervars) == 0:
+                self.disable_vec("not a loop")
                 return self.simd_vec
-            
+
             store_dtype = V.graph.get_dtype(name)
 
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
