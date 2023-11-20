@@ -600,7 +600,7 @@ class trace:
     fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
-    ir_pre_fusion = False
+    ir_pre_fusion = True
 
     # Save TorchInductor IR after fusion pass
     ir_post_fusion = True
