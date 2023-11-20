@@ -29,6 +29,10 @@ install_centos() {
   rm -rf /var/lib/yum/history
 }
 
+if [[ $ANACONDA_PYTHON_VERSION == "3.12" ]]; then
+  exit
+fi
+
 # Install base packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
