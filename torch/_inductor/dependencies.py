@@ -22,7 +22,7 @@ Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 class MemoryDep(typing.NamedTuple):
     name: str
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -138,7 +138,7 @@ class WeakDep(typing.NamedTuple):
 
 
 class IndexExprDep(typing.NamedTuple):
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -357,7 +357,7 @@ def extract_read_writes(
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
-    with V.set_ops_handler(rw):  # type: ignore[call-arg]
+    with V.set_ops_handler(rw):
         fn(*args)
 
     if normalize:
@@ -377,7 +377,7 @@ def extract_read_writes(
 
 
 def extract_input_node_reduction_ranges(  # noqa: F722
-    input_node: ".ir.TensorBox",  # type: ignore[valid-type] # noqa: F722
+    input_node: "torch._inductor.ir.TensorBox",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -397,7 +397,7 @@ def extract_input_node_reduction_ranges(  # noqa: F722
         else:
             return (None, None)
 
-    if not isinstance(input_node.data.data, Loops):
+    if not isinstance(input_node.data.data, Loops):  # type: ignore[attr-defined]
         # Other IRNodes do not have reduction_ranges.
         return (None, None)
 
