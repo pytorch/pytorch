@@ -247,7 +247,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # Huggingface
-    "GPT2ForSequenceClassification",  # Accuracy https://github.com/pytorch/pytorch/issues/109019
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
@@ -3958,5 +3957,5 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
 
 if __name__ == "__main__":
     raise RuntimeError(
-        f"You shouldn't run {sys.argv[0]} directly, instead try timm_model.py, torchbench.py or hugginface.py"
+        f"You shouldn't run {sys.argv[0]} directly, instead try timm_model.py, torchbench.py or huggingface.py"
     )
