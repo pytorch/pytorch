@@ -8,7 +8,7 @@ import torch
 import torch.library
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 
 __all__ = [
     "decomposition_table",
@@ -182,7 +182,7 @@ def register_decomposition(
             _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(register, aten_op)
+        pytree.tree_map_(register, aten_op)
         return fn
 
     return decomposition_decorator
@@ -259,6 +259,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.addcmul_,
             aten.addr,
             aten.affine_grid_generator,
+            aten.all,
             aten.aminmax,
             aten.arange.default,
             aten.arange.start,
@@ -299,6 +300,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._fused_moving_avg_obs_fq_helper,
             aten.gelu_,
             aten.gelu_backward,
+            aten.glu,
             aten.glu_backward,
             aten.hardshrink,
             aten.hardsigmoid,
@@ -401,9 +403,14 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
+            aten.split.Tensor,
+            aten.squeeze.default,
+            aten.squeeze.dim,
             aten.std,
             aten.std_mean,
             aten.stack,
+            aten.sum.default,
+            aten.sum.out,
             aten.t,
             aten.tanh_backward,
             aten.threshold,
@@ -415,6 +422,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.tril_,
             aten.triu,
             aten.triu_,
+            aten.unbind,
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
@@ -430,5 +438,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._weight_norm_interface,
         ]
     )

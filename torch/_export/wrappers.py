@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import torch
 import torch._custom_ops
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -10,14 +11,6 @@ from torch.utils import _pytree as pytree
 
 
 _export_tracepoint = HigherOrderOperator("_export_tracepoint")
-
-
-_export_tracepoint.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-_export_tracepoint.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-_export_tracepoint.fallthrough(DispatchKey.ADInplaceOrView)
-_export_tracepoint.fallthrough(DispatchKey.BackendSelect)
-_export_tracepoint.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-_export_tracepoint.fallthrough(DispatchKey.AutogradCPU)
 
 
 @_export_tracepoint.py_impl(ProxyTorchDispatchMode)
@@ -45,6 +38,11 @@ def export_tracepoint_functional(ctx, *args, **kwargs):
     with ctx.redispatch_to_next():
         out = _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
         return ctx.wrap_tensors(out)
+
+
+_export_tracepoint.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(_export_tracepoint, deferred_error=True)
+)
 
 
 @_export_tracepoint.py_impl(DispatchKey.CPU)

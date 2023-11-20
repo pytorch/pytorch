@@ -45,7 +45,15 @@ class InstanceNormImpl
   }
 
   /// Pretty prints the `InstanceNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << std::boolalpha << "torch::nn::InstanceNorm" << D << "d("
+           << this->options.num_features() << ", "
+           << "eps=" << this->options.eps() << ", "
+           << "momentum=" << this->options.momentum() << ", "
+           << "affine=" << this->options.affine() << ", "
+           << "track_running_stats=" << this->options.track_running_stats()
+           << ")";
+  }
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm1d

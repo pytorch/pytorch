@@ -20,8 +20,7 @@
 #include <folly/container/F14Set.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
@@ -1144,5 +1143,4 @@ class TORCH_API StaticRuntime {
   IValueArray values_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

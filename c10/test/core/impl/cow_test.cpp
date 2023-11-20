@@ -1,6 +1,5 @@
-#include <c10/core/impl/cow/context.h>
-#include <c10/core/impl/cow/deleter.h>
-#include <c10/core/impl/cow/try_ensure.h>
+#include <c10/core/impl/cow/COW.h>
+#include <c10/core/impl/cow/COWDeleter.h>
 
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/StorageImpl.h>
@@ -11,6 +10,7 @@
 #include <cstddef>
 #include <memory>
 
+// NOLINTBEGIN(clang-analyzer-cplusplus*)
 namespace c10::impl {
 namespace {
 
@@ -41,7 +41,7 @@ class ContextTest : public testing::Test {
 };
 
 TEST_F(ContextTest, Basic) {
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   context.increment_refcount();
@@ -51,7 +51,8 @@ TEST_F(ContextTest, Basic) {
     // is expected to give us a shared lock.
     auto result = context.decrement_refcount();
     ASSERT_THAT(
-        std::holds_alternative<cow::Context::NotLastReference>(result),
+        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
+            result),
         testing::IsTrue());
     ASSERT_THAT(delete_count(), testing::Eq(0));
   }
@@ -59,7 +60,7 @@ TEST_F(ContextTest, Basic) {
   {
     auto result = context.decrement_refcount();
     ASSERT_THAT(
-        std::holds_alternative<cow::Context::LastReference>(result),
+        std::holds_alternative<cow::COWDeleterContext::LastReference>(result),
         testing::IsTrue());
     // Result holds the DeleteTracker.
     ASSERT_THAT(delete_count(), testing::Eq(0));
@@ -69,27 +70,29 @@ TEST_F(ContextTest, Basic) {
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
-TEST_F(ContextTest, delete_context) {
+TEST_F(ContextTest, cow_deleter) {
   // This is effectively the same thing as decrement_refcount() above.
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::delete_context(&context);
+  cow::cow_deleter(&context);
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
 MATCHER(is_copy_on_write, "") {
   const c10::StorageImpl& storage = std::ref(arg);
-  return storage.data_ptr().get_deleter() == cow::delete_context;
+  return cow::is_cow_data_ptr(storage.data_ptr());
 }
 
-TEST(try_ensure_test, no_context) {
+TEST(lazy_clone_storage_test, no_context) {
   StorageImpl original_storage(
-      {}, /*size_bytes=*/7, GetCPUAllocator(), /*resizable=*/false);
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
   ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
 
-  intrusive_ptr<StorageImpl> new_storage = cow::try_ensure(original_storage);
-  ASSERT_THAT(new_storage, testing::NotNull());
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The original storage was modified in-place to now hold a copy on
   // write context.
@@ -103,27 +106,38 @@ TEST(try_ensure_test, no_context) {
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
 }
 
-class OpaqueContext {};
+struct MyDeleterContext {
+  MyDeleterContext(void* bytes) : bytes(bytes) {}
 
-TEST(try_ensure_test, different_context) {
+  ~MyDeleterContext() {
+    delete[] static_cast<std::byte*>(bytes);
+  }
+
+  void* bytes;
+};
+
+void my_deleter(void* ctx) {
+  delete static_cast<MyDeleterContext*>(ctx);
+}
+
+TEST(lazy_clone_storage_test, different_context) {
+  void* bytes = new std::byte[5];
   StorageImpl storage(
       {},
       /*size_bytes=*/5,
       at::DataPtr(
-          /*data=*/new std::byte[5],
-          /*ctx=*/new OpaqueContext,
-          +[](void* opaque_ctx) {
-            delete static_cast<OpaqueContext*>(opaque_ctx);
-          },
-          Device(Device::Type::CPU)),
+          /*data=*/bytes,
+          /*ctx=*/new MyDeleterContext(bytes),
+          /*ctx_deleter=*/my_deleter,
+          /*device=*/Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
   // We can't handle an arbitrary context.
-  ASSERT_THAT(cow::try_ensure(storage), testing::IsNull());
+  ASSERT_THAT(cow::lazy_clone_storage(storage), testing::IsNull());
 }
 
-TEST(try_ensure_test, already_copy_on_write) {
+TEST(lazy_clone_storage_test, already_copy_on_write) {
   std::unique_ptr<void, DeleterFnPtr> data(
       new std::byte[5],
       +[](void* bytes) { delete[] static_cast<std::byte*>(bytes); });
@@ -133,16 +147,17 @@ TEST(try_ensure_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::Context(std::move(data)),
-          cow::delete_context,
+          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
   ASSERT_THAT(original_storage, is_copy_on_write());
 
-  intrusive_ptr<StorageImpl> new_storage = cow::try_ensure(original_storage);
-  ASSERT_THAT(new_storage, testing::NotNull());
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The result is a different storage.
   ASSERT_THAT(&*new_storage, testing::Ne(&original_storage));
@@ -154,3 +169,4 @@ TEST(try_ensure_test, already_copy_on_write) {
 
 } // namespace
 } // namespace c10::impl
+// NOLINTEND(clang-analyzer-cplusplus*)

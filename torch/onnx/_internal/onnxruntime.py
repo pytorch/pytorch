@@ -182,7 +182,7 @@ class OrtOperatorSupport(OperatorSupport):
 
 def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
     """
-    In torch.fx.Graph, placehoder is a special assignment node. If it's not
+    In torch.fx.Graph, placeholder is a special assignment node. If it's not
     executed in the beginning, it could overwrite values computed by upstream
     nodes.
     """
@@ -597,7 +597,7 @@ class OrtBackend:
     """A backend compiles (sub-)graphs in torch.fx.GraphModule to onnxruntime.InferenceSession calls.
 
     The compiler entry point is OrtBackend.compile, which
-        1. partitions the original graph into supported sub-graphs (type: torch.fx.GrpahModule) and unsupported
+        1. partitions the original graph into supported sub-graphs (type: torch.fx.GraphModule) and unsupported
            sub-graphs.
         2. For each supported sub-graph, it replaces its _wrapped_call function with _ort_accelerated_call.
         3. Inside _ort_accelerated_call, it creates onnxruntime.InferenceSession and calls it to execute the sub-graph.
@@ -923,7 +923,7 @@ class OrtBackend:
 
             # Overriding fused_module's __call__() function with ort_acclerated_call()
             # This loop goes through all graph partitions (each of them is an ONNX-representable graph)
-            # and override their _wrappped_call function with _ort_accelerated_call.
+            # and override their _wrapped_call function with _ort_accelerated_call.
             # Inside _ort_accelerated_call, the partition's graph is exported into ONNX and executed by ORT.
             for node in partitioned_prim_graph_module.graph.nodes:
                 # TODO(wschin): use a better way to identify fused submodule

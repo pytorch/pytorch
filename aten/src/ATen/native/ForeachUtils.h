@@ -20,14 +20,14 @@
 namespace at::native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
-bool has_integral_tensor(TensorList tensors, const bool includeBool) {
+inline bool has_integral_tensor(TensorList tensors, const bool includeBool) {
   return std::any_of(
       tensors.begin(), tensors.end(), [&includeBool](const auto& t) {
         return at::isIntegralType(t.scalar_type(), includeBool);
       });
 }
 // check if tensor list has bool tensors
-bool has_bool_tensor(TensorList tensors) {
+inline bool has_bool_tensor(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const auto& t) -> bool {
     return t.scalar_type() == ScalarType::Bool;
   });
@@ -37,11 +37,11 @@ bool has_bool_tensor(TensorList tensors) {
 // - Tensor lists must be non-empty.
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
-void check_foreach_api_restrictions(TensorList tensors) {
+inline void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
 }
 
-void check_foreach_api_restrictions(
+inline void check_foreach_api_restrictions(
     TensorList tensors,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors);
@@ -50,7 +50,9 @@ void check_foreach_api_restrictions(
       "Tensor list must have same number of elements as scalar list.");
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
+inline void check_foreach_api_restrictions(
+    TensorList tensors1,
+    TensorList tensors2) {
   TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
   TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
   TORCH_CHECK(
@@ -61,7 +63,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
       tensors2.size());
 }
 
-void check_foreach_api_restrictions(
+inline void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
     TensorList tensors3) {
@@ -82,7 +84,7 @@ void check_foreach_api_restrictions(
       tensors3.size());
 }
 
-void check_foreach_api_restrictions(
+inline void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
     TensorList tensors3,
@@ -99,7 +101,8 @@ void check_foreach_api_restrictions(
 // Helper function called in check_fast_path_restrictions to check whether all
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
-bool _check_tensors_share_device_and_dtype(ArrayRef<TensorList> tensorLists) {
+inline bool _check_tensors_share_device_and_dtype(
+    ArrayRef<TensorList> tensorLists) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
@@ -122,7 +125,8 @@ bool _check_tensors_share_device_and_dtype(ArrayRef<TensorList> tensorLists) {
 
 // Helper function called in check_fast_path_restrictions to check if
 // corresponding tensors in tensor lists have the same sizes and strides.
-bool _check_tensors_share_sizes_and_strides(ArrayRef<TensorList> tensorLists) {
+inline bool _check_tensors_share_sizes_and_strides(
+    ArrayRef<TensorList> tensorLists) {
   for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
       if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
@@ -140,7 +144,7 @@ bool _check_tensors_share_sizes_and_strides(ArrayRef<TensorList> tensorLists) {
 // function assumes that _check_tensors_share_device_and_dtype has already been
 // called so that all corresponding tensors in tensorLists have the same dtype.
 // Then, it is sufficient to check the type promotion with just one tensorList.
-bool _check_tensors_do_type_promotion_with_scalars(
+inline bool _check_tensors_do_type_promotion_with_scalars(
     TensorList tensorList,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -176,7 +180,7 @@ bool _check_tensors_do_type_promotion_with_scalars(
 
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
-bool check_fast_path_restrictions(
+inline bool check_fast_path_restrictions(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -188,7 +192,7 @@ bool check_fast_path_restrictions(
              does_op_promote_integer_inputs_to_float);
 }
 
-std::vector<c10::Scalar> convert_tensor_to_scalar_list(
+inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
@@ -221,13 +225,13 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
             scalarList_.size(0),
             " instead.");
         for (int64_t i = 0; i < scalarList_.size(0); i++) {
-          scalarList.push_back(c10::Scalar(scalar_data[i]));
+          scalarList.emplace_back(scalar_data[i]);
         }
       });
   return scalarList;
 }
 
-bool can_use_fast_route(
+inline bool can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -235,7 +239,7 @@ bool can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-bool can_use_fast_route(
+inline bool can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -253,13 +257,13 @@ using FlatMap = std::unordered_map<
     TensorsAndIndicesT,
     ParamsHash<DeviceDtypeKey>>;
 
-FlatMap _group_tensors_by_first_tensors_device_and_dtype(
+inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
     const nested_optional_tensorvec_t& nested_tensorlist,
     const bool with_indices) {
   FlatMap grouped_tensors_with_indices;
 
-  TORCH_CHECK(nested_tensorlist.size() > 0);
-  TORCH_CHECK(nested_tensorlist[0].size() > 0);
+  TORCH_CHECK(!nested_tensorlist.empty());
+  TORCH_CHECK(!nested_tensorlist[0].empty());
   const auto num_lists = nested_tensorlist.size();
   const auto num_tensors = nested_tensorlist[0].size();
 

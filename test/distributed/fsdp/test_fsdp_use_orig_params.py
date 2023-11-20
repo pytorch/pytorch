@@ -20,11 +20,11 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     _FSDP_SKIP_WRITEBACK_CHECK,
     _FSDP_USE_FULL_PREC_IN_EVAL,
 )
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP

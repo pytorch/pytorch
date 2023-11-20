@@ -45,6 +45,7 @@ using namespace torch::autograd;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
+PyObject* THPGradientEdgeClass = nullptr;
 
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
@@ -68,7 +69,7 @@ namespace {
 void throw_python_error() {
   python_error err;
   err.persist();
-  throw err;
+  throw std::move(err);
 }
 
 } // namespace
@@ -507,6 +508,21 @@ static void _wrap_outputs(
     return results;
   };
 
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    pybind11::gil_scoped_acquire gil;
+    THPObjectPtr py_x(THPVariable_Wrap(x));
+    THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
+    if (!py_view_as_method)
+      throw python_error();
+    THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
+    if (!args)
+      throw python_error();
+    THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
+    if (!result)
+      throw python_error();
+    return THPVariable_Unpack(result);
+  };
+
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
@@ -515,7 +531,8 @@ static void _wrap_outputs(
       raw_output_vars,
       cdata_if_executable,
       jvp_user_function,
-      to_save_if_setup_context);
+      to_save_if_setup_context,
+      view_as_self_fn);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -1557,6 +1574,7 @@ PyTypeObject THPFunctionType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */

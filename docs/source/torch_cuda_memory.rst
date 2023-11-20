@@ -43,13 +43,13 @@ Allocator State History
 
 The Allocator State History shows individual allocator events in a timeline on the left. Select an event in the timeline to see a visual summary of the
 allocator state at that event. This summary shows each individual segment returned from cudaMalloc and how it is split up into blocks of individual allocations
-or free space. Mouse over segments and blocks to see the stack trace when the memory was allocated. Mouse over events to see the stack trace when the event occured,
+or free space. Mouse over segments and blocks to see the stack trace when the memory was allocated. Mouse over events to see the stack trace when the event occurred,
 such as when a tensor was freed. Out of memory errors are reported as OOM events. Looking at the state of memory during an OOM may provide insight into why
 an allocation failed even though reserved memory still exists.
 
 .. image:: _static/img/torch_cuda_memory/allocator_state_history.png
 
-The stack trace information also reports the address at which an allocation occured.
+The stack trace information also reports the address at which an allocation occurred.
 The address b7f064c000000_0 refers to the (b)lock at address 7f064c000000 which is the "_0"th time this address was allocated.
 This unique string can be looked up in the Active Memory Timeline and searched
 in the Active State History to examine the memory state when a tensor was allocated or freed.

@@ -1,5 +1,4 @@
 import torch
-from torch._export.constraints import constrain_as_value
 
 from torch._export.db.case import export_case
 
@@ -19,7 +18,7 @@ def constrain_as_value_example(x, y):
     tensor.
     """
     a = x.item()
-    constrain_as_value(a, min=0, max=5)
+    torch._constrain_as_value(a, min=0, max=5)
 
     if a < 6:
         return y.sin()

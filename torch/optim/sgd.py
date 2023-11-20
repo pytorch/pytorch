@@ -280,7 +280,7 @@ def _multi_tensor_sgd(params: List[Tensor],
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
     for ((device_params, device_grads, device_momentum_buffer_list), indices) in grouped_tensors.values():
-        device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
+        device_has_sparse_grad = has_sparse_grad and any(grad.is_sparse for grad in device_grads)
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)

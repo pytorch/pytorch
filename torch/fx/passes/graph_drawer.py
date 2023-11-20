@@ -215,6 +215,8 @@ if HAS_PYDOT:
                 if len(arg_strs_list) == 0:
                     return ""
                 arg_strs = prefix + r",\n".join(arg_strs_list) + suffix
+                if len(arg_strs_list) == 1:
+                    arg_strs = arg_strs.replace(r"\l", "").replace(r"\n", "")
                 return arg_strs.replace("{", r"\{").replace("}", r"\}")
 
 

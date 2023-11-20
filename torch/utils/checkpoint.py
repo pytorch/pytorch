@@ -37,9 +37,34 @@ __all__ = [
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
     "context_fn_gen",
+    "set_checkpoint_debug_enabled",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
+
+_checkpoint_debug_enabled: Optional[bool] = None
+
+
+@contextlib.contextmanager
+def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+    """
+    Context manager that sets whether checkpoint should print additional debug
+    information when running. See the ``debug`` flag for
+    :func:`~torch.utils.checkpoint.checkpoint` for more information. Note that
+    when set, this context manager overrides the value of ``debug`` passed to
+    checkpoint. To defer to the local setting, pass ``None`` to this context.
+
+    Args:
+        enabled (bool): Whether checkpoint should print debug information.
+            Default is 'None'.
+    """
+    global _checkpoint_debug_enabled
+    try:
+        prev = _checkpoint_debug_enabled
+        _checkpoint_debug_enabled = enabled
+        yield
+    finally:
+        _checkpoint_debug_enabled = prev
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -76,11 +101,13 @@ def _get_device_module(device="cuda"):
 class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
+
     If no non-CPU tensors are present, the default device type will
     be used. The default value is 'cuda'. The device type is used in
     the checkpointing process when determining which device states
     to save and restore for recomputation.
     """
+
     _default_device_type = "cuda"
 
     @staticmethod
@@ -322,7 +349,7 @@ def checkpoint(
     debug: bool = False,
     **kwargs
 ):
-    r"""Checkpoint a model or part of the model
+    r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
     Instead of keeping tensors needed for backward alive until they are used in
@@ -469,7 +496,7 @@ def checkpoint(
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
-    r"""A helper function for checkpointing sequential models.
+    r"""Checkpoint a sequential model to save memory.
 
     Sequential models execute a list of modules/functions in order
     (sequentially). Therefore, we can divide such a model in various segments
@@ -688,8 +715,7 @@ _enable_checkpoint_early_stop = True
 
 @contextlib.contextmanager
 def set_checkpoint_early_stop(enable: bool):
-    """Context manager that sets whether checkpoint should stop recomputation
-    early.
+    """Context manager that sets whether checkpoint should stop recomputation early.
 
     By default, non-reentrant checkpoint stops recomputation as soon as it
     has computed all needed Tensors. This context manager can be used to disable
@@ -1105,10 +1131,11 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
+    # There should probably be a better way to do this...
     for arg in args:
         if isinstance(arg, torch.Tensor):
-            if torch._is_functional_tensor(arg):
-                arg = torch._from_functional_tensor(arg)
+            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
+                arg = torch._from_functional_tensor(arg.elem)
             if isinstance(arg, torch._subclasses.FakeTensor):
                 return True
     return False
@@ -1129,7 +1156,7 @@ uid = count(1)
 _ignored_ops = {
     torch.ops.prim.device.default,
     torch.ops.aten.detach.default,
-}
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
@@ -1271,7 +1298,8 @@ def _checkpoint_without_reentrant_generator(
     *args,
     **kwargs
 ):
-    """Checkpointing without reentrant autograd
+    """Checkpointing without reentrant autograd.
+
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
@@ -1299,7 +1327,7 @@ def _checkpoint_without_reentrant_generator(
     """
     unpack_error_cb = None
 
-    if debug:
+    if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
         if context_fn != noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"

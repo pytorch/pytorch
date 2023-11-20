@@ -47,7 +47,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
                     pad_length = max_length - length
                     presence_arr.append(
                         np.pad(
-                            np.ones((length), dtype=np.bool), ((0, pad_length)),
+                            np.ones((length), dtype=bool), ((0, pad_length)),
                             mode=str("constant")
                         )
                     )
@@ -305,7 +305,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         presence_mask = workspace.FetchBlob('p')
         expected_presence_mask = np.array(
             [[True, False, False], [True, True, False], [True, True, True]],
-            dtype=np.bool
+            dtype=bool
         )
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
         np.testing.assert_array_equal(presence_mask, expected_presence_mask)
