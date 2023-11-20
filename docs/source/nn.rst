@@ -447,6 +447,7 @@ in :func:`torch.nn.utils.parameterize.register_parametrization`.
     :nosignatures:
 
     parametrizations.orthogonal
+    parametrizations.weight_norm
     parametrizations.spectral_norm
 
 Utility functions to parametrize Tensors on existing Modules.
