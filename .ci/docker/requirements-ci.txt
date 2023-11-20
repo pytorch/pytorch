@@ -268,7 +268,8 @@ rockset==1.0.3
 #Pinned versions: 1.0.3
 #test that import:
 
-ghstack==0.7.1
+ghstack==0.7.1 ; python_version < "3.12"
+ghstack==0.8.0 ; python_version >= "3.12"
 #Description: ghstack tool
 #Pinned versions: 0.7.1
 #test that import:
