@@ -4189,8 +4189,14 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
-fbcode_use_proxy_executor = {
-    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+has_c_shim = {
+    aten._scaled_dot_product_flash_attention.default,
+    aten.addmm.out,
+    aten.bmm.out,
+    aten.mm.out,
+    aten._scaled_mm.default,
+    aten.repeat_interleave.Tensor,
+    aten.nonzero.default,
 }
 
 
@@ -4394,7 +4400,7 @@ class FallbackKernel(ExternKernelAlloc):
         node = ExternKernelNode(
             name=self.get_name(),
             node=export_schema.Node(
-                target=self.cpp_kernel,
+                target=self.op_overload.name(),
                 inputs=named_arguments,
                 outputs=output_arguments,
                 metadata={},
@@ -4413,7 +4419,11 @@ class FallbackKernel(ExternKernelAlloc):
             op_base_name = kernel.__name__.split(".")[0]
 
             if V.graph.cpp_wrapper:
-                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                if config.is_fbcode() and kernel not in has_c_shim:
+                    log.warning(
+                        "%s is missing a c-shim implementation, using proxy executor as fallback",
+                        kernel,
+                    )
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
                 else:
