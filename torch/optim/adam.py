@@ -542,8 +542,7 @@ def _multi_tensor_adam(params: List[Tensor],
                     device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
             else:
                 # Perform stepweight decay
-                if weight_decay != 0:
-                    torch._foreach_mul_(device_params, 1 - lr * weight_decay)
+                torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
