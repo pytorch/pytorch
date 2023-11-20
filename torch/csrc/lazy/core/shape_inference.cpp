@@ -62,11 +62,10 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/api/include/torch/enum.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <ostream>
 #include <vector>
 
@@ -644,7 +643,7 @@ std::vector<Shape> compute_shape_native_layer_norm_backward(
       output_mask[1] && weight ? weight->sizes().vec()
                                : std::vector<int64_t>{});
   shapes.emplace_back(
-      bias && weight->defined() ? bias->scalar_type() : input.scalar_type(),
+      bias && bias->defined() ? bias->scalar_type() : input.scalar_type(),
       output_mask[2] && bias ? bias->sizes().vec() : std::vector<int64_t>{});
   return shapes;
 }

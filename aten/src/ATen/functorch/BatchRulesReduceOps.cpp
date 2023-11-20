@@ -458,8 +458,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(aminmax);
   m.impl("all", all_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dims);
   m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(any.dims);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);

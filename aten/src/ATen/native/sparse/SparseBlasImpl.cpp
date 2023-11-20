@@ -92,20 +92,15 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
    // so the result is tiled to (b0, b0) and we need to make
    // sure that dense.size(-1) is divisible by b0.
    && n % blocksize[0] == 0) {
-    try {
-      const auto triton_kernel = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("triton::_triton_bsr_dense_mm_out", "")
-        .typed<Tensor&(const Tensor&, const Tensor&, Tensor&)>();
-      // Call Triton only if dispatch key was overwritten.
-      // This is not strictly necessary since the definition is done in Python,
-      // but we leave it here for extra safety.
+    const auto triton_schema = c10::Dispatcher::singleton()
+      .findSchema({"triton::_triton_bsr_dense_mm_out", ""});
+    if (triton_schema.has_value()) {
+      const auto triton_kernel = triton_schema.value().typed<Tensor&(const Tensor&, const Tensor&, Tensor&)>();
       if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
         return triton_kernel.call(compressed, strided, result);
       }
-    } catch (const std::exception& e) {
-      // The schema is not defined and/or the key is not overwritten,
-      // so skip and execute the code below.
-    }
+    } /* else the schema is not defined and/or the key is not
+         overwritten, so skip and execute the code below. */
   }
 #endif
 
@@ -223,27 +218,42 @@ Tensor& _compressed_row_strided_addmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  auto alpha_val = alpha.toComplexDouble();
+  auto beta_val = beta.toComplexDouble();
   // If result is not the same as self, it could always be used as out argument to mm.
   if (!result.is_same(self)) {
-    _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
-
+    _compressed_row_strided_mm_out(mat1, mat2, result);
+    if (alpha_val != 1.) {
+      result.mul_(alpha);
+    }
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.add_(self.mul(beta));
+    if (beta_val != 0.) {
+      if (beta_val == 1.) {
+        result.add_(self);
+      } else {
+        result.add_(self.mul(beta));
+      }
     }
   }
   // Otherwise we need to allocate external memory for mm if beta != 0.
   else {
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.mul_(beta);
+    if (beta_val != 0.) {
+      if (beta_val != 1.) {
+        result.mul_(beta);
+      }
       auto mm = at::empty_like(result);
       _compressed_row_strided_mm_out(mat1, mat2, mm);
-      mm.mul_(alpha);
+      if (alpha_val != 1.) {
+        mm.mul_(alpha);
+      }
       result.add_(mm);
     }
     else {
-      _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
+      _compressed_row_strided_mm_out(mat1, mat2, result);
+      if (alpha_val != 1.) {
+        result.mul_(alpha);
+      }
     }
   }
 

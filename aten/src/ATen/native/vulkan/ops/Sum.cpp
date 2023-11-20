@@ -135,6 +135,11 @@ Tensor sum_dim_IntList(
 Tensor sum(const Tensor& self, const c10::optional<ScalarType> dtype) {
   std::vector<int64_t> dims;
   for (int64_t d = 0; d < self.dim(); d++) {
+    // If any dimension has zero elements, we will shortcut to a zero-dim.
+    if (self.size(d) == 0) {
+      return self.new_zeros({}, at::device(at::kVulkan).dtype(self.dtype()));
+    }
+
     dims.push_back(d);
   }
 

@@ -10,7 +10,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_nested_from_padded.h>
+#include <ATen/ops/_nested_from_padded_native.h>
+#include <ATen/ops/narrow_native.h>
 #endif
 
 #include <ATen/native/NonSymbolicBC.h>
@@ -140,6 +141,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     const Tensor& t,
     double padding,
     OptionalIntArrayRef output_size) {
+  TORCH_CHECK(t.numel() > 0, "to_padded_tensor: at least one constituent tensor should have non-zero numel")
   int64_t t_dim = t.dim();
   if (t_dim >= 2 && t_dim <= 4 &&
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
@@ -306,7 +308,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       : sdp::CustomMaskType::NoCustomMask;
 
   // See Note [Seed and Offset] for description of seed and offset
-  auto [attention, log_sumexp, seed, offset] = at::_efficient_attention_forward(
+  // Although max_seqlen_q, and max_seqlen_batch_kv is returned we drop these values.
+  auto [attention, log_sumexp, seed, offset, max_seqlen_q, max_seqlen_batch_kv] = at::_efficient_attention_forward(
       query_buffer_reshaped.unsqueeze(0),
       key_buffer_reshaped.unsqueeze(0),
       value_buffer_reshaped.unsqueeze(0),
