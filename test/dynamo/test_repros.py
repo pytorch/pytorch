@@ -3611,6 +3611,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
         )
 
+    def test_user_defined_object_callable(self):
+        # https://github.com/pytorch/pytorch/issues/114019
+        class MyCallable:
+            def __call__(self, x):
+                return x + 1
+
+        def fn(x):
+            # Create in graph - will not have source
+            return MyCallable()(x)
+
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
+
     def test_numpy_not_ndarray_recompiles(self):
         import torch
 
