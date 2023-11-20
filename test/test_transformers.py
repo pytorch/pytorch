@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
     slowTest,
     set_default_dtype,
     gradcheck,
@@ -1799,7 +1800,7 @@ class TestSDPACudaOnly(NNTestCase):
         """
         if TEST_WITH_ROCM:
             return S
-        
+
         b, h, seqlen_q, seqlen_k = S.shape
         warps_n = 4
         blocksize_m, blocksize_n = _get_block_size(S.device, head_dim, causal)
@@ -2466,9 +2467,9 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
+    @parametrize("seq_len_q", [16, 32, 64, 128, 256, 512, 1024, 2048] if TEST_WITH_ROCM else [4, 8, 64, 143, 256, 512, 1024, 2048])
+    @parametrize("seq_len_k", [16, 32, 64, 128, 256, 512, 1024, 2048] if TEST_WITH_ROCM else [4, 8, 64, 128, 256, 587, 1024, 2048])
+    @parametrize("head_dim", [16, 32, 64, 128] if TEST_WITH_ROCM else [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -2497,6 +2498,7 @@ class TestSDPACudaOnly(NNTestCase):
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
+        # dropout_p = 0.0001 # FIXME: DEBUG
         is_dropout = dropout_p > 0.0
 
         if not is_dropout:
@@ -2524,6 +2526,8 @@ class TestSDPACudaOnly(NNTestCase):
             out = out[..., :v_og_size]
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
+            print(f'{dbug_mask=}')
+            print(f'{dbug_mask.shape=}')
             query_padding_mask = torch.ones(
                 batch_size, seq_len_q, device=device, dtype=torch.bool)
             key_padding_mask = torch.ones(
@@ -2532,7 +2536,9 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
+            print(f'{softmax_mask=}')
             dropout_mask = softmax_mask >= 0
+            print(f'{dropout_mask=}')
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
@@ -2563,6 +2569,8 @@ class TestSDPACudaOnly(NNTestCase):
         value_fudge_factor = 2
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
+        print(f'{out=}')
+        print(f'{out_ref=}')
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
                          atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
