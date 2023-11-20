@@ -1989,11 +1989,12 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @skipIfRocm
-    def test_triton_kernel_None_arg(self):
+    def test_triton_kernel_None_Float_arg(self):
         @triton.jit
         def pass_kernel(
             out_ptr,
             dummy_None,
+            dummy_float,
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
@@ -2003,7 +2004,7 @@ def forward(self, x_1, output_1):
         def call_triton(output):
             n_elements = output.numel()
             grid = (n_elements,)
-            pass_kernel[grid](output, None, n_elements, BLOCK_SIZE=16)
+            pass_kernel[grid](output, None, 3.1415926, n_elements, BLOCK_SIZE=16)
             return output
 
         output = torch.randn(5, device="cuda")
