@@ -541,7 +541,7 @@ class FakeTensorTest(TestCase):
         mode1 = FakeTensorMode(shape_env=shape_env)
         t1 = mode1.from_tensor(
             torch.randn(10),
-            policy=StatelessSymbolicContext(
+            symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=[DimDynamic.DYNAMIC],
                 constraint_sizes=[None]
             )
