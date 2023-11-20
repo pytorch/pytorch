@@ -3,9 +3,6 @@ name: docker-builds
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - .ci/docker/**
-      - .github/workflows/docker-builds.yml
   push:
     branches:
       - main
@@ -59,6 +56,7 @@ jobs:
           echo "${GITHUB_WORKSPACE}"
           sudo rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
+          echo "Testing"
 
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
