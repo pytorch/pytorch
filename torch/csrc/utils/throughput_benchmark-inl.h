@@ -71,7 +71,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
-      GradMode::set_enabled(tls_grad_enabled);
+      c10::GradMode::set_enabled(tls_grad_enabled);
       c10::impl::_force_tls_local_dispatch_key_set(tls_key_set);
 
       for (const auto j : c10::irange(config.num_warmup_iters)) {
