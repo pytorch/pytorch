@@ -5,7 +5,6 @@
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <climits>
@@ -581,7 +580,7 @@ void gemm_batched_with_stride(
       scalar_t beta,                                            \
       scalar_t *c, int64_t ldc, int64_t batch_stride_c);
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 
