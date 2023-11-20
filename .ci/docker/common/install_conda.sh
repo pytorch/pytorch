@@ -54,13 +54,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
-    conda_install numpy=1.23.5 numba=0.58.0 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
-    conda_install numpy=1.21.2 numba=0.55.2 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    conda_install numpy=1.21.2 numba=0.54.1 ${CONDA_COMMON_DEPS}
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    conda_install numpy=1.21.2 numba=0.49.0 ${CONDA_COMMON_DEPS}
+    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS}
   else
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   fi
