@@ -6,10 +6,10 @@ import unittest
 from typing import Any, Dict, Set
 from unittest import mock
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 try:
     # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
+    sys.path.insert(0, str(REPO_ROOT))
 
     from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
     from tools.testing.target_determination.determinator import (
@@ -19,10 +19,11 @@ try:
     )
     from tools.testing.target_determination.heuristics import HEURISTICS
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
-        _get_previously_failing_tests,
+        get_previous_failures,
     )
     from tools.testing.test_run import TestRun, TestRuns
 
+    sys.path.remove(str(REPO_ROOT))
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
@@ -36,20 +37,20 @@ def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
 
 
 class TestParsePrevTests(HeuristicsTestMixin):
-    @mock.patch("pathlib.Path.exists", return_value=False)
+    @mock.patch("os.path.exists", return_value=False)
     def test_cache_does_not_exist(self, mock_exists: Any) -> None:
         expected_failing_test_files: Set[str] = set()
 
-        found_tests = _get_previously_failing_tests()
+        found_tests = get_previous_failures()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
-    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("os.path.exists", return_value=True)
     @mock.patch("builtins.open", return_value=mocked_file({"": True}))
     def test_empty_cache(self, mock_exists: Any, mock_open: Any) -> None:
         expected_failing_test_files: Set[str] = set()
 
-        found_tests = _get_previously_failing_tests()
+        found_tests = get_previous_failures()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
         mock_open.assert_called()
@@ -61,19 +62,19 @@ class TestParsePrevTests(HeuristicsTestMixin):
         "test/test_bar.py::TestBar::test_fun_copy[25]": True,
     }
 
-    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("os.path.exists", return_value=True)
     @mock.patch(
         "builtins.open",
         return_value=mocked_file(lastfailed_with_multiple_tests_per_file),
     )
     def test_dedupes_failing_test_files(self, mock_exists: Any, mock_open: Any) -> None:
         expected_failing_test_files = {"test_car", "test_bar", "test_far"}
-        found_tests = _get_previously_failing_tests()
+        found_tests = get_previous_failures()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
     @mock.patch(
-        "tools.testing.target_determination.heuristics.previously_failed_in_pr._get_previously_failing_tests",
+        "tools.testing.target_determination.heuristics.previously_failed_in_pr.get_previous_failures",
         return_value={"test4"},
     )
     @mock.patch(
