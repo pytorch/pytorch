@@ -209,7 +209,7 @@ class DTensorTest(DTensorTestBase):
         shard_placement = Shard(0)
         tensor_list, _ = shard_placement._split_tensor(
             global_tensor,
-            device_mesh.size(dim=0),
+            device_mesh.size(mesh_dim=0),
             with_padding=False,
             contiguous=True,
         )
@@ -235,7 +235,7 @@ class DTensorTest(DTensorTestBase):
         shard_placement = Shard(0)
         tensor_list, _ = shard_placement._split_tensor(
             global_tensor,
-            device_mesh.size(dim=0),
+            device_mesh.size(mesh_dim=0),
             with_padding=False,
             contiguous=True,
         )

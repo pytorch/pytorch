@@ -80,7 +80,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
                 sharding_dim += self.dim()
 
             device_mesh = self.device_mesh
-            world_size = device_mesh.size(dim=0)
+            world_size = device_mesh.size(mesh_dim=0)
             new_sharding_placement = [Shard(sharding_dim)]
 
             # Fix shape
