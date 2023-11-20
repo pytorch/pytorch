@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/detail/MPSHooksInterface.h>
-#include <c10/util/Exception.h>
 #include <c10/util/CallOnce.h>
 
 namespace at {
