@@ -29,7 +29,11 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.reference import PythonReferenceAnalysis
 from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -54,6 +58,7 @@ from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
+    AttrSource,
     ConstantSource,
     GlobalStateSource,
     is_constant_source,
@@ -261,6 +266,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+
+        # List of symbols for which we have exact bindings in the arguments
+        # already
+        self.bound_symbols: Set[sympy.Symbol] = set()
 
         shape_env = ShapeEnv(
             # Reference Cycle!
@@ -583,34 +592,44 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         def bind_symint(s, prop):
             if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
                 return
+            s0 = s.node.expr
+            if s0 in self.bound_symbols:
+                return
+            self.bound_symbols.add(s0)
+            log.debug("bind_symint %s %s", s, prop.name())
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
             proxy = self.root_tracer.create_graph_input(
-                str(s.node.expr),
+                str(s0),
                 torch.SymInt,
                 before=True,
-                source=prop(arg.source),
+                source=prop,
             )
+            proxy.node.meta["example_value"] = s
             proxy.node.meta["grapharg"] = GraphArg(
-                prop(arg.source),
+                prop,
                 s,
                 is_unspecialized=False,
                 fake_tensor=None,
                 is_tensor=False,
             )
 
-        for i, s in enumerate(arg.fake_tensor.size()):
+        def handle_tensor(t, src):
+            for i, s in enumerate(t.size()):
+                bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
+            for i, s in enumerate(t.stride()):
+                bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
             bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
+                t.storage_offset(),
+                TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
             )
-        for i, s in enumerate(arg.fake_tensor.stride()):
-            bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
-            )
-        bind_symint(
-            arg.fake_tensor.storage_offset(),
-            lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-        )
+            if is_traceable_wrapper_subclass(t):
+                attrs, ctx = t.__tensor_flatten__()
+                for attr in attrs:
+                    inner_t = getattr(t, attr)
+                    handle_tensor(inner_t, AttrSource(src, attr))
+
+        handle_tensor(arg.fake_tensor, arg.source)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -1014,6 +1033,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         assert self.should_exit
 
+        name = unique_id("__compiled_fn")
+
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         self.create_node(
@@ -1022,6 +1043,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
             {},
         )
+        self.insert_deferred_runtime_asserts(root, name)
+        # NB: deferred runtime asserts can keep graphargs live, so make sure
+        # those are inserted before pruning
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
@@ -1034,7 +1058,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             register_finalizer(gm)
 
         gm.compile_subgraph_reason = self.compile_subgraph_reason
-        name = unique_id("__compiled_fn")
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
@@ -1193,6 +1216,131 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 else:
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
+
+    # TODO: this is a generic pass that should live outside of Dynamo
+    def insert_deferred_runtime_asserts(self, root, name) -> None:
+        """
+        During tracing, we may have discovered that some data-dependent values
+        had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
+        that x.item() >= 0.  This asserts can happen unpredictably during fake
+        tensor propagation, so we cannot conveniently insert them into the FX graph
+        when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
+        pass insert them into the graph as proper tests.
+        """
+        # TODO: Request simplification on runtime asserts before emitting them
+        ras_by_symbol = self.shape_env.deferred_runtime_asserts.copy()
+
+        if not any(ras for ras in ras_by_symbol.values()):
+            return
+
+        gm = fx.GraphModule(root, self.graph)
+        graph_code_log.debug(
+            "%s",
+            lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
+        )
+
+        # We are going to mutate the dict
+        symbol_to_proxy = {}
+        placeholders = set()
+        last_placeholder = None
+        for node in self.graph.nodes:
+            if node.op != "placeholder":
+                last_placeholder = node
+                break
+            placeholders.add(node)
+        assert last_placeholder is not None
+
+        # Identify what symbols we need to reify.  This isn't strictly needed
+        # but helps reduce churn on the graph
+        needed_symbols: Set[sympy.Symbol] = set()
+        for ras in ras_by_symbol.values():
+            for ra in ras:
+                needed_symbols.update(free_symbols(ra.expr))
+
+        log.debug("needed_symbols = %s", needed_symbols)
+
+        for node in self.graph.nodes:
+            # Placeholders can match symbols, but when we destructure them
+            # with size we have to make sure we insert the nodes after all
+            # the placeholders
+            with self.graph.inserting_before(
+                node.next if node not in placeholders else last_placeholder.next
+            ):
+                if "example_value" not in node.meta:
+                    continue
+
+                defs = []
+
+                # For every new unbacked symbol, we need an fx.Node representing
+                # precisely this value.  There are a few places where the unbacked
+                # symbol could have come from, and we will check them to setup
+                # these nodes.
+                #
+                # For a case like item(), this is trivial (no new node is added.)
+                #
+                # For nonzero(), we need to add something like i0 = out.size(0)
+                #
+                # We could end up with duplicate nodes this way but it is not a
+                # big deal.
+                #
+                # We also do this to setup backed SymInts, but those are all going
+                # to be matched from placeholders
+                def match_symbol(symint, cb):
+                    if (
+                        isinstance(symint, torch.SymInt)
+                        and isinstance(symint.node, SymNode)
+                        and isinstance(s := symint.node.expr, sympy.Symbol)
+                        and s not in symbol_to_proxy
+                        and s in needed_symbols
+                    ):
+                        symbol_to_proxy[s] = fx.Proxy(cb())
+                        log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        defs.append(s)
+
+                match_symbol(node.meta["example_value"], lambda: node)
+                if isinstance(t := node.meta["example_value"], torch.Tensor):
+                    for i, s in enumerate(t.size()):
+                        match_symbol(
+                            s, lambda: self.graph.call_method("size", (node, i))
+                        )
+                    for i, s in enumerate(t.stride()):
+                        match_symbol(
+                            s, lambda: self.graph.call_method("stride", (node, i))
+                        )
+                    match_symbol(
+                        t.storage_offset(),
+                        lambda: self.graph.call_method("storage_offset", (node,)),
+                    )
+
+                for i0 in defs:
+                    ras = ras_by_symbol.pop(i0, [])
+                    for ra in ras:
+                        log.debug("inserting runtime assert %s", ra.expr)
+                        # Need to process ALL free symbols, not just unbacked ones
+                        fvs = free_symbols(ra.expr)
+                        missing = fvs - symbol_to_proxy.keys()
+                        if missing:
+                            i1 = sorted(missing)[0]
+                            assert self.shape_env.is_unbacked_symint(i1), i1
+                            ras_by_symbol.setdefault(i1, []).append(ra)
+                        else:
+                            # Convert the sympy expression into a sequence of FX
+                            # nodes
+                            res = sympy_interp(
+                                PythonReferenceAnalysis, symbol_to_proxy, ra.expr
+                            ).node
+                            res2 = self.graph.call_function(
+                                torch.ops.aten.scalar_tensor.default, (res,)
+                            )
+                            self.graph.call_function(
+                                torch.ops.aten._assert_async.msg,
+                                # TODO: use ra.msg here, but it's pretty
+                                # useless right now
+                                (
+                                    res2,
+                                    f"Deferred runtime assertion failed {ra.expr}",
+                                ),
+                            )
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
