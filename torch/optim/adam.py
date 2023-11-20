@@ -401,9 +401,9 @@ def _single_tensor_adam(params: List[Tensor],
                 grad = torch.view_as_real(grad)
                 exp_avg = torch.view_as_real(exp_avg)
                 exp_avg_sq = torch.view_as_real(exp_avg_sq)
-            if amsgrad:
-                max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-            param = torch.view_as_real(param)
+                if amsgrad:
+                    max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
+                param = torch.view_as_real(param)
 
             # update step
             step_t += 1
