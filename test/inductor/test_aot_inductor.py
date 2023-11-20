@@ -1261,6 +1261,27 @@ class AOTInductorTestsTemplate:
             disable_constraint_solver=True,
         )
 
+    def test_scatter_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                index: torch.Tensor,
+                src: torch.Tensor,
+            ):
+                return torch.scatter(inp, 1, index, src)
+
+        inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1300,6 +1321,8 @@ copy_tests(
         "test_shifted_constraint_ranges": TestFailure(
             ("abi_compatible_cpu",), is_skip=True
         ),
+        # the test segfaults
+        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
     },
 )
 
