@@ -6,6 +6,7 @@ with test_export_persist_assert)
 import copy
 import functools
 import inspect
+import io
 import math
 import operator
 import unittest
@@ -32,6 +33,15 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import TEST_CUDA
+
+try:
+    import torchvision.models
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "No torchvision.")
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -2255,6 +2265,23 @@ def forward(self, x):
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 
+    @skipIfNoTorchVision
+    @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
+    def test_export_with_parameters(self):
+        model = torchvision.models.vgg16(weights=None).eval().cuda()
+        random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
+        dim_x = torch.export.Dim("dim_x", min=1, max=32)
+        exp_program = torch.export.export(
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+        )
+        output_buffer = io.BytesIO()
+        # Tests if we can restore saved nn.Parameters when we load them again
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        self.assertTrue(
+            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+        )
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2537,8 +2564,6 @@ def forward(self, x):
         capture_scalar_outputs=True,
     )
     def test_exported_graph_serialization(self):
-        import io
-
         def f(x, y):
             b = x.item()
             torch._constrain_as_size(b)
