@@ -1223,7 +1223,7 @@ static PyMethodDef methods[] = { // NOLINT
      castPyCFunctionWithKeywords(get_function_stack_at),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_len_torch_function_stack", len_torch_function_stack, METH_O, nullptr},
+    {"_len_torch_function_stack", len_torch_function_stack, METH_NOARGS, nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
      METH_VARARGS,

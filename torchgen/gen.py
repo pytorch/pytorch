@@ -2436,9 +2436,7 @@ def gen_source_files(
         def gen_op_headers(
             g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
         ) -> List[str]:
-            headers = [
-                "#include <c10/core/impl/TorchDispatchModeTLS.h>",
-            ]
+            headers = []
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
                 headers += [
