@@ -1,3 +1,5 @@
+#include <ATen/Functions.h>
+#include <aten/src/ATen/TensorOperators.h>
 #include <gtest/gtest.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
