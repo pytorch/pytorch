@@ -1174,6 +1174,10 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
                 indices.append(arg.args[1])
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
+            # the gettitems to be merged must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+                continue
             # update the arg of cat user, only keep the first getitem
             cat_user.update_arg(0, cat_user.args[0][0])
             # calculate the fused tensor sizes in the indices
@@ -1227,7 +1231,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
 #       /   ...    \             ...       /         \
 # getitem      getitem                 getitem     getitem -> user=1
 #    \           /
-#        stack (dim=0)  -> user=1
+#        stack (dim=0)  -> user=1, getitems to be consecutive
 #          |
 #         tahn  -> user=1
 #          |
@@ -1318,6 +1322,10 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections_for_unbind.append(split_sections[arg.args[1]])
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
+            # the gettitems to be merged must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+                continue
             # update the arg of stack user, only keep the first getitem
             user.update_arg(0, user.args[0][0])
             # calculate the fused tensor sizes in the indices
