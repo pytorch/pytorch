@@ -514,9 +514,9 @@ class SideEffects:
                 for _ in range(var.index):
                     cg.extend_output([create_load_global("next", push_null=True)])
                     cg(var.mutable_local.source)
+                    cg.extend_output(create_call_function(1, True))
                     cg.extend_output(
                         [
-                            create_instruction("CALL_FUNCTION", arg=1),
                             create_instruction("POP_TOP"),
                         ]
                     )
