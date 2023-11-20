@@ -5,6 +5,7 @@ import os
 import shutil
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -16,7 +17,7 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
-CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
+CHECKPOINT_DIR = f"~/{os.environ['LOGNAME']}/checkpoint"
 
 
 class Model(torch.nn.Module):
@@ -51,19 +52,28 @@ def _train(model, optim, train_steps=1):
 
     return loss
 
-
-def run(world_size, device="cuda"):
-    model = Model().cuda()
-    optim = torch.optim.Adam(model.parameters(), lr=0.1)
-    _make_stateful(model, optim)
-
+def _init_model(device, world_size):
     device_mesh = init_device_mesh(device, (world_size,))
+    model = Model().cuda()
     model = FSDP(
         model,
         device_mesh=device_mesh,
         use_orig_params=True,
     )
+    optim = torch.optim.Adam(model.parameters(), lr=0.1)
+    _make_stateful(model, optim)
 
+    return model, optim
+
+def run(rank, world_size, device="cuda"):
+    # Set up world pg
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+    model, optim = _init_model(device, world_size)
     _train(model, optim, train_steps=2)
 
     DCP.save(
@@ -72,10 +82,7 @@ def run(world_size, device="cuda"):
     )
 
     # presumably do something else
-
-    model = Model().cuda()
-    optim = torch.optim.Adam(model.parameters(), lr=0.1)
-    _make_stateful(model, optim)
+    model, optim = _init_model(device, world_size)
     DCP.load(
         state_dict={"model": model, "optimizer": optim},
         storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
