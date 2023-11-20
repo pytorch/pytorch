@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Dict, List
+from typing import Dict
 
-import torch
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass, diagnostics, registration
 
 
 @dataclasses.dataclass
@@ -52,23 +51,35 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             RuntimeErrorWithDiagnostic: If diagnostics are emitted and the diagnostic
                 level is `ERROR`.
         """
-        unsupported_nodes: List[torch.fx.Node] = []
-        for node in self.module.graph.nodes:
-            if node.op == "call_function":
-                try:
-                    # NOTE: OPSchema matcher is not in this analysis scope.
-                    self.onnxfunction_dispatcher.get_function_overloads(
-                        node, self.diagnostic_context
-                    )
-                except diagnostics.RuntimeErrorWithDiagnostic as e:
-                    unsupported_nodes.append(node)
 
         op_to_target_mapping: Dict[str, Dict[str, None]] = {}
-
-        for node in unsupported_nodes:
-            op = node.op
-            target = node.target
-            op_to_target_mapping.setdefault(op, {}).setdefault(str(target), None)
+        for node in self.module.graph.nodes:
+            if node.op == "call_function":
+                # NOTE: OPSchema matcher is not in this analysis scope.
+                internal_opname: registration.OpName = (
+                    self.onnxfunction_dispatcher._get_aten_name(
+                        node=node, diagnostic_context=self.diagnostic_context
+                    )
+                )
+                overload_registration = (
+                    self.onnxfunction_dispatcher.onnx_registry.is_registered_op(
+                        namespace=internal_opname.namespace,
+                        op_name=internal_opname.op_name,
+                        overload=internal_opname.overload,
+                    )
+                )
+                # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
+                default_registration = (
+                    self.onnxfunction_dispatcher.onnx_registry.is_registered_op(
+                        namespace=internal_opname.namespace,
+                        op_name=internal_opname.op_name,
+                        overload=None,
+                    )
+                )
+                if not overload_registration and not default_registration:
+                    op_to_target_mapping.setdefault(node.op, {}).setdefault(
+                        str(node.target), None
+                    )
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
         self._lint(analysis_result, diagnostic_level)
