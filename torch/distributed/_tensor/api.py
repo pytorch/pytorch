@@ -420,14 +420,16 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
 
-        for placement in placements:
+        placements = list(placements)
+        for i, placement in enumerate(placements):
             if placement.is_partial():
                 raise RuntimeError(
                     "Can not redistribute to _Partial, _Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
-                placement.dim += self.ndim
+                placements[i] = Shard(placement.dim + self.ndim)
+        placements = tuple(placements)
 
         # Early return the original DTensor if the placements are the same.
         if self._spec.placements == placements:
