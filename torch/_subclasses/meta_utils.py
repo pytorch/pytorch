@@ -560,13 +560,18 @@ class MetaConverter:
                     if torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 
+
+                    from torch.fx.experimental.symbolic_shapes import (
+                        definitely_true, sym_eq
+                    )
+
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
                     if swr not in self.storage_memo and (
                         r.is_nested
                         or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                            definitely_true(sym_eq(r.stride(), strides))
+                            and definitely_true(r.storage_offset() == storage_offset, may_guard=False)
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo

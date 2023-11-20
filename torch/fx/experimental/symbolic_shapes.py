@@ -213,7 +213,7 @@ def find_symbol_binding_fx_nodes(graph):
         if is_symbol_binding_fx_node(node)
     }
 
-def definitely_true(a):
+def definitely_true(a, may_guard=True):
     """
     Returns True only if we can tell that a is True, possibly introducing
     a guard in the process.  If a depends on some unbacked SymInt, we may
@@ -231,10 +231,16 @@ def definitely_true(a):
     the program errors in more cases than it did previously (but otherwise
     behaves identically), or if it changes some quantity in a way that
     doesn't matter (e.g., strides often fall in this bucket.)
+
+    If may_guard is False, we will treat backed SymInts equivalently to
+    unbacked SymInts and avoid guarding on them.
     """
     if isinstance(a, SymBool):
         if a.node.has_hint():
-            return guard_bool(a)
+            if may_guard or a.node.shape_env._maybe_evaluate_static(a.node.expr) is not None:
+                return guard_bool(a)
+            else:
+                return False
         else:
             return False
     return bool(a)
@@ -2112,6 +2118,9 @@ class ShapeEnv:
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=DimDynamic.DYNAMIC,
             constraint_dim=None,
+            do_not_specialize_zero_one=True,
+            positive=None,
+            negative=False,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
@@ -2228,6 +2237,7 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
+        negative: Optional[bool] = None,
         do_not_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
         if do_not_specialize_zero_one:
@@ -2237,6 +2247,7 @@ class ShapeEnv:
 
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
+        assert not (negative and val > 0), f"negative set for positive value: {val}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the policy to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped
@@ -2264,7 +2275,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, negative=negative, integer=True)
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
@@ -2288,6 +2299,8 @@ class ShapeEnv:
 
                     # Apply default range, which assumes not zero-one
                     self.var_to_range[sympy_expr] = self._default_value_range()
+                elif negative is False:
+                    self.var_to_range[sympy_expr] = ValueRanges(0, sys.maxsize - 1)
                 else:
                     self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
 
