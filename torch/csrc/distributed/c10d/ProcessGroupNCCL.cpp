@@ -4077,8 +4077,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       avoidRecordStreams);
 }
 
-}
-
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
