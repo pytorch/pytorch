@@ -65,5 +65,5 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # needs NumPy 1.20 or less.
   conda_reinstall cmake="${CMAKE_VERSION}"
   # Note that we install numpy with pip as conda might not have the version we want
-  pip_install --force-reinstall numpy="${NUMPY_VERSION}"
+  pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
 fi
