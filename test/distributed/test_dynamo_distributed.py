@@ -758,7 +758,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             (False, "local")
         ):
             torch._dynamo.reset()
-            torch._dynamo.config.skip_fsdp_guards = skip_guards
 
             class ToyModel(nn.Module):
                 def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
@@ -784,8 +783,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             m.apply(init_weights)
             correct_outputs = m(inputs)
             fsdp_m = FSDP(m, use_orig_params=True)
-            opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
-            outputs = opt_m(inputs)
+
+            with torch._dynamo.config.patch(skip_fsdp_guards=skip_guards):
+                opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+                outputs = opt_m(inputs)
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck() \
