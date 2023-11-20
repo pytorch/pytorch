@@ -49,7 +49,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
