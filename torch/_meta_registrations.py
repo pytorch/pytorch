@@ -2996,8 +2996,6 @@ def register_meta_foreach(ops):
         aten._foreach_sub,
         aten._foreach_mul,
         aten._foreach_div,
-        aten._foreach_maximum,
-        aten._foreach_minimum,
         aten._foreach_clamp_min,
         aten._foreach_clamp_max,
         aten._foreach_lerp,
@@ -3122,14 +3120,25 @@ def _check_foreach_binop_tensor_lists(self, other):
 
 @register_meta(
     [
-        aten._foreach_maximum_.List,
-        aten._foreach_minimum_.List,
+        aten._foreach_maximum,
+        aten._foreach_minimum,
     ]
 )
-def meta__foreach_binop__list(self, other):
-    # There are no aten.maximum_, aten.minimum_ method
-    # and therefore we cannot use register_meta_foreach
-    _check_foreach_binop_tensor_lists(self, other)
+def meta__foreach_binop_scalar(*args):
+    # aten.maximum(Tensor, Scalar) does not exist.
+    return _meta_foreach_out_of_place(*args, _scalar_op=aten.clamp_min)
+
+
+@register_meta(
+    [
+        aten._foreach_maximum_,
+        aten._foreach_minimum_,
+    ]
+)
+def meta__foreach_binop__scalar(*args):
+    # aten.maximum(Tensor, Scalar) does not exist
+    _meta_foreach_inplace(*args, _scalar_op=aten.clamp_min_)
+    return
 
 
 @register_meta(
