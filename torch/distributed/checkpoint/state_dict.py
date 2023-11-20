@@ -940,7 +940,7 @@ def _patch_model_state_dict(
     )
 
     def load_state_dict_call(state_dict: Dict[str, Any]):
-        _load_state_dict_call(model_state_dict=state_dict)[1]  # TODO: remove [1]
+        _load_state_dict_call(model_state_dict=state_dict)
 
     model.load_state_dict = load_state_dict_call
 
