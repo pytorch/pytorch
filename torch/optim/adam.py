@@ -38,7 +38,7 @@ class Adam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        self.decoupled_weight_decay = decoupled_weight_decay
+        self._decoupled_weight_decay = decoupled_weight_decay
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
@@ -185,7 +185,7 @@ class Adam(Optimizer):
                 fused=group['fused'],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
-                decoupled_weight_decay=self.decoupled_weight_decay
+                decoupled_weight_decay=self._decoupled_weight_decay
             )
 
         return loss
@@ -384,35 +384,23 @@ def _single_tensor_adam(params: List[Tensor],
 
             if weight_decay != 0:
                 grad = grad.add(param, alpha=weight_decay)
-
-            if torch.is_complex(param):
-                grad = torch.view_as_real(grad)
-                exp_avg = torch.view_as_real(exp_avg)
-                exp_avg_sq = torch.view_as_real(exp_avg_sq)
-                if amsgrad:
-                    max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-                param = torch.view_as_real(param)
-
-            # Decay the first and second moment running average coefficient
-            exp_avg.lerp_(grad, 1 - beta1)
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
         else:
-            if torch.is_complex(param):
-                grad = torch.view_as_real(grad)
-                exp_avg = torch.view_as_real(exp_avg)
-                exp_avg_sq = torch.view_as_real(exp_avg_sq)
-                if amsgrad:
-                    max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
-                param = torch.view_as_real(param)
-
             # update step
             step_t += 1
             # Perform stepweight decay
             param.mul_(1 - lr * weight_decay)
-            # Decay the first and second moment running average coefficient
-            exp_avg.lerp_(grad, 1 - beta1)
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            if amsgrad:
+                max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
+            param = torch.view_as_real(param)
+
+        # Decay the first and second moment running average coefficient
+        exp_avg.lerp_(grad, 1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
             step = step_t
