@@ -589,6 +589,7 @@ class VariableBuilder:
                 value,
             )
         elif isinstance(value, _StreamBase):
+            unimplemented("StreamVariable does not currently work soundly.")
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
                 None,
@@ -597,7 +598,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, _EventBase):
-            self.install_guards(GuardBuilder.ID_MATCH)
+            unimplemented("EventVariable does not currently work soundly.")
             return EventVariable(
                 None,
                 value,
