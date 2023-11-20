@@ -20,7 +20,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer
+from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -834,14 +834,12 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
-        from ..ir import Buffer
-
         original_name = kernel.__name__
 
         # Distinguish between different functions using function id
         cache_key = [id(kernel.fn)]
         for arg in kwargs.values():
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 cache_key.append(arg.get_dtype())
             elif len(configs) > 0:
                 # We need to key on non tensor arg only in autotune mode
@@ -880,7 +878,7 @@ class WrapperCodeGen(CodeGen):
             ):
                 constants[key] = arg
                 continue
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
                     TensorArg(key, arg.codegen_reference(), arg.get_dtype())
                 )
@@ -1041,9 +1039,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, ComputedBuffer):
-            return s.codegen_reference()
-        elif isinstance(s, InputBuffer):
+        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -2342,9 +2338,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, ComputedBuffer):
-            return val.codegen_reference()
-        elif isinstance(val, InputBuffer):
+        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
