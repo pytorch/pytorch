@@ -338,6 +338,28 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16_unaligned_aten_fallback(
+        self,
+    ):
+        def mm(a, b):
+            return (a @ b) * 3.0
+
+        #  For this, we have no Cutlass Kernel because of alignment constraints.
+        # We expect the ATen fallback to be used, but this will not register a fusion,
+        # therefore expected_fuse_count=0
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            m=1024,
+            n=160,
+            k=257,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp32(self):
         def mm(a, b):
             return (a @ b) * 3.0
