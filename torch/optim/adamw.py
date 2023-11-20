@@ -5,7 +5,7 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _di
                         _fused_doc, _maximize_doc, _default_to_fused_or_foreach, ParamsT, _view_as_real)
 from typing import List, Optional, Tuple, Union
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
-from adam import Adam
+from .adam import Adam
 
 __all__ = ["AdamW", "adamw"]
 
