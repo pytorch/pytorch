@@ -76,6 +76,28 @@ class TestCuda(TestCase):
         del self.autocast_lists
         super().tearDown()
 
+    def test_pinned_memory_with_cudaregister(self):
+        torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        try:
+            pinned_t = torch.ones(1 << 21).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+            pinned_t = torch.ones(1 << 24).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+        except RuntimeError as e:
+            # Some GPUs don't support same address space on host and device side
+            pass
+
+    def test_pinned_memory_with_cudaregister_multithread(self):
+        num_threads = 4
+        threads = [threading.Thread(target=self.test_pinned_memory_with_cudaregister)
+                   for t in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -856,7 +878,7 @@ except RuntimeError as e:
             @staticmethod
             def backward(ctx, grad):
                 self.assertEqual(torch.cuda.current_stream(), ctx.stream)
-                # delays the operation in the the background stream
+                # delays the operation in the background stream
                 torch.cuda._sleep(1000 * 5000)
                 return grad * ctx.val, None
 
@@ -3676,6 +3698,15 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
     def test_raises_oom(self):

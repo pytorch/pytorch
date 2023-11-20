@@ -886,3 +886,7 @@ References
 .. This package is missing doc. Adding it here for coverage
 .. This does not add anything to the rendered page.
 .. py:module:: torch.jit.mobile
+.. py:module:: torch.jit.annotations
+.. py:module:: torch.jit.frontend
+.. py:module:: torch.jit.generate_bytecode
+.. py:module:: torch.jit.quantized

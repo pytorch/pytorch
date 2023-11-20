@@ -92,6 +92,14 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
+    @requires_cuda()
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def fn(x, y):
@@ -102,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -236,14 +244,22 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname == dynamo_qname:
-                self.assertEqual(logger.level, logging.INFO)
+            if logger_qname in dynamo_qnames:
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                )
             else:
-                self.assertEqual(logger.level, logging.DEBUG)
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
@@ -268,6 +284,26 @@ LoweringException: AssertionError:
             ),
             1,
         )
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format_exc(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        try:
+            raise RuntimeError("foo")
+        except RuntimeError:
+            dynamo_log.exception("test dynamo")
+            dynamo_log.info("with exc", exc_info=True)
+        dynamo_log.info("with stack", stack_info=True)
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("Traceback", handler.format(records[0]))
+        self.assertIn("Traceback", handler.format(records[1]))
+        self.assertIn("Stack", handler.format(records[2]))
 
     @make_logging_test(dynamo=logging.INFO)
     def test_custom_format(self, records):
@@ -396,6 +432,27 @@ LoweringException: AssertionError:
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
 
+    @make_logging_test(trace_source=True)
+    def test_trace_source_funcname(self, records):
+        def fn1():
+            def fn2():
+                if True:
+                    return [torch.ones(3, 3) for _ in range(5)]
+                return None
+
+            return fn2()
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt()
+
+        found_funcname = False
+        for record in records:
+            msg = record.getMessage()
+            if "<listcomp>" in msg and "fn1.fn2" in msg:
+                found_funcname = True
+
+        self.assertTrue(found_funcname)
+
     @make_logging_test(graph_sizes=True)
     def test_graph_sizes_dynamic(self, records):
         def fn(a, b):
@@ -522,7 +579,7 @@ print("arf")
         fn_opt = torch._dynamo.optimize("eager")(fn)
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -533,7 +590,7 @@ print("arf")
                 ~~^~~""",
         )
         self.assertExpectedInline(
-            messages[1],
+            messages[-1],
             """\
             return x * 3
                    ~~^~~""",
@@ -567,9 +624,13 @@ exclusions = {
     "bytecode",
     "output_code",
     "schedule",
+    "fusion",
+    "overlap",
     "aot_graphs",
+    "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",

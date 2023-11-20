@@ -36,6 +36,16 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
+# Example inputs for conv-bn2d patterns
+_conv2d_bn_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+)
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -56,7 +66,7 @@ def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Tuple[Any, Any]:
     """
-    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
     producer
     """
@@ -124,6 +134,20 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
             all_args.append(schema.default_value)
     return all_args
 
+def _is_supported_batch_norm_for_training(node: Node):
+    """
+    Return True if the given node refers to an aten batch norm op QAT supports.
+    """
+    supported_ops = [
+        torch.ops.aten._native_batch_norm_legit.default,
+        # Note: we won't need this op anymore after batch norm consolidation
+        # For now, we need to continue to support it because it gives better
+        # training numerics than `_native_batch_norm_legit`
+        torch.ops.aten.cudnn_batch_norm.default,
+        torch.ops.aten.miopen_batch_norm.default,
+    ]
+    return node.target in supported_ops
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
@@ -148,7 +172,7 @@ def fold_bn_weights_into_conv_node(
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
     if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
-    elif bn_node.target == torch.ops.aten._native_batch_norm_legit.default:
+    elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
     else:
         raise ValueError("BN node target is unexpected ", bn_node.target)
@@ -229,11 +253,14 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 def get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
+    is_cuda: bool = False,
     **kwargs,
 ) -> GraphModule:
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    if is_cuda:
+        example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,

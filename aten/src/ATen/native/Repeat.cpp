@@ -80,7 +80,9 @@ Tensor repeat_interleave_symint(
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
         repeats.sym_size(0) == input.sym_size(dim.value()),
-        "repeats must have the same size as input along dim")
+        "repeats must have the same size as input along dim, but got repeats.size(0) = ",
+        repeats.sym_size(0), " and input.size(", dim.value(), ") = ", input.sym_size(dim.value())
+    );
   } else {
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
   }

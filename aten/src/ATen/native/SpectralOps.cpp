@@ -832,6 +832,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
 
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied,"
+        "which is known to cause spectral leakage. "
+        "Other windows such as torch.hann_window or torch.hamming_window "
+        "can are recommended to reduce spectral leakage."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
+
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -1007,6 +1018,16 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied."
+        "Please provide the same window used by stft to make the inversion "
+        "lossless."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \

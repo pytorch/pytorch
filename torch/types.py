@@ -7,6 +7,10 @@ import builtins
 # to talk about in PyTorch
 
 _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
+_TensorOrTensorsOrGradEdge = Union[
+    torch.Tensor, Sequence[torch.Tensor],
+    "torch.autograd.graph.GradientEdge",
+    Sequence["torch.autograd.graph.GradientEdge"]]
 
 # In some cases, these basic types are shadowed by corresponding
 # top-level values.  The underscore variants let us refer to these
@@ -23,9 +27,6 @@ _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
-
-class SymInt:
-    pass
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]

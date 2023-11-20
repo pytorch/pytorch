@@ -18,8 +18,6 @@ from torch._inductor.fx_passes.post_grad import view_to_reshape
 from . import config
 
 aten = torch.ops.aten
-
-aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
@@ -79,9 +77,9 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if torch._guards.TracingContext.get():
-        fw_metadata = torch._guards.TracingContext.get().fw_metadata
-        params_flat = torch._guards.TracingContext.get().params_flat
+    if tracing_context := torch._guards.TracingContext.try_get():
+        fw_metadata = tracing_context.fw_metadata
+        params_flat = tracing_context.params_flat
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -125,7 +123,7 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0
@@ -153,7 +151,7 @@ def invalidate_eager_modules():
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True
+                e_t._is_param = True  # type: ignore[attr-defined]
             setattr(mod, attr_name, e_t)
 
 
@@ -168,7 +166,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
             e_t = ErasedTensor(tensor, attr_name, mod)
         if isinstance(tensor, torch.nn.Parameter):
             e_t.requires_grad_(True)
-            e_t._is_param = True
+            e_t._is_param = True  # type: ignore[attr-defined]
         setattr(mod, attr_name, e_t)
 
 

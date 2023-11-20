@@ -75,12 +75,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-jammy-py3_9-clang12-asan-build:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-jammy-py3_10-clang15-asan-build:
+    name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.4xlarge" },
@@ -92,14 +92,14 @@ jobs:
         ]}
       sync-tag: asan-build
 
-  linux-jammy-py3_9-clang12-asan-test:
-    name: linux-jammy-py3.9-clang12-asan
+  linux-jammy-py3_10-clang15-asan-test:
+    name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_9-clang12-asan-build
+    needs: linux-jammy-py3_10-clang15-asan-build
     with:
-      build-environment: linux-jammy-py3.9-clang12-asan
-      docker-image: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-asan-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
 
   linux-focal-py3_8-clang10-onnx-build:
@@ -252,7 +252,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3-clang9-mobile-custom-build-static
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       build-generates-artifacts: false
       test-matrix: |
         { include: [
@@ -264,7 +264,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3_8-clang9-xla
-      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.0
+      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
@@ -319,23 +319,23 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single:
-    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
+  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
+    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
+  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
+    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -353,13 +353,13 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-rocm5_6-py3_8-build:
+  linux-focal-rocm5_7-py3_8-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.6-py3.8
+    name: linux-focal-rocm5.7-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
+      build-environment: linux-focal-rocm5.7-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |

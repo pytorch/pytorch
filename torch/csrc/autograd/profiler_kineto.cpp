@@ -3,11 +3,11 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
-#include <c10/util/variant.h>
 
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
@@ -57,7 +57,7 @@ inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return torch::profiler::impl::getTime() / 1000;
+  return c10::getTime() / 1000;
 #endif // USE_KINETO
 }
 
@@ -100,7 +100,7 @@ auto parseArgData(
   std::vector<c10::IValue> concrete_inputs_list;
 
   for (const auto& i : c10::irange(input_shapes.size())) {
-    c10::visit(
+    std::visit(
         c10::overloaded(
             [&](const TensorMetadata& t) {
               shapes[i] = t.sizes_;
@@ -127,12 +127,12 @@ auto parseArgData(
     concrete_inputs_list.resize(input_shapes.size());
 
     for (const auto& i : c10::irange(input_shapes.size())) {
-      c10::visit(
+      std::visit(
           c10::overloaded(
               [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
               [&](const auto&) {}),
           input_shapes[i]);
-      c10::visit(
+      std::visit(
           c10::overloaded(
               [&](const c10::IValue& val) {
                 concrete_inputs_list[i] = val;
@@ -150,7 +150,7 @@ auto parseArgData(
 struct MetadataBase {
   MetadataBase(const std::shared_ptr<Result>& result)
       : kineto_activity_{result->kineto_activity_} {
-    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
             result->extra_fields_)) {
       // In order to add metadata we have to downcast from
       // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
@@ -167,7 +167,12 @@ struct MetadataBase {
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
+      torch::profiler::impl::kineto::addMetadata(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<torch::profiler::impl::kineto::activity_t*>(
+              kineto_activity_),
+          key,
+          value);
     }
   }
 
@@ -245,6 +250,11 @@ struct AddGenericMetadata : public MetadataBase {
       }
     }
 
+    // Add extra metadata if any
+    for (const auto& [key, val] : op_event.extra_meta_) {
+      addMetadata(key, val);
+    }
+
     if (config_ && !config_->experimental_config.performance_events.empty()) {
       auto& event_names = config_->experimental_config.performance_events;
       for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
@@ -317,7 +327,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   void reportVulkanEventToProfiler(torch::profiler::impl::vulkan_id_t id) {
     if (!config_.disabled()) {
       record_queue_.getSubqueue()->emplace_vulkan_event(
-          torch::profiler::impl::getApproximateTime(), id);
+          c10::getApproximateTime(), id);
     }
   }
 
@@ -329,7 +339,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_allocation_event(
-          torch::profiler::impl::getApproximateTime(),
+          c10::getApproximateTime(),
           ptr,
           alloc_size,
           total_allocated,
@@ -346,7 +356,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_ooms_event(
-          torch::profiler::impl::getApproximateTime(),
+          c10::getApproximateTime(),
           alloc_size,
           total_allocated,
           total_reserved,
@@ -417,7 +427,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   }
 
   uint64_t start_time_;
-  torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
+  c10::ApproximateClockToUnixTimeConverter clock_converter_;
   torch::profiler::impl::RecordQueue record_queue_;
   std::vector<KinetoEvent> kineto_events_;
   std::vector<experimental_event_t> event_tree_;
@@ -448,8 +458,7 @@ void onFunctionExit(
   auto* kineto_ctx_ptr =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
-  kineto_ctx_ptr->event_->end_time_ =
-      torch::profiler::impl::getApproximateTime();
+  kineto_ctx_ptr->event_->end_time_ = c10::getApproximateTime();
   if (!config.experimental_config.performance_events.empty()) {
     state_ptr->record_queue_.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);
@@ -743,20 +752,25 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
     return !i.jit_stack_.empty() ? i.jit_stack_ : python_stack_;
   };
 
-  using out_t = const c10::ArrayRef<std::string>;
-  return result_->visit(c10::overloaded(
-      [&](const ExtraFields<EventType::TorchOp>& i) -> out_t { return get(i); },
-      [&](const ExtraFields<EventType::Backend>& i) -> out_t { return get(i); },
-      [&](const auto&) -> out_t { return python_stack_; }));
+  auto const& extra_fields = result_->extra_fields_;
+  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+    return get(*p);
+  }
+  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+    return get(*p);
+  }
+  return python_stack_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
-  return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::TorchOp>& e)
-          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
-      [](const ExtraFields<EventType::Backend>& e)
-          -> const c10::ArrayRef<std::string> { return e.jit_modules_; },
-      [](const auto&) -> const c10::ArrayRef<std::string> { return {}; }));
+  auto const& extra_fields = result_->extra_fields_;
+  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+    return p->jit_modules_;
+  }
+  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+    return p->jit_modules_;
+  }
+  return {};
 }
 
 uint64_t KinetoEvent::durationUs() const {
@@ -869,6 +883,7 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
+TYPED_ATTR(TorchOp, extraMeta, e.extra_meta_)
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
 TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(

@@ -3,10 +3,15 @@ name: ios-build-test
 on:
   workflow_call:
     inputs:
+      trigger-event:
+        type: string
+        default: ""
+        description: |
+          The trigger event from the caller that determines whether or not to upload
       build-environment:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
+        description: Top-level label for what is being built/tested.
       sync-tag:
         required: false
         type: string
@@ -19,6 +24,13 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+    secrets:
+      AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID:
+        required: false
+      AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY:
+        required: false
+      COCOAPODS_TRUNK_TOKEN:
+        required: false
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -92,7 +104,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: "3.9"
-          environment-file: .github/requirements/conda-env-iOS
+          environment-file: .github/requirements/conda-env-iOS.txt
           pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
@@ -118,28 +130,16 @@ jobs:
           export TCLLIBPATH="/usr/local/lib"
           ${CONDA_RUN} scripts/build_ios.sh
 
-      - name: Build TestApp
-        if: matrix.ios_platform == 'SIMULATOR'
-        timeout-minutes: 15
-        run: |
-          # Run the ruby build script
-          if ! [ -x "$(command -v xcodebuild)" ]; then
-            echo 'Error: xcodebuild is not installed.'
-            exit 1
-          fi
-          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
-
-      - name: Run simulator tests
-        if: matrix.ios_platform == 'SIMULATOR'
+      - name: Prepare the test models
         shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp/benchmark
         run: |
           set -eux
           # shellcheck disable=SC1091
           # Use the pytorch nightly build to generate models
           ${CONDA_RUN} pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
 
-          # Generate models for differnet backends
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          # Generate models for different backends
           mkdir -p ../models
           # NB: Both of the following scripts only export models with lite interpreter
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
@@ -160,9 +160,28 @@ jobs:
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
-          popd
 
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp"
+      - name: Build TestApp
+        if: matrix.ios_platform == 'SIMULATOR'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -eux
+
+          # Run the ruby build script
+          if ! [ -x "$(command -v xcodebuild)" ]; then
+            echo 'Error: xcodebuild is not installed.'
+            exit 1
+          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
+
+      - name: Run simulator tests
+        if: matrix.ios_platform == 'SIMULATOR'
+        shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp
+        run: |
+          set -eux
+
           # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
@@ -173,7 +192,6 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
-          popd
 
       - name: Dump simulator tests on failure
         if: failure() && matrix.ios_platform == 'SIMULATOR'
@@ -182,6 +200,7 @@ jobs:
           cat /Users/runner/Library/Logs/scan/*.log
 
       - name: Prepare the build artifacts for upload
+        if: matrix.ios_platform == 'OS'
         shell: bash
         run: |
           set -eux
@@ -244,18 +263,18 @@ jobs:
           popd
 
       - uses: actions/upload-artifact@v3
+        if: matrix.ios_platform == 'OS'
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
           path: ${{ runner.temp }}/${{ matrix.ios_arch }}/${{ matrix.ios_arch }}.zip
 
   upload-ios-artifacts:
-    # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
-    # to create the fat iOS binaries for both x86_64 and arm64
-    runs-on: macos-12
+    # NB: this job run on GitHub MacOS ephemeral runner so that it can access AWS credentials
+    runs-on: ubuntu-22.04
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -276,26 +295,20 @@ jobs:
         with:
           name: pytorch-ios-build-artifacts-arm64
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: pytorch-ios-build-artifacts-x86_64
-
-      - name: Unzip arm64 and x86_64 artifacts
+      - name: Unzip artifacts
         shell: bash
         run: |
           set -eux
 
-          for ARCH in "arm64" "x86_64"; do
-            TMP_DIR="${RUNNER_TEMP}/${ARCH}"
-            mkdir -p "${TMP_DIR}"
+          ARCH="arm64"
+          TMP_DIR="${RUNNER_TEMP}/${ARCH}"
+          mkdir -p "${TMP_DIR}"
 
-            cp "${ARCH}.zip" "${TMP_DIR}"
+          cp "${ARCH}.zip" "${TMP_DIR}"
 
-            pushd "${TMP_DIR}"
-            unzip -o "${ARCH}.zip"
-            popd
-          done
+          pushd "${TMP_DIR}"
+          unzip -o "${ARCH}.zip"
+          popd
 
       - name: Prepare the artifact
         env:
@@ -311,7 +324,7 @@ jobs:
           # Prepare all the sub directories
           mkdir -p "${DEST_DIR}"/install/lib
 
-          # Copy header and share files, arm64 or x86_64 both work
+          # Copy header and share files
           cp -R install/include "${DEST_DIR}"/install
           cp -R install/share "${DEST_DIR}"/install
           # The last dash is important to copy only files under src
@@ -334,11 +347,7 @@ jobs:
           popd
 
           for LIB in "${LIBRARIES[@]}"; do
-            FROM_LIBS=("${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${RUNNER_TEMP}"/x86_64/install/lib/"${LIB}")
-            # Create a fat binary for both arm64 and x86_64
-            lipo -create "${FROM_LIBS[@]}" -o "${DEST_DIR}"/install/lib/"${LIB}"
-            # Print the info
-            lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
+            cp "${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${DEST_DIR}"/install/lib/"${LIB}"
           done
 
           BUILD_LITE_INTERPRETER=1
@@ -404,15 +413,15 @@ jobs:
           path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
 
       - name: Set DRY_RUN
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
       - name: Upload the artifact to S3
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
           IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
@@ -441,7 +450,7 @@ jobs:
           # We need to set this secret to upload to cocoapods. However, we might want
           # to NOT set this for PROD release so that we can upload the artifacts manually
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |

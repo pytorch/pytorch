@@ -874,6 +874,22 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
+    @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_cufft_context(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/109448
+        x = torch.randn(32, dtype=dtype, device=device, requires_grad=True)
+        dout = torch.zeros(32, dtype=dtype, device=device)
+
+        # compute iFFT(FFT(x))
+        out = torch.fft.ifft(torch.fft.fft(x))
+        out.backward(dout, retain_graph=True)
+
+        dx = torch.fft.fft(torch.fft.ifft(dout))
+
+        self.assertTrue((x.grad - dx).abs().max() == 0)
+        self.assertFalse((x.grad - x).abs().max() == 0)
+
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
@@ -1183,6 +1199,22 @@ class TestFFT(TestCase):
         x = torch.rand(100)
         with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
             y = x.stft(10, pad_mode='constant')
+
+    # stft and istft are currently warning if a window is not provided
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_stft_requires_window(self, device):
+        x = torch.rand(100)
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            y = x.stft(10, pad_mode='constant', return_complex=True)
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_istft_requires_window(self, device):
+        stft = torch.rand((51, 5), dtype=torch.cdouble)
+        # 51 = 2 * n_fft + 1, 5 = number of frames
+        with self.assertWarnsOnceRegex(UserWarning, "A window was not provided"):
+            x = torch.istft(stft, n_fft=100, length=100)
 
     @skipCPUIfNoFFT
     def test_fft_input_modification(self, device):

@@ -234,6 +234,8 @@ public:
    */
   void throwIfHasAbstractImplPyStub(OperatorName op_name);
 
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
   /**
    * Register a new operator by name.
    */
@@ -438,6 +440,9 @@ public:
     // will be done by the time a typed() handle is acquired.
 #if !defined C10_MOBILE
     operatorDef_->op.assertSignatureIsCorrect<FuncType>();
+    if (fn_has_symint<FuncType>::value) {
+      operatorDef_->op.assertSignatureIsCorrect<typename fn_remove_symint<FuncType>::type>();
+    }
 #endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }

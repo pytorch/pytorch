@@ -62,7 +62,7 @@ jobs:
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
-      {%- if config.pytorch_extra_install_requirements is defined %}
+      {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
       {%- endif %}
     secrets:

@@ -7,7 +7,7 @@
 //
 // In order to support the ROCm build target, the use of cublas and
 // cusolver APIs needed to be split into separate source files to
-// accomodate the hipify step of the ROCm build process.
+// accommodate the hipify step of the ROCm build process.
 //
 // To create this current file, the original file
 // BatchLinearAlgebraLib.cpp was copied to
