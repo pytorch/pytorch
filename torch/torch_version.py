@@ -24,7 +24,7 @@ class TorchVersion(str):
     """
     # fully qualified type names here to appease mypy
     def _convert_to_version(self, inp: Any) -> Any:
-        if isinstance(inp, Version.get_cls()):
+        if isinstance(inp, Version):
             return inp
         elif isinstance(inp, str):
             return Version(inp)
@@ -43,7 +43,7 @@ class TorchVersion(str):
         try:
             return getattr(Version(self), method)(self._convert_to_version(cmp))
         except BaseException as e:
-            if not isinstance(e, InvalidVersion.get_cls()):
+            if not isinstance(e, InvalidVersion):
                 raise
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
