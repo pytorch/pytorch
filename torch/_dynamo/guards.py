@@ -612,9 +612,10 @@ class GuardBuilder(GuardBuilderBase):
         self.config_hash = config_hash
         self._produce_guard_code(guard, code)
 
-    def NOT_NOPYTHON(self, guard: Guard):
-        # If this compiled entry is not one graph, it is a cache miss if the compiled object
-        # needs nopython. We only need to install this guard if there is a graph break.
+    def HAS_GRAPH_BREAK(self, guard: Guard):
+        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
+        # if the compiled object needs nopython. We only need to install this guard if
+        # there is a graph break.
         code = ["not ___nopython()"]
         self._produce_guard_code(guard, code)
 

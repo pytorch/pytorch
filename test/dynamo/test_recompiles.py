@@ -356,7 +356,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
-    def test_nopython_no_fallback_(self):
+    def test_forbid_nopython_has_graph_break_cache_hit(self):
         for create_functions in [
             lambda f, cnt: (
                 torch.compile(f, backend=cnt),
@@ -369,9 +369,12 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         ]:
 
             def fn(x):
-                x = x + 2
-                torch._dynamo.graph_break()
-                return x + 1
+                if len(x.size()) == 1:
+                    x = x + 2
+                    torch._dynamo.graph_break()
+                    return x + 1
+                else:
+                    return x + 1
 
             cnt = torch._dynamo.testing.CompileCounter()
 
@@ -390,6 +393,13 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             opt_fn(torch.zeros(1))
             self.assertEqual(cnt.frame_count, 2)
+
+            nopython_fn(torch.zeros((1, 2)))
+            self.assertEqual(cnt.frame_count, 3)
+
+            # nopython does not recompile when hitting cache with no graph breaks
+            nopython_fn(torch.zeros((1, 2)))
+            self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":

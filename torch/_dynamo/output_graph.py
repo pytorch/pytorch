@@ -372,8 +372,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
 
-    def guard_not_nopython(self):
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.NOT_NOPYTHON))
+    def guard_has_graph_break(self):
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.HAS_GRAPH_BREAK))
 
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
@@ -791,8 +791,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = True
 
         if not compile_return_value:
-            # invalid graph fro nopython
-            self.guard_not_nopython()
+            # invalid graph to be cache hit for nopython
+            self.guard_has_graph_break()
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
