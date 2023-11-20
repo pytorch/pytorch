@@ -2496,7 +2496,7 @@ class TestDifferentiableOptimizer(TestCase):
         from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
                                  asgd, adamax, adadelta, adagrad)
         multi_optims = ((Adam, adam, "_multi_tensor_adam"),
-                        (AdamW, adamw, "_multi_tensor_adamw"),
+                        (AdamW, adamw, "_multi_tensor_adam"),
                         (NAdam, nadam, "_multi_tensor_nadam"),
                         (SGD, sgd, "_multi_tensor_sgd"),
                         (RAdam, radam, "_multi_tensor_radam"),
