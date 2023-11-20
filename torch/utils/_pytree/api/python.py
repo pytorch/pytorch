@@ -119,7 +119,7 @@ SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
-def _register_pytree_node(
+def register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
@@ -128,7 +128,8 @@ def _register_pytree_node(
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
-    """
+    """Register a container-like type as pytree node.
+
     Args:
         cls: the type to register
         flatten_fn: A callable that takes a pytree and returns a flattened
@@ -171,7 +172,49 @@ def _register_pytree_node(
         )
 
 
-register_pytree_node = _register_pytree_node
+def _register_pytree_node(
+    cls: Type[Any],
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    *,
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+) -> None:
+    """Register a container-like type as pytree node for the Python pytree only.
+
+    Args:
+        cls: the type to register
+        flatten_fn: A callable that takes a pytree and returns a flattened
+            representation of the pytree and additional context to represent the
+            flattened pytree.
+        unflatten_fn: A callable that takes a flattened version of the pytree,
+            additional context, and returns an unflattened pytree.
+        serialized_type_name: A keyword argument used to specify the fully qualified
+            name used when serializing the tree spec.
+        to_dumpable_context: An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable
+            representation. This is used for json serialization, which is being
+            used in torch.export right now.
+        from_dumpable_context: An optional keyword argument to custom specify how
+            to convert the custom json dumpable representation of the context
+            back to the original context. This is used for json deserialization,
+            which is being used in torch.export right now.
+    """
+    warnings.warn(
+        "torch.utils._pytree._register_pytree_node is deprecated. "
+        "Please use torch._utils._pytree.register_pytree_node instead.",
+        stacklevel=2,
+    )
+
+    _private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
 
 
 def _private_register_pytree_node(
@@ -215,9 +258,6 @@ def _private_register_pytree_node(
         )
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
-
-
-register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -357,10 +397,7 @@ class TreeSpec:
             children_specs_str += self.children_specs[0].__repr__(indent)
             children_specs_str += "," if len(self.children_specs) > 1 else ""
             children_specs_str += ",".join(
-                [
-                    "\n" + " " * indent + child.__repr__(indent)
-                    for child in self.children_specs[1:]
-                ]
+                ["\n" + " " * indent + child.__repr__(indent) for child in self.children_specs[1:]]
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
