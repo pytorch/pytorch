@@ -589,13 +589,12 @@ class TensorVariable(VariableTracker):
                     return False
 
             if (
-                not config.capture_dynamic_output_shape_ops
-                and has_bool_key(key)
+                has_bool_key(key)
                 and isinstance(value, TensorVariable)
                 and value.requires_grad
             ):
                 unimplemented(
-                    "boolean masking setitem backwards requires dynamic shapes"
+                    "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
                 )
             tx.output.create_proxy(
                 "call_function",
