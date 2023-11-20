@@ -266,26 +266,26 @@ def _validate_sdpa_input(
     scale=None,
 ):
     if query.dtype != key.dtype or query.dtype != value.dtype:
-        raise RuntimeError(
+        raise ValueError(
             f"Expected query, key, and value to have the same dtype, "
             f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
             f"and value.dtype: {value.dtype} instead."
         )
     if query.device != key.device or query.device != value.device:
-        raise RuntimeError(
+        raise ValueError(
             f"Expected query, key, and value to have the same device type, "
             f"but got query.device: {query.device}, key.device: {key.device}, "
             f"and value.device: {value.device} instead."
         )
     if query.dim() < 2 or key.dim() < 2 or value.dim() < 2:
-        raise RuntimeError(
+        raise ValueError(
             f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
     if attn_mask is not None:
         # TODO: Figure out whether masks are actually supported for this layout or not
         if attn_mask.dtype != torch.bool and attn_mask.dtype != query.dtype:
-            raise RuntimeError(
+            raise ValueError(
                 f"Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: "
                 f"{attn_mask.dtype}, and query.dtype: {query.dtype} instead."
             )
@@ -305,9 +305,9 @@ def _can_use_math_sdpa_jagged(
         or not key.is_contiguous()
         or not value.is_contiguous()
     ):
-        raise RuntimeError("If inputs are nested tensors they must be contiguous.")
+        raise ValueError("If inputs are nested tensors they must be contiguous.")
     if is_causal:
-        raise RuntimeError(
+        raise ValueError(
             "Nested tensors for query / key are not supported when is_causal=True."
         )
 
