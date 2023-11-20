@@ -13,9 +13,9 @@ from .default_planner import DefaultLoadPlanner
 
 from .utils import _DistWrapper
 
-__all__ = ["load_state_dict"]
+__all__ = ["load_state_dict", "load"]
 
-def _load_state_dict(
+def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -27,7 +27,7 @@ def _load_state_dict(
     warnings.warn(
         "'load_state_dict' is deprecated and will be removed in future versions. Please use 'load' instead."
     )
-    #TODO: test returning `load` here instead.
+    # TODO: test returning `load` here instead.
     return _load_state_dict(state_dict, storage_reader, process_group, coordinator_rank, no_dist, planner)
 
 def load(

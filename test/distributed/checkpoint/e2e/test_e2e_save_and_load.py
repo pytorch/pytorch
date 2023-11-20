@@ -1,21 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
 from enum import auto, Enum
-from functools import partial
 
 import torch
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
-    get_state_dict,
-    set_state_dict,
-    get_model_state_dict,
-    get_optimizer_state_dict,
-    set_model_state_dict,
-    set_optimizer_state_dict,
     _patch_model_state_dict,
-    _patch_optimizer_state_dict
+    _patch_optimizer_state_dict,
+    get_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -35,8 +29,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
-# Simple and boring model to test interface and some corner cases that do not
-# require complicated wrapping strategy.
+# Simple and boring model
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -122,7 +115,6 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     @parametrize("compile", [True, False])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
     def test_stateful(self, compile, model_type):
-
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -149,9 +141,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         model_sd, optim_sd = get_state_dict(model, optimizers=optim)
 
         self._verify_msd(model_sd, dist_msd)
-        self._verify_osd_by_load(
-            model, optim, self._optim(model), dist_osd
-        )
+        self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)

@@ -1,6 +1,6 @@
-from typing import Any, Dict, TypeVar
+from typing import Any, Dict, runtime_checkable, TypeVar
 
-from typing_extensions import Protocol, runtime_checkable
+from typing_extensions import Protocol
 
 
 @runtime_checkable
@@ -10,3 +10,6 @@ class Stateful(Protocol):
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         ...
+
+
+StatefulT = TypeVar("StatefulT", bound=Stateful)

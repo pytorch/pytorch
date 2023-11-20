@@ -15,7 +15,7 @@ from .storage import (
 from .metadata import Metadata, STATE_DICT_TYPE
 from .utils import _DistWrapper
 
-__all__ = ["save_state_dict"]
+__all__ = ["save_state_dict", "save"]
 
 
 # Deprecated
@@ -32,8 +32,8 @@ def save_state_dict(
         "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
     )
 
-    #TODO: test returning `save` here instead.
-    return _save_state_dict(save_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+    # TODO: test returning `save` here instead.
+    return _save_state_dict(state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
 
 def save(
     state_dict: STATE_DICT_TYPE,

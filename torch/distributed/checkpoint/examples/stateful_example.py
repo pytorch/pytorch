@@ -3,22 +3,21 @@
 
 import os
 import shutil
-from enum import auto, Enum
-from functools import partial
 
 import torch
-import torch.nn as nn
-import torch.multiprocessing as mp
 import torch.distributed.checkpoint as DCP
+import torch.multiprocessing as mp
+import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
-    _patch_optimizer_state_dict
+    _patch_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
+
 
 class Model(torch.nn.Module):
     def __init__(self):
@@ -35,9 +34,11 @@ class Model(torch.nn.Module):
     def get_input(self):
         return torch.rand(8, 8, device="cuda")
 
+
 def _make_stateful(model, optim):
     _patch_model_state_dict(model)
     _patch_optimizer_state_dict(model, optimizers=optim)
+
 
 def _train(model, optim, train_steps=1):
     torch.manual_seed(0)
@@ -52,14 +53,13 @@ def _train(model, optim, train_steps=1):
 
 
 def run(world_size, device="cuda"):
-
     model = Model().cuda()
     optim = torch.optim.Adam(model.parameters(), lr=0.1)
     _make_stateful(model, optim)
 
     device_mesh = init_device_mesh(device, (world_size,))
     model = FSDP(
-        dummy_model,
+        model,
         device_mesh=device_mesh,
         use_orig_params=True,
     )
@@ -77,7 +77,7 @@ def run(world_size, device="cuda"):
     optim = torch.optim.Adam(model.parameters(), lr=0.1)
     _make_stateful(model, optim)
     DCP.load(
-        state_dict={"model": dist_model, "optimizer": dist_optim},
+        state_dict={"model": model, "optimizer": optim},
         storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
     )
     _train(model, optim, train_steps=2)
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     print(f"Running stateful checkpoint example on {world_size} devices.")
     shutil.rmtree(CHECKPOINT_DIR, ignore_errors=True)
     mp.spawn(
-        run_fsdp_checkpoint_example,
+        run,
         args=(world_size,),
         nprocs=world_size,
         join=True,
