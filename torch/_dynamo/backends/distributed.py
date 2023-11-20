@@ -423,6 +423,7 @@ or file a github issue."""
                 assert isinstance(kwargs, dict)
 
                 if n.op == "call_module":
+                    assert not kwargs, "Only deal with args for now"
                     real_mod = self.fetch_attr(n.target)
                     if fake_mode:
                         curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
