@@ -7,7 +7,6 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from weakref import ReferenceType
 
@@ -26,13 +25,6 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import (
-    _constrain_range_for_size,
-    DimConstraint,
-    DimDynamic,
-    free_symbols,
-    is_symbolic,
-)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -42,7 +34,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
 
@@ -210,6 +202,10 @@ def maybe_get_fake_mode(t):
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
     return None
 
 
@@ -232,8 +228,8 @@ def torch_decomp_decompositions(func):
     return decomposition_table[func] in decomp_attrs
 
 
-def tree_flatten_only(ty: Type[T], pytree: PyTree):
-    flat_vals, _ = tree_flatten(pytree)
+def tree_flatten_only(ty: Type[T], tree: PyTree):
+    flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
 
@@ -314,11 +310,9 @@ class FakeTensorConverter:
         t,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy=None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -353,10 +347,8 @@ class FakeTensorConverter:
             t,
             shape_env=shape_env,
             callback=mk_fake_tensor,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -390,10 +382,8 @@ class FakeTensorConverter:
         *,
         make_constant=False,
         shape_env=None,
-        ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        policy=None,
         memoized_only=False,
     ):
         return self.from_real_tensor(
@@ -401,10 +391,8 @@ class FakeTensorConverter:
             t,
             make_constant,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
@@ -498,7 +486,8 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
             is_symbolic(x) for x in itertools.chain(args, kwargs.values())
         )
         if not require_dynamic:
-            return run_fallback_kernel(fake_mode, func, args, kwargs, None)
+            flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+            return run_fallback_kernel(fake_mode, func, flat_args, args_spec, None)
 
     raise UnsupportedOperatorException(func)
 
@@ -537,6 +526,10 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
             raise DynamicOutputShapeException(func)
 
         output_size = fake_mode.shape_env.create_unbacked_symint()
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
         _constrain_range_for_size(output_size)
         # TODO: consider a memo
     return repeats.new_empty(output_size)
@@ -578,7 +571,14 @@ def nonzero(fake_mode, func, arg):
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
         maxval = sys.maxsize - 1
-        if not free_symbols(arg.numel()):
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
@@ -607,7 +607,14 @@ def masked_select(fake_mode, func, self, mask):
 
     # see nonzero for commentary
     maxval = sys.maxsize - 1
-    if not free_symbols(arg.numel()):
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        has_free_symbols,
+    )
+
+    if not has_free_symbols(arg.numel()):
         if arg.numel() >= 2:
             maxval = int(arg.numel())
 
@@ -675,7 +682,6 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 
 
 # takes in multiple-devices, dont default to default device handling
-@register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
@@ -685,7 +691,6 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 
 
 # same with multi_device_op_default, but return the input
-@register_op_impl(aten.index_put_.default)
 @register_op_impl(aten.copy.out)
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
@@ -697,6 +702,27 @@ def multi_device_op_out(fake_mode, func, *args, **kwargs):
     )
 
     return new_kwargs["input"]
+
+
+@register_op_impl(aten.index_put.default)
+@register_op_impl(aten.index_put_.default)
+def index_put_impl(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values = new_kwargs["values"]
+    self_device = new_kwargs["input"].fake_device
+    torch._check(
+        self_device == values.fake_device or (values.ndim == 0 and values.numel() == 1),
+        lambda: f"Mismatching {func} device between self ({self_device}) and values ({values.device})",
+    )
+
+    out = run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    if func is aten.index_put_.default:
+        return new_kwargs["input"]
+    else:
+        return out
 
 
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
@@ -718,6 +744,7 @@ def conv(fake_mode, func, *args, **kwargs):
         k = kwargs["weight"].ndim
         batch = kwargs["input"].shape[0]
 
+        # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
 
         if not has_hint(batch):
@@ -791,12 +818,24 @@ def infer_size(a, b):
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
-        if not (sizeA == sizeB or sizeA == 1 or sizeB == 1):
-            raise RuntimeError(
-                f"The size of tensor a ({sizeA}) "
-                f"must match the size of tensor b ({sizeB}) "
-                f"at non-singleton dimension {i})"
-            )
+
+        # NB: It is very important to test for broadcasting, before testing
+        # sizeA == sizeB.  This is because the broadcasting tests are likely
+        # to be statically known (in particular, if sizeA/sizeB is unbacked
+        # but size-like, we will unsoundly assume they never equal 1), but
+        # the sizeA == sizeB test may not be statically known.  However, once
+        # we have established that no broadcasting is happening, the
+        # sizeA == sizeB is now expect_true and we can defer it as a runtime
+        # assert (this works because Python will return the terminal
+        # expression of an or statement as-is, without bool()'ing it; if this
+        # were not the case, we'd need to write this using torch.sym_or() or
+        # something like that).
+        torch._check(
+            sizeA == 1 or sizeB == 1 or sizeA == sizeB,
+            lambda: f"The size of tensor a ({sizeA}) "
+            f"must match the size of tensor b ({sizeB}) "
+            f"at non-singleton dimension {i})",
+        )
         expandedSizes[i] = sizeB if sizeA == 1 else sizeA
     return tuple(expandedSizes)
 
@@ -1145,7 +1184,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
+        for arg in pytree.arg_tree_leaves(*args, **kwargs):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -1174,7 +1213,7 @@ class FakeTensor(torch.Tensor):
             return func(*args, **kwargs)
 
     @staticmethod
-    def _find_common_device(func, args, kwargs) -> Tuple[torch.device, bool]:
+    def _find_common_device(func, flat_args) -> Tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
         # cpu - zero-dim tensors can be called in cuda kernels,
@@ -1221,8 +1260,8 @@ class FakeTensor(torch.Tensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        for arg in flat_args:
+            merge_devices(arg)
 
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,
@@ -1246,8 +1285,8 @@ class FakeTensor(torch.Tensor):
     # of the tensor to create the output Python list, and (2) creating unbacked
     # symints for each element of the list.
     def tolist(self):
-        assert self.dim() == 1 and is_symbolic(self.shape[0])
-        shape_env = self.shape[0].node.shape_env
+        assert self.dim() == 1, "NYI for higher dims"
+        shape_env = self.fake_mode.shape_env
         out = []
         # Specialize on the length of the list
         for _ in range(self.shape[0]):
@@ -1384,6 +1423,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        elif func is torch.ops.aten.size.default:
+            return tuple(int(s) for s in args[0].size())
+        elif func is torch.ops.aten.stride.default:
+            return tuple(int(s) for s in args[0].stride())
+        elif func is torch.ops.aten.storage_offset.default:
+            return int(args[0].storage_offset())
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
@@ -1402,25 +1447,32 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+
         flat_arg_fake_tensors = [
-            t
-            for t in tree_flatten_only(FakeTensor, (args, kwargs))
-            if self.is_our_fake(t)
+            t for t in flat_args if isinstance(t, FakeTensor) and self.is_our_fake(t)
         ]
-        flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
-        has_symbolic_sizes = (
-            any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
-            or len(flat_symints) > 0
-        )
+        has_symbolic_sizes = any(
+            i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
+        ) or any(isinstance(a, torch.SymInt) for a in flat_args)
 
         converter = self.fake_tensor_converter
 
+        def maybe_to_constant(t):
+            if isinstance(t, FakeTensor) and self.is_our_fake(t):
+                return t.constant
+            else:
+                return t
+
         # To constant propagate through these functions:
-        # 1, If this is a lift, the input tensor is guaranteed to be a
+        # 1, If this is a lift due to a torch.tensor call,
+        #    the input tensor is guaranteed to be a
         #    constant, so we keep a copy of the original argument along so
-        #    we can query it if we're asked to item() it at some later point
+        #    we can query it if we're asked to item() it at some later point.
+        #    (Note that you can always call a lift fn manually, so we do
+        #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if func in self.lift_fns or (
+        if (func in self.lift_fns and not flat_arg_fake_tensors) or (
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
@@ -1428,11 +1480,8 @@ class FakeTensorMode(TorchDispatchMode):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
-            const_args, const_kwargs = pytree.tree_map_only(
-                FakeTensor,
-                lambda t: t.constant if self.is_our_fake(t) else t,
-                (args, kwargs),
-            )
+            const_flat_args = [maybe_to_constant(a) for a in flat_args]
+            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
@@ -1449,7 +1498,7 @@ class FakeTensorMode(TorchDispatchMode):
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        unrecognized_types = self.check_for_subclass(args, kwargs)
+        unrecognized_types = self.check_for_subclass(flat_args)
         if unrecognized_types:
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
@@ -1463,19 +1512,17 @@ class FakeTensorMode(TorchDispatchMode):
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if func in self.lift_fns:
-            assert (
-                len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
-            ), f"{args} {kwargs}"
+            assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
-            return converter(self, args[0])
+            if type(args[0]) is torch.Tensor:
+                return converter(self, args[0])
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
-        (
-            args,
-            kwargs,
-            flat_arg_fake_tensors,
-        ) = self.validate_and_convert_non_fake_tensors(func, converter, args, kwargs)
+        (flat_args, flat_arg_fake_tensors) = self.validate_and_convert_non_fake_tensors(
+            func, converter, flat_args, args_spec
+        )
+        del args, kwargs  # Invalidated
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -1495,20 +1542,17 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
         ):
-            const_args, const_kwargs = pytree.tree_map_only(
-                FakeTensor,
-                lambda t: t.constant if self.is_our_fake(t) else t,
-                (args, kwargs),
-            )
+            const_flat_args = [maybe_to_constant(a) for a in flat_args]
+            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
 
             # NB: not in_kernel_invocation_manager(self) as we want to do REAL
             # compute
             with no_dispatch():
                 out = func(*const_args, **const_kwargs)
 
-            all_constant = pytree.tree_all_only(
-                torch.Tensor, lambda t: self.may_turn_const(t), out
-            )
+            flat_out = pytree.tree_leaves(out)
+            flat_out_tensors = [t for t in flat_out if isinstance(t, torch.Tensor)]
+            all_constant = all(self.may_turn_const(t) for t in flat_out_tensors)
 
             if all_constant:
                 return pytree.tree_map_only(
@@ -1519,11 +1563,12 @@ class FakeTensorMode(TorchDispatchMode):
 
             # we weren't able to turn outputs to constants,
             # so invalidate all constants that might be aliases of the outputs
-            for ten in tree_flatten_only(torch.Tensor, out):
+            for ten in flat_out_tensors:
                 converter.invalidate_constant_aliases(ten)
 
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
+        args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         # Try for fastpath
@@ -1586,6 +1631,13 @@ class FakeTensorMode(TorchDispatchMode):
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations:
+            if func in (
+                aten._nested_tensor_from_tensor_list.default,
+                aten._nested_tensor_from_tensor_list.out,
+            ):
+                raise UnsupportedOperatorException(
+                    "torch.compile does not support strided NestedTensor"
+                )
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out != NotImplemented:
@@ -1627,7 +1679,7 @@ class FakeTensorMode(TorchDispatchMode):
                 raise UnsupportedOperatorException(func)
             if error is None:
                 error = UnsupportedOperatorException(func)
-            return run_fallback_kernel(self, func, args, kwargs, error)
+            return run_fallback_kernel(self, func, flat_args, args_spec, error)
 
         # Optimization: If there is no Meta kernel, it takes a surprisingly long
         # amount of time to catch the NotImplementedError, so we check it here.
@@ -1645,7 +1697,9 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
 
-        return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
+        return self.wrap_meta_outputs_with_default_device_logic(
+            r, func, flat_args, device=kwargs.get("device")
+        )
 
     # [subclass inputs]
     # Suppose we enable fake tensor mode.  This means that fake tensor
@@ -1657,19 +1711,20 @@ class FakeTensorMode(TorchDispatchMode):
     # fake tensor is not supported.  What we actually wanted to happen
     # was to give the subclass a chance to figure out what it wants to
     # before erroring out. Returning NotImplemented here allows this.
-    def check_for_subclass(self, args, kwargs):
+    def check_for_subclass(self, flat_args):
         def check(x):
             return (
-                not isinstance(x, FakeTensor)
+                isinstance(x, torch.Tensor)
+                and not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
             )
 
-        return [
-            type(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)) if check(x)
-        ]
+        return [type(x) for x in flat_args if check(x)]
 
-    def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
+    def validate_and_convert_non_fake_tensors(
+        self, func, converter, flat_args, args_spec
+    ):
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
@@ -1678,15 +1733,20 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = []
 
         def validate(x):
+            if not isinstance(x, torch.Tensor):
+                return x
+
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
                 if torch.Tag.inplace_view in func.tags:
+                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
+                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
@@ -1697,30 +1757,17 @@ class FakeTensorMode(TorchDispatchMode):
             flat_arg_fake_tensors.append(x)
             return x
 
-        args, kwargs = tree_map_only(
-            torch.Tensor,
-            validate,
-            (args, kwargs),
-        )
-        return args, kwargs, flat_arg_fake_tensors
+        validated_args = [validate(a) for a in flat_args]
+        return validated_args, flat_arg_fake_tensors
 
-    def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
-        wrap = self.gen_wrap_fn(func, args, kwargs)
-
-        # if device is specified, use that
-        if kwargs.get("device", None):
-            return tree_map(partial(wrap, device=kwargs["device"]), r)
-
-        return tree_map(partial(wrap), r)
-
-    def gen_wrap_fn(self, func, args, kwargs):
+    def wrap_meta_outputs_with_default_device_logic(self, r, func, flat_args, device):
         converter = self.fake_tensor_converter
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
         has_scalar_only_inputs = False
 
-        def wrap(e, device=None):
+        def wrap(e):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
@@ -1728,7 +1775,7 @@ class FakeTensorMode(TorchDispatchMode):
                 (
                     common_device,
                     has_scalar_only_inputs,
-                ) = FakeTensor._find_common_device(func, args, kwargs)
+                ) = FakeTensor._find_common_device(func, flat_args)
 
             if self.is_our_fake(e):
                 torch._check(
@@ -1753,7 +1800,7 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return e
 
-        return wrap
+        return tree_map(wrap, r)
 
     def cpp_meta_supports_symint(self, func):
         if torch.Tag.view_copy in func.tags:
@@ -1788,8 +1835,8 @@ class FakeTensorMode(TorchDispatchMode):
         self, func, flat_arg_fake_tensors, args, kwargs
     ):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
-        if any_constant and get_schema_info(func).is_mutable():
-            schema_info = get_schema_info(func)
+        schema_info = get_schema_info(func)
+        if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
             )
@@ -1807,10 +1854,8 @@ class FakeTensorMode(TorchDispatchMode):
         tensor,
         *,
         static_shapes=None,
-        ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        policy=None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1819,24 +1864,22 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
+            assert policy is None, "cannot set both static_shapes and policy"
             shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
-            ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            policy=policy,
             memoized_only=memoized_only,
         )
 
 
 # NB: returns fake tensors
-def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exception):
+def run_fallback_kernel(
+    fake_mode, func, flat_args, args_spec, orig_not_implemented_exception
+):
     # these should all be supported, just to be safe
     # avoid fallback for operators which inplace modify metadata
     # because the input fake tensors would be umodified
@@ -1858,15 +1901,15 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
                 return out
             return e
 
-        args = tree_map(to_real_tensor, args)
-        kwargs = tree_map(to_real_tensor, kwargs)
+        flat_args = [to_real_tensor(a) for a in flat_args]
+        args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
 
         r = func(*args, **kwargs)
 
     tensor_impls = set()
     storages = set()
 
-    for e in tree_flatten((args, kwargs))[0]:
+    for e in flat_args:
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
                 storages.add(e._typed_storage()._cdata)
@@ -1875,7 +1918,8 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # proper aliasing/metadata relationship between outputs and inputs will
     # not be set up, bc of conversion to device, unless we can reuse an
     # input impl
-    for e in tree_flatten(r)[0]:
+
+    def map_out(e):
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse
@@ -1883,7 +1927,6 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
         ):
             raise orig_not_implemented_exception
 
-    def map_out(e):
         if isinstance(e, torch.Tensor):
             if id(e) in inp_impls:
                 return inp_impls[id(e)]
@@ -1892,7 +1935,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
         else:
             return e
 
-    return tree_map(map_out, r)
+    return pytree.tree_map(map_out, r)
 
 
 # Just for use to allow copying a module to fake tensors,

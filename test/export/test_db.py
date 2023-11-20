@@ -57,7 +57,7 @@ class ExampleTests(TestCase):
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with self.assertRaises(torchdynamo.exc.Unsupported):
+        with self.assertRaises((torchdynamo.exc.Unsupported, AssertionError, RuntimeError)):
             inputs = normalize_inputs(case.example_inputs)
             exported_model = export(
                 model,

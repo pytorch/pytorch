@@ -17,6 +17,7 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
+from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
@@ -38,10 +39,9 @@ from .schema import (  # type: ignore[attr-defined]
     InputSpec,
     InputToBufferSpec,
     InputToParameterSpec,
-    UserInputSpec,
-    UserOutputSpec,
-    LossOutputSpec,
+    InputToTensorConstantSpec,
     Layout,
+    LossOutputSpec,
     MemoryFormat,
     ModuleCallEntry,
     ModuleCallSignature,
@@ -61,6 +61,8 @@ from .schema import (  # type: ignore[attr-defined]
     TensorMeta,
     TensorValue,
     TREESPEC_VERSION,
+    UserInputSpec,
+    UserOutputSpec,
 )
 
 
@@ -160,6 +162,13 @@ _SYM_BOOL_OPS = {
 }
 
 
+@dataclass
+class SerializedArtifact:
+    exported_program: Union[ExportedProgram, bytes]
+    state_dict: bytes
+    tensor_constants: bytes
+
+
 def deserialize_device(d: Device) -> torch.device:
     if d.index is None:
         return torch.device(type=d.type)  # type: ignore[call-overload]
@@ -214,7 +223,13 @@ def serialize_torch_artifact(artifact) -> bytes:
     # on the designated device.
     # For now, we simply move the tensor to cpu before saving.
     # TODO: this should be fixed by deserialization instead.
-    artifact = tree_map_only(torch.Tensor, lambda t: t.cpu(), artifact)
+
+    def _tensor_to_cpu(t: torch.Tensor):
+        if t.is_meta:
+            return t
+        else:
+            return t.cpu()
+    artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
     torch.save(artifact, buffer)
     return buffer.getvalue()
 
@@ -282,6 +297,16 @@ def deserialize_equality_constraints(
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
     returns = target._schema.returns
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
+
+
+def _is_single_tensor_list_return(target: torch._ops.OpOverload) -> bool:
+    returns = target._schema.returns
+    if len(returns) != 1:
+        return False
+    return_type = returns[0].real_type
+    return isinstance(return_type, torch.ListType) and isinstance(
+        return_type.getElementType(), torch.TensorType
+    )
 
 
 @dataclass
@@ -510,8 +535,7 @@ class GraphModuleSerializer:
                 attr = getattr(arg.graph.owning_module, arg.target)
 
                 if isinstance(attr, torch.Tensor):
-                    self.graph_state.constants[arg.name] = attr
-                    return Argument.create(as_tensor=TensorArgument(name=arg.name))
+                    raise SerializeError("getattr nodes containing tensors should not appear in the graph")
                 elif isinstance(attr, torch.fx.GraphModule):
                     with self.save_graph_state():
                         graph = self.serialize_graph(attr)
@@ -589,10 +613,7 @@ class GraphModuleSerializer:
                 arguments = []
                 for a in arg:
                     if a.op == "get_attr":
-                        assert isinstance(a.target, str)
-                        attr = getattr(a.graph.owning_module, a.target)
-                        assert isinstance(attr, torch.Tensor)
-                        self.graph_state.constants[a.name] = attr
+                        raise SerializeError("getattr nodes containing tensors should not appear in the graph")
                     arguments.append(TensorArgument(name=a.name))
                 return Argument.create(as_tensors=arguments)
             elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
@@ -690,6 +711,15 @@ class GraphModuleSerializer:
                 buffer=InputToBufferSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
+                )
+            )
+        elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return InputSpec.create(
+                tensor_constant=InputToTensorConstantSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    tensor_constant_name=spec.target,
                 )
             )
         else:
@@ -800,38 +830,81 @@ class GraphModuleSerializer:
 
         meta_val = node.meta["val"]
 
+        def output_node_at_index(node, index):
+            for user in node.users:
+                assert user.target is operator.getitem, f"{user} is not a getitem node"
+                if index == user.args[1]:
+                    return user
+            return None
+
         # Check single value return
         if _is_single_tensor_return(node.target):
+            # e.g "-> Tensor"
             return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
         elif len(returns) == 1 and isinstance(meta_val, torch.SymInt):
+            # e.g "-> SymInt"
             return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
         elif len(returns) == 1 and isinstance(meta_val, torch.SymBool):
+            # e.g "-> SymBool"
             return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
+        elif _is_single_tensor_list_return(node.target):
+            # e.g "-> Tensor[]"
+            tensor_args = []
+            for idx, meta in enumerate(meta_val):
+                user_node = output_node_at_index(node, idx)
+                name = (
+                    user_node.name
+                    if user_node is not None
+                    else f"{node.name}_unused_{idx}"
+                )
+                tensor_args.append(self.serialize_tensor_output(name, meta))
+            return [Argument.create(as_tensors=tensor_args)]
 
         # There are a two possibilities at this point:
-        # - This operator returns a list of Tensors.
-        # - This operator returns multiple Tensors.
+        # - This operator returns a tuple of Tensors, e.g. "-> (Tensor, Tensor)"
+        # - This operator returns a tuple of mixed of Tensor and Tensors, e.g. "-> (Tensor, Tensor[])"
         #
         # Either way, start by gathering a list of TensorArguments with the correct names.
         # For consistent naming with FX, consult the downstream `getitem` node and
         # make sure our outputs have the same name.
 
-        arg_list = self._handle_getitem_users(node)
+        output_arguments = []
+        for idx, (meta, return_schema) in enumerate(zip(meta_val, returns)):
+            if meta is None:
+                assert isinstance(return_schema.real_type, torch.OptionalType)
+                output_arguments.append(Argument.create(as_none=()))
+            elif isinstance(meta, torch._subclasses.fake_tensor.FakeTensor):
+                assert isinstance(return_schema.real_type, torch.TensorType)
+                user_node = output_node_at_index(node, idx)
+                name = (
+                    user_node.name
+                    if user_node is not None
+                    else f"{node.name}_unused_{idx}"
+                )
+                output_arguments.append(
+                    Argument.create(as_tensor=self.serialize_tensor_output(name, meta))
+                )
+            elif isinstance(meta, list):
+                # for List[Tensor] return type
+                assert isinstance(
+                    return_schema.real_type, torch.ListType
+                ) and isinstance(
+                    return_schema.real_type.getElementType(), torch.TensorType
+                )
+                user_node = output_node_at_index(node, idx)
+                assert user_node is not None
 
-        # Then, pack the return value differently depending on what the return type is.
-        if len(returns) == 1:
-            return_type = returns[0].real_type
-            assert isinstance(return_type, torch.ListType) and isinstance(
-                return_type.getElementType(), torch.TensorType
-            ), "Only tensors and lists of tensors supported"
+                args = []
+                for i, m in enumerate(meta):
+                    if m is None:
+                        continue
+                    sub_user_node = output_node_at_index(user_node, i)
+                    assert sub_user_node is not None, f"No user found at index {i}"
 
-            return [Argument.create(as_tensors=arg_list)]
-        else:
-            assert all(
-                isinstance(ret.real_type, torch.TensorType) for ret in returns
-            ), f"Multiple returns can only have tensor returns, got: {[ret.real_type for ret in returns]}"
+                    args.append(self.serialize_tensor_output(sub_user_node.name, m))
+                output_arguments.append(Argument.create(as_tensors=args))
 
-            return [Argument.create(as_tensor=arg) for arg in arg_list]
+        return output_arguments
 
     def _handle_getitem_users(self, node: torch.fx.Node) -> List[TensorArgument]:
         meta_val = node.meta["val"]
@@ -864,11 +937,6 @@ class GraphModuleSerializer:
             except Exception as e:
                 raise SerializeError(f"Failed serializing node {node} in graph: {node.format_node()}") from e
 
-        serialized_constants = {
-            k: serialize_torch_artifact(v)
-            for k, v in self.graph_state.constants.items()
-        }
-
         return Graph(
             inputs=self.graph_state.inputs,
             nodes=self.graph_state.nodes,
@@ -877,7 +945,6 @@ class GraphModuleSerializer:
             sym_bool_values=self.graph_state.sym_bool_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
-            constants=serialized_constants,
         )
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
@@ -898,7 +965,7 @@ class ExportedProgramSerializer:
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
+    def serialize(self, exported_program: ep.ExportedProgram) -> SerializedArtifact:
         serialized_graph_module = (
             GraphModuleSerializer(
                 exported_program.graph_signature,
@@ -908,16 +975,17 @@ class ExportedProgramSerializer:
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
 
-        return (
+        return SerializedArtifact(
             ExportedProgram(
                 graph_module=serialized_graph_module,
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
-                example_inputs=None,
+                dialect=exported_program.dialect,
             ),
             serialize_torch_artifact(exported_program.state_dict),
+            serialize_torch_artifact(exported_program.tensor_constants),
         )
 
 
@@ -1025,15 +1093,6 @@ class GraphModuleDeserializer:
 
     def deserialize_graph_output(self, output) -> torch.fx.Node:
         if isinstance(output.value, TensorArgument):
-            if output.value.name in self.constants:
-                val = self.constants[output.value.name]
-                setattr(self.module, output.value.name, val)
-                node = self.graph.create_node(
-                    "get_attr",
-                    output.value.name,
-                    name=output.value.name,
-                )
-                return node
             return self.serialized_name_to_node[output.value.name]
         elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
             return self.serialized_name_to_node[output.value.as_name]
@@ -1041,11 +1100,6 @@ class GraphModuleDeserializer:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
-        self.constants: Dict[str, torch.Tensor] = {
-            k: deserialize_torch_artifact(base64.b64decode(v))
-            for k, v in serialized_graph.constants.items()
-        }
-
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
             meta_val = self.deserialize_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
@@ -1156,6 +1210,12 @@ class GraphModuleDeserializer:
                 kind=ep.InputKind.BUFFER,
                 arg=PyTensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
+            )
+        elif i.tensor_constant is not None:
+            return ep.InputSpec(
+                kind=ep.InputKind.CONSTANT_TENSOR,
+                arg=PyTensorArgument(name=i.tensor_constant.arg.name),
+                target=i.tensor_constant.tensor_constant_name,
             )
         else:
             raise AssertionError(f"Unkown input spec {i}")
@@ -1278,14 +1338,6 @@ class GraphModuleDeserializer:
         elif isinstance(value, Device):
             return deserialize_device(value)
         elif isinstance(value, TensorArgument):
-            if value.name in self.constants:
-                val = self.constants[value.name]
-                setattr(self.module, value.name, val)
-                return self.graph.create_node(
-                    "get_attr",
-                    value.name,
-                    name=value.name,
-                )
             return self.serialized_name_to_node[value.name]
         elif isinstance(value, (int, float, bool)):
             return value
@@ -1299,18 +1351,7 @@ class GraphModuleDeserializer:
             elif isinstance(value[0], TensorArgument):
                 result = []
                 for arg in value:
-                    if arg.name in self.constants:
-                        val = self.constants[arg.name]
-                        setattr(self.module, arg.name, val)
-                        result.append(
-                            self.graph.create_node(
-                                "get_attr",
-                                arg.name,
-                                name=arg.name,
-                            )
-                        )
-                    else:
-                        result.append(self.serialized_name_to_node[arg.name])
+                    result.append(self.serialized_name_to_node[arg.name])
                 return result
             elif isinstance(value[0], (int, float, bool)):
                 # convert from serialized.python.types.List to python list
@@ -1364,23 +1405,10 @@ class GraphModuleDeserializer:
         self.deserialize_multiple_outputs(serialized_node, fx_node)
 
     def deserialize_multiple_outputs(self, serialized_node: Node, fx_node: torch.fx.Node) -> None:
-        # Convert multiple return types to FX format.
-        # In FX, each node only returns one value. So in order to represent
-        # multiple return values, we have to emit a `getitem` node for each
-        # return value.
-        # This performs the inverse mapping of the `serialize_outputs` call in
-        # serialization, see [NOTE: Multiple outputs]
-        output_names = []
-        if len(serialized_node.outputs) == 1:
-            assert isinstance(serialized_node.outputs[0].value, list)
-            assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
-            output_names = [arg.name for arg in serialized_node.outputs[0].as_tensors]
-        else:
-            for output in serialized_node.outputs:
-                assert isinstance(output.value, TensorArgument)
-                output_names.append(output.as_tensor.name)
+        deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
 
-        for idx, name in enumerate(output_names):
+        def generate_getitem(meta_val, fx_node: torch.fx.Node, arg: TensorArgument, idx: int):
+            name = arg.name
             individual_output = self.graph.create_node(
                 "call_function",
                 operator.getitem,
@@ -1388,12 +1416,46 @@ class GraphModuleDeserializer:
                 name=name,
             )
             self.sync_fx_node(name, individual_output)
+            meta_val.append(self.serialized_name_to_meta[name])
             # The derived `getitem` nodes should have the same stacktrace as the
             # original `fx_node`
-            individual_output.meta.update(self.deserialize_metadata(serialized_node.metadata))
+            individual_output.meta.update(deserialized_metadata)
+
+        def generate_getitems(meta_val, fx_node: torch.fx.Node, args):
+            for idx, arg in enumerate(args):
+                if isinstance(arg, Argument):
+                    arg = arg.value
+                if isinstance(arg, TensorArgument):
+                    generate_getitem(meta_val, fx_node, arg, idx)
+                elif isinstance(arg, (list, tuple)):
+                    list_output = self.graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        (fx_node, idx),
+                    )
+                    meta_val.append([])
+                    generate_getitems(meta_val[-1], list_output, arg)
+                    list_output.meta.update(deserialized_metadata)
+                    list_output.meta['val'] = meta_val[-1]
+                else:
+                    raise NotImplementedError(f"Unimplemented node output type: {arg}")
+
+        # Convert multiple return types to FX format.
+        # In FX, each node only returns one value. So in order to represent
+        # multiple return values, we have to emit a `getitem` node for each
+        # return value.
+        # This performs the inverse mapping of the `serialize_outputs` call in
+        # serialization, see [NOTE: Multiple outputs]
+        meta_val: List[Any] = []
+        if len(serialized_node.outputs) == 1:
+            assert isinstance(serialized_node.outputs[0].value, list)
+            assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
+            generate_getitems(meta_val, fx_node, serialized_node.outputs[0].as_tensors)
+        else:
+            generate_getitems(meta_val, fx_node, serialized_node.outputs)
 
         # also update the metaval for `fx_node` to be a list(meta)
-        fx_node.meta["val"] = tuple(self.serialized_name_to_meta[name] for name in output_names)
+        fx_node.meta["val"] = tuple(meta_val)
         self.serialized_name_to_node[fx_node.name] = fx_node
 
     def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
@@ -1486,36 +1548,41 @@ class ExportedProgramDeserializer:
         return range_constraints
 
     def deserialize(
-        self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
+        self, serialized_artifact: SerializedArtifact
     ) -> ep.ExportedProgram:
-        if serialized_exported_program.schema_version != SCHEMA_VERSION:
+        assert isinstance(serialized_artifact.exported_program, ExportedProgram)
+
+        if serialized_artifact.exported_program.schema_version != SCHEMA_VERSION:
             raise SerializeError(
-                f"Serialized schema version {serialized_exported_program.schema_version} "
+                f"Serialized schema version {serialized_artifact.exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
             )
 
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
-            for k, v in serialized_exported_program.range_constraints.items()
+            for k, v in serialized_artifact.exported_program.range_constraints.items()
         }
 
         res = (
             GraphModuleDeserializer()
             .deserialize(
-                serialized_exported_program.graph_module,
+                serialized_artifact.exported_program.graph_module,
                 symbol_name_to_range,
             )
         )
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range, res.names_to_symbols,
         )
-        model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
+        model_opset_version: Optional[Dict[str, int]] = serialized_artifact.exported_program.opset_version
         self._validate_model_opset_version(model_opset_version)
 
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
-        state_dict = deserialize_torch_artifact(serialized_state_dict)
-        equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
+        state_dict = deserialize_torch_artifact(serialized_artifact.state_dict)
+        tensor_constants = deserialize_torch_artifact(serialized_artifact.tensor_constants)
+        equality_constraints = deserialize_equality_constraints(
+            serialized_artifact.exported_program.equality_constraints
+        )
 
         exported_program = ep.ExportedProgram(
             res.graph_module,
@@ -1525,7 +1592,9 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
             res.module_call_graph,
-            None,  # type: ignore[arg-type]
+            None,
+            load_verifier(serialized_artifact.exported_program.dialect),
+            tensor_constants=tensor_constants,
         )
         return upgrader.upgrade(exported_program)
 
@@ -1582,15 +1651,21 @@ class EnumEncoder(json.JSONEncoder):
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
-) -> Tuple[bytes, bytes]:
-    serialized_exported_program, serialized_state_dict = (
+) -> SerializedArtifact:
+    serialized_artifact = (
         ExportedProgramSerializer(opset_version).serialize(exported_program)
     )
+    assert isinstance(serialized_artifact.exported_program, ExportedProgram)
     json_program = json.dumps(
-        dataclasses.asdict(serialized_exported_program), cls=EnumEncoder
+        dataclasses.asdict(serialized_artifact.exported_program), cls=EnumEncoder
     )
     json_bytes = json_program.encode('utf-8')
-    return json_bytes, serialized_state_dict
+    artifact = SerializedArtifact(
+        json_bytes,
+        serialized_artifact.state_dict,
+        serialized_artifact.tensor_constants
+    )
+    return artifact
 
 
 def _dict_to_dataclass(cls, data):
@@ -1632,14 +1707,20 @@ def _dict_to_dataclass(cls, data):
 
 
 def deserialize(
-    exported_program_bytes: bytes,
-    state_dict: bytes,
+    artifact: SerializedArtifact,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ep.ExportedProgram:
-    exported_program_str = exported_program_bytes.decode('utf-8')
+    assert isinstance(artifact.exported_program, bytes)
+    exported_program_str = artifact.exported_program.decode('utf-8')
     exported_program_dict = json.loads(exported_program_str)
     serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
     return (
         ExportedProgramDeserializer(expected_opset_version)
-        .deserialize(serialized_exported_program, state_dict)
+        .deserialize(
+            SerializedArtifact(
+                serialized_exported_program,
+                artifact.state_dict,
+                artifact.tensor_constants
+            )
+        )
     )

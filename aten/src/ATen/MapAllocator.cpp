@@ -8,11 +8,9 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Unicode.h>
 
-/* stuff for mapped files */
 #ifdef _WIN32
-#include <c10/util/win32-headers.h>
+#include <c10/util/Unicode.h>
 #endif
 
 #if defined(HAVE_MMAP)
@@ -201,7 +199,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
           }
         } else {
           CloseHandle(hfile);
-          TORCH_CHECK(false, "file <", filename_, "> size is smaller than the required mapping size <", size, ">; error code: <", GetLastError(), ">");
+          TORCH_CHECK(false, "file <", filename_, "> size <", hfilesz.QuadPart, "> is smaller than the required mapping size <", size, ">; error code: <", GetLastError(), ">");
         }
       }
     } else {
@@ -306,7 +304,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 #endif
         } else {
           ::close(fd);
-          TORCH_CHECK(false, "file <", filename_, "> size is smaller than the required mapping size <", size, ">");
+          TORCH_CHECK(false, "file <", filename_, "> size <",  file_stat.st_size, "> is smaller than the required mapping size <", size, ">");
         }
       }
     } else {

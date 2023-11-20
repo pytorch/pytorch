@@ -114,7 +114,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node)
-        and isinstance(node.meta.get("val"), torch.SymInt)
+        and fx_type_utils.is_torch_symbolic_type(node.meta.get("val"))
         for node in onnx_tensor
     ):
         # This intends to handle dynamic axes. for example, if the input size of op.Expand
@@ -124,13 +124,14 @@ def _retrieve_or_adapt_input_to_graph_set(
         sequence_mixed_elements: List[
             Union[
                 onnxscript_graph_building.TorchScriptTensor,
+                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
                 List[int],
             ]
         ] = []
         for tensor in onnx_tensor:
-            if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta.get("val"), torch.SymInt
-            ):
+            if isinstance(
+                tensor, torch.fx.Node
+            ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
@@ -147,9 +148,9 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with onnxscript.evaluator.default_as(tracer):
-            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)
-        output.dtype = torch.int64
-        output.shape = [len(sequence_mixed_elements)]
+            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)  # type: ignore[type-var]
+        output.dtype = torch.int64  # type: ignore[union-attr]
+        output.shape = [len(sequence_mixed_elements)]  # type: ignore[union-attr]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
@@ -209,7 +210,6 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
 
 @_beartype.beartype
 def _fill_tensor_shape_type(
-    tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
     onnxscript_values: Union[
         onnxscript_graph_building.TorchScriptTensor,
         Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
@@ -241,24 +241,17 @@ def _fill_tensor_shape_type(
             # None could be a valid value for return type, so we need to handle it.
             # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
             continue
-        elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        elif fx_type_utils.is_torch_symbolic_type(expected_value):
             # aten::sym_size output is a int, not a tensor, which stands
             # for the size of one dim. We treat it as 0-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
-            torch_size = torch.Size([])
+            onnxscript_value.shape = torch.Size([])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
-            onnxscript_value.shape = (
-                *[
-                    dim if isinstance(dim, int) else None
-                    for dim in expected_value.size()
-                ],
-                2,
-            )
-            torch_size = torch.Size((*expected_value.size(), 2))
+            onnxscript_value.shape = torch.Size((*expected_value.size(), 2))
             # complex64 -> float32, complex128 -> float64, etc.
             onnxscript_value.dtype = fx_type_utils.from_complex_to_float(
                 expected_value.dtype
@@ -268,19 +261,9 @@ def _fill_tensor_shape_type(
         else:
             # We set node output sizes to be dynamic to continue the model conversion,
             # and inputs are also set to be dynamic in add_input().
-            onnxscript_value.shape = tuple(
-                [
-                    dim if isinstance(dim, int) else str(dim.node)
-                    for dim in expected_value.size()
-                ]
-            )
+            onnxscript_value.shape = expected_value.size()
             onnxscript_value.dtype = expected_value.dtype
-            torch_size = expected_value.size()
 
-        tracer.graph.record_value_type(
-            onnxscript_value.symbolic_value(),
-            onnxscript_graph_building.TensorType(onnxscript_value.dtype, torch_size),
-        )
         # naming
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
@@ -595,7 +578,7 @@ class FxOnnxInterpreter:
                 dtype=fake_tensor.dtype,
             )
 
-        elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+        elif fx_type_utils.is_torch_symbolic_type(fake_tensor):
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=torch.Size([]),
@@ -674,7 +657,7 @@ class FxOnnxInterpreter:
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
         # Assign type and shape from fx graph.
-        _fill_tensor_shape_type(onnxscript_tracer, output, node.name, node.meta["val"])
+        _fill_tensor_shape_type(output, node.name, node.meta["val"])
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(
@@ -804,7 +787,7 @@ class FxOnnxInterpreter:
             outputs, (onnxscript_graph_building.TorchScriptTensor, tuple)
         ), f"Unexpected outputs type {type(outputs)} for node {node}."
 
-        _fill_tensor_shape_type(tracer, outputs, node.name, node.meta["val"])
+        _fill_tensor_shape_type(outputs, node.name, node.meta["val"])
         fx_name_to_onnxscript_value[node.name] = outputs
 
         # Skip op_level_validation for call_module. Subgraph nodes are validated individually.

@@ -1,6 +1,7 @@
 import builtins
 import collections
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -11,12 +12,13 @@ import types
 import warnings
 
 from collections import defaultdict
-from typing import Callable, cast, Dict, List, Optional, Set
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
+np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
-    np = None
+    pass
 
 
 import torch
@@ -46,7 +48,7 @@ skipfiles" there.
 """
 
 
-def make_function_id_set(lazy_initializer):
+class FunctionIdSet:
     """
     Track a set of `id()`s of objects which are either allowed or not
     allowed to go into the generated FX graph.  Use to test for torch.*,
@@ -56,42 +58,44 @@ def make_function_id_set(lazy_initializer):
     added to the graph and what will cause a graph break.
     """
 
-    class FunctionIdSet:
-        function_ids: Optional[Set[int]] = None
-        function_names: Optional[Dict[int, str]] = None
+    function_ids: Optional[Set[int]] = None
+    function_names: Optional[Dict[int, str]] = None
 
-        def __call__(self):
-            if self.function_ids is None:
-                value = lazy_initializer()
-                if isinstance(value, dict):
-                    self.function_ids = set(value.keys())
-                    self.function_names = value
-                else:
-                    assert isinstance(value, set)
-                    self.function_ids = value
-            return self.function_ids
+    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+        self.lazy_initializer = lazy_initializer
 
-        def get_name(self, idx: int, default: str):
-            self()  # lazy init
-            return self.function_names.get(idx, default)
+    def __call__(self):
+        if self.function_ids is None:
+            value = self.lazy_initializer()
+            if isinstance(value, dict):
+                self.function_ids = set(value.keys())
+                self.function_names = value
+            else:
+                assert isinstance(value, set)
+                self.function_ids = value
+        return self.function_ids
 
-        def add(self, idx: int):
-            self()  # lazy init
-            self.function_ids.add(idx)
+    def get_name(self, idx: int, default: str):
+        self()  # lazy init
+        assert self.function_names is not None
+        return self.function_names.get(idx, default)
 
-        def remove(self, idx: int):
-            if idx in self():
-                self.function_ids.remove(idx)
+    def add(self, idx: int):
+        function_ids = self()  # lazy init
+        function_ids.add(idx)
 
-        def __contains__(self, idx: int):
-            return idx in self()
+    def remove(self, idx: int):
+        function_ids = self()
+        if idx in function_ids:
+            function_ids.remove(idx)
 
-    return FunctionIdSet()
+    def __contains__(self, idx: int):
+        return idx in self()
 
 
-@make_function_id_set
-def _disallowed_function_ids():
-    remove = [
+@FunctionIdSet
+def _disallowed_function_ids() -> Set[int]:
+    remove: List[Any] = [
         True,
         False,
         None,
@@ -145,13 +149,51 @@ def _disallowed_function_ids():
     return {id(x) for x in remove}
 
 
-@make_function_id_set
-def _allowed_function_ids():
+# Helper function to dump the torch name rule map generated based on
+# the heuristic defined in gen_allowed_objs_and_ids.
+def dump_allowed_torch_name_rule_map() -> None:
+    m = gen_allowed_objs_and_ids().name_rule_map
+    for k, v in m.items():
+        print(f'"{k}": {v.__name__},')
+
+
+@dataclasses.dataclass
+class AllowedObjects:
+    """
+    Track the objects, object id - name pairs, and name - dynamo wrapping rule pairs
+    from the heuristic defined in `gen_allowed_objs_and_ids`.
+    TODO: Remove the overalp/duplication between these fields
+    after allowed_functions refactor is done.
+    """
+
+    object_ids: Dict[int, str]
+    objects: Set[Any]
+    name_rule_map: Dict[str, Any]
+
+
+def gen_allowed_objs_and_ids() -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
+    from .variables import TorchCtxManagerClassVariable
+
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
+    torch_objects = set()
+    torch_name_rule_map = dict()
+
+    # Add obj to torch_objects set if it's a torch context manager class.
+    # This is used to generate the ctx manager class list based on heuristic.
+    def heuristic_record_if_ctx_manager(obj, module, name):
+        if (
+            issubclass(type(obj), type)
+            and hasattr(obj, "__enter__")
+            and hasattr(obj, "__exit__")
+        ):
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchCtxManagerClassVariable
+            torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -161,24 +203,68 @@ def _allowed_function_ids():
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim.",
-            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
-            "torch.utils._pytree",
-            "torch.nn.modules.rnn.",
-            "torch._dynamo.",
-            "torch._C._dynamo.",
-            "torch._inductor.",
-            "torch._C.inductor.",
-            "torch.fx.",
-            "torch.distributed.fsdp.",
-            "torch.distributed._tensor.",
-            # Inline through the ActivationWrapper in
-            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
-            # nn module calls torch.utils.checkpoint internally. If Dynamo does
-            # not trace this, AOT Autograd will try to trace this and can cause
-            # issues observed in
-            # https://github.com/pytorch/pytorch/issues/108269
-            "torch.distributed.algorithms.",
+            "torch.optim",
+            "torch.nn.modules.rnn",
+            "torch._dynamo",
+            "torch._C._dynamo",
+            "torch._inductor",
+            "torch._C.inductor",
+            "torch.fx",
+            "torch._C._autograd",
+            "torch._C._cudart",
+            "torch._C._distributed_autograd",
+            "torch._C._distributed_c10d",
+            "torch._C._distributed_rpc",
+            "torch._C._functorch",
+            "torch._C._monitor",
+            "torch._C._nvtx",
+            "torch._C._lazy",
+            "torch._C._profiler",
+            "torch.__config__",
+            "torch._custom_op",
+            "torch._dispatch",
+            "torch._export",
+            "torch._functorch.make_functional",
+            "torch._functorch.compile_utils",
+            "torch._functorch.partitioners",
+            "torch._functorch.aot_autograd",
+            "torch._functorch.compilers",
+            "torch._functorch.fx_minifier",
+            "torch.autograd.profiler_util",
+            "torch.autograd.profiler",
+            "torch._jit_internal",
+            "torch._library",
+            "torch._lobpcg",
+            "torch._logging",
+            "torch._meta_registrations",
+            "torch._namedtensor_internals",
+            "torch._numpy",
+            "torch._sources",
+            "torch._subclasses",
+            "torch._tensor",
+            "torch._tensor_str",
+            "torch._utils",
+            "torch._utils_internal",
+            "torch._vmap_internals",
+            "torch.compiler",
+            "torch.distributed",
+            "torch.export",
+            "torch.hub",
+            "torch.jit",
+            "torch.library",
+            "torch.masked.maskedtensor",
+            "torch.nn.init",
+            "torch.nn.modules.module",
+            "torch.nn.parallel",
+            "torch.nn.utils",
+            "torch.multiprocessing",
+            "torch.onnx",
+            "torch.overrides",
+            "torch.package",
+            "torch.profiler",
+            "torch.serialization",
+            "torch.storage",
+            "torch.utils",
         ]
         if config.trace_distributed:
             disallowed_modules.append("torch.distributed.")
@@ -233,8 +319,10 @@ def _allowed_function_ids():
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -268,17 +356,22 @@ def _allowed_function_ids():
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids
+    return AllowedObjects(torch_object_ids, torch_objects, torch_name_rule_map)
 
 
-@make_function_id_set
-def _allowed_user_defined_function_ids():
-    rv = {}
+@FunctionIdSet
+def _allowed_function_ids() -> Dict[int, str]:
+    return gen_allowed_objs_and_ids().object_ids
+
+
+@FunctionIdSet
+def _allowed_user_defined_function_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
     return rv
 
 
-@make_function_id_set
-def _builtin_function_ids():
+@FunctionIdSet
+def _builtin_function_ids() -> Dict[int, str]:
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -299,8 +392,8 @@ def _builtin_function_ids():
     return rv
 
 
-@make_function_id_set
-def _numpy_function_ids():
+@FunctionIdSet
+def _numpy_function_ids() -> Dict[int, str]:
     rv = dict()
     for mod in NP_SUPPORTED_MODULES:
         rv.update(
@@ -314,8 +407,8 @@ def _numpy_function_ids():
     return rv
 
 
-@make_function_id_set
-def _builtin_constant_ids():
+@FunctionIdSet
+def _builtin_constant_ids() -> Dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
@@ -354,7 +447,7 @@ def _maybe_init_lazy_module(obj: object) -> None:
             fn()
 
 
-def is_allowed(obj):
+def is_allowed(obj) -> bool:
     """Is this safe to trace like torch.add ?"""
     _maybe_init_lazy_module(obj)
 
@@ -373,30 +466,30 @@ def is_allowed(obj):
     )
 
 
-def is_user_defined_allowed(obj):
+def is_user_defined_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_user_defined_function_ids
 
 
-def is_forbidden(obj):
+def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return getattr(obj, "_dynamo_forbidden", False)
 
 
-def torch_get_name(obj, default):
+def torch_get_name(obj, default) -> str:
     """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
 
 
-def is_builtin_callable(obj):
+def is_builtin_callable(obj) -> bool:
     return id(obj) in _builtin_function_ids
 
 
-def is_builtin_constant(obj):
+def is_builtin_constant(obj) -> bool:
     return id(obj) in _builtin_constant_ids
 
 
-def is_numpy(obj):
+def is_numpy(obj) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids

@@ -108,7 +108,7 @@ class NestedModel(nn.Module):
 def _init_with_reset_params(module: nn.Module):
     """
     to_empty + reset_parameters() init function example for modules
-    initailized with device="meta"
+    initialized with device="meta"
     """
     has_meta_states = any(
         t.is_meta

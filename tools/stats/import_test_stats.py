@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
 
@@ -21,9 +22,12 @@ SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
+TEST_CLASS_TIMES_FILE = "test-class-times.json"
 TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
 TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
-
+TD_HEURISTIC_PROFILING_FILE = "td_heuristic_profiling.json"
+TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.json"
+TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -88,6 +92,14 @@ def get_test_times() -> Dict[str, Dict[str, float]]:
     )
 
 
+def get_test_class_times() -> Dict[str, Dict[str, float]]:
+    return get_from_test_infra_generated_stats(
+        "test-class-times.json",
+        TEST_CLASS_TIMES_FILE,
+        "Couldn't download test times...",
+    )
+
+
 def get_disabled_tests(
     dirpath: str, filename: str = DISABLED_TESTS_FILE
 ) -> Optional[Dict[str, Any]]:
@@ -124,6 +136,32 @@ def get_test_class_ratings() -> Dict[str, Any]:
         "file_test_class_rating.json",
         TEST_CLASS_RATINGS_FILE,
         "Couldn't download test class ratings file, not reordering...",
+    )
+
+
+def get_td_heuristic_historial_edited_files_json() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "td_heuristic_historical_edited_files.json",
+        TD_HEURISTIC_HISTORICAL_EDITED_FILES,
+        "Couldn't download td_heuristic_historical_edited_files.json, not reordering...",
+    )
+
+
+def get_td_heuristic_profiling_json() -> Dict[str, Any]:
+    return get_from_test_infra_generated_stats(
+        "td_heuristic_profiling.json",
+        TD_HEURISTIC_PROFILING_FILE,
+        "Couldn't download td_heuristic_profiling.json not reordering...",
+    )
+
+
+def copy_pytest_cache() -> None:
+    original_path = REPO_ROOT / ".pytest_cache/v/cache/lastfailed"
+    if not original_path.exists():
+        return
+    shutil.copyfile(
+        original_path,
+        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED,
     )
 
 

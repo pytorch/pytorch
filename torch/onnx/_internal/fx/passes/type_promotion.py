@@ -195,8 +195,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *_pytree.tree_flatten(candidate_args)[0],
-            *_pytree.tree_flatten(candidate_kwargs)[0],
+            *_pytree.arg_tree_leaves(*candidate_args.values(), **candidate_kwargs),
             type_promotion_kind=self.promotion_kind,
         )
 
@@ -910,6 +909,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
