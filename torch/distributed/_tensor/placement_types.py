@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -28,10 +28,10 @@ class Placement:
         return isinstance(self, _Partial)
 
 
+@dataclass(frozen=True)
 class Shard(Placement):
     # shard placement, shard on a dim
-    def __init__(self, dim):
-        self.dim = dim
+    dim: int
 
     def _split_tensor(
         self,
@@ -387,8 +387,16 @@ class DTensorSpec:
     def __post_init__(self):
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
+        self._hash = self._hash_impl()
 
-    def __hash__(self) -> int:
+    def __setattr__(self, attr: str, value: Any):
+        super().__setattr__(attr, value)
+        # Make sure to recompute the hash in case any of the hashed attributes
+        # change (though we do not expect `mesh` or `placements` to change)
+        if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
+            self._hash = self._hash_impl()
+
+    def _hash_impl(self):
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
         # dtype and stride.
@@ -404,8 +412,13 @@ class DTensorSpec:
                     self.tensor_meta.dtype,
                 )
             )
-        else:
-            return hash((self.mesh, self.placements))
+        return hash((self.mesh, self.placements))
+
+    def __hash__(self) -> int:
+        # We eagerly cache the spec to avoid recomputing the hash upon each
+        # use, where we make sure to update the hash when the `tensor_meta`
+        # changes by overriding `__setattr__`.
+        return self._hash
 
     def __eq__(self, __o: object) -> bool:
         if not (
