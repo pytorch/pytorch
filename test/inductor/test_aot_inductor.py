@@ -60,7 +60,14 @@ except (unittest.SkipTest, ImportError) as e:
 
 class AOTInductorModelRunner:
     @classmethod
-    def compile(cls, model, example_inputs, options=None, constraints=None):
+    def compile(
+        cls,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,
@@ -68,6 +75,7 @@ class AOTInductorModelRunner:
             options=options,
             constraints=constraints,
             remove_runtime_assertions=True,
+            disable_constraint_solver=disable_constraint_solver,
         )
         return so_path
 
@@ -111,9 +119,21 @@ class AOTInductorModelRunner:
         return optimized
 
     @classmethod
-    def run(cls, device, model, example_inputs, options=None, constraints=None):
+    def run(
+        cls,
+        device,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         so_path = AOTInductorModelRunner.compile(
-            model, example_inputs, options=options, constraints=constraints
+            model,
+            example_inputs,
+            options=options,
+            constraints=constraints,
+            disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
         return optimized(example_inputs)
@@ -146,6 +166,7 @@ def check_model(
     example_inputs,
     options=None,
     constraints=None,
+    disable_constraint_solver=False,
 ):
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
@@ -158,7 +179,12 @@ def check_model(
 
         torch.manual_seed(0)
         actual = AOTInductorModelRunner.run(
-            self.device, model, example_inputs, options, constraints
+            self.device,
+            model,
+            example_inputs,
+            options,
+            constraints,
+            disable_constraint_solver,
         )
 
     self.assertTrue(same(actual, expected))
@@ -1205,6 +1231,36 @@ class AOTInductorTestsTemplate:
         ]
         self.check_model(Model(), (a,), constraints=constraints)
 
+    def test_shifted_constraint_ranges(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                torch._check(y.size(0) == x.size(0) + 1)
+                return x.sum(0) + y.sum(0)
+
+        a = torch.randn((4, 5), device=self.device)
+        b = torch.randn((5, 5), device=self.device)
+
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 2,
+            torch._export.dynamic_dim(a, 0) <= 1024,
+            torch._export.dynamic_dim(b, 0) >= 3,
+            torch._export.dynamic_dim(b, 0) <= 1025,
+        ]
+
+        self.check_model(
+            Model(),
+            (a, b),
+            constraints=constraints,
+            disable_constraint_solver=True,
+        )
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1240,6 +1296,10 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # error: could not find s0
+        "test_shifted_constraint_ranges": TestFailure(
+            ("abi_compatible_cpu",), is_skip=True
+        ),
     },
 )
 

@@ -46,6 +46,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -1181,6 +1182,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
+    disable_constraint_solver: bool = False,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1205,6 +1207,8 @@ def export(
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
+
+        disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
 
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
@@ -1341,7 +1345,8 @@ def export(
         remove_from_cache(f)
 
         if (
-            (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+            not disable_constraint_solver
+            and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
             and not skipfiles.check(call_to_inspect)
         ):
