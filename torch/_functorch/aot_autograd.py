@@ -4381,14 +4381,17 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return torch._dynamo.utils.to_fake_tensor(x, fake_mode)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
