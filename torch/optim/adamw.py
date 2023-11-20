@@ -1,10 +1,7 @@
-import torch
 from torch import Tensor
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
-                        _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, ParamsT, _view_as_real)
+from .optimizer import (_use_grad_for_differentiable, _capturable_doc, _differentiable_doc,
+                        _foreach_doc, _fused_doc, _maximize_doc, ParamsT)
 from typing import List, Optional, Tuple, Union
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 from .adam import Adam, adam
 
 __all__ = ["AdamW", "adamw"]
@@ -130,6 +127,6 @@ def adamw(
     See :class:`~torch.optim.AdamW` for details.
     """
     adam(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, foreach=foreach,
-              capturable=capturable, differentiable=differentiable, fused=fused, grad_scale=grad_scale,
-              found_inf=found_inf, has_complex=has_complex, amsgrad=amsgrad, beta1=beta1, beta2=beta2, 
-              lr=lr, weight_decay=weight_decay, eps=eps, maximize=maximize, decoupled_weight_decay=True)
+         capturable=capturable, differentiable=differentiable, fused=fused, grad_scale=grad_scale,
+         found_inf=found_inf, has_complex=has_complex, amsgrad=amsgrad, beta1=beta1, beta2=beta2,
+         lr=lr, weight_decay=weight_decay, eps=eps, maximize=maximize, decoupled_weight_decay=True)

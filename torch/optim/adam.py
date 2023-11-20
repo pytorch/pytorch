@@ -272,6 +272,7 @@ def adam(params: List[Tensor],
          grad_scale: Optional[Tensor] = None,
          found_inf: Optional[Tensor] = None,
          has_complex: bool = False,
+         decoupled_weight_decay: bool = False,
          *,
          amsgrad: bool,
          beta1: float,
@@ -279,8 +280,7 @@ def adam(params: List[Tensor],
          lr: Union[float, Tensor],
          weight_decay: float,
          eps: float,
-         maximize: bool,
-         decoupled_weight_decay: bool):
+         maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.
@@ -310,9 +310,9 @@ def adam(params: List[Tensor],
         raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
     if fused and not torch.jit.is_scripting():
-        func = _fused_adam 
+        func = _fused_adam
     elif foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_adam 
+        func = _multi_tensor_adam
     else:
         func = _single_tensor_adam
 
@@ -666,7 +666,7 @@ def _fused_adam(
             lr_dict[device] = lr.to(device=device, non_blocking=True)
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
-        func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_ 
+        func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
         func(
             device_params,
             device_grads,
