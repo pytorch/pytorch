@@ -589,21 +589,14 @@ class VariableBuilder:
                 value,
             )
         elif isinstance(value, _StreamBase):
-            unimplemented("StreamVariable does not currently work soundly.")
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return StreamVariable(
-                None,
+            return self.tx.output.register_attr_or_module(
                 value,
-                value.device.type,
-                source=self.source,
+                self.name,
+                source=self.get_source(),
+                device=value.device.type,
             )
         elif isinstance(value, _EventBase):
             unimplemented("EventVariable does not currently work soundly.")
-            return EventVariable(
-                None,
-                value,
-                source=self.source,
-            )
         elif (
             isinstance(value, torch._C._TensorMeta)
             and value in config.traceable_tensor_subclasses

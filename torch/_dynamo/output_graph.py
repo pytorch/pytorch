@@ -660,6 +660,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         *names,
         **options,
     ):
+        from torch._streambase import _StreamBase
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
@@ -726,6 +727,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 )
 
             # HACKY CODE REGION END
+        elif isinstance(target, _StreamBase):
+
+            def wrap_name(module_key):
+                from torch._dynamo.variables.ctx_manager import StreamVariable
+
+                return StreamVariable(
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    target,
+                    **options,
+                )
+
         else:
 
             def wrap_name(module_key):
