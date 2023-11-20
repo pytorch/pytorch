@@ -589,6 +589,7 @@ class VariableBuilder:
                 value,
             )
         elif isinstance(value, _StreamBase):
+            self.install_guards(GuardBuilder.ID_MATCH)
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
