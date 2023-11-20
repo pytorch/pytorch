@@ -356,6 +356,41 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_nopython_no_fallback_(self):
+        for create_functions in [
+            lambda f, cnt: (
+                torch.compile(f, backend=cnt),
+                torch.compile(f, backend=cnt, fullgraph=True),
+            ),
+            lambda f, cnt: (
+                torch._dynamo.optimize(backend=cnt)(f),
+                torch._dynamo.optimize(backend=cnt, nopython=True)(f),
+            ),
+        ]:
+
+            def fn(x):
+                x = x + 2
+                torch._dynamo.graph_break()
+                return x + 1
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            opt_fn, nopython_fn = create_functions(fn, cnt)
+
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "graph_break"):
+                nopython_fn(torch.zeros(1))
+            self.assertEqual(cnt.frame_count, 0)
+
+            opt_fn(torch.zeros(1))
+            self.assertEqual(cnt.frame_count, 2)
+
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "graph_break"):
+                nopython_fn(torch.zeros(1))
+            self.assertEqual(cnt.frame_count, 2)
+
+            opt_fn(torch.zeros(1))
+            self.assertEqual(cnt.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
