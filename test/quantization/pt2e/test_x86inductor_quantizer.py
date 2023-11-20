@@ -258,6 +258,15 @@ class TestHelperModules:
         def forward(self, x):
             return self.postop(self.linear(x))
 
+    class LinearUnaryModuleGelu(torch.nn.Module):
+        def __init__(self, use_bias, postop, post_op_algo) -> None:
+            super().__init__()
+            self.linear = nn.Linear(4, 4, bias=use_bias)
+            self.postop = postop(approximate=post_op_algo)
+
+        def forward(self, x):
+            return self.postop(self.linear(x))
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -877,6 +886,45 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
                     post_op_map[postop][0 if inplace else 1],
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+
+    @skipIfNoX86
+    def test_linear_unary_gelu(self):
+        """
+        Test pattern of linear with unary post ops (e.g. gelu) with X86InductorQuantizer.
+        """
+        use_bias_list = [True, False]
+        postop = nn.GELU
+        post_op_algorithm = ['none', 'tanh']
+        cases = itertools.product(use_bias_list, post_op_algorithm)
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias, post_op_algo in cases:
+                m = TestHelperModules.LinearUnaryModuleGelu(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the gelu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.linear.default,
+                    torch.ops.aten.gelu.default,
                 ]
                 self._test_quantizer(
                     m,

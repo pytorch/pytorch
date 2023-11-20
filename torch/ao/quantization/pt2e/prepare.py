@@ -346,6 +346,7 @@ def _maybe_insert_input_observers_for_node(
     assert (
         node.target == torch.ops.aten.clone.default or
         node.target == torch.ops.aten.zeros_like.default or
+        node.target == torch.ops.aten.gelu.default or
         len(node.kwargs) == 0
     ), " expecting kwargs for aten op IR to be empty"
 
