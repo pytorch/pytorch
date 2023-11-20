@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import dataclasses
 import itertools
@@ -8,7 +10,7 @@ import sympy
 
 import torch
 from .. import config, ir
-from ..utils import cache_on_self, CachedFunction, IndentedBuffer
+from ..utils import cache_on_self, CachedMethod, IndentedBuffer
 from ..virtualized import V
 
 from .wrapper import (
@@ -231,9 +233,9 @@ class Empty(AllocationTreeNode):
 
 
 class MemorySplitProtocol(Protocol):
-    get_live_ranges: CachedFunction[LiveRanges]
-    get_size_hint: CachedFunction[int]
-    get_symbolic_size: CachedFunction[sympy.Expr]
+    get_live_ranges: CachedMethod[[], LiveRanges]
+    get_size_hint: CachedMethod[[], int]
+    get_symbolic_size: CachedMethod[[], sympy.Expr]
 
     def _allocate(self, block: "Allocation", is_last: bool) -> bool:
         ...

@@ -1268,7 +1268,7 @@ class TritonKernel(Kernel):
         return mask
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
