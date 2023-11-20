@@ -146,8 +146,9 @@ def cprofile_wrapper(func):
                 ],
                 stdout=subprocess.PIPE,
             )
-            subprocess.run(
-                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
             )
             print(f"Generated SVG from profile at {str(svg_path)}")
         except FileNotFoundError:
@@ -375,7 +376,7 @@ def setup_log_file():
     exitstack = contextlib.ExitStack()
     if config.log_file_name is not None:
         log_file_handler = logging.FileHandler(config.log_file_name)
-        for logger in logging.get_loggers():
+        for logger in torch._logging._internal.get_loggers():
             logger.addHandler(log_file_handler)
             exitstack.callback(lambda: logger.removeHandler(log_file_handler))
         return exitstack
@@ -635,7 +636,7 @@ def clone_input(x, *, dtype=None):
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -668,7 +669,7 @@ def clone_input(x, *, dtype=None):
             # performing the operation.
             return torch_clone(x)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return result
 
 
@@ -739,7 +740,7 @@ def torchscript(model, example_inputs, verbose=False):
 def getfile(obj):
     try:
         return inspect.getfile(obj)
-    except TypeError:
+    except (TypeError, OSError):
         return None
 
 
@@ -1305,7 +1306,7 @@ class CompileProfiler:
     def __init__(self):
         self.frame_count = 0
         self.op_count = 0
-        self.backend_ctx_ctor = lambda: disable_cache_limit()
+        self.backend_ctx_ctor = disable_cache_limit
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
@@ -1444,6 +1445,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
+    from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -1517,7 +1519,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
-        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+        elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -1932,6 +1934,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
@@ -2252,10 +2256,6 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         )
         result += markers[i] + "\n"
     return result
-
-
-def is_guard_failure_reporting_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
 def get_static_address_type(t):
