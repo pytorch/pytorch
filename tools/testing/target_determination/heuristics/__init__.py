@@ -27,7 +27,7 @@ from tools.testing.target_determination.heuristics.profiling import Profiling
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
-    HistoricalClassFailurCorrelation(trial_mode=True),
+    HistoricalClassFailurCorrelation(),
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(trial_mode=True),
     Profiling(trial_mode=True),
