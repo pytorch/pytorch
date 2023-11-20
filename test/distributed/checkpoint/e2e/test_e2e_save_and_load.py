@@ -45,6 +45,19 @@ class TestDummyModel(torch.nn.Module):
     def get_input(self):
         return torch.rand(8, 8, device="cuda")
 
+class TestStatefulObj:
+    def __init__(self):
+        self.data = torch.rand(10, 10, device="cuda")
+
+    def state_dict(self):
+        return {"data": self.data}
+
+    def load_state_dict(self, state_dict):
+        self.data = state_dict["data"]
+
+    def __eq__(self, other):
+        return torch.equal(self.data, other.data)
+
 
 class ModelType(Enum):
     FSDP = auto()
@@ -114,23 +127,31 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     @with_temp_dir
     @parametrize("compile", [True, False])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
-    def test_stateful(self, compile, model_type):
+    def test_e2e(self, compile, model_type):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
         dist_model, dist_optim = self._create_model(compile, model_type)
         _train(dist_model, dist_optim, train_steps=2)
 
+        original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
         DCP.save(
-            state_dict={"model": dist_model, "optimizer": dist_optim},
+            state_dict={
+                "model": dist_model,
+                "optimizer": dist_optim,
+                "s": original_stateful_obj
+            },
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
+        loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
         DCP.load(
-            state_dict={"model": dist_model, "optimizer": dist_optim},
+            state_dict={"model": dist_model, "optimizer": dist_optim, "s": loaded_stateful_obj},
             storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
+
+        self.assertEqual(original_stateful_obj, loaded_stateful_obj)
 
         # train one more step on both models
         loss = _train(model, optim, train_steps=1)
