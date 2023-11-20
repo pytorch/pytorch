@@ -34,7 +34,7 @@ inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 if use_buck:
-    import libfb.py.build_info  # type: ignore[import]
+    import libfb.py.build_info
 
 
 extra_deps = []
