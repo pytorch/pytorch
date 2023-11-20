@@ -336,6 +336,10 @@ def jagged_scaled_dot_product_attention(
         return torch._scaled_dot_product_attention_math(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
+    else:
+        raise RuntimeError(
+            "No viable backend for scaled_dot_product_attention was found."
+        )
 
 
 def jagged_torch_function(func, *args, **kwargs):
