@@ -11,7 +11,7 @@ from .storage import (
 from .planner import LoadPlanner
 from .default_planner import DefaultLoadPlanner
 
-from .utils import _DistWrapper
+from .utils import _DistWrapper, _all_gather_keys
 
 __all__ = ["load_state_dict", "load"]
 
@@ -105,13 +105,21 @@ def load(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+    keys = _all_gather_keys(state_dict.keys())
 
     statetful_sd = {}
-    for key, elem in state_dict.items():
+    for key in keys:
+        if key not in state_dict:
+            continue
+        elem = state_dict[key]
         statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
     _load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
-    for key, elem in state_dict.items():
+    for key in keys:
+        if key not in state_dict:
+            continue
+        elem = statetful_sd[key]
+
         if isinstance(elem, Stateful):
             elem.load_state_dict(statetful_sd[key])
         state_dict[key] = elem

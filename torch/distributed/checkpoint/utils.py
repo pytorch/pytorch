@@ -46,6 +46,10 @@ def _get_failure_dict(
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
+def _all_gather_keys(keys):
+    gathered_keys = [None] * dist.get_world_size()
+    dist.all_gather_object(gathered_keys, keys)
+    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 class _DistWrapper:
     """

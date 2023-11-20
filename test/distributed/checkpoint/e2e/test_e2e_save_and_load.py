@@ -3,6 +3,8 @@
 from enum import auto, Enum
 
 import torch
+from torch.distributed.distributed_c10d import ReduceOp
+import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
@@ -168,6 +170,55 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
+
+    @with_comms
+    @with_temp_dir
+    def test_different_ordered_state_dict_keys(self):
+
+        world_size = self.world_size
+
+        class Foo:
+            def state_dict(self):
+                tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
+                t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                dist.all_gather(tl, t, async_op=False)
+                print(f"{dist.get_rank()=}{self}")
+                return {}
+
+            def load_state_dict(self, state_dict):
+                pass
+                # tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
+                # t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                # dist.all_gather(tl, t, async_op=False)
+                # print(f"{dist.get_rank()=}{self}")
+
+        class Bar:
+            def state_dict(self):
+                tensor = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                dist.all_reduce(tensor, op=ReduceOp.SUM)
+                return {}
+
+            def load_state_dict(self, state_dict):
+                pass
+
+        if self.rank == 0:
+            sd = {
+                "A": Foo(),
+                "B": Bar(),
+            }
+        else:
+            sd = {
+                "A": Foo(),
+                "B": Bar()
+            }
+
+        print("save")
+        DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
+
+        print("load")
+        DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
+
+        dist.barrier()
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
