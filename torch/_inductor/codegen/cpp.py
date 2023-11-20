@@ -1837,6 +1837,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 self.compute,
                 f"at::vec::Vectorized<{DTYPE_TO_CPP[scalar_var.dtype]}>({scalar_var.name})",
             )
+        assert isinstance(vec_var, CppCSEVariable)
         vec_var.dtype = scalar_var.dtype
         vec_var.relevant_itervars = scalar_var.relevant_itervars
         vec_var.is_vec = True
