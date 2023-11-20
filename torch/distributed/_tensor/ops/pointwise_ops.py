@@ -523,6 +523,7 @@ for_each_ops = [
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
     aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
