@@ -1225,7 +1225,7 @@ def split_with_sizes(
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
-        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+        lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
     num_splits = len(split_sizes)
     splits = []

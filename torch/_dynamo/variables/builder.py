@@ -704,14 +704,14 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
+            and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
+                skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
