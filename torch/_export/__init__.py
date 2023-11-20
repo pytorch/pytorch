@@ -398,6 +398,9 @@ def capture_pre_autograd_graph(
 
 
 def _convert_input_to_fake(gm, args, kwargs):
+    if len(args) == 0 and len(kwargs) == 0 and len(dict(gm.named_parameters())) == 0 and len(dict(gm.named_buffers())) == 0:
+        return [], {}, {}, None
+
     fake_inps: List[torch.Tensor] = []
     fake_mode = None
     for node in gm.graph.nodes:
@@ -485,6 +488,7 @@ def _export_to_torch_ir(
     constraints: Optional[List[Constraint]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    disable_constraint_solver: bool = False,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -512,6 +516,7 @@ def _export_to_torch_ir(
                     constraints=constraints,
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
+                    disable_constraint_solver=disable_constraint_solver,
                 )(
                     *args,
                     **kwargs,
@@ -601,7 +606,7 @@ def _export(
         args,
         kwargs,
         constraints,
-        preserve_module_call_signature=preserve_module_call_signature
+        preserve_module_call_signature=preserve_module_call_signature,
     )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
@@ -623,6 +628,9 @@ def _export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
+                assert dynamo_fake_mode is not None, (
+                    "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                )
                 node.meta["val"] = dynamo_fake_mode.from_tensor(attr, static_shapes=True)
 
     # When aot_export lifts the params, we lose the nn_module_stack
@@ -735,11 +743,14 @@ def _export(
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
-    }
+
+    # dynamo_fake_mode can be None if there's no placeholder in gm_torch_level
+    if dynamo_fake_mode:
+        gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -915,6 +926,7 @@ def aot_compile(
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -941,6 +953,8 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        disable_constraint_solver: Whether the dim constraint solver must be disabled.
+
     Returns:
         Path to the generated shared library
     """
@@ -957,7 +971,13 @@ def aot_compile(
 
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
-    gm = _export_to_torch_ir(f, args, kwargs, constraints)
+    gm = _export_to_torch_ir(
+        f,
+        args,
+        kwargs,
+        constraints,
+        disable_constraint_solver=disable_constraint_solver
+    )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():

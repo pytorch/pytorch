@@ -2106,7 +2106,7 @@ Tensor _nested_split_with_sizes_backward(
     if (grads[i].defined()) {
       grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
     } else {
-      const auto& length = split_sizes[i].expect_int();
+      const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
       for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
