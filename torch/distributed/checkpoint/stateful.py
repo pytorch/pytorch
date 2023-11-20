@@ -10,8 +10,3 @@ class Stateful(Protocol):
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         ...
-
-
-#TODO: Evaluate AppState vs `checkpoint.metadata.State_DICT_TYPE`
-T = TypeVar("T", bound=Stateful)
-AppState = Dict[str, T]
