@@ -155,19 +155,13 @@ def is_concrete_bool(a: Union[bool, SymBool]):
 
     return False
 
-# Returns True if every size dim on the tensor has a hint
-# TODO: Should this include strides too?  For now it doesn't matter,
-# that's quite an obscure case
-def tensor_has_hints(t):
-    return all(has_hint(s) for s in t.size())
-
-def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
+def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # singleton ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, sympy.Expr):
+    elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool)):
         pass
