@@ -927,6 +927,10 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def iter_next(it):
+    return next(it)
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.

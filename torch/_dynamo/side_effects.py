@@ -8,7 +8,6 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
-    create_load_global,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -512,7 +511,7 @@ class SideEffects:
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
-                    cg.extend_output([create_load_global("next", push_null=True)])
+                    cg.load_import_from(utils.__name__, "iter_next")
                     cg(var.mutable_local.source)
                     cg.extend_output(create_call_function(1, True))
                     cg.extend_output(
