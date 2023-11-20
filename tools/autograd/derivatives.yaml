@@ -402,7 +402,7 @@
   L: cholesky_jvp(self_t, L, upper)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
-  self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
+  self, input2: cholesky_solve_backward(grad, self, input2, result, upper, grad_input_mask)
   result: cholesky_solve_jvp(result, input2_p, input2_t, self_t, upper)
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
@@ -439,6 +439,10 @@
   result: where(self_p <= max_p, self_t, max_t)
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  self: grad
+  result: auto_linear
+
+- name: _lazy_clone(Tensor self) -> Tensor
   self: grad
   result: auto_linear
 

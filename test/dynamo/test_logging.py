@@ -110,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -596,6 +596,38 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(guards=True, recompiles=True)
+    def test_guards_recompiles(self, records):
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertIn(
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -630,6 +662,7 @@ exclusions = {
     "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",
