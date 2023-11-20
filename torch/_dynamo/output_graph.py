@@ -81,8 +81,8 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.ctx_manager import StreamVariable
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.ctx_manager import StreamVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
