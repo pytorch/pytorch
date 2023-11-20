@@ -372,6 +372,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
 
+    def guard_has_graph_break(self):
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.HAS_GRAPH_BREAK))
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
@@ -769,7 +772,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+        self,
+        tx,
+        partial_convert=False,
+        reason: Optional[GraphCompileReason] = None,
+        compile_return_value=False,
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -782,6 +789,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
+
+        if not compile_return_value:
+            # invalid graph to be cache hit for nopython
+            self.guard_has_graph_break()
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
