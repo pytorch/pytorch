@@ -614,7 +614,7 @@ TreeSpec(tuple, None, [*,
                 self.x = x
                 self.y = y
 
-        py_pytree._register_pytree_node(
+        py_pytree.register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: DummyType(*xs),
@@ -634,7 +634,7 @@ TreeSpec(tuple, None, [*,
                 self.x = x
                 self.y = y
 
-        py_pytree._register_pytree_node(
+        py_pytree.register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: DummyType(*xs),
@@ -659,7 +659,7 @@ TreeSpec(tuple, None, [*,
         with self.assertRaisesRegex(
             ValueError, "Both to_dumpable_context and from_dumpable_context"
         ):
-            py_pytree._register_pytree_node(
+            py_pytree.register_pytree_node(
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
                 lambda xs, _: DummyType(*xs),
@@ -673,7 +673,7 @@ TreeSpec(tuple, None, [*,
                 self.x = x
                 self.y = y
 
-        py_pytree._register_pytree_node(
+        py_pytree.register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: DummyType(*xs),
