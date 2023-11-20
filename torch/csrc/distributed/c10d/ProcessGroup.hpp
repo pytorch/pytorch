@@ -156,6 +156,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) {
+    // Dispatchable collective adds quite a bit of overhead
+    if (tensors[0].is_cuda()) {
+      return getBackend(c10::DeviceType::CUDA)->allreduce(tensors, opts);
+    }
     static auto op =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("c10d::allreduce_", "")

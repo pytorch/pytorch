@@ -509,6 +509,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
+  c10::intrusive_ptr<c10d::IntraNodeComm> initIntraNodeComm();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -718,8 +720,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       ncclIdToCommMap_;
 
-  c10::intrusive_ptr<IntraNodeComm> intraNodeComm_;
-
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
 
@@ -865,6 +865,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Backend> uccPG_;
 #endif
   size_t uid_;
+
+  c10::intrusive_ptr<IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();

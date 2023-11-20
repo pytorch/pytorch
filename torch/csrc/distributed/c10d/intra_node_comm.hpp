@@ -7,6 +7,9 @@
 
 namespace c10d {
 
+static constexpr size_t kMaxDevices = 8;
+static constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
+
 class SharedMemoryPtrBase {
  public:
   SharedMemoryPtrBase(
@@ -65,10 +68,10 @@ class SharedMemoryPtr : public SharedMemoryPtrBase {
   }
 };
 
-class TwoPhaseSync {
+class TwoPhaseGather {
  public:
-  TwoPhaseSync(size_t worldSize);
-  ~TwoPhaseSync();
+  TwoPhaseGather(size_t worldSize);
+  ~TwoPhaseGather();
 
   void run(std::function<void()> writeFn, std::function<void()> gatherFn);
 
@@ -79,8 +82,7 @@ class TwoPhaseSync {
   pthread_cond_t cond_;
 };
 
-static constexpr size_t kMaxDevices = 8;
-static constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
+using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
@@ -105,6 +107,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t rank_;
   size_t worldSize_;
   uint32_t generation_;
+  NvlMesh nvlMesh_;
+  bool isHybridCubeMesh_ = false;
 };
 
 } // namespace c10d

@@ -28,9 +28,10 @@
   _(cuMemCreate)                  \
   _(cuGetErrorString)
 
-#define C10_NVML_DRIVER_API(_)        \
-  _(nvmlInit_v2)                      \
-  _(nvmlDeviceGetHandleByPciBusId_v2) \
+#define C10_NVML_DRIVER_API(_)           \
+  _(nvmlInit_v2)                         \
+  _(nvmlDeviceGetHandleByPciBusId_v2)    \
+  _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
 
 namespace c10 {

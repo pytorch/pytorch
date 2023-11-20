@@ -1,10 +1,14 @@
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/driver_api.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <cuda_runtime.h>
+#include <nvml.h>
+
+#include <iostream>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -75,7 +79,7 @@ SharedMemoryPtrBase::~SharedMemoryPtrBase() {
   }
 }
 
-TwoPhaseSync::TwoPhaseSync(size_t worldSize)
+TwoPhaseGather::TwoPhaseGather(size_t worldSize)
     : worldSize_(worldSize), barrierCnt_(0) {
   pthread_mutexattr_t mutexAttr;
   pthread_condattr_t condAttr;
@@ -107,13 +111,13 @@ TwoPhaseSync::TwoPhaseSync(size_t worldSize)
   pthread_condattr_destroy(&condAttr);
 }
 
-TwoPhaseSync::~TwoPhaseSync() {
+TwoPhaseGather::~TwoPhaseGather() {
   pthread_mutex_destroy(&mutex_);
   pthread_cond_destroy(&cond_);
 }
 
 // TODO: maybe call it TwoPhaseExchange?
-void TwoPhaseSync::run(
+void TwoPhaseGather::run(
     std::function<void()> writeFn,
     std::function<void()> gatherFn) {
   // Phase 1: write
@@ -139,6 +143,67 @@ void TwoPhaseSync::run(
   pthread_mutex_unlock(&mutex_);
 }
 
+// TODO: determine via GPU model
+static constexpr size_t kMaxNvLinks = 12;
+
+static NvlMesh getNvlMesh() {
+  using namespace c10::cuda;
+
+  nvmlDevice_t devices[kMaxDevices];
+  std::unordered_map<std::string, size_t> busIdToIdx;
+  NvlMesh nvlMesh = {};
+
+  for (size_t idx = 0; idx < kMaxDevices; ++idx) {
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, idx));
+    char busId[80];
+    snprintf(
+        busId,
+        sizeof(busId),
+        NVML_DEVICE_PCI_BUS_ID_FMT,
+        prop.pciDomainID,
+        prop.pciBusID,
+        prop.pciDeviceID);
+    TORCH_CHECK(
+        DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
+            busId, &devices[idx]) == NVML_SUCCESS);
+    busIdToIdx.emplace(std::make_pair(busId, idx));
+  }
+
+  for (size_t idx = 0; idx < kMaxDevices; ++idx) {
+    for (size_t link = 0; link < kMaxNvLinks; ++link) {
+      nvmlPciInfo_t pciInfo;
+      TORCH_CHECK(
+          DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
+              devices[idx], link, &pciInfo) == NVML_SUCCESS);
+      auto it = busIdToIdx.find(pciInfo.busId);
+      if (it != busIdToIdx.end()) {
+        if (idx != it->second) {
+          nvlMesh[idx][it->second] += 1;
+        }
+      }
+    }
+  }
+  return nvlMesh;
+}
+
+static bool isHybridCubeMesh(NvlMesh nvlMesh) {
+  std::array<size_t, kMaxDevices> numNeighbors = {};
+  for (size_t i = 0; i < kMaxDevices; ++i) {
+    for (size_t j = 0; j < kMaxDevices; ++j) {
+      if (nvlMesh[i][j] > 0) {
+        numNeighbors[i] += 1;
+      }
+    }
+  }
+  for (size_t i = 0; i < kMaxDevices; ++i) {
+    if (numNeighbors[i] != 4) {
+      return false;
+    }
+  }
+  return true;
+}
+
 IntraNodeComm::IntraNodeComm(
     std::array<void*, kMaxDevices> buffers,
     std::array<uint32_t*, kMaxDevices> barriers,
@@ -148,7 +213,12 @@ IntraNodeComm::IntraNodeComm(
       barriers_(barriers),
       rank_(rank),
       worldSize_(worldSize),
-      generation_(0) {}
+      generation_(0),
+      nvlMesh_(getNvlMesh()) {
+  if (worldSize_ == kMaxDevices) {
+    isHybridCubeMesh_ = isHybridCubeMesh(nvlMesh_);
+  }
+}
 
 IntraNodeComm::~IntraNodeComm() {
   // TODO
@@ -158,32 +228,35 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
+  // Impose this constraint to avoid confusion
+  TORCH_CHECK(rank == static_cast<size_t>(at::cuda::current_device()));
+
   struct Shared {
     std::array<int, kMaxDevices> devices;
     std::array<cudaIpcMemHandle_t, kMaxDevices> barrierHandles;
     std::array<cudaIpcMemHandle_t, kMaxDevices> bufferHandles;
-    TwoPhaseSync twoPhaseSync;
+    TwoPhaseGather twoPhaseGather;
 
-    Shared(size_t worldSize) : twoPhaseSync(worldSize) {}
+    Shared(size_t worldSize) : twoPhaseGather(worldSize) {}
   };
   SharedMemoryPtr<Shared> peerInfo(rdzvId, rank, worldSize, worldSize);
 
   void* buffer = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize));
+  // TODO: explain * 2
+  C10_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
   cudaIpcMemHandle_t bufferHandle;
   AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
 
   uint32_t* barrier = nullptr;
-  // TODO: correct size
-  // TODO: memset
-  C10_CUDA_CHECK(cudaMalloc(&barrier, kMaxIntraNodeSize));
+  C10_CUDA_CHECK(cudaMalloc(&barrier, sizeof(uint32_t) * kMaxDevices));
+  C10_CUDA_CHECK(cudaMemset(barrier, 0, sizeof(uint32_t) * kMaxDevices));
   cudaIpcMemHandle_t barrierHandle;
   AT_CUDA_CHECK(cudaIpcGetMemHandle(&barrierHandle, barrier));
 
   std::array<int, kMaxDevices> devices;
   std::array<cudaIpcMemHandle_t, kMaxDevices> bufferHandles;
   std::array<cudaIpcMemHandle_t, kMaxDevices> barrierHandles;
-  peerInfo->twoPhaseSync.run(
+  peerInfo->twoPhaseGather.run(
       [&]() {
         peerInfo->devices[rank] = at::cuda::current_device();
         peerInfo->bufferHandles[rank] = bufferHandle;
@@ -229,11 +302,24 @@ at::Tensor oneShotAllReduce(
     size_t rank,
     size_t worldSize);
 
+at::Tensor hybridCubeOneShotAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> buffers,
+    std::array<uint32_t*, kMaxDevices> barriers,
+    uint32_t barrierFlag,
+    size_t rank,
+    size_t worldSize,
+    NvlMesh nvlMesh_);
+
 at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
-  // TODO: check size
-  // TODO: two-shot
-  // TODO: memset barrier
-  generation_ += 1;
+  TORCH_CHECK(static_cast<size_t>(input.numel()) < kMaxIntraNodeSize);
+  if (isHybridCubeMesh_ && parseEnvVarFlag("ENABLE_HCM_ALLREDUCE")) {
+    // The hybrid cube mesh algorithm uses the barrier twice
+    generation_ = (generation_ + 2) % 93187;
+    return hybridCubeOneShotAllReduce(
+        input, buffers_, barriers_, generation_, rank_, worldSize_, nvlMesh_);
+  }
+  generation_ = (generation_ + 1) % 93187;
   return oneShotAllReduce(
       input, buffers_, barriers_, generation_, rank_, worldSize_);
 }
