@@ -536,8 +536,8 @@ skip_bw = [
     "torch.eq",
     "torch.isfinite",
     "torch.isnan",
-    "torch.native_layer_norm",
-    "torch.nn.functional.layer_norm",
+    # "torch.native_layer_norm",
+    # "torch.nn.functional.layer_norm",
 ]
 
 
@@ -658,7 +658,7 @@ class TestDTensorOps(DTensorOpTestBase):
                                 if isinstance(dtensor_rs, DTensor):
                                     dtensor_rs.to_local().sum().backward()
                                 elif isinstance(dtensor_rs, tuple):
-                                    dtensor_rs[0].to_local().sum().backward()
+                                    dtensor_rs[0].sum().backward()
 
                         except Exception as e:
                             # TODO(anj): Remove this guard exception after gaining more confidence.

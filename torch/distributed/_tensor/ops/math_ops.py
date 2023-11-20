@@ -350,6 +350,45 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
+@register_op_strategy(
+    [aten.native_layer_norm_backward.default],
+    # schema_info=RuntimeSchemaInfo(),
+)
+def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # args must be: grad_out, input, normalized_shape, mean, rstd,
+    # weight, bias, output_mask. For None weight and bias, their
+    # corresponding objects will be None as well.
+    assert len(op_schema.args_schema) == 8
+    (
+        grad_out_strategy,
+        input_strategy,
+        normalized_shape,
+        _,  # mean
+        _,  # rstd
+        weight_strategy,
+        bias_strategy,
+        output_mask,
+    ) = op_schema.args_schema
+
+    # the current layer norm implementation requires that all
+    # input DTensor's sharding must be in form of OpStrategy
+    for strat in [grad_out_strategy, input_strategy, weight_strategy, bias_strategy]:
+        assert isinstance(strat, OpStrategy)
+
+    assert isinstance(normalized_shape, (int, Sequence, torch.Size))
+    normalized_size = normalize_to_torch_size(normalized_shape)
+    input_ndim = input_strategy.output_ndim
+    axis = input_ndim - len(normalized_size)
+
+    assert isinstance(output_mask, List) and len(output_mask) == 3
+
+    # output triple: (d_input, d_weight, d_bias)
+    res: List[Optional[OpStrategy]] = []
+    if output_mask[0]:
+
+    else:
+        res.append(None)
+
 def _replicate_dims_start_at(
     placements: Sequence[Placement], start_dim: int = 0
 ) -> Tuple[Placement, ...]:
