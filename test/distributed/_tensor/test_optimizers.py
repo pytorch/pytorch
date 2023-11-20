@@ -154,3 +154,43 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_sgd_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        sgd_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "momentum": 0.05},
+            {"lr": 0.1, "momentum": 0.05, "foreach": True},
+            {"lr": 0.1, "momentum": 0.06, "dampening": 0.07, "foreach": True},
+            {
+                "lr": 0.1,
+                "momentum": 0.08,
+                "weight_decay": 0.05,
+                "nesterov": True,
+                "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "momentum": 0.08,
+                "weight_decay": 0.05,
+                "nesterov": True,
+                "maximize": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in sgd_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.SGD(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.SGD(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
