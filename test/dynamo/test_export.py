@@ -3249,7 +3249,7 @@ def forward(self, x):
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
                     x,
-                    policy=StatelessSymbolicContext(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
                     ),
                 )
