@@ -5,8 +5,8 @@ import torch
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
-from torch.fx.operator_schemas import normalize_function
 from torch.backends.cuda import SDPBackend
+from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
 
@@ -256,46 +256,90 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     raise RuntimeError(mismatch_error_msg)
 
 
-def _validate_sdpa_input(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Optional[torch.Tensor] = None, dropout_p=0.0, is_causal=False, scale=None):
+def _validate_sdpa_input(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    dropout_p=0.0,
+    is_causal=False,
+    scale=None,
+):
     if query.dtype != key.dtype or query.dtype != value.dtype:
-        raise RuntimeError(f"Expected query, key, and value to have the same dtype, 
-                         but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, 
-                         and value.dtype: {value.dtype} instead.")
+        raise RuntimeError(
+            f"Expected query, key, and value to have the same dtype, "
+            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype} instead."
+        )
     if query.device != key.device or query.device != value.device:
-        raise RuntimeError(f"Expected query, key, and value to have the same device type, 
-                         but got query.device: {query.device}, key.device: {key.device}, 
-                         and value.device: {value.device} instead.")
+        raise RuntimeError(
+            f"Expected query, key, and value to have the same device type, "
+            f"but got query.device: {query.device}, key.device: {key.device}, "
+            f"and value.device: {value.device} instead."
+        )
     if query.dim() < 2 or key.dim() < 2 or value.dim() < 2:
-        raise RuntimeError(f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: 
-                            {query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead.")
+        raise RuntimeError(
+            f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
+            f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
+        )
     if attn_mask is not None:
         # TODO: Figure out whether masks are actually supported for this layout or not
         if attn_mask.dtype != torch.bool and attn_mask.dtype != query.dtype:
-            raise RuntimeError(f"Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: 
-                                {attn_mask.dtype}, and query.dtype: {query.dtype} instead.")
+            raise RuntimeError(
+                f"Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: "
+                f"{attn_mask.dtype}, and query.dtype: {query.dtype} instead."
+            )
 
 
-def _can_use_math_sdpa_jagged(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Optional[torch.Tensor] = None, dropout_p=0.0, is_causal=False, scale=None):
-    if not query.is_contiguous() or not key.is_contiguous() or not value.is_contiguous():
+def _can_use_math_sdpa_jagged(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    dropout_p=0.0,
+    is_causal=False,
+    scale=None,
+):
+    if (
+        not query.is_contiguous()
+        or not key.is_contiguous()
+        or not value.is_contiguous()
+    ):
         raise RuntimeError("If inputs are nested tensors they must be contiguous.")
     if is_causal:
-        raise RuntimeError("Nested tensors for query / key are not supported when is_causal=True.")
+        raise RuntimeError(
+            "Nested tensors for query / key are not supported when is_causal=True."
+        )
 
 
-def jagged_scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Optional[torch.Tensor] = None, dropout_p=0.0, is_causal=False, scale=None):
+def jagged_scaled_dot_product_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    dropout_p=0.0,
+    is_causal=False,
+    scale=None,
+):
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     backend_choice = SDPBackend.MATH  # TODO: Implement dispatch logic here
     if backend_choice == SDPBackend.FLASH_ATTENTION:
-        raise RuntimeError("Dispatcher for nested tensors with jagged layout cannot run Flash Attention v2 just yet.")
+        raise RuntimeError(
+            "Dispatcher for nested tensors with jagged layout cannot run Flash Attention v2 just yet."
+        )
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
-        raise RuntimeError("Dispatcher for nested tensors with jagged layout cannot run Memory Efficient Attention just yet.")
+        raise RuntimeError(
+            "Dispatcher for nested tensors with jagged layout cannot run Memory Efficient Attention just yet."
+        )
     elif backend_choice == SDPBackend.MATH:
         _can_use_math_sdpa_jagged(query, key, value)
-        return torch._scaled_dot_product_attention_math(query, key, value, attn_mask, dropout_p, is_causal, scale=scale)[0]
+        return torch._scaled_dot_product_attention_math(
+            query, key, value, attn_mask, dropout_p, is_causal, scale=scale
+        )[0]
 
 
 def jagged_torch_function(func, *args, **kwargs):
-    # SDPA has special kernels that handle nested tensors. 
+    # SDPA has special kernels that handle nested tensors.
     # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
