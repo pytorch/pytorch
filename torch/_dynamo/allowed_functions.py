@@ -1,6 +1,7 @@
 import builtins
 import collections
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -148,16 +149,51 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-# We are in progress of refactoring and moving the following functions to test_trace_rules.py.
-# If you made any change to the following functions, please also update there as well.
-# If you are not clear of how to update, please contact @yanboliang.
-@FunctionIdSet
-def _allowed_function_ids() -> Dict[int, str]:
+# Helper function to dump the torch name rule map generated based on
+# the heuristic defined in gen_allowed_objs_and_ids.
+def dump_allowed_torch_name_rule_map() -> None:
+    m = gen_allowed_objs_and_ids().name_rule_map
+    for k, v in m.items():
+        print(f'"{k}": {v.__name__},')
+
+
+@dataclasses.dataclass
+class AllowedObjects:
+    """
+    Track the objects, object id - name pairs, and name - dynamo wrapping rule pairs
+    from the heuristic defined in `gen_allowed_objs_and_ids`.
+    TODO: Remove the overalp/duplication between these fields
+    after allowed_functions refactor is done.
+    """
+
+    object_ids: Dict[int, str]
+    objects: Set[Any]
+    name_rule_map: Dict[str, Any]
+
+
+def gen_allowed_objs_and_ids() -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
+    from .variables import TorchCtxManagerClassVariable
+
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
+    torch_objects = set()
+    torch_name_rule_map = dict()
+
+    # Add obj to torch_objects set if it's a torch context manager class.
+    # This is used to generate the ctx manager class list based on heuristic.
+    def heuristic_record_if_ctx_manager(obj, module, name):
+        if (
+            issubclass(type(obj), type)
+            and hasattr(obj, "__enter__")
+            and hasattr(obj, "__exit__")
+        ):
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchCtxManagerClassVariable
+            torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -167,24 +203,68 @@ def _allowed_function_ids() -> Dict[int, str]:
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim.",
-            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
-            "torch.utils._pytree",
-            "torch.nn.modules.rnn.",
-            "torch._dynamo.",
-            "torch._C._dynamo.",
-            "torch._inductor.",
-            "torch._C.inductor.",
-            "torch.fx.",
-            "torch.distributed.fsdp.",
-            "torch.distributed._tensor.",
-            # Inline through the ActivationWrapper in
-            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
-            # nn module calls torch.utils.checkpoint internally. If Dynamo does
-            # not trace this, AOT Autograd will try to trace this and can cause
-            # issues observed in
-            # https://github.com/pytorch/pytorch/issues/108269
-            "torch.distributed.algorithms.",
+            "torch.optim",
+            "torch.nn.modules.rnn",
+            "torch._dynamo",
+            "torch._C._dynamo",
+            "torch._inductor",
+            "torch._C.inductor",
+            "torch.fx",
+            "torch._C._autograd",
+            "torch._C._cudart",
+            "torch._C._distributed_autograd",
+            "torch._C._distributed_c10d",
+            "torch._C._distributed_rpc",
+            "torch._C._functorch",
+            "torch._C._monitor",
+            "torch._C._nvtx",
+            "torch._C._lazy",
+            "torch._C._profiler",
+            "torch.__config__",
+            "torch._custom_op",
+            "torch._dispatch",
+            "torch._export",
+            "torch._functorch.make_functional",
+            "torch._functorch.compile_utils",
+            "torch._functorch.partitioners",
+            "torch._functorch.aot_autograd",
+            "torch._functorch.compilers",
+            "torch._functorch.fx_minifier",
+            "torch.autograd.profiler_util",
+            "torch.autograd.profiler",
+            "torch._jit_internal",
+            "torch._library",
+            "torch._lobpcg",
+            "torch._logging",
+            "torch._meta_registrations",
+            "torch._namedtensor_internals",
+            "torch._numpy",
+            "torch._sources",
+            "torch._subclasses",
+            "torch._tensor",
+            "torch._tensor_str",
+            "torch._utils",
+            "torch._utils_internal",
+            "torch._vmap_internals",
+            "torch.compiler",
+            "torch.distributed",
+            "torch.export",
+            "torch.hub",
+            "torch.jit",
+            "torch.library",
+            "torch.masked.maskedtensor",
+            "torch.nn.init",
+            "torch.nn.modules.module",
+            "torch.nn.parallel",
+            "torch.nn.utils",
+            "torch.multiprocessing",
+            "torch.onnx",
+            "torch.overrides",
+            "torch.package",
+            "torch.profiler",
+            "torch.serialization",
+            "torch.storage",
+            "torch.utils",
         ]
         if config.trace_distributed:
             disallowed_modules.append("torch.distributed.")
@@ -239,8 +319,10 @@ def _allowed_function_ids() -> Dict[int, str]:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -274,7 +356,12 @@ def _allowed_function_ids() -> Dict[int, str]:
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids
+    return AllowedObjects(torch_object_ids, torch_objects, torch_name_rule_map)
+
+
+@FunctionIdSet
+def _allowed_function_ids() -> Dict[int, str]:
+    return gen_allowed_objs_and_ids().object_ids
 
 
 @FunctionIdSet

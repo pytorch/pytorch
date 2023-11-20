@@ -28,27 +28,29 @@
 namespace c10d {
 // Environment variable which controls whether we perform a NCCL healt check
 // which ensures communicators are healthy at the beginning of init.
-constexpr const char* ENABLE_NCCL_HEALTH_CHECK = "ENABLE_NCCL_HEALTH_CHECK";
+static std::vector<std::string> ENABLE_NCCL_HEALTH_CHECK = {
+    "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
-constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
+static std::vector<std::string> NCCL_BLOCKING_WAIT = {"NCCL_BLOCKING_WAIT"};
 
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
-constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
+static std::vector<std::string> NCCL_ASYNC_ERROR_HANDLING = {
+    "NCCL_ASYNC_ERROR_HANDLING"};
 
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
-constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
+static std::vector<std::string> NCCL_DESYNC_DEBUG = {"NCCL_DESYNC_DEBUG"};
 
-constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
+static std::vector<std::string> NCCL_ENABLE_TIMING = {"NCCL_ENABLE_TIMING"};
 
-constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
-    "TORCH_NCCL_ENABLE_MONITORING";
+static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
+    "TORCH_NCCL_ENABLE_MONITORING"};
 
-constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC =
-    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC";
+static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -79,14 +81,14 @@ enum ErrorHandlingMode {
 // Instead, it stashes live references to those tensors until after
 // user-facing streams are synced with comm streams.
 // See stashed_for_allocator_safety_ below.
-constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
-    "TORCH_NCCL_AVOID_RECORD_STREAMS";
+static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
+    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
 
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
 // can register/deregister the tensor on all available NCCL communicators.
-constexpr const char* NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
-    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK";
+static std::vector<std::string> NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK = {
+    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -660,6 +662,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
+
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
   // We are working on enabling more useful debug information for watchdog
@@ -765,6 +772,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Mutex to Guard monitorWakeUpCV_
   std::mutex monitorMutex_;
+
+  bool writeDebugInfo_ = false;
+
+  // Mutex to Guard the check of writeDebugInfo_
+  std::mutex writeDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
