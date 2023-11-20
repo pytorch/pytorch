@@ -2873,6 +2873,8 @@ coverage_ignore_classes = [
     "StrictMinMaxConstraint",
     "SymDispatchMode",
     "SymbolicContext",
+    "StatelessSymbolicContext",
+    "StatefulSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
