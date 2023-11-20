@@ -93,7 +93,13 @@ def _get_allowed_globals():
         rc[f"{tt.__module__}.{tt.__name__}"] = tt
     # Storage classes
     for ts in torch._storage_classes:
-        rc[f"{ts.__module__}.{ts.__name__}"] = ts
+        if ts not in (torch.storage.TypedStorage, torch.storage.UntypedStorage):
+            # Wrap legacy storage types in a dummy class
+            rc[f"{ts.__module__}.{ts.__name__}"] = torch.serialization.StorageType(
+                ts.__name__
+            )
+        else:
+            rc[f"{ts.__module__}.{ts.__name__}"] = ts
     # Rebuild functions
     for f in [
         torch._utils._rebuild_parameter,
