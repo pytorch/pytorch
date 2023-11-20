@@ -138,6 +138,10 @@ hf_GPT2,pass,0
 
 
 
+hf_GPT2_large,infra_error,0
+
+
+
 hf_Reformer,pass,5
 
 
