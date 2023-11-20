@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
-#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
