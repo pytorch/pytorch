@@ -852,7 +852,7 @@ class CommonTemplate:
             fn,
             inps,
             has_assert: typing.Union[bool, typing.Callable[[bool], bool]],
-            has_wrapping: bool
+            has_wrapping: bool,
         ):
             def get_value(fn, dynamic):
                 return fn(dynamic) if inspect.isfunction(fn) else fn
@@ -906,12 +906,7 @@ class CommonTemplate:
             return dynamic
 
         # Wrapping is constant-folded
-        test(
-            flip_with_index_constant,
-            (a,),
-            has_assert=is_dynamic,
-            has_wrapping=False,
-        )
+        test(flip_with_index_constant, (a,), has_assert=is_dynamic, has_wrapping=False)
 
         # Operation where we can't prove that the index is always positive or negative
         def pos_and_neg(a):
@@ -919,7 +914,7 @@ class CommonTemplate:
             return a[b]
 
         # It has wrapping but no assert when dynamic=False
-        test(pos_and_neg, (a,), has_assert=is_dynamic, has_wrapping=True)
+        test(pos_and_neg, (a,), has_assert=True, has_wrapping=True)
 
         # We currently don't do constant propagation with float constants
         def flip_with_index(a):
@@ -948,7 +943,7 @@ class CommonTemplate:
             b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=self.device)
             return a[b + 1]
 
-        test(flip_with_negative_index, (a,), has_assert=is_dynamic, has_wrapping=True)
+        test(flip_with_negative_index, (a,), has_assert=True, has_wrapping=True)
 
     def test_computed_buffer_inlining(self):
         def flip(x):
