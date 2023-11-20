@@ -138,7 +138,14 @@ class SideEffects:
         self.save_for_backward = VariableTracker.apply(
             fn, self.save_for_backward, cache, skip_fn
         )
+        for t, _, _, _ in self.tensor_hooks.values():
+            print("Hook source pre?", t.source.name())
         self.tensor_hooks = VariableTracker.apply(fn, self.tensor_hooks, cache, skip_fn)
+        for t, _, _, _ in self.tensor_hooks.values():
+            if t.source:
+                print("Hook source post?", t.source.name())
+            else:
+                print("WHERE DID THE SOURCE GO??")
 
     def __contains__(self, item):
         return id(item) in self.id_to_variable
@@ -380,6 +387,7 @@ class SideEffects:
 
     def register_hook(self, tensor, hook, handle, name):
         idx = len(self.tensor_hooks.keys())
+        print("Tensor hook sources?", tensor.source.name())
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
@@ -423,7 +431,7 @@ class SideEffects:
             #  - For tensors without sources:
             #    - We graph break
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
-            # assert tensor.source, "Hooks on non input tensors NYI - should not get here"
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
             cg.extend_output([cg.create_load_attr(name)])
             cg(hook)

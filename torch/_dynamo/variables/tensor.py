@@ -755,7 +755,8 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
-
+            else:
+                print("HOOKED SOURCE??", self.source.name(), name)
             tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
