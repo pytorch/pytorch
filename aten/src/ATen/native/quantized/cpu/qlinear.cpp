@@ -967,7 +967,16 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto bias_desc = with_bias ?
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
       tensor::desc();
-  auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args);
+
+  dnnl::algorithm post_op_algo;
+  if (post_op_algorithm == "None"){
+    post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
+  }
+  if (post_op_algorithm == "tanh"){
+    post_op_algo = dnnl::algorithm::eltwise_gelu_tanh;
+  }
+
+  auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args, post_op_algo);
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
