@@ -878,8 +878,8 @@ struct OperatorGeneratorArgs {
           aten_op, op, op, op, bool),                                    \
       DEFINE_STR_CMP_OP(aten_op, op)
 
-
 TORCH_API at::Generator make_generator_for_device(
-    c10::Device device, c10::optional<int64_t> seed = c10::nullopt);
+    c10::Device device,
+    c10::optional<int64_t> seed = c10::nullopt);
 
 } // namespace torch::jit

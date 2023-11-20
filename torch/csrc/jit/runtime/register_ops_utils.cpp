@@ -1,7 +1,8 @@
 #include <ATen/CPUGeneratorImpl.h>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#endif
+// TODO(antoniojkim): Add CUDA support for make_generator_for_device
+// #ifdef USE_CUDA
+// #include <ATen/cuda/CUDAGeneratorImpl.h>
+// #endif
 #ifdef USE_MPS
 #include <ATen/mps/MPSGeneratorImpl.h>
 #endif
@@ -402,21 +403,24 @@ void listSetItem(Stack& stack) {
 }
 
 at::Generator make_generator_for_device(
-  c10::Device device, c10::optional<int64_t> seed) {
+    c10::Device device,
+    c10::optional<int64_t> seed) {
   if (device.is_cpu()) {
     if (seed.has_value()) {
       return at::detail::createCPUGenerator(seed.value());
     } else {
       return at::detail::createCPUGenerator();
     }
-#ifdef USE_CUDA
-  } else if (device.is_cuda()) {
-    auto generator = at::cuda::detail::createCUDAGenerator(device.index());
-    if (seed.has_value()) {
-      generator.set_current_seed(seed.value());
-    }
-    return generator;
-#endif
+// TODO(antoniojkim): Enable support for CUDA device
+//                    Implementation below causes issues during rocm build
+// #ifdef USE_CUDA
+//   } else if (device.is_cuda()) {
+//     auto generator = at::cuda::detail::createCUDAGenerator(device.index());
+//     if (seed.has_value()) {
+//       generator.set_current_seed(seed.value());
+//     }
+//     return generator;
+// #endif
 #ifdef USE_MPS
   } else if (device.is_mps()) {
     if (seed.has_value()) {
@@ -426,7 +430,9 @@ at::Generator make_generator_for_device(
     }
 #endif
   } else {
-    AT_ERROR("Unsupported device for at::make_generator_for_device found: ", device.str());
+    AT_ERROR(
+        "Unsupported device for at::make_generator_for_device found: ",
+        device.str());
   }
 }
 
