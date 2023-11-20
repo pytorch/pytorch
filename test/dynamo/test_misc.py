@@ -3306,14 +3306,12 @@ def fn():
 
     def test_repeat_interleave_graphbreaks(self):
         def fn_no_breaks(x):
-            # no breaks on self_int
             x += 1
             x = torch.repeat_interleave(x, 2, 3)
             x += 1
             return x
 
         def fn_has_breaks(x):
-            # breaks on self_Tensor
             x += 1
             x = torch.repeat_interleave(x, torch.tensor(2), 3)
             x += 1
@@ -3330,7 +3328,7 @@ def fn():
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn_has_breaks)
         opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
