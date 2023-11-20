@@ -1,4 +1,5 @@
 from typing import Optional
+import warnings
 
 import torch
 import torch.distributed as dist
@@ -17,7 +18,8 @@ from .utils import _DistWrapper
 __all__ = ["save_state_dict"]
 
 
-def save(
+# Deprecated
+def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -25,13 +27,15 @@ def save(
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
-    dumpable_state_dict = {}
-    for key, elem in state_dict.items():
-        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+    """This method is deprecated. Please switch to 'save'."""
+    warnings.warn(
+        "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
+    )
 
-    return save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+    #TODO: test returning `save` here instead.
+    return _save_state_dict(save_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
 
-def save_state_dict(
+def save(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -97,6 +101,23 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+
+    dumpable_state_dict = {}
+    for key, elem in state_dict.items():
+        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+
+    return _save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+
+def _save_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
+
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)

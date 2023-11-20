@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+import warnings
 
 import torch
 import torch.distributed as dist
@@ -14,8 +15,7 @@ from .utils import _DistWrapper
 
 __all__ = ["load_state_dict"]
 
-
-def load(
+def _load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -23,19 +23,14 @@ def load(
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
 ) -> None:
+    """This method is deprecated. Please switch to 'load'."""
+    warnings.warn(
+        "'load_state_dict' is deprecated and will be removed in future versions. Please use 'load' instead."
+    )
+    #TODO: test returning `load` here instead.
+    return _load_state_dict(state_dict, storage_reader, process_group, coordinator_rank, no_dist, planner
 
-    statetful_sd = {}
-    for key, elem in state_dict.items():
-        statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
-
-    load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
-    for key, elem in state_dict.items():
-        if isinstance(elem, Stateful):
-            elem.load_state_dict(statetful_sd[key])
-        state_dict[key] = elem
-
-
-def load_state_dict(
+def load(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -106,6 +101,27 @@ def load_state_dict(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+
+    statetful_sd = {}
+    for key, elem in state_dict.items():
+        statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+
+    _load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
+    for key, elem in state_dict.items():
+        if isinstance(elem, Stateful):
+            elem.load_state_dict(statetful_sd[key])
+        state_dict[key] = elem
+
+
+def _load_state_dict(
+    state_dict: Dict[str, Any],
+    storage_reader: StorageReader,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[LoadPlanner] = None,
+) -> None:
+
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
