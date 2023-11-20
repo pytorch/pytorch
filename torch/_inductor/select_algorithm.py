@@ -661,7 +661,7 @@ class TritonTemplateCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
 
@@ -732,7 +732,7 @@ class ExternKernelCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> dict[str, str]:
+    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "extern",
