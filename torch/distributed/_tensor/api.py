@@ -390,6 +390,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
+        if grad_placements is not None and not isinstance(grad_placements, tuple):
+            grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
             self, grad_placements, True
         )  # pyre-ignore[16]: autograd func
