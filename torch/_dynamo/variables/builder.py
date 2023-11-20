@@ -1727,9 +1727,7 @@ def _automatic_dynamic(e, tx, source, static_shapes) -> SymbolicContext:
 
 
 # See note [Tensor Fakification Caching]
-def wrap_to_fake_tensor_and_record(
-    e, tx, *, deource: Optional[Source], is_tensor: bool
-):
+def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or isinstance(e, torch.Tensor)
