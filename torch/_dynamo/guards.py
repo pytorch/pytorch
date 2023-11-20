@@ -367,7 +367,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         if np:
-            np_types = (
+            np_types = [
                 np.int8,
                 np.int16,
                 np.int32,
@@ -379,9 +379,9 @@ class GuardBuilder(GuardBuilderBase):
                 np.float16,
                 np.float32,
                 np.float64,
-            )
+            ]
         else:
-            np_types = ()  # type: ignore[assignment]
+            np_types = []
         ok_types = (
             int,
             float,
