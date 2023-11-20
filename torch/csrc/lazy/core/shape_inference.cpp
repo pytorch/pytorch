@@ -62,11 +62,10 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/api/include/torch/enum.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <ostream>
 #include <vector>
 
