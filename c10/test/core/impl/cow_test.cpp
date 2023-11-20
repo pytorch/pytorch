@@ -208,6 +208,18 @@ TEST(materialize_test, copy_on_write_single_reference) {
   ASSERT_THAT(storage, testing::Not(is_copy_on_write()));
 }
 
+bool buffers_are_equal(const void* a, const void* b, size_t nbytes) {
+  const char* a_ = static_cast<const char*>(a);
+  const char* b_ = static_cast<const char*>(b);
+
+  for (size_t idx = 0; idx < nbytes; idx++) {
+    if (a_[idx] != b_[idx]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 TEST(materialize_test, copy_on_write) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/6, GetCPUAllocator(), /*resizable=*/false);
@@ -227,10 +239,10 @@ TEST(materialize_test, copy_on_write) {
   // But the original storage still has the original copy.
   ASSERT_THAT(original_storage.data(), testing::Eq(original_data));
 
-  // But their data is the same.
-  ASSERT_THAT(
-      static_cast<char const*>(new_storage->data()),
-      testing::StrEq(static_cast<char const*>(original_storage.data())));
+  // And their data is the same
+  ASSERT_TRUE(new_storage->nbytes() == original_storage.nbytes());
+  ASSERT_TRUE(buffers_are_equal(
+      new_storage->data(), original_storage.data(), new_storage->nbytes()));
 }
 
 } // namespace
