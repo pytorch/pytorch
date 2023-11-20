@@ -3343,14 +3343,12 @@ def fn():
 
     def test_repeat_interleave_graphbreaks(self):
         def fn_no_breaks(x):
-            # no breaks on self_int
             x += 1
             x = torch.repeat_interleave(x, 2, 3)
             x += 1
             return x
 
         def fn_has_breaks(x):
-            # breaks on self_Tensor
             x += 1
             x = torch.repeat_interleave(x, torch.tensor(2), 3)
             x += 1
@@ -3367,7 +3365,7 @@ def fn():
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn_has_breaks)
         opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
@@ -6366,11 +6364,14 @@ def fn():
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     def test_anomaly_aot_autograd(self):
+        def fail():
+            raise AssertionError("fail")
+
         @allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
-            r.register_hook(lambda x: x + x.item())
+            r.register_hook(lambda x: fail())
             return r
 
         @torch.compile(backend="aot_eager")
@@ -6382,8 +6383,8 @@ def fn():
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        self.assertEqual(len(w), 1)
-        self.assertIn("forward call that caused the error", str(w[0].message))
+        # Suppress unrelated pkg_resources warnings
+        self.assertIn("forward call that caused the error", str(w[-1].message))
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
