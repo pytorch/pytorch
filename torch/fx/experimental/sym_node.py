@@ -24,6 +24,7 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
+    sym_sqrt,
     SymBool,
     SymFloat,
     SymInt,
@@ -396,13 +397,6 @@ class SymNode:
 
     def is_constant(self):
         return False
-
-
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
 
 
 # TODO: this probably needs the sizes-strides eval functions
