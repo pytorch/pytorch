@@ -1085,15 +1085,6 @@ class TritonKernel(Kernel):
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
-    def get_ranges(self):
-        ranges = {}
-        for symbol, range_ in self.var_ranges().items():
-            r = ValueRanges.unknown()
-            if isinstance(range_, int) or range_.is_number:
-                r = ValueRanges(0, range_ - 1)
-            ranges[symbol] = r
-        return ranges
-
     def index_to_str(self, index: sympy.Expr) -> str:
         """
         Convert an index expr to a string that can be used in triton code.

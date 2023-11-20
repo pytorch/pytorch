@@ -1221,6 +1221,9 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def indexing(self, index):
+        return self.index_to_str(index), None, None, None
+
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
     ):
@@ -1236,14 +1239,8 @@ class CppKernel(Kernel):
         """
         return cexpr(self.rename_indexing(index))
 
-    def get_ranges(self):
-        ranges = {}
-        for idx, upper in zip(self.itervars, self.ranges):
-            r = ValueRanges.unknown()
-            if isinstance(upper, int) or upper.is_number:
-                r = ValueRanges(0, upper - 1)
-            ranges[idx] = r
-        return ranges
+    def var_ranges(self):
+        return dict(zip(self.itervars, self.ranges))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

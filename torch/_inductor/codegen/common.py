@@ -25,10 +25,12 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch.utils._sympy.functions import Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import config, metrics
 from ..utils import (
+    cache_on_self,
     DeferredLineBase,
     do_bench,
     free_symbol_startswith,
@@ -960,6 +962,9 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
+    def var_ranges(self):
+        raise NotImplementedError()
+
     def bucketize(
         self,
         values,
@@ -1000,7 +1005,7 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(var, size, check=True):
+            def wrap_index_var(var, size):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:
@@ -1030,35 +1035,37 @@ class Kernel(CodeGen):
 
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var
+                return var
 
+            @staticmethod
+            def assert_index_in_bounds(var, size, mask):
+                # An assertion line may have been written already, if so just
+                # update the max size.
+                map_key = (var, mask)
+                existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
+                if existing_size is not None:
+                    size = sympy.Min(size, existing_size)
+                else:
+                    line = '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                    self.compute.writeline(
+                        IndirectAssertLine(
+                            line,
+                            self.assert_function,  # type: ignore[attr-defined]
+                            var,
+                            mask,
+                            self.indirect_max_sizes,
+                        )
+                    )
+
+                self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))  # type: ignore[attr-defined]
+
+            @staticmethod
+            def indirect_indexing(var, size, check=True):
+                new_var = CSEProxy.wrap_index_var(var, size)
                 if self.generate_assert(check):
                     mask = self.load_mask(var)
-
-                    # An assertion line may have been written already, if so just
-                    # update the max size.
-                    map_key = (var, mask)
-                    existing_size, _ = self.indirect_max_sizes.get(
-                        map_key, (None, None)
-                    )
-                    if existing_size is not None:
-                        size = sympy.Min(size, existing_size)
-                    else:
-                        line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-                        )
-                        self.compute.writeline(
-                            IndirectAssertLine(
-                                line,
-                                self.assert_function,  # type: ignore[attr-defined]
-                                var,
-                                mask,
-                                self.indirect_max_sizes,
-                            )
-                        )
-
-                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))  # type: ignore[attr-defined]
-
-                return sympy_symbol(str(var))
+                    CSEProxy.assert_index_in_bounds(new_var, size, mask)
+                return sympy_symbol(str(new_var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
@@ -1074,32 +1081,32 @@ class Kernel(CodeGen):
                 return self.load(name, index)
 
             @staticmethod
-            def check_bounds(var, expr, size):
+            def check_bounds(expr, size):
                 ranges = self.get_ranges()  # type: ignore[attr-defined]
 
-                should_compute_bounds = True
+                should_assert_bounds = True
                 if isinstance(size, int) or size.is_number:
-                    if "Where" in str(expr):
-                        expr_ = expr.subs({expr.args[-1]: 0})
+                    w = expr.atoms(Where)
+                    if len(w):
+                        replacements = {w_: 0 for w_ in w}
+                        expr_ = sympy_subs(expr, replacements)
                         bounds = bound_sympy(expr_, ranges)
                         # bounds must be within the range [-size, size) to be valid
                         if bounds.lower >= -size and bounds.upper < size:
-                            should_compute_bounds = False
+                            should_assert_bounds = False
                     else:
                         bounds = bound_sympy(expr, ranges)
                         # bounds in [0, size)
                         if bounds.lower >= 0 and bounds.upper < size:
-                            should_compute_bounds = False
+                            should_assert_bounds = False
 
-                if should_compute_bounds:
-                    bounds = bound_sympy(expr, ranges)
-                    index = self.index_to_str(expr)  # type: ignore[attr-defined]
-                    new_var = self.cse.generate(self.compute, index, bounds=bounds)
-                    new_var.update_on_args("index_wrap", (var,), {})
-                    # set the bounds on new_var as "update_on_args" may change
-                    # the bounds to "var.bounds"
-                    new_var.bounds = bounds
-                    return CSEProxy.indirect_indexing(new_var, size)
+                if should_assert_bounds:
+                    # Should this emit a check straight using expr? rather than
+                    # go throught assert_index_in_bounds:
+                    # code.writeline(f'{assert_fn}(({expr} >= 0) & ({expr} < {size}))')
+                    index, _, mask, _ = self.indexing(expr)  # type: ignore[attr-defined]
+                    new_var = self.cse.generate(self.compute, index)
+                    return CSEProxy.assert_index_in_bounds(new_var, size, mask)
 
             @staticmethod
             def store(name, index, value, mode=None):
@@ -1168,6 +1175,16 @@ class Kernel(CodeGen):
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
+
+    @cache_on_self
+    def get_ranges(self):
+        ranges = {}
+        for symbol, range_ in self.var_ranges().items():
+            r = ValueRanges.unknown()
+            if isinstance(range_, int) or range_.is_number:
+                r = ValueRanges(0, range_ - 1)
+            ranges[symbol] = r
+        return ranges
 
     def generate_assert(self, check):
         return (check or config.debug_index_asserts) and config.assert_indirect_indexing

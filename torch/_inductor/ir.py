@@ -6323,10 +6323,10 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
-            def check_bounds(self, var, index, size):
+            def check_bounds(self, index, size):
                 index = add_index(index, "other")
                 size = add_index(size, "other")
-                return self._inner.check_bounds(var, index, size)
+                return self._inner.check_bounds(index, size)
 
             def bucketize(
                 self,

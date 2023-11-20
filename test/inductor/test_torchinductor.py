@@ -852,7 +852,7 @@ class CommonTemplate:
             fn,
             inps,
             has_assert: typing.Union[bool, typing.Callable[[bool], bool]],
-            has_wrapping: typing.Union[bool, typing.Callable[[bool], bool]],
+            has_wrapping: bool
         ):
             def get_value(fn, dynamic):
                 return fn(dynamic) if inspect.isfunction(fn) else fn
@@ -861,7 +861,6 @@ class CommonTemplate:
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
 
                 has_assert_ = get_value(has_assert, dynamic)
-                has_wrapping_ = get_value(has_wrapping, dynamic)
 
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
@@ -870,11 +869,11 @@ class CommonTemplate:
                     pattern = r"\?.*:"
                     if re.findall(pattern, code):
                         found = True
-                    self.assertTrue(found is has_wrapping_)
+                    self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert_)
                 else:
                     code = run_and_get_triton_code(fn_opt, *inps)
-                    self.assertTrue(("tl.where" in code) is has_wrapping_)
+                    self.assertTrue(("tl.where" in code) is has_wrapping)
                     self.assertTrue(("device_assert" in code) is has_assert_)
                 self.assertEqual(fn(*inps), fn_opt(*inps))
 
@@ -911,7 +910,7 @@ class CommonTemplate:
             flip_with_index_constant,
             (a,),
             has_assert=is_dynamic,
-            has_wrapping=is_dynamic,
+            has_wrapping=False,
         )
 
         # Operation where we can't prove that the index is always positive or negative
@@ -935,7 +934,7 @@ class CommonTemplate:
             flip_with_index_constant,
             (a,),
             has_assert=is_dynamic,
-            has_wrapping=is_dynamic,
+            has_wrapping=False,
         )
 
         def unsafe_index(a, b):

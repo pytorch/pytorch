@@ -259,8 +259,7 @@ class IndexPropagation:
             # If we are turning a indirect indexing into direct, we need to wrap it.
             index = index.value.expr
             result = index + Where(index >= 0, 0, size)
-            var = self.materialize_expr(result, torch.int64)
-            self._inner.check_bounds(var, result, size)
+            self._inner.check_bounds(result, size)
 
             return result
 
