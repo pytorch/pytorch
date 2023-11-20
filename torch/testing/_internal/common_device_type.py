@@ -925,11 +925,10 @@ class ops(_TestParametrizer):
                                     f"{_serialize_sample(tracked_input.val)}") from e
                             raise e
 
-                    # Initialize info for the last inputs seen. This is useful for tracking
+                    # Initialize info for the last input seen. This is useful for tracking
                     # down which inputs caused a test failure. Note that TrackedInputIter is
-                    # responsible for populating this dict and cleaning it to reduce memory usage.
-                    # Mapping format: test ID -> TrackedInput
-                    test.tracked_inputs = dict()
+                    # responsible for managing this.
+                    test.tracked_input = None
 
                     decorator_fn = partial(op.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)

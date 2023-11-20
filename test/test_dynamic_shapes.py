@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
+    FreshCreateSymbolicPolicy,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -136,8 +137,10 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            policy=FreshCreateSymbolicPolicy(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims
+            ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
@@ -616,18 +619,18 @@ def forward(self, x_1):
 
         self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
+    def forward(self, a_1: "f32[s0, s1]", b_1: "f32[s2, s1]"):
         # No stacktrace found for following nodes
-        sym_size_int: Sym(s0) = torch.ops.aten.sym_size.int(a_1, 0)
-        sym_size_int_1: Sym(s2) = torch.ops.aten.sym_size.int(b_1, 0)
-        add: Sym(s0 + s2) = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-        sym_size_int_2: Sym(s1) = torch.ops.aten.sym_size.int(a_1, 1)
-        sym_size_int_3: Sym(s1) = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
-        add_1: Sym(2*s1) = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_int: "Sym(s0)" = torch.ops.aten.sym_size.int(a_1, 0)
+        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(b_1, 0)
+        add: "Sym(s0 + s2)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+        sym_size_int_2: "Sym(s1)" = torch.ops.aten.sym_size.int(a_1, 1)
+        sym_size_int_3: "Sym(s1)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: "Sym(2*s1)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
+        new_empty: "f32[s0 + s2, 2*s1]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
-        getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
+        getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
+        getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -797,7 +800,7 @@ class TestSymNumberMagicMethods(TestCase):
             create_symbool(shape_env, True),
             # We should be passing in float here, but create_symbol currently
             # only supports int
-            create_symfloat(shape_env, 3),
+            create_symfloat(shape_env, 3.0),
         )
 
         for x in unhashable:

@@ -52,6 +52,42 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_broadcast_inductor(self):
+        """
+        Testing if broadcast works correctly when using inductor
+        """
+
+        def example(tensor, src, *, tag, ranks, group_size):
+            res = torch.ops.c10d_functional.broadcast(tensor, src, tag, ranks, group_size)
+            res = torch.ops.c10d_functional.wait_tensor(res)
+            return res
+
+        def compile(func, example_inputs):
+            graph = make_fx(func)(*example_inputs)
+            return inductor_compile_fx(graph, example_inputs)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            t = torch.randn(4, 4, device="cuda")
+            inputs = (
+                t if self.rank == 0 else torch.zeros(4, 4, device="cuda"),
+                0
+            )
+            eager_out = example(*inputs)
+            self.assertTrue(same(t, eager_out))
+
+            compiled_func = compile(example, inputs)
+            compiled_out = compiled_func(*inputs)
+            self.assertTrue(same(eager_out, compiled_out))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -472,8 +508,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         }
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_single_op(self):
-        torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
             ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
@@ -500,12 +536,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
         that isn't going to be used again
         """
-        torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1
@@ -537,12 +573,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
-        torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1
@@ -779,12 +814,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(x.size(), out.size())
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_all_gather_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
-        torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1
@@ -826,12 +860,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_reduce_scatter_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
-        torch._inductor.config.debug = True
 
         def func(inp, *, tag, ranks, group_size):
             x = inp + 1

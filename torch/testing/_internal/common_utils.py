@@ -238,9 +238,9 @@ def gcIfJetson(fn):
         fn(*args, **kwargs)
     return wrapper
 
-# Tries to extract the current test function and full test ID
-# by crawling the stack. If unsuccessful, returns a pair of Nones.
-def extract_test_fn_and_id() -> Tuple[Optional[Callable], Optional[str]]:
+# Tries to extract the current test function by crawling the stack.
+# If unsuccessful, return None.
+def extract_test_fn() -> Optional[Callable]:
     try:
         stack = inspect.stack()
         for frame_info in stack:
@@ -252,10 +252,10 @@ def extract_test_fn_and_id() -> Tuple[Optional[Callable], Optional[str]]:
                 test_id = self_val.id()
                 test_name = test_id.split('.')[2]
                 test_fn = getattr(self_val, test_name).__func__
-                return (test_fn, test_id)
+                return test_fn
     except Exception:
         pass
-    return (None, None)
+    return None
 
 # Contains tracked input data useful for debugging purposes
 @dataclass
@@ -267,19 +267,15 @@ class TrackedInput:
 # Attempt to pull out tracked input information from the test function.
 # A TrackedInputIter is used to insert this information.
 def get_tracked_input() -> Optional[TrackedInput]:
-    test_fn, test_id = extract_test_fn_and_id()
-    if test_fn is None or test_id is None:
+    test_fn = extract_test_fn()
+    if test_fn is None:
         return None
-    if not hasattr(test_fn, "tracked_inputs"):
+    if not hasattr(test_fn, "tracked_input"):
         return None
-    tracked_input_dict = test_fn.tracked_inputs
-    if test_id not in tracked_input_dict:
-        return None
-    return tracked_input_dict[test_id]
+    return test_fn.tracked_input
 
-# Wraps an iterator and tracks the most recent value the iterator produces for debugging purposes.
-# Tracked values are stored in a dictionary named 'tracked_inputs' stored on the test function
-# and keyed on the full test ID.
+# Wraps an iterator and tracks the most recent value the iterator produces
+# for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
     def __init__(self, child_iter, input_type_desc, callback=lambda x: x):
         self.child_iter = enumerate(child_iter)
@@ -287,7 +283,7 @@ class TrackedInputIter:
         self.input_type_desc = input_type_desc
         # Callback is run on each iterated thing to get the thing to track.
         self.callback = callback
-        self.test_fn, self.test_id = extract_test_fn_and_id()
+        self.test_fn = extract_test_fn()
 
     def __iter__(self):
         return self
@@ -306,18 +302,16 @@ class TrackedInputIter:
             raise e
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
-        if self.test_fn is None or self.test_id is None:
+        if self.test_fn is None:
             return
-        if not hasattr(self.test_fn, "tracked_inputs"):
+        if not hasattr(self.test_fn, "tracked_input"):
             return
-        self.test_fn.tracked_inputs[self.test_id] = tracked_input
+        self.test_fn.tracked_input = tracked_input
 
     def _clear_tracked_input(self):
-        if (self.test_fn is not None and self.test_id is not None and
-                hasattr(self.test_fn, "tracked_inputs") and
-                self.test_id in self.test_fn.tracked_inputs):
-            del self.test_fn.tracked_inputs[self.test_id]
-        self.test_fn, self.test_id = None, None
+        if self.test_fn is not None and hasattr(self.test_fn, "tracked_input"):
+            self.test_fn.tracked_input = None
+        self.test_fn = None
 
 class _TestParametrizer:
     """
@@ -541,29 +535,30 @@ class parametrize(_TestParametrizer):
         self.arg_values = arg_values
         self.name_fn = name_fn
 
-    def _formatted_str_repr(self, name, value):
+    def _formatted_str_repr(self, idx, name, value):
         """ Returns a string representation for the given arg that is suitable for use in test function names. """
         if isinstance(value, torch.dtype):
             return dtype_name(value)
         elif isinstance(value, torch.device):
             return str(value)
         # Can't use isinstance as it would cause a circular import
-        elif value.__class__.__name__ == 'OpInfo' or value.__class__.__name__ == 'ModuleInfo':
+        elif type(value).__name__ in {'OpInfo', 'ModuleInfo'}:
             return value.formatted_name
-        else:
-            # Include name and value separated by underscore.
+        elif isinstance(value, (int, float, str)):
             return f"{name}_{str(value).replace('.', '_')}"
+        else:
+            return f"{name}{idx}"
 
-    def _default_subtest_name(self, values):
-        return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
+    def _default_subtest_name(self, idx, values):
+        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
 
-    def _get_subtest_name(self, values, explicit_name=None):
+    def _get_subtest_name(self, idx, values, explicit_name=None):
         if explicit_name:
             subtest_name = explicit_name
         elif self.name_fn:
             subtest_name = self.name_fn(*values)
         else:
-            subtest_name = self._default_subtest_name(values)
+            subtest_name = self._default_subtest_name(idx, values)
         return subtest_name
 
     def _parametrize_test(self, test, generic_cls, device_cls):
@@ -576,7 +571,7 @@ class parametrize(_TestParametrizer):
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
             values = check_exhausted_iterator = object()
-            for values in self.arg_values:
+            for idx, values in enumerate(self.arg_values):
                 maybe_name = None
 
                 decorators = []
@@ -601,7 +596,7 @@ class parametrize(_TestParametrizer):
 
                 param_kwargs = dict(zip(self.arg_names, values))
 
-                test_name = self._get_subtest_name(values, explicit_name=maybe_name)
+                test_name = self._get_subtest_name(idx, values, explicit_name=maybe_name)
 
                 def decorator_fn(_, decorators=decorators):
                     return decorators
@@ -1334,9 +1329,6 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
-    # TODO: Remove this; this is grandfathered in because we suppressed errors
-    # on test suite previously
-    torch._dynamo.config.suppress_errors = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
@@ -1391,6 +1383,26 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         return fn
 
     return decorator
+
+def markDynamoStrictTest(cls_or_func):
+    """
+    Marks the test as 'strict'. In strict mode, we reset before and after the
+    test, and run without suppress errors.
+    """
+    if inspect.isclass(cls_or_func):
+        cls_or_func.dynamo_strict = True
+        return cls_or_func
+
+    fn = cls_or_func
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        torch._dynamo.reset()
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
+            fn(*args, **kwargs)
+        torch._dynamo.reset()
+    return wrapper
+
 
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
     return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
@@ -2680,15 +2692,36 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        if TEST_WITH_TORCHINDUCTOR:
-            super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-        elif TEST_WITH_TORCHDYNAMO:
-            # TorchDynamo optimize annotation
-            super_run = torch._dynamo.optimize("eager")(super_run)
+        test_cls = super_run.__self__
 
-        super_run(result=result)
+        # Are we compiling?
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
+        # Is the class strict and compiling?
+        strict_mode = getattr(test_cls, "dynamo_strict", False) and compiled
+
+        if strict_mode:
+            torch._dynamo.reset()
+
+        # TODO: Remove this; this is grandfathered in because we suppressed errors
+        # on test suite previously
+        # When strict mode is False, supress_errors is True
+        if compiled:
+            supress_errors = not strict_mode
+        else:
+            supress_errors = torch._dynamo.config.suppress_errors
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
+            if TEST_WITH_TORCHINDUCTOR:
+                super_run = torch._dynamo.optimize("inductor", save_config=False)(super_run)
+            elif TEST_WITH_AOT_EAGER:
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition", save_config=False)(super_run)
+            elif TEST_WITH_TORCHDYNAMO:
+                # TorchDynamo optimize annotation
+                super_run = torch._dynamo.optimize("eager", save_config=False)(super_run)
+
+            super_run(result=result)
+
+        if strict_mode:
+            torch._dynamo.reset()
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():

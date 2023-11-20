@@ -7,6 +7,7 @@ import gc
 import importlib
 import itertools
 import math
+import operator
 import os
 import random
 import re
@@ -85,7 +86,7 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -367,7 +368,10 @@ def check_model(
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
                 assert correct_val.size() == actual_val.size()
-                assert correct_val.stride() == actual_val.stride()
+                strides_equal, _ = torch._prims_common.check_significant_strides(
+                    correct_val, actual_val
+                )
+                assert strides_equal
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
@@ -665,6 +669,20 @@ class CommonTemplate:
             return torch.sgn(a), torch.sgn(a + 1) - 1
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
+
+    def test_scatter_bf16(self):
+        def fn(inp, src, index):
+            return inp.scatter_add(0, index, src)
+
+        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            self.common(
+                fn,
+                [
+                    torch.zeros(3, 5, dtype=dtype),
+                    torch.ones((2, 5), dtype=dtype),
+                    torch.tensor([[0, 1, 2, 0, 0]]),
+                ],
+            )
 
     def test_randn_generator(self):
         def fn(a, generator):
@@ -1163,8 +1181,14 @@ class CommonTemplate:
             return (
                 torch.dist(a, b),
                 torch.dist(a, b, p=1.2),
-                torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16)),
             )
+
+        self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_dist_bf16(self):
+        def fn(a, b):
+            return torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16))
 
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
@@ -1847,7 +1871,7 @@ class CommonTemplate:
         )
 
     # https://github.com/pytorch/pytorch/issues/98979
-    @unittest.skipIf(HAS_CUDA, "cuda failed for float64 linear")
+    @skipCUDAIf(True, "cuda failed for float64 linear")
     def test_linear_float64(self):
         mod = torch.nn.Sequential(torch.nn.Linear(8, 16).to(torch.float64)).eval()
         with torch.no_grad():
@@ -2647,6 +2671,142 @@ class CommonTemplate:
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
 
+    def test_buffer_copied_in_graph(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+                self.w1 = torch.nn.Parameter(torch.zeros(1))
+                self.w2 = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w1 * x * self.w2).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(1, requires_grad=True)
+        inp_test = torch.ones(1, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_copied_in_graph_with_different_shapes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 4))
+                self.w = torch.nn.Parameter(
+                    torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
+                )
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return (self.w @ x).sum() + self.buf.sum()
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(2, 4, requires_grad=True)
+        inp_test = torch.ones(2, 4, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
+    def test_buffer_batch_norm(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.BatchNorm1d(100)
+
+            def forward(self, x):
+                return self.m(x)
+
+        model_for_eager = MyModel()
+        model_for_compile = copy.deepcopy(model_for_eager)
+
+        eager_version_counters = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        compiled_f = torch.compile(model_for_compile, backend="inductor")
+
+        inp_ref = torch.ones(20, 100, requires_grad=True)
+        inp_test = torch.ones(20, 100, requires_grad=True)
+
+        out_ref = model_for_eager(inp_ref.clone())
+        out_test = compiled_f(inp_test.clone())
+
+        eager_version_counters_after = [
+            buffer._version for _, buffer in model_for_eager.named_buffers()
+        ]
+        compile_version_counters_after = [
+            buffer._version for _, buffer in model_for_compile.named_buffers()
+        ]
+
+        eager_delta = list(
+            map(operator.sub, eager_version_counters_after, eager_version_counters)
+        )
+        compile_delta = list(
+            map(operator.sub, compile_version_counters_after, compile_version_counters)
+        )
+
+        self.assertEqual(eager_delta, compile_delta)
+
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -3021,6 +3181,19 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_var_correction(self):
+        def fn(x):
+            dim = -1
+            return (
+                torch.var(x, dim=dim, correction=1.3),
+                torch.var(x, dim=dim, correction=3),
+                torch.var(x, dim=dim, correction=10),
+            )
+
+        self.common(fn, (torch.randn([2, 8]),))
+        # Unrolled reduction
+        self.common(fn, (torch.randn([2, 4]),))
+
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
         @torch._dynamo.optimize("inductor", nopython=True)
@@ -3111,6 +3284,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
+    @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -3485,6 +3659,13 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
+        self.common(
+            fn_2,
+            (
+                torch.ones([0]),
+                torch.randn([1, 3, 3, 16]),
+            ),
+        )
 
     @expectedFailureCodegenDynamic
     def test_cat_single_empty(self):
@@ -3529,14 +3710,13 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
-    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
-
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
 
         foo_opt = torch.compile(matmul_with_op)
 
@@ -4011,7 +4191,7 @@ class CommonTemplate:
                 ),
             )
 
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -4608,9 +4788,8 @@ class CommonTemplate:
         for ref, test in zip(refs, tests):
             torch.testing.assert_close(ref, test)
 
+    @torch._dynamo.config.patch(cache_size_limit=10)
     def test_tensor_index_put_slice(self):
-        torch._dynamo.config.cache_size_limit = 10
-
         def fn(a, version):
             x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
             y = torch.tensor([2, 3], device=self.device, dtype=torch.int32)
@@ -4667,8 +4846,10 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):
+        if not has_torchvision_roi_align():
+            raise unittest.SkipTest("requires torchvision")
+
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
 
@@ -5132,6 +5313,30 @@ class CommonTemplate:
             [
                 torch.randn([8, 197, 384]),
                 torch.randn([8, 197, 384]),
+            ],
+        )
+
+    def test_slice_scatter3(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 1, 9223372036854775807, 2)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 4]),
+                torch.randn([1, 2]),
+            ],
+        )
+
+    def test_slice_scatter4(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 2, 9223372036854775807, 3)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 9]),
+                torch.randn([1, 3]),
             ],
         )
 
@@ -6366,6 +6571,17 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_unfold_zero_dimension_tensor(self):
+        def forward(x):
+            return torch.unfold_copy(dimension=1, input=x, size=0, step=7)
+
+        x = torch.rand([1, 0], dtype=torch.float32)
+
+        y = forward(x)
+        compiled_y = torch.compile(forward, fullgraph=True)(x)
+
+        self.assertEqual(y, compiled_y)
+
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
             def __init__(self):
@@ -6702,10 +6918,9 @@ class CommonTemplate:
         # If assume_static_by_default is set, the calls above will trigger
         # 3 function compilation:
         #   1. assuming 'n' is static (equals 2)
-        #   2. making 'n' dynamic, but with the guard 'end < x.shape[0]'
+        #   2. making 'n' dynamic, but with the guard 'end <= x.shape[0]'
         #      (from: torch._inductor.ir.SliceView.create)
-        #   3. when 'n' equals 6 (the above guard is violated)
-        frame_count = 3 if torch._dynamo.config.assume_static_by_default else 2
+        frame_count = 2 if torch._dynamo.config.assume_static_by_default else 1
         self.assertEqual(cnts.frame_count, frame_count)
 
         # Negative index triggers new compilation.
@@ -7496,6 +7711,16 @@ class CommonTemplate:
         a = torch.randn(2**24, 65, device=self.device)
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
+
+    def test_adaptive_avg_pool1d_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/113013
+        def fn(x):
+            x = torch.adaptive_avg_pool1d(input=x, output_size=2)
+            x = torch.argmax(input=x)
+            return x
+
+        x = torch.rand([4, 4, 3], dtype=torch.float64)
+        self.common(fn, (x,))
 
 
 @dataclasses.dataclass
