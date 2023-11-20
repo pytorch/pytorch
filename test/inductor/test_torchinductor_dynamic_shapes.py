@@ -130,7 +130,9 @@ class TestInductorDynamic(TestCase):
         torch._dynamo.reset()
 
     # See https://github.com/pytorch/pytorch/issues/114139
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=False)
+    @torch._dynamo.config.patch(
+        capture_dynamic_output_shape_ops=False, capture_scalar_outputs=False
+    )
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
@@ -209,6 +211,14 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_bool_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item()
+
+        f(torch.tensor([True], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
         def f(x):
@@ -228,6 +238,16 @@ class TestInductorDynamic(TestCase):
             return y + z
 
         f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_inf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == math.inf
+
+        f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
