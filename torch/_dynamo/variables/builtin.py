@@ -901,7 +901,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
-            assert len(kwargs) == 1
+            assert len(kwargs) == 1 and "strict" in kwargs
         if all(x.has_unpack_var_sequence(tx) for x in args):
             unpacked = [arg.unpack_var_sequence(tx) for arg in args]
             if kwargs.pop("strict", False) and len(unpacked) > 0:
