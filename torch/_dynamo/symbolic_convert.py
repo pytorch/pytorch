@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
-    allowed_functions,
     config,
     exc,
     logging as torchdynamo_logging,
@@ -64,6 +63,7 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalSource,
+    Source,
 )
 from .utils import (
     counters,
@@ -202,7 +202,7 @@ def _step_logger():
 class BlockStackEntry:
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: ContextWrappingVariable = None
+    with_context: Optional[ContextWrappingVariable] = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -215,6 +215,7 @@ class BlockStackEntry:
             return ReenterWith(self.stack_index)
 
     def exit(self, tx):
+        assert self.with_context is not None
         return self.with_context.exit(tx)
 
 
@@ -522,6 +523,7 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
+                assert b.with_context is not None
                 self.output.add_output_instructions(
                     [
                         *b.with_context.reconstruct(cg),
@@ -655,10 +657,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return newvar
             return v
 
+        recursive_parents = oldvar.parents_tracker.recursive_parents()
+
         def skip(v: VariableTracker):
             return v.parents_tracker not in recursive_parents
 
-        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -900,6 +903,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable.create(value=inst.argval))
 
     def get_global_source(self, name):
+        source: Source
         if self.output.global_scope is self.f_globals:
             source = GlobalSource(name)
         else:
@@ -1210,6 +1214,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
+        kwargsvars: VariableTracker
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({}, dict)
             argsvars = self.pop()
@@ -1917,7 +1922,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     @property
     def fake_mode(self):
-        return self._fake_mode
+        return self.output.tracing_context.fake_mode
 
     def find_symbolic_locals_name(self, tensor_variable):
         for key, value in self.symbolic_locals.items():
@@ -1991,8 +1996,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-
-        self._fake_mode = output.tracing_context.fake_mode
 
         self.current_speculation = None
         self.random_calls = []
@@ -2256,24 +2259,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with __self__")
 
-        if func.get_name() == "patched_init":
-            unimplemented("Patched init cannot be inlined.")
-
-        try:
-            func_value = func.get_function()
-        except NotImplementedError:
-            func_value = None
-
-        if (
-            func.get_name() == "__torch_function__"
-            or func_value is torch._tensor._convert
-        ):
-            return skipfiles.SkipResult(False, "Allow __torch_function__")
-
-        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
-            unimplemented(f"inlining disallowed: {func_value}")
-
-        result = skipfiles.check_verbose(func, allow_torch=True)
+        result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,

@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
+#include <fstream>
 #include <mutex>
 #include <sstream>
 
@@ -37,6 +38,30 @@
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
+
+DebugInfoWriter::DebugInfoWriter(int rank) {
+  std::string fileName = getCvarString(
+      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+  filename_ = c10::str(fileName, rank);
+}
+
+DebugInfoWriter::~DebugInfoWriter() = default;
+
+void DebugInfoWriter::write(const std::string& ncclTrace) {
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename_, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Wrote finished ";
+}
 
 namespace {
 
@@ -375,7 +400,7 @@ struct NCCLTraceBuffer {
     return instance;
   }
   NCCLTraceBuffer() {
-    max_entries_ = parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0);
+    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     enabled_ = max_entries_ > 0;
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
@@ -928,24 +953,24 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
+  blockingWait_ = getCvarBool(NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
+      getCvarInt(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
+  desyncDebug_ = getCvarBool(NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
-  heartbeatTimeoutInSec_ = parseEnvVarIntDefault(
-      TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  heartbeatTimeoutInSec_ =
+      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
-      parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
+      getCvarBool(NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
-  avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
+  avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
-      parseEnvVarFlag(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK);
+      getCvarBool(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
   if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
@@ -974,7 +999,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+  if (getCvarBool(ENABLE_NCCL_HEALTH_CHECK, false)) {
     // Perform health check by initializing dummy communicators and destroying
     // them. This will help indicate any NCCL-related issues prior to the first
     // collective.
@@ -990,27 +1015,28 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   init();
   const std::string OFF = "OFF";
-  const char* torch_distributed_debug =
-      parseEnvVarString("TORCH_DISTRIBUTED_DEBUG", OFF.c_str());
-  const char* nccl_debug = parseEnvVarString("NCCL_DEBUG", OFF.c_str());
-  LOG(INFO)
-      << "[Rank " << rank_ << "] ProcessGroupNCCL initialization options: "
-      << "NCCL version: " << getNcclVersion()
-      << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-      << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-      << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-      << ", NCCL_BLOCKING_WAIT: " << blockingWait_
-      << ", TIMEOUT(ms): " << options_->timeout.count()
-      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
-      << ", TORCH_DISTRIBUTED_DEBUG: " << std::string(torch_distributed_debug)
+  std::string torch_distributed_debug =
+      getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
+  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
+  LOG(INFO) << "[Rank " << rank_
+            << "] ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion()
+            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-      << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-      << useTensorRegisterAllocatorHook_
+            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << useTensorRegisterAllocatorHook_
 #endif
-      << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", NCCL_DEBUG: " << std::string(nccl_debug)
-      << ", ID=" << this->getID();
+            << ", TORCH_NCCL_ENABLE_MONITORING: "
+            << monitorThreadEnabled_.load()
+            << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   RECORD_PARAM_COMMS(
       0, // seq
@@ -1183,6 +1209,18 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
+
+c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
+  if (writeDebugInfo_) {
+    return c10::nullopt;
+  }
+  // If we have not dumped the debugInfo return true and set the flag to false
+  writeDebugInfo_ = true;
+  return c10::optional<std::thread>(
+      std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
+}
+
 void abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1276,13 +1314,30 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void dump_debugging_info() {
+void ProcessGroupNCCL::registerDebugInfoWriter(
+    std::unique_ptr<DebugInfoWriter> writer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      debugInfoWriter_ == nullptr,
+      "ProcessGroupNCCL debugInfoWriter already registered");
+  debugInfoWriter_ = std::move(writer);
+}
+
+void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR)
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
-  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
-    // TODO: Find the right and proper way to dump the debug info.
-    // We cannot print out debugging info directly.
-    LOG(ERROR) << "nccl_trace: " << dump_nccl_trace();
+  if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0) {
+    // We dump nccl trace into local disk by default and users can register
+    // their customized writer by inheriting `DebugInfoWriter` via
+    // `registerDebugInfoWriter`.
+    auto ncclTrace = dump_nccl_trace();
+    if (debugInfoWriter_ == nullptr) {
+      // Dump the trace blob into local disk as a fallback.
+      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
+          std::make_unique<DebugInfoWriter>(rank_);
+      registerDebugInfoWriter(std::move(debugInfoWriterPtr));
+    }
+    debugInfoWriter_->write(ncclTrace);
   }
 }
 
@@ -1318,10 +1373,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
-  // In the timeout case and we now only dump the flight recorder
-  // to std::out. Down the road, if we have more complicated or blocking
-  // operations, we might need to use a side thread to do it.
-  dump_debugging_info();
+  // Store debug info to storage if no other thread does it. (By default to
+  // local disk)
+  auto maybeWriteDebugInfo = tryWriteDebugInfo();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1341,11 +1395,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  }
+
+  // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
+  // or the thread has finished. Because we don't want to block the monitor
+  // thread, so We mark the thread detach and the dump of debug info becomes
+  // "best effort". If the process exit normally, marking it detach also makes
+  // sense because we don't really care about dumping the debug info.
+  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
+    maybeWriteDebugInfo->detach();
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
@@ -1465,14 +1529,26 @@ void ProcessGroupNCCL::workCleanupLoop() {
           // rank
           abort();
         }
+
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
-            // Set shutdown mode, so the heartbeat monitor thread will not abort
-            // process immediately.
+            // Set shutdown mode, so the heartbeat monitor thread will not
+            // abort process immediately.
             collectiveDebugInfoMode_.store(true);
+            // Store debug info to storage. (By default to local disk)
+            auto dumpingDebugInfo = tryWriteDebugInfo();
             auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
+            if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
+              std::this_thread::sleep_for(
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+              // At this point, we either have already waited for
+              // `kWatchdogThreadSleepMillis * 30` or the thread has finished so
+              // that we mark the thread detach and the dump of debug info
+              // becomes "best effort".
+              dumpingDebugInfo->detach();
+            }
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
@@ -1850,7 +1926,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
   if (getRank() == 0) {
-    LOG(INFO) << "NCCL_DEBUG: " << parse_env("NCCL_DEBUG");
+    LOG(INFO) << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
   }
 
   // See [Group Start/End Note]
