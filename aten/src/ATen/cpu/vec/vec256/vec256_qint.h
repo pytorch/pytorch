@@ -305,6 +305,13 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
     }
 
+    float_vec_return_type dequantize(
+        Vectorized<float> scale,
+        Vectorized<float> zero_point) const {
+      __m256 float_vals = _mm256_cvtepi32_ps(vals);
+      return {(Vectorized<float>(float_vals) - zero_point) * scale};
+    }
+
     static Vectorized<c10::qint32> quantize(
         const float_vec_return_type& rhs,
         float scale,
@@ -520,6 +527,26 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     return {val0, val1, val2, val3};
   }
 
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+
+    __m256 float_val0 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val0));
+    __m256 float_val1 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val1));
+    __m256 float_val2 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val2));
+    __m256 float_val3 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val3));
+
+    auto val0 = (Vectorized<float>(float_val0) - zero_point) * scale;
+    auto val1 = (Vectorized<float>(float_val1) - zero_point) * scale;
+    auto val2 = (Vectorized<float>(float_val2) - zero_point) * scale;
+    auto val3 = (Vectorized<float>(float_val3) - zero_point) * scale;
+    return {val0, val1, val2, val3};
+  }
+
   static Vectorized<c10::qint8> quantize(
       const float_vec_return_type& rhs,
       float /*scale*/,
@@ -698,6 +725,26 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     return {val0, val1, val2, val3};
   }
 
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+
+    __m256 float_val0 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val0));
+    __m256 float_val1 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val1));
+    __m256 float_val2 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val2));
+    __m256 float_val3 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val3));
+
+    auto val0 = (Vectorized<float>(float_val0) - zero_point) * scale;
+    auto val1 = (Vectorized<float>(float_val1) - zero_point) * scale;
+    auto val2 = (Vectorized<float>(float_val2) - zero_point) * scale;
+    auto val3 = (Vectorized<float>(float_val3) - zero_point) * scale;
+    return {val0, val1, val2, val3};
+  }
+
   static Vectorized<c10::quint8> quantize(
       const float_vec_return_type& rhs,
       float /*scale*/,
@@ -851,6 +898,13 @@ struct VectorizedQuantizedConverter {
           tmp_vals[7]);
     }
     return rv;
+  }
+
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    Vectorized<float> scale_zp_premul;
+    return dequantize(scale, zero_point, scale_zp_premul);
   }
 
  protected:

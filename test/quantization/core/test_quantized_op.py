@@ -328,6 +328,23 @@ class TestQuantizedOps(TestCase):
         ]
         self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
 
+    @skipIfNoFBGEMM
+    def test_sigmoid_dequantize_rounding_error(self):
+        # issue #107030
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'output_is_observed': True,
+            }
+        ]
+        X = (np.full(64, 514., dtype=np.float32), (1028.02, 255, torch.quint8))
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
     """Tests the correctness of the quantized::hardsigmoid op."""
     @override_qengines
     def test_qhardsigmoid(self):
