@@ -357,6 +357,8 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
     def test_forbid_nopython_has_graph_break_cache_hit(self):
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list, innermost_fn
+
         for create_functions in [
             lambda f, cnt: (
                 torch.compile(f, backend=cnt),
@@ -367,6 +369,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.optimize(backend=cnt, nopython=True)(f),
             ),
         ]:
+            torch._dynamo.reset()
 
             def fn(x):
                 if len(x.size()) == 1:
@@ -387,6 +390,16 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.zeros(1))
             self.assertEqual(cnt.frame_count, 2)
 
+            cache_entries = _debug_get_cache_entry_list(innermost_fn(opt_fn))
+            self.assertEqual(len(cache_entries), 1)
+            # guarded code with graph break has `___needs_nopython` guard
+            self.assertTrue(
+                any(
+                    "___needs_nopython" in part
+                    for part in cache_entries[0].check_fn.code_parts
+                )
+            )
+
             with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "graph_break"):
                 nopython_fn(torch.zeros(1))
             self.assertEqual(cnt.frame_count, 2)
@@ -397,7 +410,24 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             nopython_fn(torch.zeros((1, 2)))
             self.assertEqual(cnt.frame_count, 3)
 
-            # nopython does not recompile when hitting cache with no graph breaks
+            cache_entries = _debug_get_cache_entry_list(innermost_fn(opt_fn))
+            self.assertEqual(len(cache_entries), 2)
+            # nopython function with no graph break does not have `___needs_nopython` guard
+            self.assertFalse(
+                any(
+                    "___needs_nopython" in part
+                    for part in cache_entries[0].check_fn.code_parts
+                )
+            )
+            # previous guarded code with graph break still has `___needs_nopython` guard
+            self.assertTrue(
+                any(
+                    "___needs_nopython" in part
+                    for part in cache_entries[1].check_fn.code_parts
+                )
+            )
+
+            # nopython does not recompile - manages to hit cache entry with no graph breaks
             nopython_fn(torch.zeros((1, 2)))
             self.assertEqual(cnt.frame_count, 3)
 
