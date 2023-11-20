@@ -1781,6 +1781,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            # call the ABI shim function instead of the ATen one
+            kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
         if fn == "aten.scatter_":
             if src_is_tensor:
