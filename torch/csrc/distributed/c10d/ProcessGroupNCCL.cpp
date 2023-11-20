@@ -1370,50 +1370,50 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // local disk)
   auto maybeWriteDebugInfo = tryWriteDebugInfo();
 
-// Create a error message reported from MonitorThread, so
-// we throw exception and make the whole process to be killed.
-const auto exitMsg = fmt::format(
-    "[Rank {}] NCCL monitor thread timeout. Basically, this could ",
-    "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-    "especially when your program enters a deadlock state in watchdog"
-    "or destructors. If you see this error, please file a bug to pytorch.",
-    rank_);
+  // Create a error message reported from MonitorThread, so
+  // we throw exception and make the whole process to be killed.
+  const auto exitMsg = fmt::format(
+      "[Rank {}] NCCL monitor thread timeout. Basically, this could ",
+      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
+      "especially when your program enters a deadlock state in watchdog"
+      "or destructors. If you see this error, please file a bug to pytorch.",
+      rank_);
 
-// There are two possible cases for the watchdog thread exit:
-// Case one: desync report runs quickly, and it follows the step:
-// collective timeout -> desync -> exception handling -> destructors
-// -> set terminateHeartbeatMonitorThread_ -> notify monitorWakeUpCV_.
-// So the code either early returns above or will skip the sleep below.
-// Case two: desync might be slow or get stuck. Or we get stuck in
-// destructors, we will sleep for some time before calling std::abort() to
-// kill the whole process.
-if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-     (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
-    !terminateHeartbeatMonitorThread_.load()) {
-  // Leave another two mins for desync report generation or process group
-  // destroy.
-  std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
-}
+  // There are two possible cases for the watchdog thread exit:
+  // Case one: desync report runs quickly, and it follows the step:
+  // collective timeout -> desync -> exception handling -> destructors
+  // -> set terminateHeartbeatMonitorThread_ -> notify monitorWakeUpCV_.
+  // So the code either early returns above or will skip the sleep below.
+  // Case two: desync might be slow or get stuck. Or we get stuck in
+  // destructors, we will sleep for some time before calling std::abort() to
+  // kill the whole process.
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
+      !terminateHeartbeatMonitorThread_.load()) {
+    // Leave another two mins for desync report generation or process group
+    // destroy.
+    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  }
 
-// At this point, we either already sleep for another `heartbeatTimeoutInSec_`
-// or the thread has finished. Because we don't want to block the monitor
-// thread, so We mark the thread detach and the dump of debug info becomes
-// "best effort". If the process exit normally, marking it detach also makes
-// sense because we don't really care about dumping the debug info.
-if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
-  maybeWriteDebugInfo->detach();
-}
+  // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
+  // or the thread has finished. Because we don't want to block the monitor
+  // thread, so We mark the thread detach and the dump of debug info becomes
+  // "best effort". If the process exit normally, marking it detach also makes
+  // sense because we don't really care about dumping the debug info.
+  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
+    maybeWriteDebugInfo->detach();
+  }
 
-if (!terminateHeartbeatMonitorThread_.load()) {
-  const auto logMsg = fmt::format(
-      "[Rank {}] monitoring thread detects no heartbeat and will finally kill the process!",
-      " terminateProcessGroup_{} collectiveDebugInfoMode_{}",
-      rank_,
-      terminateProcessGroup_,
-      collectiveDebugInfoMode_);
-  LOG(ERROR) << logMsg;
-  terminateProcess(exitMsg);
-}
+  if (!terminateHeartbeatMonitorThread_.load()) {
+    const auto logMsg = fmt::format(
+        "[Rank {}] monitoring thread detects no heartbeat and will finally kill the process!",
+        " terminateProcessGroup_{} collectiveDebugInfoMode_{}",
+        rank_,
+        c10::str(terminateProcessGroup_),
+        c10::str(collectiveDebugInfoMode_));
+    LOG(ERROR) << logMsg;
+    terminateProcess(exitMsg);
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
