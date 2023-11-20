@@ -442,6 +442,10 @@ or file a github issue."""
                         real_mod, new_args, kwargs
                     )
 
+                    ddp_graph_log.debug(
+                        "\n---%s graph---\n%s", n.target, curr_submod.graph
+                    )
+
                     # We update the original (outer) graph with a call into the compiled module
                     # instead of the uncompiled one.
                     self.module.delete_submodule(n.target)
