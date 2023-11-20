@@ -248,3 +248,62 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_RMSprop_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        RMSprop_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "alpha": 0.85},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+                "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+                "maximize": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in RMSprop_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.RMSprop(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.RMSprop(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
