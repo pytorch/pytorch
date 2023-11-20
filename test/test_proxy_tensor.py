@@ -755,7 +755,17 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    pass
+    def test_error_on_data_dependent_ops(self):
+        def f():
+            x = torch.randn([])
+            y = torch.randn([])
+            assert torch.allclose(x * y, y * x)
+            z = float(x)
+            z2 = float(y)
+
+        # Smoke tests
+        make_fx(f, _error_on_data_dependent_ops=False)()
+        make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
