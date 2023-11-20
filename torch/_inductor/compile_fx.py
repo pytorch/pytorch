@@ -51,7 +51,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -215,79 +214,6 @@ def count_bytes_inner(
         metrics.nodes_num_elem += nodes_num_elem
         metrics.node_runtimes += node_runtimes
     return make_boxed_func(gm.forward)
-
-
-def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
-    @functools.wraps(inner_compile)
-    def wrapper(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], **kwargs):
-        """
-        Compile into cpp wrapper:
-        For CPU, this is currently done in one pass.
-        For GPU, this is done in two passes: JIT-compile the model with python wrapper code
-        and run it to generate autotuned kernel binaries in the first pass; and then generate
-        cpp wrapper code and compile it to a dynamic library in the second pass.
-        """
-        devices = (
-            {t.device.type for t in gm.parameters()}
-            | {t.device.type for t in gm.buffers()}
-            | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
-        )
-
-        if "cuda" not in devices:
-            kwargs_patched = {**kwargs, "cpp_wrapper": True}
-            return inner_compile(gm, example_inputs, **kwargs_patched)
-        else:
-            with config.patch(
-                {
-                    "triton.store_cubin": True,
-                }
-            ):
-                # first pass with regular python wrapper code
-                kwargs_patched = {
-                    **kwargs,
-                    "cpp_wrapper": False,
-                }
-                # clone_graph(gm) makes sure no graph modification from the first pass will
-                # leak to the second pass. It does increase memory pressure, but the problem
-                # can be alleviated once we have parameters as FakeTensor.
-
-                compiled = inner_compile(
-                    clone_graph(gm), example_inputs, **kwargs_patched
-                )
-
-                def materialize(x):
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
-                        # Need concrete value to run dynamic shapes and tune the result
-                        return x.node.hint
-                    else:
-                        assert not isinstance(x, FakeTensor)
-                        return x
-
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    if tracing_context.output_strides:
-                        tracing_context.output_strides.clear()
-
-                    params_flat = [
-                        param
-                        for param in tracing_context.params_flat  # type: ignore[union-attr]
-                        if param is not None
-                    ]
-                    real_inputs = [
-                        materialize(x) for x in (params_flat + V.real_inputs)
-                    ]
-                else:
-                    real_inputs = [materialize(x) for x in V.real_inputs]
-
-                with torch.utils._python_dispatch._disable_current_modes():
-                    compiled(real_inputs)
-
-                del real_inputs
-
-                # second pass
-                kwargs_patched = {**kwargs, "cpp_wrapper": True}
-                return inner_compile(gm, example_inputs, **kwargs_patched)
-
-    return wrapper
 
 
 def fake_tensor_prop(
@@ -592,6 +518,10 @@ def fx_codegen_and_compile(
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
+            # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
+            # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
+            # we currently use fake tensors and defake them later.
+            example_inputs=V.real_inputs if is_inference else example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
@@ -1033,6 +963,7 @@ def compile_fx(
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
+                "triton.store_cubin": True,
             }
         ), V.set_real_inputs(example_inputs_):
             inputs_ = example_inputs_
@@ -1055,7 +986,7 @@ def compile_fx(
             return compile_fx(
                 model_,
                 inputs_,
-                inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
+                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                 decompositions=decompositions,
             )
 
