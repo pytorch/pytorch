@@ -577,7 +577,6 @@ def _export(
     constraints: Optional[List[Constraint]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
-    disable_constraint_solver: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -596,8 +595,6 @@ def _export(
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
 
-        disable_constraint_solver: Whether the dim constraint solver must be disabled.
-
     Returns:
         An ExportedProgram containing the traced method.
     """
@@ -610,7 +607,6 @@ def _export(
         kwargs,
         constraints,
         preserve_module_call_signature=preserve_module_call_signature,
-        disable_constraint_solver=disable_constraint_solver,
     )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
