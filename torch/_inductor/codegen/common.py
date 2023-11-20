@@ -1223,7 +1223,7 @@ class ChoiceCaller:
     def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
         raise NotImplementedError()
 
-    def info_dict(self) -> dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
 
