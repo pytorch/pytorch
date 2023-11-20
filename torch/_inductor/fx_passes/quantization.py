@@ -867,6 +867,7 @@ def _register_quantization_lowerings():
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     def _inner(match):
+        assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
             aten.mul.Tensor,
@@ -877,15 +878,19 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
 
         if dequant_pattern_end_node.target is aten.reshape.default:
             mul_node = (
-                dequant_pattern_end_node.args[0]
+                dequant_pattern_end_node.args[0]  # pattern: linear <- reshape <- mul
                 if dtype == torch.float32
-                else dequant_pattern_end_node.args[0].args[0]
+                else dequant_pattern_end_node.args[0].args[
+                    0
+                ]  # pattern: linear <- reshape <- to_bf16 <- mul
             )
         else:
             mul_node = (
-                dequant_pattern_end_node
+                dequant_pattern_end_node  # pattern: linear <- mul
                 if dtype == torch.float32
-                else dequant_pattern_end_node.args[0]
+                else dequant_pattern_end_node.args[
+                    0
+                ]  # pattern: linear <- to_bf16 <- mul
             )
 
         sub_node = mul_node.args[0]
@@ -896,7 +901,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
             and to_fp32_node.target is prims.convert_element_type.default
             and len(list(dequant_pattern_end_node.users)) > 1
         ):
-            # dequant pattern has more than 1 users to be promoted
+            # If dequant pattern has more than 1 users, then do dequant promoted
             return True
         return False
 
@@ -937,7 +942,8 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         assert dtype in [torch.float32, torch.bfloat16]
 
         def clone_to_new_node(graph, source_node, user_node):
-            # clone the source_node to connect with user_node
+            # Clone the source_node to a new node
+            # Replace user_node's input from source_node to new_node
             assert (
                 source_node.op == "call_function"
             ), "clone_to_new_node only support node.op call_function"
@@ -951,9 +957,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 user_node.replace_input_with(source_node, new_node)
             return new_node
 
-        # Find the start node and end node of a dequant pattern to be cloned
+        # Find the start node and end node of a dequant pattern
         # * End node should be the match.output_node()
-        # * Start node should be the dtype convert to float32 node
+        # * Start node should be the node of dtype convert to float32
         dequant_pattern_end_node = match.output_node()
         assert dequant_pattern_end_node.target in [
             aten.mul.Tensor,
