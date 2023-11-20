@@ -1204,6 +1204,8 @@ coverage_ignore_functions = [
     "rebuild_cuda_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",
+    "rebuild_sparse_coo_tensor",
+    "rebuild_sparse_compressed_tensor",
     "rebuild_storage_empty",
     "rebuild_storage_fd",
     "rebuild_storage_filename",
@@ -2870,6 +2872,7 @@ coverage_ignore_classes = [
     "ShapeGuardPrinter",
     "StrictMinMaxConstraint",
     "SymDispatchMode",
+    "CreateSymbolicPolicy",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",

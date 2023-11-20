@@ -70,8 +70,7 @@ class _ToTorchTensor(torch.autograd.Function):
         local_tensor = input._local_tensor
         if not async_output and isinstance(local_tensor, funcol.AsyncCollectiveTensor):
             # synchronously wait for any pending collectives to get the result tensor
-            local_tensor = local_tensor.trigger_wait()
-            local_tensor = local_tensor.elem  # type: ignore[attr-defined]
+            local_tensor = local_tensor.wait()
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
