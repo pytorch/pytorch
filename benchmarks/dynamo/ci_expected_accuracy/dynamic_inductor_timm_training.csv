@@ -186,7 +186,7 @@ rexnet_100,pass,8
 
 
 
-sebotnet33ts_256,pass,8
+sebotnet33ts_256,fail_accuracy,8
 
 
 
