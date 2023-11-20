@@ -567,17 +567,18 @@ class WrapperCodeGen(CodeGen):
         pass
 
     @dynamo_timed
-    def generate(self, is_inference):
+    def generate(self, is_inference, profiling_allowed=True):
         result = IndentedBuffer()
         result.splice(self.header)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
-            if config.profiler_mark_wrapper_call:
-                self.generate_profiler_mark_wrapper_call(stack)
-            if config.profile_bandwidth:
-                self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+            if profiling_allowed:
+                if config.profiler_mark_wrapper_call:
+                    self.generate_profiler_mark_wrapper_call(stack)
+                if config.profile_bandwidth:
+                    self.write_triton_header_once()
+                    self.wrapper_call.writeline("start_graph()")
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -605,7 +606,7 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
-            if config.profile_bandwidth:
+            if config.profile_bandwidth and profiling_allowed:
                 self.wrapper_call.writeline("end_graph()")
 
             self.generate_return(output_refs)
@@ -1584,7 +1585,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_model_kernels()
             self.codegen_model_constructor()
         self.write_wrapper_decl()
-        return super().generate(is_inference)
+        # don't generate profiling-related python code
+        return super().generate(is_inference, profiling_allowed=False)
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
