@@ -18,7 +18,7 @@ class Placement:
     def is_shard(self, dim: Optional[int] = None) -> bool:
         is_shard_instance = isinstance(self, Shard)
         if dim is not None and is_shard_instance:
-            return self.dim == dim
+            return cast(Shard, self).dim == dim
         else:
             return is_shard_instance
 
