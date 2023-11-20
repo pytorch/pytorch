@@ -159,9 +159,10 @@ Tensor& quantize_tensor_per_channel_affine(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    if(qtensor.device().type() != c10::DeviceType::CUDA){
+    if (qtensor.device().type() != c10::DeviceType::CUDA &&
+        qtensor.device().type() != c10::DeviceType::PrivateUse1) {
       checkZeroPoints<underlying_t>(fn_name, zero_points);
-    }  // for cuda, this check will occur in the actual cuda function
+    }  // for cuda and privateuse1, this check will occur in the actual device function
   });
 
   TORCH_CHECK(
@@ -251,9 +252,10 @@ Tensor& dequantize_tensor_per_channel_affine(
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    if(qtensor.device().type() != c10::DeviceType::CUDA){
+    if(qtensor.device().type() != c10::DeviceType::CUDA &&
+       qtensor.device().type() != c10::DeviceType::PrivateUse1){
       checkZeroPoints<underlying_t>(fn_name, zero_points);
-    }  // for cuda, this check will occur in the actual cuda function
+    }  // for cuda and privateuse1, this check will occur in the actual device function
   });
 
   TORCH_CHECK(
