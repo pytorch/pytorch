@@ -424,6 +424,11 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     # (e.g. __main__)
     caller_module_name = None if caller_module is None else caller_module.__name__
 
+    # TODO(rzou): We're gonna need to stage this change with torchvision,
+    # since torchvision is github first.
+    if caller_module_name is not None and caller_module_name.startswith("torchvision."):
+        caller_module_name = None
+
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
         if caller_module_name is not None:

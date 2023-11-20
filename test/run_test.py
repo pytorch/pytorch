@@ -47,6 +47,7 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
+    get_prediction_confidences,
     get_test_prioritizations,
 )
 
@@ -508,7 +509,7 @@ def run_test(
         return 0
 
     if is_cpp_test:
-        stepcurrent_key = test_file
+        stepcurrent_key = f"{test_file}_{os.urandom(8).hex()}"
     else:
         unittest_args.extend(
             [
@@ -516,7 +517,7 @@ def run_test(
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -1666,7 +1667,7 @@ def main():
     aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
         unranked_tests=selected_tests
     )
-    metrics_dict = {}
+
     if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
@@ -1674,14 +1675,6 @@ def main():
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
     test_prioritizations.print_info()
-
-    if IS_CI:
-        metrics_dict = {
-            "high_relevance_tests": test_prioritizations.get_high_relevance_tests(),
-            "probable_relevance_tests": test_prioritizations.get_probable_relevance_tests(),
-            "unranked_relevance_tests": test_prioritizations.get_unranked_relevance_tests(),
-            "cpp": options.cpp,
-        }
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
@@ -1774,13 +1767,9 @@ def main():
             print_to_stderr(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
-            metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
-            metrics_dict[f"{test_batch.name}_failures"] = [
-                str(x.test) for x in test_batch.failures
-            ]
 
     finally:
         if options.coverage:
@@ -1798,15 +1787,23 @@ def main():
         all_failures = [failure for batch in test_batches for failure in batch.failures]
 
         if IS_CI:
-            emit_metric("td_experiment_1", metrics_dict)
-
             num_tests = len(selected_tests)
             for test, _ in all_failures:
                 test_stats = aggregated_heuristics.get_test_stats(test)
                 test_stats["num_total_tests"] = num_tests
 
                 print_to_stderr("Emiting td_test_failure_stats")
-                emit_metric("td_test_failure_stats", test_stats)
+                emit_metric(
+                    "td_test_failure_stats",
+                    {
+                        **test_stats,
+                        "confidence_ratings": get_prediction_confidences(
+                            selected_tests
+                        ),
+                        "failure": str(test),
+                        "tests": selected_tests,
+                    },
+                )
 
     if len(all_failures):
         for _, err in all_failures:

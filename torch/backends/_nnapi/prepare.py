@@ -174,7 +174,7 @@ def process_for_nnapi(
     # We have to create a new class here every time this function is called
     # because module.define adds a method to the *class*, not the instance.
     class ShapeComputeModule(torch.nn.Module):
-        """Code-gen-ed module for tensor shape computation
+        """Code-gen-ed module for tensor shape computation.
 
         module.prepare will mutate ser_model according to the computed operand
         shapes, based on the shapes of args.  Returns a list of output templates.

@@ -3735,6 +3735,36 @@ class TestAutograd(TestCase):
             y = x * 2
         self.assertTrue(y.requires_grad)
 
+    def test_set_grad_enabled_wraps(self):
+        for decorator in [True, False]:
+            with torch.enable_grad():
+                self.assertTrue(torch.is_grad_enabled())
+
+                if decorator:
+                    # This should not mutate the global grad mode!
+                    @torch.set_grad_enabled(False)
+                    def inner_func(x):
+                        return x.sin()
+                else:
+                    def inner_func(x):
+                        return x.sin()
+
+                    # This is non-idiomatic usage!
+                    # More idiomatic usage: torch.set_grad_enabled(False)(inner_func)
+                    obj = torch.set_grad_enabled(False)
+                    self.assertTrue(not torch.is_grad_enabled())
+
+                    # this will consume the set_grad_enabled global mutation!
+                    inner_func = obj(inner_func)
+                    self.assertTrue(torch.is_grad_enabled())
+
+                self.assertTrue(torch.is_grad_enabled())
+
+                x = torch.zeros(1, requires_grad=True)
+                self.assertTrue(
+                    not inner_func(x).requires_grad
+                )
+
     def test_simple_reentrant(self):
         y_data = torch.randn(2, 2)
 
@@ -6306,6 +6336,22 @@ for shape in [(1,), ()]:
 
         self.assertEqual(called[0], 2)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_callback_propagates_errors_from_device_thread(self):
+        def callback():
+            raise RuntimeError("blah")
+
+        def hook_with_callback(*args):
+            torch.autograd.Variable._execution_engine.queue_callback(callback)
+
+        t = torch.tensor([1., 2.], requires_grad=True, device=torch.device("cuda"))
+        t.register_hook(hook_with_callback)
+        output = t ** 2
+        loss = output.sum()
+
+        with self.assertRaisesRegex(RuntimeError, "blah"):
+            loss.backward()
+
     def _test_reentrant_with_callbacks(self, install_callbacks_in_depths):
         counter = {}
         counter["inner"] = 0
@@ -6990,6 +7036,32 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.unsqueeze_(0))
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
+
+    def test_autograd_print_tensor(self):
+        a = torch.ones(1, requires_grad=True)
+        a_clone = a.clone()
+        self.assertEqual(repr(a), "tensor([1.], requires_grad=True)")
+        self.assertEqual(repr(a_clone), "tensor([1.], grad_fn=<CloneBackward0>)")
+
+        with torch.no_grad():
+            b = a[:]
+            b *= 2
+
+        # Special handling for printing view created in no-grad and modified
+        # in-placed in no-grad.
+        self.assertEqual(repr(b), "tensor([2.], grad_fn=<Invalid>)")
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, x):
+                return x
+
+        c = Func.apply(a)
+        self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
 
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
@@ -11224,6 +11296,24 @@ class TestMultithreadAutograd(TestCase):
 
         torch.autograd.set_multithreading_enabled(True)
         self.assertTrue(torch.autograd.is_multithreading_enabled())
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_custom_function_propagates_errors_from_device_thread(self):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("blah")
+                return gO
+
+        t = torch.tensor([1., 2.], requires_grad=True, device=torch.device("cuda"))
+        out = MyFunc.apply(t).sum()
+
+        with self.assertRaisesRegex(RuntimeError, "blah"):
+            out.backward()
 
 class TestNestedCheckpoint(TestCase):
     @staticmethod

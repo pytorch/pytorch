@@ -38,9 +38,9 @@ map = MapWrapper("map", _deprecated_global_ns=True)
 map_impl = HigherOrderOperator("map_impl")
 
 dummy_aot_config = AOTConfig(
-    fw_compiler=None,
-    bw_compiler=None,
-    partition_fn=None,
+    fw_compiler=None,  # type: ignore[arg-type]
+    bw_compiler=None,  # type: ignore[arg-type]
+    partition_fn=None,  # type: ignore[arg-type]
     decompositions={},
     num_params_buffers=0,
     aot_id=0,
@@ -185,7 +185,7 @@ def map_wrapper(f, xs, *args):
     out_spec = None
 
     def flat_fn(*flat_args):
-        xs = pytree.tree_unflatten(flat_args[:num_mapped_args], xs_spec)
+        xs = pytree.tree_unflatten(list(flat_args[:num_mapped_args]), xs_spec)
         unflattened_out = f(xs, *flat_args[num_mapped_args:])
         flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
 
@@ -194,7 +194,7 @@ def map_wrapper(f, xs, *args):
         return flat_out
 
     return pytree.tree_unflatten(
-        map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec
+        map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec  # type: ignore[arg-type]
     )
 
 
@@ -293,6 +293,7 @@ def _stack_pytree(pytrees):
     for pt in pytrees:
         flat_pt, out_spec = pytree.tree_flatten(pt)
         flat_out.append(flat_pt)
+    assert out_spec is not None
     b = zip(*flat_out)
     stacked_out = []
     for leaves in b:
@@ -302,7 +303,7 @@ def _stack_pytree(pytrees):
             # Backward graph can return None output when forward inputs doesn't require grad.
             # When we eagerly execute backward graph, we need to call _stack_pytree on its output,
             # therefore we need to deal with None output.
-            stacked_out.append(None)
+            stacked_out.append(None)  # type: ignore[arg-type]
         else:
             raise RuntimeError(f"Cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
