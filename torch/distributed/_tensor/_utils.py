@@ -112,7 +112,7 @@ def compute_local_shape_and_global_offset(
 
 def compute_global_tensor_info(
     tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> Tuple[List[int], List[int], Tuple[Placement, ...]]:
+) -> Tuple[List[int], List[int]]:
     """
     Compute the global size and stride of a DTensor from the given local tensor.
     The local size is multiplited by `world_size` per Sharding dim.
@@ -140,15 +140,13 @@ def compute_global_tensor_info(
     """
     tensor_shape = list(tensor.size())
     tensor_stride = list(tensor.stride())
-    placements = list(placements)
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
         if placement.is_shard():
             shard_placement = cast(Shard, placement)
             if shard_placement.dim < 0:
                 # normalize shard dim to be positive
-                shard_placement = Shard(shard_placement.dim + len(tensor.shape))
-                placements[idx] = shard_placement
+                shard_placement.dim += len(tensor_shape)
             shard_dim = shard_placement.dim
 
             assert (
@@ -166,4 +164,4 @@ def compute_global_tensor_info(
                     tensor_stride[i] = tensor_stride[i] * mesh_dim_size
         elif not isinstance(placement, (Replicate, _Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
-    return tensor_shape, tensor_stride, tuple(placements)
+    return tensor_shape, tensor_stride
