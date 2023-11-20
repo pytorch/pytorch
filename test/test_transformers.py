@@ -1797,6 +1797,9 @@ class TestSDPACudaOnly(NNTestCase):
             query_padding_mask: (batch_size, seqlen_q)
             key_padding_mask: (batch_size, seqlen_k)
         """
+        if TEST_WITH_ROCM:
+            return S
+        
         b, h, seqlen_q, seqlen_k = S.shape
         warps_n = 4
         blocksize_m, blocksize_n = _get_block_size(S.device, head_dim, causal)
