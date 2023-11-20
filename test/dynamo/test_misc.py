@@ -8290,10 +8290,14 @@ ShapeEnv not equal: field values don't match:
             foo()
 
     def test_dict_subclass_cannot_be_initialized_in_graph(self):
-        for super_class in (dict, collections.OrderedDict):
+        for super_class in (
+            collections.OrderedDict,
+            dict,
+        ):
 
             class CustomDict(super_class):
-                pass
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
 
             def fn(x):
                 c = CustomDict()
