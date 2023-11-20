@@ -379,6 +379,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
@@ -458,7 +460,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @property
     def fake_mode(self):
-        return self.root_tx.fake_mode
+        return self.tracing_context.fake_mode
 
     @property
     def shape_env(self):
@@ -798,6 +800,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+        self.should_exit = True
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -938,11 +941,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def cleanup_graph(self):
         """
+        Remove "creation_timestamp" from node meta
+
         Remove this pattern from the graph:
             torch._C._set_grad_enabled(False)
             torch._C._set_grad_enabled(True)
         """
+        assert self.should_exit
         nodes = list(self.graph.nodes)
+        for node in nodes:
+            node.meta.pop("creation_timestamp", None)
+
         grad_enabled = torch.is_grad_enabled()
         for node1, node2 in zip(nodes, nodes[1:]):
             if (
@@ -1010,6 +1019,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         call that generated code.
         """
         from .decorators import disable
+
+        assert self.should_exit
 
         name = unique_id("__compiled_fn")
 
@@ -1140,6 +1151,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return result
 
     def remove_unused_graphargs(self) -> None:
+        assert self.should_exit
         # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
