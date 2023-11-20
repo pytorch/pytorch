@@ -265,7 +265,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(  # type: ignore[attr-defined]
+        V.ops.store(
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -649,7 +649,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
+            torch._C._dynamo.guards.assert_size_stride(
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
