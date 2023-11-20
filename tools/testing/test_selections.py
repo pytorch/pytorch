@@ -77,6 +77,7 @@ def get_with_pytest_shard(
         for test_class in test_classes:
             class_duration = test_class_times.get(test_file, {}).get(test_class, None)
             if class_duration is None:
+                print(f"ZR: No class duration found for {test_class} in {test_file}")
                 return None
             if class_duration:
                 duration += class_duration
@@ -89,6 +90,7 @@ def get_with_pytest_shard(
         included_classes_duration = get_duration_for_classes(test.test_file, included)
         excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
 
+        print(f"ZR: Duration for file {test.test_file}: {file_duration}")
         if included:
             # If we don't have the time for all included classes, our upper bound is the file duration
             duration = (
@@ -105,9 +107,12 @@ def get_with_pytest_shard(
             )
         else:
             duration = file_duration
+        print(f"ZR: Duration for test {test}: {duration}")
+        print(f"ZR: Duration difference: {file_duration - duration}")
 
         if duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
+            print(f"ZR: Sharding {test} into {num_shards} shards")
             for i in range(num_shards):
                 sharded_tests.append(
                     ShardedTest(test, i + 1, num_shards, duration / num_shards)
@@ -158,6 +163,18 @@ def calculate_shards(
     for unknown_test in unknown_tests:
         sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
         index = (index + 1) % num_shards
+
+    print("Shard stats:")
+    print(f"  Total number of tests: {len(tests)}")
+    print(f"  Number of shards: {num_shards}")
+    for shard_num in range(1, num_shards + 1):
+        print(f"  Shard {shard_num}:")
+        print(f"    Number of serial tests:     {len(sharded_jobs[shard_num].serial)}")
+        print(f"    Duration of serial tests:   {sum(test.get_time() for test in sharded_jobs[shard_num].serial)}")
+        print(f"    Number of parallel tests:   {len(sharded_jobs[shard_num].parallel)}")
+        print(f"    Duration of parallel tests: {sum(test.get_time() for test in sharded_jobs[shard_num].parallel)}") # Should this be divided by the number of tests we can run in parallel?
+        print(f"    Total duration:             {sharded_jobs[shard_num].get_total_time()}")
+
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 
