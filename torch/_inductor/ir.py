@@ -4213,9 +4213,8 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"assert {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}, {repr(self.msg)}"
-        )
+        wrapper.writeline(f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:")
+        wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
