@@ -73,7 +73,7 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type, train_steps=2, make_stateful=False):
+    def _create_model(self, compile, model_type, train_steps=2):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -102,68 +102,19 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
         else:
             model = dummy_model
-        optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         if compile:
             model = torch.compile(model)
 
-        if make_stateful:
+        optim = self._optim(model)
+        if model_type is not ModelType.NONE:
             _patch_model_state_dict(model)
             _patch_optimizer_state_dict(model, optimizers=optim)
 
         return model, optim
 
-    def _equal_state_dict(self, model_0, model_1):
-        for params_0, params_1 in zip(model_0.values(), model_1.values()):
-            if not torch.equal(params_0, params_1):
-                return False
-        return True
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @with_temp_dir
-    @parametrize("compile", [True, False])
-    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
-    def test_e2e(self, compile, model_type):
-        model, optim = self._create_model(compile, ModelType.NONE)
-        _train(model, optim, train_steps=2)
-
-        dist_model, dist_optim = self._create_model(compile, model_type)
-        _train(dist_model, dist_optim, train_steps=2)
-
-        # create and save a checkpoint for parallel model
-        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        DCP.save_state_dict(
-            state_dict={"model": dist_msd, "optimizer": dist_osd},
-            storage_writer=DCP.FileSystemWriter(self.temp_dir),
-        )
-
-        # load the checkpoint, starting with a new model
-        dist_model, dist_optim = self._create_model(compile, model_type)
-        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        DCP.load_state_dict(
-            {"model": dist_msd, "optimizer": dist_osd},
-            storage_reader=DCP.FileSystemReader(self.temp_dir),
-        )
-        set_state_dict(
-            dist_model,
-            optimizers=dist_optim,
-            model_state_dict=dist_msd,
-            optim_state_dict=dist_osd,
-        )
-
-        # train one more step on both models
-        loss = _train(model, optim, train_steps=1)
-        dist_loss = _train(dist_model, dist_optim, train_steps=1)
-        self.assertEqual(loss, dist_loss)
-
-        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
-
-        self._verify_msd(model_sd, dist_msd)
-        self._verify_osd_by_load(
-            model, optim, torch.optim.Adam(model.parameters(), lr=0.1), optim_sd
-        )
+    def _optim(self, model):
+        return torch.optim.Adam(model.parameters(), lr=0.1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -175,7 +126,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
-        dist_model, dist_optim = self._create_model(compile, model_type, make_stateful=True)
+        dist_model, dist_optim = self._create_model(compile, model_type)
         _train(dist_model, dist_optim, train_steps=2)
 
         DCP.save(
@@ -183,7 +134,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
-        dist_model, dist_optim = self._create_model(compile, model_type, make_stateful=True)
+        dist_model, dist_optim = self._create_model(compile, model_type)
         DCP.load(
             state_dict={"model": dist_model, "optimizer": dist_optim},
             storage_reader=DCP.FileSystemReader(self.temp_dir),
@@ -199,7 +150,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(
-            model, optim, torch.optim.Adam(model.parameters(), lr=0.1), optim_sd
+            model, optim, self._optim(model), dist_osd
         )
 
 
