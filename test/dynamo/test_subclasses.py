@@ -337,13 +337,13 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
                     x,
-                    policy=StatelessSymbolicContext(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
                 x1_fake = fake_mode.from_tensor(
                     x1,
-                    policy=StatelessSymbolicContext(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
@@ -373,7 +373,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
                         inp,
-                        policy=StatelessSymbolicContext(
+                        symbolic_context=StatelessSymbolicContext(
                             [dim_dynamic for i in range(x.dim())]
                         ),
                     )
@@ -708,7 +708,7 @@ class GraphModule(torch.nn.Module):
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
                     x,
-                    policy=StatelessSymbolicContext(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
                     ),
                 )
