@@ -334,6 +334,9 @@ class PythonPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
 
+    def _helper_sqrt(self, expr):
+        return f"math.sqrt({self._print(expr)})"
+
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
@@ -343,9 +346,9 @@ class PythonPrinter(ExprPrinter):
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
-            return f"math.sqrt({self._print(base)})"
+            return self._helper_sqrt(base)
         elif exp == -0.5:
-            return f"1 / math.sqrt({self._print(base)})"
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
