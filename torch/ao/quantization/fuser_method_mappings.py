@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.ao.nn.intrinsic as nni
 
-from typing import Union, Callable, Tuple, Dict, Optional, Type
+from typing import Any, Union, Callable, List, Tuple, Dict, Optional, Type
 from torch.ao.quantization.utils import Pattern, get_combined_dict, MatchAllNode
 import itertools
 
@@ -231,7 +231,7 @@ def _get_valid_patterns(op_pattern):
      (MatchAllNode, (MatchAllNode, MatchAllNode)),
     ]
     """
-    result = []
+    result: List[Any]
     if isinstance(op_pattern, (tuple, list)):
         sub_combs = []
         for sub_pattern in op_pattern:
