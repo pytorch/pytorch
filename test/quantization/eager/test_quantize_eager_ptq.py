@@ -1504,10 +1504,11 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         class EmbeddingWithLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12,
-                                                scale_grad_by_freq=False)
+                self.emb = torch.nn.Embedding(
+                    num_embeddings=10, embedding_dim=12, scale_grad_by_freq=False)
                 self.fc = torch.nn.Linear(5, 5)
-            def forward(self, indices,linear_in):
+
+            def forward(self, indices, linear_in):
                 return self.emb(indices), self.fc(linear_in)
         model = EmbeddingWithLinear().eval()
         qconfig_dict = {
