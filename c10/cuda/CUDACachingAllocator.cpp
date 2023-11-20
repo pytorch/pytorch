@@ -1140,9 +1140,10 @@ class DeviceCachingAllocator {
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting max_split_size_mb to avoid"
-          " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
-          "");
+          " If reserved but unallocated memory is large try setting",
+          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " fragmentation.  See documentation for Memory Management "
+          " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
 
     bool split_remainder = should_split(params.block, params.size());
@@ -1716,7 +1717,8 @@ class DeviceCachingAllocator {
     return result;
   }
 
-  std::vector<TraceEntry> trace() {
+  std::vector<TraceEntry> trace(
+      std::function<time_t(approx_time_t)> tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
     result.reserve(alloc_trace->size());
@@ -1728,6 +1730,11 @@ class DeviceCachingAllocator {
         result.end(),
         alloc_trace->begin(),
         alloc_trace->begin() + alloc_trace_next);
+
+    // Convert all the timestamps from tsc to epoch time in microseconds.
+    for (auto& te : result) {
+      te.time_.t_ = tsc_to_us(te.time_.approx_t_);
+    }
     return result;
   }
 
@@ -2759,6 +2766,7 @@ class DeviceCachingAllocator {
         addr,
         size,
         stream,
+        getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
 
     // Callbacks should not include any Pytorch call
@@ -2813,6 +2821,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lock(mutex);
     allocated_blocks[block->ptr] = block;
   }
+
+  c10::ApproximateClockToUnixTimeConverter clock_converter;
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
@@ -2964,9 +2974,15 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   SnapshotInfo snapshot() override {
+    // Set-up converter to convert timestamps from tsc to microseconds.
+    auto tsc_to_ns = clock_converter.makeConverter();
+    auto tsc_to_us = [=](approx_time_t t_approx) {
+      return tsc_to_ns(t_approx) / 1000;
+    };
+
     SnapshotInfo result;
     for (auto& da : device_allocator) {
-      result.device_traces.emplace_back(da->trace());
+      result.device_traces.emplace_back(da->trace(tsc_to_us));
       auto snap = da->snapshot();
       result.segments.insert(result.segments.end(), snap.begin(), snap.end());
     }
