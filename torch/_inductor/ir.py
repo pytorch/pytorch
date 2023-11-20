@@ -127,6 +127,7 @@ def validate_ir(node_or_nodes):
                 (
                     torch._inductor.ir.ExpandView,
                     DynamicScalar,
+                    AssertScalar,
                     TensorBox,
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
@@ -4178,6 +4179,43 @@ class DynamicScalar(ExternKernel):
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(f"{self.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        wrapper.writeline(f"{self.get_name()} = None")
+
+
+class AssertScalar(ExternKernel):
+    """
+    The result of a call to aten._assert_scalar
+    """
+
+    def get_reads(self):
+        return ()
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, scalar, msg):
+        super().__init__(
+            # Buffer(name, layotu)
+            None,
+            NoneLayout(torch.device("cpu")),
+            # InputsKernel(inputs)
+            [],
+        )  # type: ignore[arg-type]
+        self.scalar = scalar
+        self.msg = msg
+
+    def has_side_effects(self):
+        return True
+
+    def get_unbacked_symbol_uses(self):
+        return free_unbacked_symbols(self.scalar)
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"assert {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}, {repr(self.msg)}"
+        )
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")

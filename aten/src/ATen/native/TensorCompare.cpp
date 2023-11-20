@@ -422,6 +422,15 @@ void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
+void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+  TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+  _assert_scalar(scalar, assert_msg);
+  return dep_token.clone();
+}
+
 Tensor _functional_assert_async_msg_cpu(
   const Tensor& self,
   c10::string_view assert_msg,
