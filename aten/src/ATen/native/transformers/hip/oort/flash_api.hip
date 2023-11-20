@@ -75,67 +75,6 @@ namespace pytorch_flash {
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
-// TODO: Remove this dead function
-void set_params_dgrad(Flash_bwd_params &params,
-                      // sizes
-                      const size_t b,
-                      const size_t seqlen_q,
-                      const size_t seqlen_k,
-                      const size_t seqlen_q_rounded,
-                      const size_t seqlen_k_rounded,
-                      const size_t h,
-                      const size_t h_k,
-                      const size_t d,
-                      const size_t d_rounded,
-                      // device pointers
-                      const at::Tensor q,
-                      const at::Tensor k,
-                      const at::Tensor v,
-                      const at::Tensor out,
-                      const at::Tensor dout,
-                      at::Tensor dq,
-                      at::Tensor dk,
-                      at::Tensor dv,
-                      void *cu_seqlens_q_d,
-                      void *cu_seqlens_k_d,
-                      void *dq_accum_d,
-                      void *dk_accum_d,
-                      void *dv_accum_d,
-                      void *softmax_lse_d,
-                      void *dsoftmax_sum_d,
-                      float p_dropout,
-                      float softmax_scale,
-                      int window_size_left,
-                      int window_size_right) {
-    // Set the pointers and strides.
-    params.do_ptr = dout.data_ptr();
-    params.do_row_stride = dout.stride(-3);
-    params.do_head_stride = dout.stride(-2);
-    params.dq_ptr = dq.data_ptr();
-    params.dk_ptr = dk.data_ptr();
-    params.dv_ptr = dv.data_ptr();
-    params.dq_row_stride = dq.stride(-3);
-    params.dk_row_stride = dk.stride(-3);
-    params.dv_row_stride = dv.stride(-3);
-    params.dq_head_stride = dq.stride(-2);
-    params.dk_head_stride = dk.stride(-2);
-    params.dv_head_stride = dv.stride(-2);
-
-    if (cu_seqlens_q_d == nullptr) {
-        params.do_batch_stride = dout.stride(0);
-        params.dq_batch_stride = dq.stride(0);
-        params.dk_batch_stride = dk.stride(0);
-        params.dv_batch_stride = dv.stride(0);
-    }
-
-    params.dq_accum_ptr = dq_accum_d;
-    params.dk_accum_ptr = dk_accum_d;
-    params.dv_accum_ptr = dv_accum_d;
-
-    // Softmax sum
-    params.dsoftmax_sum = dsoftmax_sum_d;
-}
-
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
@@ -148,197 +87,197 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         int window_size_right,
         const bool return_softmax,
         c10::optional<at::Generator> gen_) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto dprops = at::cuda::getCurrentDeviceProperties();
 
-    constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-    TORCH_CHECK(mi200 == dprops->gcnArchName,
-                "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
+  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
+  TORCH_CHECK(mi200 == dprops->gcnArchName,
+              "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
 
-    auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
-                "FlashAttention only support fp16 and bf16 data type");
-    TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
-    TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
+  auto q_dtype = q.dtype();
+  TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
+              "FlashAttention only support fp16 and bf16 data type");
+  TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
+  TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
 
-    CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
+  CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
 
-    // FIXME: ROCM probably does not need this
-    TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
-    TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
-    TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  // FIXME: ROCM probably does not need this
+  TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
 
-    const auto sizes = q.sizes();
+  const auto sizes = q.sizes();
 
-    const int batch_size = sizes[0];
-    int seqlen_q = sizes[1];
-    int num_heads = sizes[2];
-    const int head_size_og = sizes[3];
-    const int seqlen_k = k.size(1);
-    const int num_heads_k = k.size(2);
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
-    TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
-    TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
-    TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+  const int batch_size = sizes[0];
+  int seqlen_q = sizes[1];
+  int num_heads = sizes[2];
+  const int head_size_og = sizes[3];
+  const int seqlen_k = k.size(1);
+  const int num_heads_k = k.size(2);
+  TORCH_CHECK(batch_size > 0, "batch size must be positive");
+  TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
+  TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+  TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
-    if (seqlen_q == 1) { is_causal = false; }  // causal=true is the same as causal=false in this case
-    if (is_causal) { window_size_right = 0; }
+  if (seqlen_q == 1) { is_causal = false; }  // causal=true is the same as causal=false in this case
+  if (is_causal) { window_size_right = 0; }
 
-    CHECK_SHAPE(q, batch_size, seqlen_q, num_heads, head_size_og);
-    CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size_og);
-    CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size_og);
+  CHECK_SHAPE(q, batch_size, seqlen_q, num_heads, head_size_og);
+  CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size_og);
+  CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size_og);
 
-    at::Tensor q_padded, k_padded, v_padded;
-    q_padded = q;
-    k_padded = k;
-    v_padded = v;
+  at::Tensor q_padded, k_padded, v_padded;
+  q_padded = q;
+  k_padded = k;
+  v_padded = v;
 
-    at::Tensor out;
-    if (out_.has_value()) {
-        out = out_.value();
-        TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
-        CHECK_DEVICE(out);
-        TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
-        CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_size_og);
-        if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
+  at::Tensor out;
+  if (out_.has_value()) {
+    out = out_.value();
+    TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
+    CHECK_DEVICE(out);
+    TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+    CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_size_og);
+    if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
+  } else {
+    out = at::empty_like(q_padded);
+  }
+
+  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+  const int head_size = round_multiple(head_size_og, 8);
+  const int head_size_rounded = round_multiple(head_size, 32);
+  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
+  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+
+  // We want to checkpoint and save the RNG state for backward if dropout
+  // We get the default generator and return the seed and offset which will
+  // be used in the backward function
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+  at::Tensor seed_t, offset_t;
+
+  if (p_dropout > 0.0)  {
+    // number of times random will be generated per thread, to offset philox counter in thc random
+    // state
+    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
+    int64_t counter_offset = batch_size * num_heads * 32;
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+    if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+      auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
     } else {
-        out = at::empty_like(q_padded);
+      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    }
+  } else {
+    if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    } else {
+      seed_t = at::empty({}, at::dtype(at::kLong));
+      offset_t = at::empty({}, at::dtype(at::kLong));
     }
 
-    auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size = round_multiple(head_size_og, 8);
-    const int head_size_rounded = round_multiple(head_size, 32);
-    const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-    const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+  }
 
-    // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  //reorder tensors and make contiguous
+  at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
+  at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
+  at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
+  at::Tensor output_t = out.permute({0,2,1,3}).contiguous();
 
-    // We want to checkpoint and save the RNG state for backward if dropout
-    // We get the default generator and return the seed and offset which will
-    // be used in the backward function
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
-    at::Tensor seed_t, offset_t;
+  at::Tensor M = at::empty({batch_size, num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
 
-    if (p_dropout > 0.0)  {
-        // number of times random will be generated per thread, to offset philox counter in thc random
-        // state
-        // We use a custom RNG that increases the offset by batch_size * nheads * 32.
-        int64_t counter_offset = batch_size * num_heads * 32;
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
-        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
-          auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
-        } else {
-          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        }
-    } else {
-        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        } else {
-            seed_t = at::empty({}, at::dtype(at::kLong));
-            offset_t = at::empty({}, at::dtype(at::kLong));
-        }
+  constexpr int BLOCK_M = 16;
+  constexpr int BLOCK_N = 16;
+  dim3  grid;
+  grid.x = (q_t.sizes()[2] + BLOCK_M - 1) / BLOCK_M;
+  grid.y = q_t.sizes()[0] * q_t.sizes()[1];
+  grid.z = 1;
+  dim3 block { 64 * 4, 1, 1 };  // compiled triton kernel intrinsic
 
-    }
+  at::Tensor softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
+                                      at::dtype(q.dtype()).device(q.device()));
 
-    auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-    //reorder tensors and make contiguous
-    at::Tensor q_t = q_padded.permute({0,2,1,3}).contiguous();
-    at::Tensor k_t = k_padded.permute({0,2,1,3}).contiguous();
-    at::Tensor v_t = v_padded.permute({0,2,1,3}).contiguous();
-    at::Tensor output_t = out.permute({0,2,1,3}).contiguous();
-
-    at::Tensor M = at::empty({batch_size, num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
-
-    constexpr int BLOCK_M = 16;
-    constexpr int BLOCK_N = 16;
-    dim3  grid;
-    grid.x = (q_t.sizes()[2] + BLOCK_M - 1) / BLOCK_M;
-    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
-    grid.z = 1;
-    dim3 block { 64 * 4, 1, 1 };  // compiled triton kernel intrinsic
-
-    at::Tensor softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
-                                        at::dtype(q.dtype()).device(q.device()));
-
-    hipError_t err; // TODO: Error handling
+  hipError_t err; // TODO: Error handling
 #define CALL_FWD(FP, STAGE, BLOCK_M, BLOCK_DMODEL, BLOCK_N, pre_load_v, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX)               \
-    do {                                                                                                                      \
-      oort::attn_fwd<STAGE,BLOCK_M, BLOCK_DMODEL, BLOCK_N, pre_load_v, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX> fwd_opt;       \
-      err   = fwd_opt(grid, block,                                                                                            \
-                      (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                    \
-                      softmax_scale, (float*)M.data_ptr(), (FP*)output_t.data_ptr(),                                          \
-                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),                                             \
-                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),                                             \
-                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                             \
-                      output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),                         \
-                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                          \
-                      *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()),                                     \
-                      (FP*)(softmax_fa_t.data_ptr()),                                                                         \
-                      stream);                                                                                                \
-    } while(0)
+  do {                                                                                                                      \
+    oort::attn_fwd<STAGE,BLOCK_M, BLOCK_DMODEL, BLOCK_N, pre_load_v, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX> fwd_opt;       \
+    err   = fwd_opt(grid, block,                                                                                            \
+                    (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                    \
+                    softmax_scale, (float*)M.data_ptr(), (FP*)output_t.data_ptr(),                                          \
+                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),                                             \
+                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),                                             \
+                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                             \
+                    output_t.stride(0), output_t.stride(1), output_t.stride(2), output_t.stride(3),                         \
+                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                          \
+                    *(uint64_t*)(seed_t.data_ptr()), *(uint32_t*)(offset_t.data_ptr()),                                     \
+                    (FP*)(softmax_fa_t.data_ptr()),                                                                         \
+                    stream);                                                                                                \
+  } while(0)
 
-    // TODO: Ugly but works
-    constexpr int kFwdUseCausal = 3;
-    constexpr int kFwdNoCausal  = 1;
-    int d_head = q_t.sizes()[3];
-    constexpr int BM = BLOCK_M;
-    constexpr int BN = BLOCK_N;
-    if(q_dtype == at::kHalf) {
-      if (is_causal) {
-        if (d_head == 16)
-          CALL_FWD(__fp16,kFwdUseCausal,BM,16,BN,true,true,true);
-        else if (d_head == 32)
-          CALL_FWD(__fp16,kFwdUseCausal,BM,32,BN,true,true,true);
-        else if (d_head == 64)
-          CALL_FWD(__fp16,kFwdUseCausal,BM,64,BN,true,true,true);
-        else if (d_head == 128)
-          CALL_FWD(__fp16,kFwdUseCausal,BM,128,BN,true,true,true);
-      } else {
-        if (d_head == 16)
-          CALL_FWD(__fp16,kFwdNoCausal,BM,16,BN,true,true,true);
-        else if (d_head == 32)
-          CALL_FWD(__fp16,kFwdNoCausal,BM,32,BN,true,true,true);
-        else if (d_head == 64)
-          CALL_FWD(__fp16,kFwdNoCausal,BM,64,BN,true,true,true);
-        else if (d_head == 128)
-          CALL_FWD(__fp16,kFwdNoCausal,BM,128,BN,true,true,true);
-      }
-    } else if (q_dtype == at::kBFloat16) {
-      if (is_causal) {
-        if (d_head == 16)
-          CALL_FWD(__bf16,kFwdUseCausal,BM,16,BN,true,true,true);
-        else if (d_head == 32)
-          CALL_FWD(__bf16,kFwdUseCausal,BM,32,BN,true,true,true);
-        else if (d_head == 64)
-          CALL_FWD(__bf16,kFwdUseCausal,BM,64,BN,true,true,true);
-        else if (d_head == 128)
-          CALL_FWD(__bf16,kFwdUseCausal,BM,128,BN,true,true,true);
-      } else {
-        if (d_head == 16)
-          CALL_FWD(__bf16,kFwdNoCausal,BM,16,BN,true,true,true);
-        else if (d_head == 32)
-          CALL_FWD(__bf16,kFwdNoCausal,BM,32,BN,true,true,true);
-        else if (d_head == 64)
-          CALL_FWD(__bf16,kFwdNoCausal,BM,64,BN,true,true,true);
-        else if (d_head == 128)
-          CALL_FWD(__bf16,kFwdNoCausal,BM,128,BN,true,true,true);
-      }
+  // TODO: Ugly but works
+  constexpr int kFwdUseCausal = 3;
+  constexpr int kFwdNoCausal  = 1;
+  int d_head = q_t.sizes()[3];
+  constexpr int BM = BLOCK_M;
+  constexpr int BN = BLOCK_N;
+  if(q_dtype == at::kHalf) {
+    if (is_causal) {
+      if (d_head == 16)
+        CALL_FWD(__fp16,kFwdUseCausal,BM,16,BN,true,true,true);
+      else if (d_head == 32)
+        CALL_FWD(__fp16,kFwdUseCausal,BM,32,BN,true,true,true);
+      else if (d_head == 64)
+        CALL_FWD(__fp16,kFwdUseCausal,BM,64,BN,true,true,true);
+      else if (d_head == 128)
+        CALL_FWD(__fp16,kFwdUseCausal,BM,128,BN,true,true,true);
+    } else {
+      if (d_head == 16)
+        CALL_FWD(__fp16,kFwdNoCausal,BM,16,BN,true,true,true);
+      else if (d_head == 32)
+        CALL_FWD(__fp16,kFwdNoCausal,BM,32,BN,true,true,true);
+      else if (d_head == 64)
+        CALL_FWD(__fp16,kFwdNoCausal,BM,64,BN,true,true,true);
+      else if (d_head == 128)
+        CALL_FWD(__fp16,kFwdNoCausal,BM,128,BN,true,true,true);
     }
+  } else if (q_dtype == at::kBFloat16) {
+    if (is_causal) {
+      if (d_head == 16)
+        CALL_FWD(__bf16,kFwdUseCausal,BM,16,BN,true,true,true);
+      else if (d_head == 32)
+        CALL_FWD(__bf16,kFwdUseCausal,BM,32,BN,true,true,true);
+      else if (d_head == 64)
+        CALL_FWD(__bf16,kFwdUseCausal,BM,64,BN,true,true,true);
+      else if (d_head == 128)
+        CALL_FWD(__bf16,kFwdUseCausal,BM,128,BN,true,true,true);
+    } else {
+      if (d_head == 16)
+        CALL_FWD(__bf16,kFwdNoCausal,BM,16,BN,true,true,true);
+      else if (d_head == 32)
+        CALL_FWD(__bf16,kFwdNoCausal,BM,32,BN,true,true,true);
+      else if (d_head == 64)
+        CALL_FWD(__bf16,kFwdNoCausal,BM,64,BN,true,true,true);
+      else if (d_head == 128)
+        CALL_FWD(__bf16,kFwdNoCausal,BM,128,BN,true,true,true);
+    }
+  }
 
-    //undo reorder tensors
-    q_padded = q_t.permute({0,2,1,3}).contiguous();
-    k_padded = k_t.permute({0,2,1,3}).contiguous();
-    v_padded = v_t.permute({0,2,1,3}).contiguous();
-    out = output_t.permute({0,2,1,3}).contiguous();
+  //undo reorder tensors
+  q_padded = q_t.permute({0,2,1,3}).contiguous();
+  k_padded = k_t.permute({0,2,1,3}).contiguous();
+  v_padded = v_t.permute({0,2,1,3}).contiguous();
+  out = output_t.permute({0,2,1,3}).contiguous();
 
-    return {out, q_padded, k_padded, v_padded, M, seed_t, offset_t, softmax_fa_t};
+  return {out, q_padded, k_padded, v_padded, M, seed_t, offset_t, softmax_fa_t};
 #undef CALL_FWD
 }
 
@@ -360,15 +299,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                const bool return_softmax,
                c10::optional<at::Generator> gen_) {
 
-    TORCH_WARN("[mha_varlen_fwd not supported on ROCm");
+  TORCH_WARN("[mha_varlen_fwd not supported on ROCm");
 
-    at::Tensor softmax_lse = at::empty({}, at::dtype(at::kFloat));
-    at::Tensor p = at::empty({}, at::dtype(at::kFloat));
-    at::Tensor offset_t = at::empty({}, at::dtype(at::kLong));
-    at::Tensor seed_t = at::empty({}, at::dtype(at::kLong));
-    at::Tensor out = at::empty({}, at::dtype(at::kFloat));
+  at::Tensor softmax_lse = at::empty({}, at::dtype(at::kFloat));
+  at::Tensor p = at::empty({}, at::dtype(at::kFloat));
+  at::Tensor offset_t = at::empty({}, at::dtype(at::kLong));
+  at::Tensor seed_t = at::empty({}, at::dtype(at::kLong));
+  at::Tensor out = at::empty({}, at::dtype(at::kFloat));
 
-    return {out, q, k, v, softmax_lse, seed_t, offset_t, p};
+  return {out, q, k, v, softmax_lse, seed_t, offset_t, p};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -389,434 +328,408 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
 
-    if (is_causal) { window_size_right = 0; }
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-    bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-    bool is_sm80 = dprops->major == 8 && dprops->minor == 0;
-    bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-    TORCH_CHECK(is_sm90 || is_sm8x, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
+  if (is_causal) { window_size_right = 0; }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  // bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
+  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+  bool is_sm80 = dprops->major == 8 && dprops->minor == 0;
+  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+  TORCH_CHECK(is_sm90 || is_sm8x, "FlashAttention only supports Ampere GPUs or newer.");
+  // We will support Turing in the near future
+  // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
-    bool is_dropout = p_dropout > 0.0;
-    auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  bool is_dropout = p_dropout > 0.0;
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
 
-    auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
-                "FlashAttention only support fp16 and bf16 data type");
-    if (q_dtype == at::kBFloat16) {
-        TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
-    }
-    TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
-    TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
-    TORCH_CHECK(out.dtype() == q_dtype, "query and out must have the same dtype");
-    TORCH_CHECK(dout.dtype() == q_dtype, "query and dout must have the same dtype");
+  auto q_dtype = q.dtype();
+  TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
+              "FlashAttention only support fp16 and bf16 data type");
+  if (q_dtype == at::kBFloat16) {
+    TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
+  }
+  TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
+  TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
+  TORCH_CHECK(out.dtype() == q_dtype, "query and out must have the same dtype");
+  TORCH_CHECK(dout.dtype() == q_dtype, "query and dout must have the same dtype");
 
-    CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
-    CHECK_DEVICE(out); CHECK_DEVICE(dout); CHECK_DEVICE(softmax_lse);
+  CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
+  CHECK_DEVICE(out); CHECK_DEVICE(dout); CHECK_DEVICE(softmax_lse);
 
-    TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
-    TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
-    TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
-    TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
-    TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+  TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+  TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
 
-    const auto sizes = q.sizes();
+  const auto sizes = q.sizes();
 
-    const int batch_size = sizes[0];
-    const int seqlen_q = sizes[1];
-    const int num_heads = sizes[2];
-    const int head_size_og = dout.size(3);
-    const int head_size = sizes[3];
-    const int seqlen_k = k.size(1);
-    const int num_heads_k = k.size(2);
+  const int batch_size = sizes[0];
+  const int seqlen_q = sizes[1];
+  const int num_heads = sizes[2];
+  const int head_size_og = dout.size(3);
+  const int head_size = sizes[3];
+  const int seqlen_k = k.size(1);
+  const int num_heads_k = k.size(2);
 
-    if (is_causal){
+  if (is_causal){
     TORCH_CHECK((seqlen_q == seqlen_k), "For backwards kernel seqlen_q must equal seqlen_k for causal kernels");
+  }
+
+  TORCH_CHECK(batch_size > 0, "batch size must be positive");
+  TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
+  TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
+  TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+  if (head_size > 192) {
+    TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
+  }
+  TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+
+  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+  const int head_size_rounded = round_multiple(head_size, 32);
+  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
+  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+
+  TORCH_CHECK(head_size == round_multiple(head_size_og, 8), "head_size must be head_size_og rounded to a multiple of 8");
+
+  CHECK_SHAPE(q, batch_size, seqlen_q, num_heads, head_size);
+  CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size);
+  CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size);
+  CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_size);
+  CHECK_SHAPE(dout, batch_size, seqlen_q, num_heads, head_size_og);
+
+  at::Tensor dq, dk, dv;
+  if (dq_.has_value()) {
+    dq = dq_.value();
+    TORCH_CHECK(dq.dtype() == q_dtype, "dq must have the same dtype as q");
+    CHECK_DEVICE(dq);
+    TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
+    CHECK_SHAPE(dq, batch_size, seqlen_q, num_heads, head_size);
+  } else {
+    dq = at::empty_like(q);
+  }
+  if (dk_.has_value()) {
+    dk = dk_.value();
+    TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
+    CHECK_DEVICE(dk);
+    TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
+    CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
+  } else {
+    dk = at::empty_like(k);
+  }
+  if (dv_.has_value()) {
+    dv = dv_.value();
+    TORCH_CHECK(dv.dtype() == q_dtype, "dv must have the same dtype as q");
+    CHECK_DEVICE(dv);
+    TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
+    CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
+  } else {
+    dv = at::empty_like(k);
+  }
+
+  // const at::Tensor& dout_padded = dout;
+
+  // bool loop = seqlen_k > blocksize_c;
+  // TODO: change later, for now set to true for simplicity
+  bool loop = true;
+
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+
+  auto opts = q.options();
+  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+  at::Tensor dq_accum;
+  at::Tensor dk_accum, dv_accum;
+  if (loop) {
+    dq_accum = at::empty({batch_size, seqlen_q_rounded, num_heads, head_size_rounded}, opts.dtype(at::kFloat));
+    // dk_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
+    // dv_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
+  }
+
+  at::Tensor dk_expanded, dv_expanded;
+  if (num_heads_k != num_heads) {  // MQA / GQA
+    dk_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
+    dv_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
+  } else {
+    dk_expanded = dk;
+    dv_expanded = dv;
+  }
+
+  at::PhiloxCudaState philox_args;
+  if (is_dropout) {
+    if (at::cuda::currentStreamCaptureStatus() ==
+        at::cuda::CaptureStatus::None)
+    {
+      philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
+    } else { // dropout + capture
+      philox_args = at::PhiloxCudaState(
+                                        philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
     }
+  }
 
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
-    TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
-    TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
-    TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
-    if (head_size > 192) {
-        TORCH_CHECK(is_sm80 || is_sm90, "FlashAttention backward for head dim > 192 requires A100/A800 or H100/H800");
-    }
-    TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+  //JCG TODO WE GO IN HERE TODO backwards
+  //reorder tensors and make contiguous
+  at::Tensor q_t = q.permute({0,2,1,3}).contiguous();
+  at::Tensor k_t = k.permute({0,2,1,3}).contiguous();
+  at::Tensor v_t = v.permute({0,2,1,3}).contiguous();
+  at::Tensor out_t = out.permute({0,2,1,3}).contiguous();
 
-    auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-    const int head_size_rounded = round_multiple(head_size, 32);
-    const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-    const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+  //reorder tensors and make contiguous
+  at::Tensor dq_t = dq.permute({0,2,1,3}).contiguous();
+  at::Tensor dk_t = dk.permute({0,2,1,3}).contiguous();
+  at::Tensor dv_t = dv.permute({0,2,1,3}).contiguous();
+  at::Tensor dout_t = dout.permute({0,2,1,3}).contiguous();
 
-    TORCH_CHECK(head_size == round_multiple(head_size_og, 8), "head_size must be head_size_og rounded to a multiple of 8");
+  dim3  grid;
+  grid.x = (q_t.sizes()[2] + 64 - 1) / 64;	// BLOCK_M = 64
+  grid.y = q_t.sizes()[0] * q_t.sizes()[1];
+  grid.z = 1;
+  dim3 block { 64 * 4, 1, 1 };
 
-    CHECK_SHAPE(q, batch_size, seqlen_q, num_heads, head_size);
-    CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size);
-    CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size);
-    CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_size);
-    CHECK_SHAPE(dout, batch_size, seqlen_q, num_heads, head_size_og);
+  at::Tensor new_do = at::empty_like(dout_t);
+  at::Tensor delta = at::empty_like(softmax_lse);
 
-    at::Tensor dq, dk, dv;
-    if (dq_.has_value()) {
-        dq = dq_.value();
-        TORCH_CHECK(dq.dtype() == q_dtype, "dq must have the same dtype as q");
-        CHECK_DEVICE(dq);
-        TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
-        CHECK_SHAPE(dq, batch_size, seqlen_q, num_heads, head_size);
-    } else {
-        dq = at::empty_like(q);
-    }
-    if (dk_.has_value()) {
-        dk = dk_.value();
-        TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
-        CHECK_DEVICE(dk);
-        TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
-        CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
-    } else {
-        dk = at::empty_like(k);
-    }
-    if (dv_.has_value()) {
-        dv = dv_.value();
-        TORCH_CHECK(dv.dtype() == q_dtype, "dv must have the same dtype as q");
-        CHECK_DEVICE(dv);
-        TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
-        CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
-    } else {
-        dv = at::empty_like(k);
-    }
+  // Preprocess
+  if(q_dtype == at::kHalf)
+  {
+    oort::bwd_preprocess<64,64> pre_opt;
+    auto                        err   = pre_opt(grid, block,
+                                                (__fp16*)(out_t.data_ptr()), (__fp16*)(dout_t.data_ptr()),
+                                                (__fp16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
+                                                stream);
+  }
+  else if (q_dtype == at::kBFloat16)
+  {
+    oort::bwd_preprocess<64,64> pre_opt;
+    auto                        err   = pre_opt(grid, block,
+                                                (__bf16*)(out_t.data_ptr()), (__bf16*)(dout_t.data_ptr()),
+                                                (__bf16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
+                                                stream);
+  }
 
-    // const at::Tensor& dout_padded = dout;
+  // dk, dv and then dq
+  grid.x = (q_t.sizes()[2] + 16 - 1) / 16;	// BLOCK_M = 16
+  grid.y = q_t.sizes()[0] * q_t.sizes()[1];
+  grid.z = 1;
 
-    // bool loop = seqlen_k > blocksize_c;
-    // TODO: change later, for now set to true for simplicity
-    bool loop = true;
-
-    // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-
-    auto opts = q.options();
-    auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-    at::Tensor dq_accum;
-    at::Tensor dk_accum, dv_accum;
-    if (loop) {
-        dq_accum = at::empty({batch_size, seqlen_q_rounded, num_heads, head_size_rounded}, opts.dtype(at::kFloat));
-        // dk_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
-        // dv_accum = at::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
-    }
-
-    at::Tensor dk_expanded, dv_expanded;
-    if (num_heads_k != num_heads) {  // MQA / GQA
-        dk_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-        dv_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-    } else {
-        dk_expanded = dk;
-        dv_expanded = dv;
-    }
-
-    Flash_bwd_params params;
-
-    set_params_dgrad(params,
-                     batch_size,
-                     seqlen_q, seqlen_k,
-                     seqlen_q_rounded, seqlen_k_rounded,
-                     num_heads, num_heads_k,
-                     head_size, head_size_rounded,
-                     q, k, v, out,
-                     dout, dq, dk_expanded, dv_expanded,
-                     nullptr,
-                     nullptr,
-                     loop ? dq_accum.data_ptr() : nullptr,
-                     // loop ? dk_accum.data_ptr() : nullptr,
-                     // loop ? dv_accum.data_ptr() : nullptr,
-                     nullptr,
-                     nullptr,
-                     softmax_lse.data_ptr(),
-                     softmax_d.data_ptr(),
-                     p_dropout,
-                     softmax_scale,
-                     window_size_left,
-                     window_size_right);
-
-    at::PhiloxCudaState philox_args;
-    if (is_dropout) {
-        if (at::cuda::currentStreamCaptureStatus() ==
-                at::cuda::CaptureStatus::None)
-        {
-            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-        } else { // dropout + capture
-            philox_args = at::PhiloxCudaState(
-                philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-        }
-    }
-    params.philox_args = philox_args;
-
-
-    //JCG TODO WE GO IN HERE TODO backwards
-    //reorder tensors and make contiguous
-    at::Tensor q_t = q.permute({0,2,1,3}).contiguous();
-    at::Tensor k_t = k.permute({0,2,1,3}).contiguous();
-    at::Tensor v_t = v.permute({0,2,1,3}).contiguous();
-    at::Tensor out_t = out.permute({0,2,1,3}).contiguous();
-
-    //reorder tensors and make contiguous
-    at::Tensor dq_t = dq.permute({0,2,1,3}).contiguous();
-    at::Tensor dk_t = dk.permute({0,2,1,3}).contiguous();
-    at::Tensor dv_t = dv.permute({0,2,1,3}).contiguous();
-    at::Tensor dout_t = dout.permute({0,2,1,3}).contiguous();
-
-    dim3  grid;
-    grid.x = (q_t.sizes()[2] + 64 - 1) / 64;	// BLOCK_M = 64
-    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
-    grid.z = 1;
-    dim3 block { 64 * 4, 1, 1 };
-
-    at::Tensor new_do = at::empty_like(dout_t);
-    at::Tensor delta = at::empty_like(softmax_lse);
-
-    // Preprocess
+  if((is_causal == true) && (is_dropout == true))
+  {
     if(q_dtype == at::kHalf)
-      {
-        oort::bwd_preprocess<64,64> pre_opt;
-        auto                        err   = pre_opt(grid, block,
-                                                    (__fp16*)(out_t.data_ptr()), (__fp16*)(dout_t.data_ptr()),
-                                                    (__fp16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
-                                                    stream);
-      }
-    else if (q_dtype == at::kBFloat16)
-      {
-        oort::bwd_preprocess<64,64> pre_opt;
-        auto                        err   = pre_opt(grid, block,
-                                                    (__bf16*)(out_t.data_ptr()), (__bf16*)(dout_t.data_ptr()),
-                                                    (__bf16*)(new_do.data_ptr()), (float*)(delta.data_ptr()),
-                                                    stream);
-      }
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                               (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
 
-    // dk, dv and then dq
-    grid.x = (q_t.sizes()[2] + 16 - 1) / 16;	// BLOCK_M = 16
-    grid.y = q_t.sizes()[0] * q_t.sizes()[1];
-    grid.z = 1;
+      oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                      (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
 
-    if((is_causal == true) && (is_dropout == true))
-      {
-        if(q_dtype == at::kHalf)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                    (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-          }
-        else if (q_dtype == at::kBFloat16)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                    (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-          }
-      }
-    else if((is_causal == true) && (is_dropout == false))
-      {
-        if(q_dtype == at::kHalf)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                    (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-          }
-        else if (q_dtype == at::kBFloat16)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                    (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-          }
-      }
-    else if((is_causal == false) && (is_dropout == true))
-      {
-        if(q_dtype == at::kHalf)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                    (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-          }
-        else if (q_dtype == at::kBFloat16)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-            oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                    (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-          }
-      }
-    else
-      {
-        if(q_dtype == at::kHalf)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                             (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-            oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
-                                                                    (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-
-          }
-        else if (q_dtype == at::kBFloat16)
-          {
-            oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
-            auto				                       dk_dv_err = dk_dv_opt(grid, block,
-                                                                             (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                             softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                             (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                             q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                             k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                             v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                             q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                             (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-            oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
-            auto				                    dq_err = dq_opt(grid, block,
-                                                                    (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
-                                                                    softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
-                                                                    (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
-                                                                    q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
-                                                                    k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
-                                                                    v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
-                                                                    q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
-                                                                    (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
-          }
-      }
-
-    //undo reorder tensors for returns
-    dq = dq_t.permute({0,2,1,3}).contiguous();
-    dk = dk_t.permute({0,2,1,3}).contiguous();
-    dv = dv_t.permute({0,2,1,3}).contiguous();
-
-    // For MQA/GQA we need to sum dK and dV across the groups
-    if (num_heads_k != num_heads) {
-        at::sum_out(dk, at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
-        at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
     }
-    return { dq, dk, dv, softmax_d };
+    else if (q_dtype == at::kBFloat16)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,true,true> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                               (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+      oort::bwd_kernel_dq<16,64,16,true,true> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                      (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+    }
+  }
+  else if((is_causal == true) && (is_dropout == false))
+  {
+    if(q_dtype == at::kHalf)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                               (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+      oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                      (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+    }
+    else if (q_dtype == at::kBFloat16)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,true,false> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                               (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+      oort::bwd_kernel_dq<16,64,16,true,false> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                      (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+    }
+  }
+  else if((is_causal == false) && (is_dropout == true))
+  {
+    if(q_dtype == at::kHalf)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                               (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+      oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                      (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+    }
+    else if (q_dtype == at::kBFloat16)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,false,true> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                               (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+      oort::bwd_kernel_dq<16,64,16,false,true> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                      (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+    }
+  }
+  else
+  {
+    if(q_dtype == at::kHalf)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                               (__fp16*)dk_t.data_ptr(),(__fp16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+      oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__fp16*)(q_t.data_ptr()), (__fp16*)(k_t.data_ptr()), (__fp16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__fp16*)out_t.data_ptr(), (__fp16*)dout_t.data_ptr(),
+                                                      (__fp16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+
+    }
+    else if (q_dtype == at::kBFloat16)
+    {
+      oort::bwd_kernel_dk_dv<16,64,16,false,false> dk_dv_opt;
+      auto				                       dk_dv_err = dk_dv_opt(grid, block,
+                                                               (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                               softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                               (__bf16*)dk_t.data_ptr(),(__bf16*)dv_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                               q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                               k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                               v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                               q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                               (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+      oort::bwd_kernel_dq<16,64,16,false,false> dq_opt;
+      auto				                    dq_err = dq_opt(grid, block,
+                                                      (__bf16*)(q_t.data_ptr()), (__bf16*)(k_t.data_ptr()), (__bf16*)(v_t.data_ptr()),
+                                                      softmax_scale, (__bf16*)out_t.data_ptr(), (__bf16*)dout_t.data_ptr(),
+                                                      (__bf16*)dq_t.data_ptr(), (float*)(softmax_lse.data_ptr()),(float*)(delta.data_ptr()),
+                                                      q_t.stride(0), q_t.stride(1), q_t.stride(2), q_t.stride(3),
+                                                      k_t.stride(0), k_t.stride(1), k_t.stride(2), k_t.stride(3),
+                                                      v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),
+                                                      q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,
+                                                      (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);
+    }
+  }
+
+  //undo reorder tensors for returns
+  dq = dq_t.permute({0,2,1,3}).contiguous();
+  dk = dk_t.permute({0,2,1,3}).contiguous();
+  dv = dv_t.permute({0,2,1,3}).contiguous();
+
+  // For MQA/GQA we need to sum dK and dV across the groups
+  if (num_heads_k != num_heads) {
+    at::sum_out(dk, at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
+    at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
+  }
+  return { dq, dk, dv, softmax_d };
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -842,11 +755,11 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor philox_seed,
                const at::Tensor philox_offset)
 {
-    TORCH_WARN("[mha_varlen_bwd not supported on ROCm");
+  TORCH_WARN("[mha_varlen_bwd not supported on ROCm");
 
-    at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
+  at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
 
-    return { q, k, v, softmax_d };
+  return { q, k, v, softmax_d };
 }
 } // namespace pytorch_fmha
 
