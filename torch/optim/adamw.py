@@ -26,20 +26,9 @@ class AdamW(Adam):
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            amsgrad=amsgrad,
-            foreach=foreach,
-            maximize=maximize,
-            capturable=capturable,
-            differentiable=differentiable,
-            fused=fused,
-            decoupled_weight_decay=True
-        )
-        super().__init__(params, defaults)
+        super().__init__(params, lr, betas, eps, weight_decay, amsgrad, foreach=foreach,
+                         maximize=maximize, capturable=capturable, differentiable=differentiable,
+                         fused=fused, decoupled_weight_decay=True)
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
