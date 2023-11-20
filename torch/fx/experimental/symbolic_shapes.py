@@ -3029,7 +3029,8 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
+        expect_rational=True,
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3121,10 +3122,10 @@ class ShapeEnv:
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
-        _assert_bound_is_rational(new_expr, out)
-
-        if out.is_singleton():
-            return out.lower
+        if expect_rational:
+            _assert_bound_is_rational(new_expr, out)
+            if out.is_singleton():
+                return out.lower
 
         return new_expr if unbacked_only else None
 
@@ -3450,7 +3451,8 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
+                      expect_rational=True):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -3510,7 +3512,8 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            static_expr = self._maybe_evaluate_static(expr)
+            static_expr = self._maybe_evaluate_static(expr,
+                                                      expect_rational=expect_rational)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
                 # NB: don't test float as there may be precision issues
