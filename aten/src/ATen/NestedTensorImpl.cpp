@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
