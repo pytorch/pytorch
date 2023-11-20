@@ -301,6 +301,12 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
+    def test_sym_div_mul(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 10)
+        r = (s0 ** 2) / 2 * 2
+        self.assertTrue(bool(r == 100.0))
+
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
@@ -383,7 +389,7 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(0.5*s1), 3)""")
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
@@ -397,7 +403,7 @@ class TestPySymInt(TestCase):
         r = sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(1.0*sqrt(s0), 2)""")
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -405,7 +411,7 @@ class TestPySymInt(TestCase):
         r = math.floor(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(0.5*s0), 2)""")
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
@@ -417,7 +423,7 @@ class TestPySymInt(TestCase):
         r = math.ceil(a0 / 2)
         self.assertEqual(r, 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(ceiling(s0/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(ceiling(0.5*s0), 3)""")
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))

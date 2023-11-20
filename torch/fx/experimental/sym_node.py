@@ -131,7 +131,9 @@ class SymNode:
     # Recompute the hint and see if we've got it now
     # Precondition: self._hint is None
     def _update_hint(self):
-        r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
+        r = self.shape_env._maybe_evaluate_static(
+            self.expr, compute_hint=True, expect_rational=self.pytype is not float
+        )
         if r is not None:
             self._hint = self.pytype(r) if not isinstance(r, SymTypes) else r
 
@@ -841,6 +843,8 @@ def _make_node_magic(method, func):
         # evaluation.
         if method in always_float_magic_methods:
             pytype = float
+            if self.pytype == int and other.pytype == int:
+                out = magic_methods["sym_float"](out)  # type: ignore[operator]
         elif method in always_bool_magic_methods:
             pytype = bool
         elif self.pytype is float or other.pytype is float:
@@ -888,6 +892,8 @@ def _make_node_magic(method, func):
             pytype = int
         elif method in always_float_magic_methods:
             pytype = float
+            if self.pytype == int:
+                out = magic_methods["sym_float"](out)  # type: ignore[operator]
         else:
             pytype = self.pytype
 
