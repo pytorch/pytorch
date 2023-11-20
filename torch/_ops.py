@@ -316,7 +316,6 @@ class HigherOrderOperator(OperatorBase):
                 return handler(mode, *args, **kwargs)
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
-        # FIXME this is busted ignore this pls
         if functionality_key == torch._C.DispatchKey.PreDispatch:
             from torch.utils._python_dispatch import _pop_mode_temporarily
 
@@ -328,7 +327,7 @@ class HigherOrderOperator(OperatorBase):
                 type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
             handler = self.python_key_mode_table[type(curr_mode)]
-            with _pop_mode_temporarily() as mode:
+            with _pop_mode_temporarily(functionality_key) as mode:
                 return handler(mode, *args, **kwargs)
 
         if functionality_key in mode_stack_per_key():
