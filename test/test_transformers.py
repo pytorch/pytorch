@@ -11,6 +11,7 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.utils.attention import CausalVariant, CausalBias, TensorBias
 from torch.nn.parameter import Parameter
 import unittest
+from unittest import expectedFailure as xfail
 from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
@@ -43,6 +44,7 @@ if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
 SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
+Tolerances = namedtuple('Tolerances', ['atol', 'rtol'])
 
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
@@ -2973,21 +2975,17 @@ class TestSDPACudaOnly(NNTestCase):
 
 class TestAttnMasks(NNTestCase):
 
-    @parametrize("compile", [True, False])
-    def test_base_case(self, device, compile: bool):
+    def run_test(self, device, compile, make_q, make_kv, attn_bias=None,
+                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None):
         if compile:
-            self.skipTest("Compiling torch_function_ not working")
             torch._dynamo.reset()
-        # Bsz, num_heads, seq_len, head_dim
-        shape = SdpaShape(16, 16, 128, 16)
-        make_tensor = partial(
-            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        query, key, value = make_q(), make_kv(), make_kv()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
 
+        realized = attn_bias.materialize(device) if attn_bias is not None else None
         pytorch_output = scaled_dot_product_attention(
-            query, key, value, dropout_p=0.0, is_causal=False
+            query, key, value, attn_mask=realized, dropout_p=0.0, is_causal=False
         )
 
         sdpa_op = (
@@ -2996,119 +2994,108 @@ class TestAttnMasks(NNTestCase):
             else scaled_dot_product_attention
         )
         sdpa_output = sdpa_op(
-            query_prototype, key_prototype, value_prototype, None, is_causal=False, dropout_p=0.0
+            query_prototype,
+            key_prototype,
+            value_prototype,
+            attn_mask=attn_bias,
+            dropout_p=0.0,
+            is_causal=False,
+            scale=None,
         )
 
         dOut = torch.randn_like(pytorch_output)
         pytorch_output.backward(dOut)
         sdpa_output.backward(dOut)
 
-        torch.testing.assert_close(pytorch_output, sdpa_output, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(query.grad, query_prototype.grad, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(key.grad, key_prototype.grad, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(value.grad, value_prototype.grad, rtol=1e-5, atol=1e-5)
+        # Use default assert_close tolerances for dtypes
+        if forw_tolerances is None:
+            forw_tolerances = Tolerances(atol=None, rtol=None)
+        if grad_tolerances is None:
+            grad_tolerances = Tolerances(atol=None, rtol=None)
 
+        torch.testing.assert_close(pytorch_output, sdpa_output, rtol=forw_tolerances.rtol, atol=forw_tolerances.atol)
+        torch.testing.assert_close(query.grad, query_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+        torch.testing.assert_close(key.grad, key_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+        torch.testing.assert_close(value.grad, value_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+
+    def test_base_case(self, device):
+        shape = SdpaShape(16, 16, 128, 16)
+        make_tensor = partial(
+            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
+        )
+        self.run_test(device, False, make_tensor, make_tensor, attn_bias=None)
+
+    def test_base_case_compile(self, device):
+        shape = SdpaShape(16, 16, 128, 16)
+        make_tensor = partial(
+            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
+        )
+        self.run_test(device, True, make_tensor, make_tensor, attn_bias=None)
 
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
-        "shapes",
+        "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @parametrize("compile", [True, False])
-    def test_causal_variants(self, device, causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
+    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
-        if compile:
-            self.skipTest("Compiling torch_function_ not working")
-            torch._dynamo.reset()
-        torch.manual_seed(123)
-        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shapes
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
         if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
             self.skipTest(
                 "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
             )
 
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        self.run_test(device, False, make_q_tensor, make_kv_tensor,
+                      CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
+
+    @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
+    @parametrize(
+        "shape",
+        [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
+    )
+    @xfail
+    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
+            self.skipTest(
+                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
+            )
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
 
-        query, key, value = make_q_tensor(), make_kv_tensor(), make_kv_tensor()
-        query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
-        attn_bias = CausalBias(causal_variant, seq_len_q, seq_len_kv)
-
-        pytorch_output = scaled_dot_product_attention(
-            query, key, value, attn_mask=attn_bias.materialize(device), dropout_p=0.0, is_causal=False
-        )
-        sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True)
-            if compile
-            else scaled_dot_product_attention
-        )
-        sdpa_output = sdpa_op(
-            query_prototype,
-            key_prototype,
-            value_prototype,
-            attn_mask=attn_bias,
-            scale=None,
-            is_causal=False,
-            dropout_p=0.0,
-        )
-
-        dOut = torch.randn_like(pytorch_output)
-        pytorch_output.backward(dOut)
-        sdpa_output.backward(dOut)
-        atol, rtol = 1e-3, 1e-3
-        grad_atol, grad_rtol = 5e-3, 5e-3
-        torch.testing.assert_close(pytorch_output, sdpa_output, atol=atol, rtol=rtol)
-        torch.testing.assert_close(query.grad, query_prototype.grad, atol=grad_atol, rtol=grad_rtol)
-        torch.testing.assert_close(key.grad, key_prototype.grad, atol=grad_atol, rtol=grad_rtol)
-        torch.testing.assert_close(value.grad, value_prototype.grad, atol=grad_atol, rtol=grad_rtol)
-
+        self.run_test(device, True, make_q_tensor, make_kv_tensor,
+                      CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
 
     @parametrize("shape", [SdpaShape(16, 16, 128, 16), SdpaShape(16, 16, 52, 32)])
-    @parametrize("compile", [True, False])
-    def test_tensor_bias(self, device, shape: SdpaShape, compile: bool):
-        if compile:
-            self.skipTest("Compiling torch_function_ not working")
-            torch._dynamo.reset()
-
-        make_tensor = partial(
-            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
+    def test_tensor_bias(self, device, shape):
+        make_tensor = partial(torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True)
         attn_bias = TensorBias(
             torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
         )
+        self.run_test(device, False, make_tensor, make_tensor, attn_bias)
 
-        pytorch_output = scaled_dot_product_attention(
-            query, key, value, attn_mask=attn_bias.materialize(device), dropout_p=0.0, is_causal=False
+    @parametrize("shape", [SdpaShape(16, 16, 128, 16), SdpaShape(16, 16, 52, 32)])
+    @xfail
+    def test_tensor_bias_compuile(self, device, shape):
+        make_tensor = partial(torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True)
+        attn_bias = TensorBias(
+            torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
         )
-
-        sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True)
-            if compile
-            else scaled_dot_product_attention
-        )
-        sdpa_output = sdpa_op(
-            query_prototype,
-            key_prototype,
-            value_prototype,
-            attn_mask=attn_bias,
-            dropout_p=0.0,
-            is_causal=False,
-            scale=None,
-        )
-
-        dOut = torch.randn_like(pytorch_output)
-        pytorch_output.backward(dOut)
-        sdpa_output.backward(dOut)
-        atol, rtol = 5e-4, 5e-4
-        grad_atol, grad_rtol = 5e-3, 5e-3
-        torch.testing.assert_close(pytorch_output, sdpa_output, atol=atol, rtol=rtol)
-        torch.testing.assert_close(query.grad, query_prototype.grad, atol=grad_atol, rtol=grad_rtol)
-        torch.testing.assert_close(key.grad, key_prototype.grad, atol=grad_atol, rtol=grad_rtol)
-        torch.testing.assert_close(value.grad, value_prototype.grad, atol=grad_atol, rtol=grad_rtol)
+        self.run_test(device, True, make_tensor, make_tensor, attn_bias)
 
     def test_attn_bias_invalid_func(self, device):
         bias = TensorBias(torch.rand(16, 16, 128, dtype=torch.float16, device=device))
