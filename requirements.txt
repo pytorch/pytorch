@@ -9,7 +9,7 @@ requests
 setuptools
 types-dataclasses
 typing-extensions>=4.8.0
-sympy
+sympy  @ git+https://github.com/sympy/sympy@master
 filelock
 networkx
 jinja2
