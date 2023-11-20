@@ -45,6 +45,7 @@ class TestDummyModel(torch.nn.Module):
     def get_input(self):
         return torch.rand(8, 8, device="cuda")
 
+
 class TestStatefulObj:
     def __init__(self):
         self.data = torch.rand(10, 10, device="cuda")
@@ -139,7 +140,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             state_dict={
                 "model": dist_model,
                 "optimizer": dist_optim,
-                "s": original_stateful_obj
+                "s": original_stateful_obj,
             },
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
@@ -147,7 +148,11 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
         DCP.load(
-            state_dict={"model": dist_model, "optimizer": dist_optim, "s": loaded_stateful_obj},
+            state_dict={
+                "model": dist_model,
+                "optimizer": dist_optim,
+                "s": loaded_stateful_obj,
+            },
             storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
 
