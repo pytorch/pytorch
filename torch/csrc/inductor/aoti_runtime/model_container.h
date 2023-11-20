@@ -50,13 +50,17 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
     }
 
+    // We delegate the loading all in the first model. After that we retrieve
+    // the members that container would hold and share across all models.
     model->load_constants(is_cpu);
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
+    use_secondary_ = false;
 #endif
+    constant_array_ = model->get_constant_array();
 
     for (auto& model : models_) {
-      model->update_constants_map(constants_);
+      model->update_constant_array(constant_array_);
     }
 
     in_spec_ = model->get_in_spec();
@@ -126,12 +130,19 @@ class AOTInductorModelContainer {
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
+  // TODO: Extend blob swapping to CPU.
+  CUDAPtr constant_blob_secondary_;
+  bool use_secondary_;
 #endif // USE_CUDA
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
   // or _binary_constants_bin_start (for CPU).
   std::shared_ptr<ConstantMap> constants_;
+
+  // A indexed vector that points to the corresponding tensor in constants_.
+  // The index of each tensor should match that of constants_info in the model
+  std::shared_ptr<std::vector<AtenTensorHandle>> constant_array_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;

@@ -283,6 +283,10 @@ class AOTInductorModelBase {
   }
 #endif
 
+  std::shared_ptr<std::vector<AtenTensorHandle>> get_constant_array() {
+    return constants_;
+  }
+
   uint8_t* constant_ptr(
       size_t constant_offset,
       size_t bytes_read,
@@ -383,16 +387,21 @@ class AOTInductorModelBase {
     if (!constants_map_) {
       return;
     }
-    constants_.resize(constants_info_.size());
+    constants_->resize(constants_info_.size());
     int idx = 0;
     for (const auto& info : constants_info_) {
       const auto it = constants_map_->find(info.name);
       if (it != constants_map_->end()) {
-        constants_[idx] = it->second;
+        constants_->at(idx) = it->second;
       }
       idx++;
     }
   }
+
+  void update_constant_array(
+      std::shared_ptr<std::vector<AtenTensorHandle>> constant_array) {
+    constants_ = constant_array;
+  };
 
   /// Returns true if the model is complete.
   bool is_finished() {
@@ -448,7 +457,7 @@ class AOTInductorModelBase {
   std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
-  std::vector<AtenTensorHandle> constants_;
+  std::shared_ptr<std::vector<AtenTensorHandle>> constants_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
