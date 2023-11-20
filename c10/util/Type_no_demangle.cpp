@@ -1,7 +1,7 @@
-#include <c10/util/Type.h>
+#include <c10/macros/Macros.h>
 
 #if HAS_DEMANGLE == 0
-#include <string>
+#include <c10/util/Type.h>
 
 namespace c10 {
 std::string demangle(const char* name) {
