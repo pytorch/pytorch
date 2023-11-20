@@ -879,11 +879,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The callback function to store NCCL debug info.
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
-#ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle and ProcessGroup pointer
-  static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<Backend> uccPG_;
-#endif
   size_t uid_;
 };
 
