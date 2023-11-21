@@ -2492,10 +2492,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // when it's safe to release the input back to the allocator,
   // and the present call has no way to know it's not an isend.
   // Therefore, we warn and fall back to the typical recordStream logic:
-  TORCH_WARN_ONCE(
-      avoidRecordStreams_,
-      "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
-      "collectives.");
+  if (avoidRecordStreams_) {
+    TORCH_WARN_ONCE(
+        "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
+        "collectives.");
+  }
 
   // Bump sequence number, updated in collective() as well
   seq_++;
