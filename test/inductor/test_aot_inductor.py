@@ -1319,6 +1319,28 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_zero_size_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, channel, r=8):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveAvgPool2d(1)
+                self.net = torch.nn.Sequential(
+                    torch.nn.Linear(channel, channel // r, bias=False),
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(channel // r, channel, bias=False),
+                    torch.nn.Sigmoid(),
+                )
+
+            def forward(self, inp):
+                b, c, _, _ = inp.shape
+                x = self.pool(inp).view(b, c)
+                x = self.net(x).view(b, c, 1, 1)
+                x = inp * x
+                return x
+
+        inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
+        self.check_model(Model(4), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
