@@ -242,6 +242,7 @@ class CausalVariant(IntEnum):
          [1, 1, 1, 1]]
 
     Note that these variants are equivalent to each other when the sequence lengths of the query and key/value
+    tensors are equal since the triangular matrix is square.
     """
 
     UPPER_LEFT = auto()
