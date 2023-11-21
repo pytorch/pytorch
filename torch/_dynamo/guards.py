@@ -49,6 +49,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -1127,6 +1128,16 @@ class CheckFunctionManager:
                     tensor_check_guards[i],
                     log_only=True,
                 )
+
+                # TODO: Figure out if this is the right place for this??
+                # guard ctx for python subclasses
+                if is_traceable_wrapper_subclass(t):
+                    ctx = t.__tensor_flatten__()[1]
+                    add_code_part(
+                        f"{name}.__tensor_flatten__()[1] == {ctx}",
+                        tensor_check_guards[i],
+                        log_only=False,
+                    )
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards

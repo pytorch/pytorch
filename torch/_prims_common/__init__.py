@@ -1546,11 +1546,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    from torch.fx.experimental.symbolic_shapes import is_singleton
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
