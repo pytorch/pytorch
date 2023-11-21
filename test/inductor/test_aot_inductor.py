@@ -1075,6 +1075,22 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_with_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
