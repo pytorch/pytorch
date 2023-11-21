@@ -1,6 +1,7 @@
 # Owner(s): ["module: pytree"]
 
 import inspect
+import re
 import unittest
 from collections import namedtuple, OrderedDict, UserDict
 
@@ -56,6 +57,7 @@ class TestGenericPytree(TestCase):
                         f"not in Python parameter(s) ({py_param_names})"
                     ),
                 )
+
                 # Check the positional parameters are the same.
                 cxx_positional_param_names = [
                     n
@@ -80,14 +82,35 @@ class TestGenericPytree(TestCase):
                     )
                 ]
                 self.assertEqual(cxx_positional_param_names, py_positional_param_names)
-                # Check parameter kinds and default values are the same.
+
                 for py_name, py_param in py_signature.parameters.items():
                     self.assertIn(py_name, cxx_signature.parameters)
                     cxx_param = cxx_signature.parameters[py_name]
+
+                    # Check parameter kinds and default values are the same.
                     self.assertEqual(cxx_param.kind, py_param.kind)
                     self.assertEqual(cxx_param.default, py_param.default)
+
+                    # Check parameter annotations are the same.
                     if "TreeSpec" in str(cxx_param.annotation):
                         self.assertIn("TreeSpec", str(py_param.annotation))
+                        self.assertEqual(
+                            re.sub(
+                                r"(?:\b)([\w\.]*)TreeSpec(?:\b)",
+                                "TreeSpec",
+                                str(cxx_param.annotation),
+                            ),
+                            re.sub(
+                                r"(?:\b)([\w\.]*)TreeSpec(?:\b)",
+                                "TreeSpec",
+                                str(py_param.annotation),
+                            ),
+                            msg=(
+                                f"C++ parameter {cxx_param} "
+                                f"does not match Python parameter {py_param} "
+                                f"for API `{name}`"
+                            ),
+                        )
                     else:
                         self.assertEqual(
                             cxx_param.annotation,
