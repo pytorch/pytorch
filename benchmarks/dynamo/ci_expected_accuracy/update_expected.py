@@ -23,6 +23,7 @@ import subprocess
 import sys
 import urllib
 from io import BytesIO
+from itertools import product
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -65,7 +66,10 @@ S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 def get_artifacts_urls(results, suites):
     urls = {}
     for r in results:
-        if "inductor" == r["workflowName"] and "test" in r["jobName"]:
+        if (
+            r["workflowName"] in ("inductor", "inductor-periodic")
+            and "test" in r["jobName"]
+        ):
             config_str, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
@@ -140,16 +144,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     repo = "pytorch/pytorch"
+
     suites = {
-        "aot_inductor_huggingface",
-        "inductor_huggingface",
-        "dynamic_inductor_huggingface",
-        "aot_inductor_timm",
-        "inductor_timm",
-        "dynamic_inductor_timm",
-        "aot_inductor_torchbench",
-        "inductor_torchbench",
-        "dynamic_inductor_torchbench",
+        f"{a}_{b}"
+        for a, b in product(
+            [
+                "aot_eager",
+                "aot_inductor",
+                "dynamic_aot_eager",
+                "dynamo_eager",
+                "inductor",
+                "dynamic_inductor",
+            ],
+            ["huggingface", "timm", "torchbench"],
+        )
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
