@@ -24,13 +24,7 @@ import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
-from . import (
-    config,
-    exc,
-    logging as torchdynamo_logging,
-    skipfiles,
-    variables,
-)
+from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
 from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
