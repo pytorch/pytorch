@@ -291,7 +291,7 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil  # type: ignore[import]
+    from libfb.py import parutil
 
     try:
         if __package__:
