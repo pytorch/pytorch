@@ -551,7 +551,9 @@ def _sharded_post_state_dict_hook(
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
-        if not fsdp_state._state_dict_config._use_dtensor:
+        if (not fsdp_state._state_dict_config._use_dtensor) or (
+            not hasattr(fsdp_state, "_device_mesh")
+        ):
             sharded_tensor = _ext_chunk_tensor(
                 tensor=param,
                 rank=fsdp_state.rank,
@@ -627,7 +629,9 @@ def _sharded_pre_load_state_dict_hook(
             continue  # TODO: Improve unittesting for state_dict finetuning
             # cases: https://github.com/pytorch/pytorch/issues/109134
 
-        if not fsdp_state._state_dict_config._use_dtensor:
+        if not fsdp_state._state_dict_config._use_dtensor or (
+            not hasattr(fsdp_state, "_device_mesh")
+        ):
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(
                 param, fsdp_state._fsdp_extension
