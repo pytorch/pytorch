@@ -454,23 +454,23 @@ class CppCSEVariable(CSEVariable):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype = None
-        self.relevant_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
             # args[1] is index
-            self._set_relevant_itervars(args[1])
+            self._set_dependent_itervars(args[1])
         else:
             # propagate relevant itervars and is_vec from args
-            self.relevant_itervars.update(
+            self.dependent_itervars.update(
                 *[
-                    arg.relevant_itervars
+                    arg.dependent_itervars
                     for arg in args
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
             if name == "index_expr":
-                self._set_relevant_itervars(args[0])
+                self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         if (
@@ -479,7 +479,7 @@ class CppCSEVariable(CSEVariable):
         ):
             self.dtype = get_current_node_opt_ctx().dtype
 
-    def _set_relevant_itervars(self, index: sympy.Expr):
+    def _set_dependent_itervars(self, index: sympy.Expr):
         """
         Set the relevant itervars for this variable based on the `index` expression.
         This includes the itervars directly used in the `index` as well as relevant itervars
@@ -487,14 +487,14 @@ class CppCSEVariable(CSEVariable):
         """
         for s in index.free_symbols:
             if s in V.kernel.itervars:
-                self.relevant_itervars.add(s)
+                self.dependent_itervars.add(s)
             elif s.name in V.kernel.cse.varname_map:
-                self.relevant_itervars.update(
-                    V.kernel.cse.varname_map[s.name].relevant_itervars
+                self.dependent_itervars.update(
+                    V.kernel.cse.varname_map[s.name].dependent_itervars
                 )
 
-    def is_relevant(self, itervar: sympy.Symbol):
-        return itervar in self.relevant_itervars
+    def depends_on(self, itervar: sympy.Symbol):
+        return itervar in self.dependent_itervars
 
 
 class CppOverrides(OpOverrides):
@@ -1577,7 +1577,7 @@ class CppVecKernel(CppKernel):
             not is_broadcast
             and stride_at(tiling_var, index) != 1
             or any(
-                self.cse.varname_map[s.name].is_relevant(tiling_var)
+                self.cse.varname_map[s.name].depends_on(tiling_var)
                 for s in index.free_symbols
                 if s.name.startswith("tmp")
             )
@@ -1635,6 +1635,7 @@ class CppVecKernel(CppKernel):
 
         csevar = self.cse.generate(self.loads, line)
         csevar.update_on_args("load", (name, index), {})
+        assert isinstance(csevar, CppCSEVariable)
         csevar.is_vec = True
         return csevar
 
@@ -1826,7 +1827,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
     def broadcast(self, scalar_var: CppCSEVariable):
         assert (
             not scalar_var.is_vec
-            and self.itervars[self.tiling_idx] not in scalar_var.relevant_itervars
+            and self.itervars[self.tiling_idx] not in scalar_var.dependent_itervars
         )
         if scalar_var.dtype == torch.bool:
             vec_var = self.cse.generate(
@@ -1839,7 +1840,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             )
         assert isinstance(vec_var, CppCSEVariable)
         vec_var.dtype = scalar_var.dtype
-        vec_var.relevant_itervars = scalar_var.relevant_itervars
+        vec_var.dependent_itervars = scalar_var.dependent_itervars
         vec_var.is_vec = True
         return vec_var
 
@@ -1954,6 +1955,7 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             csevar = self.cse.generate(self.loads, line)
             csevar.update_on_args("load", (name, index), {})
+            assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
         else:
