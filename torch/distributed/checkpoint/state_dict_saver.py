@@ -18,7 +18,6 @@ from .utils import _DistWrapper, _all_gather_keys
 __all__ = ["save_state_dict", "save"]
 
 
-# Deprecated
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,

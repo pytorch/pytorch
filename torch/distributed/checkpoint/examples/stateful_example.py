@@ -52,6 +52,7 @@ def _train(model, optim, train_steps=1):
 
     return loss
 
+
 def _init_model(device, world_size):
     device_mesh = init_device_mesh(device, (world_size,))
     model = Model().cuda()
@@ -64,6 +65,7 @@ def _init_model(device, world_size):
     _make_stateful(model, optim)
 
     return model, optim
+
 
 def run(rank, world_size, device="cuda"):
     # Set up world pg
