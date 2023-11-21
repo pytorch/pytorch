@@ -1231,6 +1231,27 @@ class AOTInductorTestsTemplate:
         ]
         self.check_model(Model(), (a,), constraints=constraints)
 
+    def test_triton_kernel_reinterpret_view(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        @triton.jit
+        def pass_kernel(x, y):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                pass_kernel[(1,)](x, torch.empty_like(x))
+                return x
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self):
