@@ -182,7 +182,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.example_inputs = example_inputs
         self.layout_opt = (
-            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+            layout_opt if layout_opt is not None else self.decide_layout_opt(gm, is_inference=is_inference)
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
@@ -247,12 +247,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_backend_registration()
 
     @staticmethod
-    def decide_layout_opt(gm) -> bool:
+    def decide_layout_opt(gm, *, is_inference) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
-        return True
         if not config.layout_optimization:
             return False
 
@@ -296,6 +295,42 @@ class GraphLowering(torch.fx.Interpreter):
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
             )
             return False
+
+
+        # only grouped convolutions benchmarked as slower in conv samples for inference only
+        if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
+            def is_grouped(n):
+                return n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1
+
+            grouped_flops = 0
+            non_grouped_flops = 0
+
+            for node in conv_nodes:
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(node)
+
+                if success:
+                    with FlopCounterMode(
+                        display=False
+                    ) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        grouped_flops += counted_flops
+                    else:
+                        non_grouped_flops += counted_flops
+
+            # average benchmarked speedup / slowdown
+            GROUPED_CHANNELS_LAST_MULTIPLER = 1.358
+            DEFAULT_MULTIPLIER = .823
+
+            default = grouped_flops + non_grouped_flops
+            channels = grouped_flops * GROUPED_CHANNELS_LAST_MULTIPLER + non_grouped_flops * DEFAULT_MULTIPLIER
+
+            return channels < default
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
