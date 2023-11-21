@@ -567,18 +567,17 @@ class WrapperCodeGen(CodeGen):
         pass
 
     @dynamo_timed
-    def generate(self, is_inference, profiling_allowed=True):
+    def generate(self, is_inference):
         result = IndentedBuffer()
         result.splice(self.header)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
-            if profiling_allowed:
-                if config.profiler_mark_wrapper_call:
-                    self.generate_profiler_mark_wrapper_call(stack)
-                if config.profile_bandwidth:
-                    self.write_triton_header_once()
-                    self.wrapper_call.writeline("start_graph()")
+            if config.profiler_mark_wrapper_call:
+                self.generate_profiler_mark_wrapper_call(stack)
+            if config.profile_bandwidth:
+                self.write_triton_header_once()
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -606,8 +605,8 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
-            if config.profile_bandwidth and profiling_allowed:
-                self.wrapper_call.writeline("end_graph()")
+            if config.profile_bandwidth:
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
@@ -979,6 +978,12 @@ class WrapperCodeGen(CodeGen):
             f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
         )
         stack.enter_context(self.wrapper_call.indent())
+
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
 
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
@@ -1585,8 +1590,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_model_kernels()
             self.codegen_model_constructor()
         self.write_wrapper_decl()
-        # don't generate profiling-related python code
-        return super().generate(is_inference, profiling_allowed=False)
+        return super().generate(is_inference)
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
@@ -1864,6 +1868,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
 
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():
