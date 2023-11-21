@@ -187,7 +187,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
         with self.assertRaises(roar.BeartypeException):
             ONNXProgram(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
         onnx_program = ONNXProgram(
-            torch.nn.Module(),
             onnx.ModelProto(),
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),

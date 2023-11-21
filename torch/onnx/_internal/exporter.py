@@ -652,7 +652,6 @@ class ONNXProgram:
         model_signature: The model signature for the exported ONNX graph.
     """
 
-    _model_torch: Final[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
@@ -664,7 +663,6 @@ class ONNXProgram:
     @_beartype.beartype
     def __init__(
         self,
-        model_torch: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_proto: onnx.ModelProto,  # type: ignore[name-defined]
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
@@ -674,7 +672,6 @@ class ONNXProgram:
         export_exception: Optional[Exception] = None,
         model_signature: Optional[torch.export.ExportGraphSignature] = None,
     ):
-        self._model_torch = model_torch
         self._model_proto = model_proto
         self._model_signature = model_signature
         self._input_adapter = input_adapter
@@ -1045,7 +1042,6 @@ class ONNXProgram:
         import onnx
 
         return ONNXProgram(
-            torch.nn.Module(),
             onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
@@ -1166,7 +1162,6 @@ class Exporter:
             )
 
             return torch.onnx.ONNXProgram(
-                self.model,
                 onnx_model,
                 self.options.fx_tracer.input_adapter,
                 self.options.fx_tracer.output_adapter,

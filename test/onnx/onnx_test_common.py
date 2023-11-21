@@ -439,7 +439,7 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_args = input_args
         ref_input_kwargs = input_kwargs
 
-    # ONNXProgram._model_torch holds a reference (not copy) to the original ref_model, including its state_dict.
+    # ONNXProgram holds a reference (not copy) to the original ref_model, including its state_dict.
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     ort_outputs = onnx_program(*input_args, **input_kwargs)
