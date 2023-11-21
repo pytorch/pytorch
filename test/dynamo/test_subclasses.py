@@ -608,7 +608,7 @@ class GraphModule(torch.nn.Module):
                 return ["inner_elem"], None
 
             @staticmethod
-            def __tensor_unflatten__(inner_tensors, _):
+            def __tensor_unflatten__(inner_tensors, _, outer_size):
                 return DoubleSizeMaybeAddGeThreeTensor(inner_tensors["inner_elem"])
 
             def __repr__(self):
