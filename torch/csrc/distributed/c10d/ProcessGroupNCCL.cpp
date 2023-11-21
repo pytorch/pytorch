@@ -2311,18 +2311,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // Bump collective counter
   seq_++;
 
-  // Currently, the API permits two scenarios where inputs.size() and
+  // Currently, the API permits one scenario where inputs.size() and
   // outputs.size() are > 0.
   // 1. If the call was a _coalesced call, all inputs must be on the same
   // device.
   //    The group of nccl calls applies the collective separately to each input,
   //    but the group as a whole should be efficient, and might even execute as
   //    a single fused kernel.
-  // 2. If the call was a _multigpu call, all inputs must be on different
-  // devices.
-  //    The nccl group applies the collective across them (eg, if the collective
-  //    is an allreduce, the output on each device contains contributions summed
-  //    across `inputs' tensors).
   const auto devices = getDeviceList(inputs);
   const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
