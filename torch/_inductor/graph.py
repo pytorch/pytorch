@@ -252,6 +252,7 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
+        return True
         if not config.layout_optimization:
             return False
 
