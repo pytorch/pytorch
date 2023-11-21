@@ -7320,7 +7320,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
 
-    @parametrize_test('device', ['cuda'] if TEST_CUDA else [])
     @largeTensorTest("60GB", "cpu")
     @largeTensorTest("16GB", "cuda")
     def test_avg_pool_large_tensor(self, device):
