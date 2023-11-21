@@ -924,6 +924,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
+        if name == "tobytes":
+            unimplemented("tobytes is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
