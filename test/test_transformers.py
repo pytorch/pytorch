@@ -2498,7 +2498,6 @@ class TestSDPACudaOnly(NNTestCase):
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
-        # dropout_p = 0.0001 # FIXME: DEBUG
         is_dropout = dropout_p > 0.0
 
         if not is_dropout:
@@ -2526,8 +2525,6 @@ class TestSDPACudaOnly(NNTestCase):
             out = out[..., :v_og_size]
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
-            print(f'{dbug_mask=}')
-            print(f'{dbug_mask.shape=}')
             query_padding_mask = torch.ones(
                 batch_size, seq_len_q, device=device, dtype=torch.bool)
             key_padding_mask = torch.ones(
@@ -2536,9 +2533,7 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
-            print(f'{softmax_mask=}')
             dropout_mask = softmax_mask >= 0
-            print(f'{dropout_mask=}')
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
@@ -2569,8 +2564,6 @@ class TestSDPACudaOnly(NNTestCase):
         value_fudge_factor = 2
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
-        print(f'{out=}')
-        print(f'{out_ref=}')
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
                          atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
