@@ -4178,7 +4178,7 @@ class DynamicScalar(ExternKernel):
             # Special case for boolean.  For Reasons(TM), we don't represent
             # boolean variables directly in sympy; instead, we generate an
             # indicator integer variable which we then convert to a boolean by
-            # testing i0 == 0.  We have to identify the underlying indicator
+            # testing i0 == 1.  We have to identify the underlying indicator
             # variable, and then bind i0 to the appropriate integer value
             # based on the runtime boolean.
             assert isinstance(sym, sympy.Eq), sym
