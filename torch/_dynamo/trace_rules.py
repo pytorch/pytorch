@@ -1,5 +1,6 @@
 import functools
 import importlib
+import sys
 import types
 
 import torch
@@ -114,7 +115,6 @@ torch_C_binding_in_graph_functions = {
     "math.isinf": TorchInGraphFunctionVariable,
     "math.isnan": TorchInGraphFunctionVariable,
     "math.isqrt": TorchInGraphFunctionVariable,
-    "math.lcm": TorchInGraphFunctionVariable,
     "math.ldexp": TorchInGraphFunctionVariable,
     "math.lgamma": TorchInGraphFunctionVariable,
     "math.log": TorchInGraphFunctionVariable,
@@ -1967,6 +1967,10 @@ torch_C_binding_in_graph_functions = {
 }
 
 
+if sys.version_info >= (3, 9):
+    torch_C_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
+
+
 # In graph functions (including constant folding) that are not C bindings
 torch_non_C_binding_in_graph_functions = {
     "torch.__future__.get_overwrite_module_params_on_conversion": TorchInGraphFunctionVariable,
@@ -2692,11 +2696,9 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 def get_torch_obj_rule_map():
     d = dict()
     for k, v in torch_name_rule_map.items():
-        try:
-            obj = load_object(k)
+        obj = load_object(k)
+        if obj is not None:
             d[obj] = v
-        except (AttributeError, ModuleNotFoundError):
-            pass
     return d
 
 
@@ -2711,13 +2713,16 @@ Load string represented torch objects.
 
 
 def load_object(name):
-    x = name.split("#")
-    if len(x) == 2:
-        obj = _load_obj_from_str(x[0])
-        val = getattr(obj, x[1])
-    else:
-        assert len(x) == 1, f"Invalid obj name {name}"
-        val = _load_obj_from_str(x[0])
+    try:
+        x = name.split("#")
+        if len(x) == 2:
+            obj = _load_obj_from_str(x[0])
+            val = getattr(obj, x[1])
+        else:
+            assert len(x) == 1, f"Invalid obj name {name}"
+            val = _load_obj_from_str(x[0])
+    except (AttributeError, ModuleNotFoundError):
+        val = None
     if hasattr(val, "__wrapped__"):
         val = val.__wrapped__
     return val
