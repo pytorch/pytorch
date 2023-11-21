@@ -738,7 +738,7 @@ class SequentialLR(LRScheduler):
         return state_dict
 
     def load_state_dict(self, state_dict):
-        """Load the schedulers state.
+        """Load the scheduler's state.
 
         Args:
             state_dict (dict): scheduler state. Should be an object returned
