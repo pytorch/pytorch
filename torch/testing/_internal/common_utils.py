@@ -274,6 +274,14 @@ def get_tracked_input() -> Optional[TrackedInput]:
         return None
     return test_fn.tracked_input
 
+def clear_tracked_input():
+    test_fn = extract_test_fn()
+    if test_fn is None:
+        return
+    if not hasattr(test_fn, "tracked_input"):
+        return None
+    test_fn.tracked_input = None
+
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
@@ -289,17 +297,14 @@ class TrackedInputIter:
         return self
 
     def __next__(self):
-        try:
-            input_idx, input_val = next(self.child_iter)
-            self._set_tracked_input(
-                TrackedInput(
-                    index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
-                )
+        # allow StopIteration to bubble up
+        input_idx, input_val = next(self.child_iter)
+        self._set_tracked_input(
+            TrackedInput(
+                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
             )
-            return input_val
-        except StopIteration as e:
-            self._clear_tracked_input()
-            raise e
+        )
+        return input_val
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -307,11 +312,6 @@ class TrackedInputIter:
         if not hasattr(self.test_fn, "tracked_input"):
             return
         self.test_fn.tracked_input = tracked_input
-
-    def _clear_tracked_input(self):
-        if self.test_fn is not None and hasattr(self.test_fn, "tracked_input"):
-            self.test_fn.tracked_input = None
-        self.test_fn = None
 
 class _TestParametrizer:
     """
