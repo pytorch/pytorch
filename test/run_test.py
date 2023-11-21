@@ -1432,6 +1432,7 @@ def load_test_times_from_file(
         print_to_stderr(
             f"::warning:: Failed to find test times file `{path}`. Using round robin sharding."
         )
+        exit()
         return {}
 
     with open(path) as f:
@@ -1668,10 +1669,10 @@ def main():
         unranked_tests=selected_tests
     )
 
-    if IS_CI:
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-        aggregated_heuristics = get_test_prioritizations(selected_tests)
+    # if IS_CI:
+    # downloading test cases configuration to local environment
+    get_test_case_configs(dirpath=test_directory)
+    aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
     test_prioritizations.print_info()
@@ -1740,8 +1741,8 @@ def main():
         ),
     ]
 
-    for test_batch in test_batches:
-        print_to_stderr(test_batch)
+    # for test_batch in test_batches:
+    #     print_to_stderr(test_batch)
 
     if options.dry_run:
         return
@@ -1756,20 +1757,21 @@ def main():
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
+    print("ZAIN RUNNNING TESTS")
     try:
         # Actually run the tests
         start_time = time.time()
         for test_batch in test_batches:
             elapsed_time = time.time() - start_time
-            print_to_stderr(
+            print(
                 f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
             )
-            print_to_stderr(
+            print(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
-            run_tests(
-                test_batch.sharded_tests, test_directory, options, test_batch.failures
-            )
+            # run_tests(
+            #     test_batch.sharded_tests, test_directory, options, test_batch.failures
+            # )
 
     finally:
         if options.coverage:

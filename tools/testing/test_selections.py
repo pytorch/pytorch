@@ -83,6 +83,9 @@ def get_with_pytest_shard(
                 duration += class_duration
         return duration
 
+    tests_without_duration = []
+    long_durations = []
+    negative_durations = []
     for test in tests:
         file_duration = test_file_times.get(test.test_file, None)
         included = test.included()
@@ -108,9 +111,20 @@ def get_with_pytest_shard(
         else:
             duration = file_duration
         print(f"ZR: Duration for test {test}: {duration}")
-        print(f"ZR: Duration difference: {file_duration - duration}")
 
-        if duration and duration > THRESHOLD:
+        if duration is None:
+            tests_without_duration.append(test)
+
+        if duration is not None and duration < 0:
+            print("ZR: Negative duration")
+            negative_durations.append(test)
+            duration = 3 # We don't know it, but it's probably small. Assume it's the same as the pytest starup costs
+        if duration is not None and duration > THRESHOLD:
+            if file_duration < duration:
+                print("ZR: Woah, file duration is less than duration")
+                long_durations.append(test)
+                #duration = file_duration # Patch the difference
+            print(f"ZR: Duration difference: {file_duration - duration}")
             num_shards = math.ceil(duration / THRESHOLD)
             print(f"ZR: Sharding {test} into {num_shards} shards")
             for i in range(num_shards):
@@ -119,6 +133,23 @@ def get_with_pytest_shard(
                 )
         else:
             sharded_tests.append(ShardedTest(test, 1, 1, duration))
+
+    print("\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    print("!!!!!!!!!! ANOMALIES !!!!!!!!!!!")
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    if tests_without_duration:
+        print("\n!!!! Tests without duration: !!!!!")
+        for test in tests_without_duration:
+            print(f"   - {test}")
+    if long_durations:
+        print("\n!!!! File durations less than test class duration: !!!!!")
+        for test in long_durations:
+            print(f"   - {test}")
+    if negative_durations:
+        print("\n!!!! Negative test class durations: !!!!!")
+        for test in negative_durations:
+            print(f"   - {test}")
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n")
     return sharded_tests
 
 
