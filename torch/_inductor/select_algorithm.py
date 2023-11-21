@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -430,7 +430,7 @@ class TritonTemplate(KernelTemplate):
         suffix_args=0,
         epilogue_fn=identity,
         **kwargs,
-    ):
+    ) -> Generator[ChoiceCaller, None, None]:
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -539,7 +539,7 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
-        return TritonTemplateCaller(
+        yield TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
             layout,

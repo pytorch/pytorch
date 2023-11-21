@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, Optional
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import Buffer, CUDATemplateBuffer, FlexibleLayout, IRNode, Layout, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -349,6 +349,16 @@ class CUDATemplateCaller(ChoiceCaller):
             return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
+        for i, node in enumerate(self.input_nodes):
+            if (
+                hasattr(node, "freeze_layout_with_same_order")
+                and hasattr(node, "layout")
+                and isinstance(node.layout, FlexibleLayout)
+            ):
+                node.freeze_layout_with_same_order(
+                    self.bmreq.input_tensor_meta[i].strides
+                )
+
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

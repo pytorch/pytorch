@@ -120,6 +120,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    from torch._inductor.ir import FixedLayout, FlexibleLayout
 
     choices = []
 
@@ -133,11 +134,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
 
     if m * n != 0 and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        out_layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
         )
-
-    from torch._inductor.ir import FixedLayout, FlexibleLayout
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, out_layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
 
     use_aten = use_aten_gemm_kernels()
 
@@ -181,6 +183,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    from torch._inductor.ir import FlexibleLayout
+
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     choices = []
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
@@ -211,9 +215,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if use_cutlass_template(layout, m, n, k):
+        out_layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
-            layout,
+            out_layout,
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
