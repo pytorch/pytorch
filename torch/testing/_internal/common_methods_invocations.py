@@ -6000,6 +6000,7 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(make_arg((3, 0)), args=(1,))
     yield SampleInput(make_arg((3, 0)), args=(1,), kwargs={'keepdim': True})
+    yield SampleInput(torch.tensor([2., 3, 0, 0], dtype=dtype, device=device, requires_grad=requires_grad))
 
     # test zero scalar tensor
     zero = make_arg(())
@@ -13516,11 +13517,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
-               # MissingOperatorWithoutDecomp: missing lowering
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
-               # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
-               DecorateInfo(unittest.expectedFailure, 'TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive'),
                # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out' is not currently implemented
                # for the MPS device.
                DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
