@@ -523,7 +523,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     grid.x = (seqlen_k + BLOCK_M - 1) / BLOCK_M;                                                                            \
     grid.y = batch_size * num_heads;                                                                                        \
     grid.z = 1;                                                                                                             \
-    std::cerr << "grid.x = " << grid.x << " grid.y = " << grid.y << std::endl;                                              \
     oort::bwd_kernel_dk_dv<BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT> dk_dv_opt;                               \
     err = dk_dv_opt(grid, block,                                                                                            \
                     (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                    \
