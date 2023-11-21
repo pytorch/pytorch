@@ -167,13 +167,13 @@ def calculate_shards(
     print("Shard stats:")
     print(f"  Total number of tests: {len(tests)}")
     print(f"  Number of shards: {num_shards}")
-    for shard_num in range(1, num_shards + 1):
-        print(f"  Shard {shard_num}:")
-        print(f"    Number of serial tests:     {len(sharded_jobs[shard_num].serial)}")
-        print(f"    Duration of serial tests:   {sum(test.get_time() for test in sharded_jobs[shard_num].serial)}")
-        print(f"    Number of parallel tests:   {len(sharded_jobs[shard_num].parallel)}")
-        print(f"    Duration of parallel tests: {sum(test.get_time() for test in sharded_jobs[shard_num].parallel)}") # Should this be divided by the number of tests we can run in parallel?
-        print(f"    Total duration:             {sharded_jobs[shard_num].get_total_time()}")
+    for shard_idx in range(num_shards):
+        print(f"  Shard {shard_idx + 1}:")
+        print(f"    Number of serial tests:     {len(sharded_jobs[shard_idx].serial)}")
+        print(f"    Duration of serial tests:   {sum(test.get_time() for test in sharded_jobs[shard_idx].serial)}")
+        print(f"    Number of parallel tests:   {len(sharded_jobs[shard_idx].parallel)}")
+        print(f"    Duration of parallel tests: {sum(test.get_time() for test in sharded_jobs[shard_idx].parallel)}") # Should this be divided by the number of tests we can run in parallel?
+        print(f"    Total duration:             {sharded_jobs[shard_idx].get_total_time()}")
 
     return [job.convert_to_tuple() for job in sharded_jobs]
 
