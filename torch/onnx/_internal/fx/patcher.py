@@ -99,7 +99,7 @@ class ONNXTorchPatcher:
                     filename, framework="pt", device=device
                 ) as f:
                     for k in f.keys():
-                        fake_mode = torch._guards.detect_fake_mode()
+                        fake_mode = torch._tracing_context.detect_fake_mode()
                         if not fake_mode:
                             result[k] = f.get_tensor(k)
                         else:

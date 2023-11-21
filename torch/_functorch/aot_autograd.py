@@ -23,7 +23,7 @@ from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
-from torch._guards import detect_fake_mode, tracing
+from torch._tracing_context import detect_fake_mode, tracing, TracingContext
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -40,7 +40,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transfor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs, Source
+from torch._guards import DuplicateInputs, Source
 
 
 original_zip = zip
@@ -2131,7 +2131,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             updated_flat_args.extend([seed, offset])
 
-        if tracing_context := torch._guards.TracingContext.try_get():
+        if tracing_context := torch._tracing_context.TracingContext.try_get():
             tracing_context.fw_metadata = fw_metadata \
                 if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
         compiled_fw = compiler(fw_module, updated_flat_args)
@@ -3847,7 +3847,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # 1) There is a check in the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
-            if tracing_context := torch._guards.TracingContext.try_get():
+            if tracing_context := torch._tracing_context.TracingContext.try_get():
                 tracing_context.fw_metadata = inner_meta
 
             with TracingContext.report_output_strides() as fwd_output_strides:
@@ -4898,7 +4898,7 @@ def aot_module_simplified(
     # First, the params
     full_args.extend(params_flat)
 
-    if tracing_context := torch._guards.TracingContext.try_get():
+    if tracing_context := torch._tracing_context.TracingContext.try_get():
         tracing_context.params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None

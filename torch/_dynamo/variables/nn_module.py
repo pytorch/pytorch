@@ -74,7 +74,12 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", "module", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "module_type",
+        "module_key",
+        "module",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(self, module_type: type, module_key: str, module, **kwargs):
         super().__init__(**kwargs)
@@ -341,6 +346,7 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
+
         module = self.module
 
         def generic_call_method_helper(name):

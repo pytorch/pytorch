@@ -77,7 +77,7 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if tracing_context := torch._guards.TracingContext.try_get():
+    if tracing_context := torch._tracing_context.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
         params_flat = tracing_context.params_flat
         assert fw_metadata is not None and params_flat is not None
@@ -138,7 +138,9 @@ class ErasedTensor(torch.Tensor):
 
 @torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
+    for (
+        mod
+    ) in torch._tracing_context.TracingContext.get().module_context.nn_modules.values():
         if not isinstance(mod, torch.nn.Module):
             continue
 

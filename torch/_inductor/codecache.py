@@ -682,7 +682,7 @@ class FxGraphCache:
         """
         Helper to get the shape env from the tracing context.
         """
-        return torch._guards.TracingContext.get().fake_mode.shape_env
+        return torch._tracing_context.TracingContext.get().fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(

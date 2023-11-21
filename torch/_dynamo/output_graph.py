@@ -26,8 +26,8 @@ from torch._guards import (
     GlobalContextCheckpointState,
     GuardsCheckpointState,
     Source,
-    TracingContext,
 )
+from torch._tracing_context import TracingContext
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -993,7 +993,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 GlobalContextCheckpointState(current_global_state)
             )
 
-    @torch._guards.TracingContext.clear_frame()
+    @torch._tracing_context.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
