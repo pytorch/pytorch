@@ -16,10 +16,11 @@ class Placement:
 
     # convenient utils to check for placement types
     def is_shard(self, dim: Optional[int] = None) -> bool:
-        if dim is not None and isinstance(self, Shard):
-            return self.dim == dim
+        is_shard_instance = isinstance(self, Shard)
+        if dim is not None and is_shard_instance:
+            return cast(Shard, self).dim == dim
         else:
-            return isinstance(self, Shard)
+            return is_shard_instance
 
     def is_replicate(self) -> bool:
         return isinstance(self, Replicate)
