@@ -515,9 +515,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
-        "of node (n0__4) does not match expected type (tensor(int64))"
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "RuntimeError:"
+        "Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
+        "If you need this functionality, please file a github issue."
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):

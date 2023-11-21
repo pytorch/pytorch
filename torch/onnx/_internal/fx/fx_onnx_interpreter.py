@@ -243,11 +243,11 @@ def _fill_tensor_shape_type(
             continue
         elif fx_type_utils.is_torch_symbolic_type(expected_value):
             # aten::sym_size output is a int, not a tensor, which stands
-            # for the size of one dim. We treat it as 0-D tensor.
+            # for the size of one dim. We treat it as 1-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
-            onnxscript_value.shape = torch.Size([])
+            onnxscript_value.shape = torch.Size([1])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
