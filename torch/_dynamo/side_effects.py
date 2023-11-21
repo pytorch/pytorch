@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
 
@@ -39,7 +39,7 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: MutableLocalSource, source: Source):
+    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
         super().__init__(typ)
         self.source = source
 
@@ -51,7 +51,7 @@ class AttributeMutationExisting(AttributeMutation):
 
 
 class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Source, cls_source: Source):
+    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
@@ -63,7 +63,7 @@ class SideEffects:
     """
 
     id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    store_attr_mutations: Dict[MutableLocalBase, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
     def __init__(
@@ -303,7 +303,7 @@ class SideEffects:
                 live_new_objects.add(var.mutable_local)
             return var
 
-        def is_live(var: VariableTracker):
+        def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
