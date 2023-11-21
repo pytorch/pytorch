@@ -164,14 +164,9 @@ file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
-# FAT Library
-add_library(fat SHARED IMPORTED)
-set_target_properties(fat PROPERTIES IMPORTED_OBJECTS "native/transformers/hip/oort/kernels/*.so")
-
 # flash_attention sources
-#file(GLOB flash_attention_cpp_hip "native/transformers/hip/oort/*.cpp")
-file(GLOB flash_attention_cpp_hip "native/transformers/hip/oort/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/hip/oort/src/*.hip")
+file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
+file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
@@ -184,6 +179,9 @@ if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
   list(APPEND FLASH_ATTENTION_CUDA_SOURCES ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
+
+  list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
+  list(APPEND native_transformers_src_hip_hip ${flash_attention_src_hip_hip})
 endif()
 
 if(USE_MEM_EFF_ATTENTION)
@@ -295,10 +293,32 @@ if(USE_ROCM)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
-  set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_nested_hip_hip} ${native_sparse_hip_hip} ${native_quantized_hip_hip} ${native_transformers_hip_hip} ${flash_attention_cpp_hip} ${flash_attention_src_hip_hip})
+  list(APPEND ATen_HIP_SRCS
+    ${ATen_HIP_SRCS}
+    ${hip_hip}
+    ${native_hip_hip}
+    ${native_nested_hip_hip}
+    ${native_sparse_hip_hip}
+    ${native_quantized_hip_hip}
+    ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
+  )
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
-  set(all_hip_cpp ${native_nested_hip_cpp} ${native_sparse_hip_cpp} ${native_quantized_hip_cpp} ${native_transformers_hip_cpp} ${native_quantized_cudnn_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${native_hip_linalg_cpp} ${cuda_generated_sources} ${ATen_HIP_SRCS})
-  set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
+  list(APPEND all_hip_cpp
+    ${native_nested_hip_cpp}
+    ${native_sparse_hip_cpp}
+    ${native_quantized_hip_cpp}
+    ${native_transformers_hip_cpp}
+    ${native_quantized_cudnn_hip_cpp}
+    ${hip_cpp}
+    ${native_hip_cpp}
+    ${native_hip_linalg_cpp}
+    ${cuda_generated_sources}
+    ${ATen_HIP_SRCS}
+    ${native_miopen_cpp}
+    ${native_cudnn_hip_cpp}
+    ${miopen_cpp}
+    ${all_hip_cpp}
+  )
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
