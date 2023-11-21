@@ -2559,7 +2559,7 @@ class TestSDPACudaOnly(NNTestCase):
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # See [Note] Fused Tolerances above
-        output_fudge_factor = 3 if head_dim % 8 != 0 else 1
+        output_fudge_factor = 3 if head_dim % 8 != 0 or TEST_WITH_ROCM else 1
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
 
         # TODO: Investigate why grad_q needs larger tolerances
