@@ -1022,6 +1022,33 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
+def lp_pool3d(
+    input: Tensor, norm_type: Union[int, float],
+    kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
+    r"""
+    Apply a 3D power-average pooling over an input signal composed of several input planes.
+
+    If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
+
+    See :class:`~torch.nn.LPPool3d` for details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            lp_pool3d, (input,), input, norm_type, kernel_size, stride=stride, ceil_mode=ceil_mode
+        )
+    kd, kw, kh = utils._triple(kernel_size)
+    if stride is not None:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kd * kw * kh).pow(1.0 / norm_type)
+
+
 def lp_pool2d(
     input: Tensor, norm_type: Union[int, float],
     kernel_size: BroadcastingList2[int],

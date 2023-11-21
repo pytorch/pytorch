@@ -4238,6 +4238,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool3d": PROXY_ITERABLE,
 
         "lp_pool2d": PROXY_ITERATED,
+        "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
         "max_unpool3d": PROXY_ITERATED,

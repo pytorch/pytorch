@@ -10,8 +10,8 @@ from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
 
 __all__ = ['MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d',
            'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'LPPool1d',
-           'LPPool2d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
-           'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
+           'LPPool2d', 'LPPool3d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d',
+           'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
 
 class _MaxPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
@@ -978,6 +978,63 @@ class LPPool2d(_LPPoolNd):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.lp_pool2d(input, float(self.norm_type), self.kernel_size,
+                           self.stride, self.ceil_mode)
+
+
+class LPPool3d(_LPPoolNd):
+    r"""Applies a 3D power-average pooling over an input signal composed of several input planes.
+
+    On each window, the function computed is:
+
+    .. math::
+        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
+
+    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
+
+    The parameters :attr:`kernel_size`, :attr:`stride` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the height, width and depth dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
+          the second `int` for the height dimension and the third `int` for the width dimension
+
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
+
+    Args:
+        kernel_size: the size of the window
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+
+          .. math::
+              D_{out} = \left\lfloor\frac{D_{in} - \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} - \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} - \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
+
+    Examples::
+
+        >>> # power-2 pool of square window of size=3, stride=2
+        >>> m = nn.LPPool3d(2, 3, stride=2)
+        >>> # pool of non-square window of power 1.2
+        >>> m = nn.LPPool3d(1.2, (3, 2, 2), stride=(2, 1, 2))
+        >>> input = torch.randn(20, 16, 50, 44, 31)
+        >>> output = m(input)
+
+    """
+
+    kernel_size: _size_3_t
+    stride: _size_3_t
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.lp_pool3d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 

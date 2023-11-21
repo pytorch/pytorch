@@ -533,16 +533,34 @@ TEST_F(ModulesTest, LPPool2d) {
   std::vector<int64_t> kernel_size({2, 3});
 
   LPPool2d model(LPPool2dOptions(norm_type, kernel_size).stride(stride));
-  auto x = torch::ones({1, 2, 5});
+  auto x = torch::ones({1, 1, 2, 5});
   auto y = model(x);
   auto expected =
-      (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) *
+      (torch::pow(torch::tensor({{{{1, 1}}}}, torch::kFloat), norm_type) *
        (kernel_size[0] * kernel_size[1]))
           .pow(1. / norm_type);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 2}));
+}
+
+TEST_F(ModulesTest, LPPool3d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({1, 2, 3});
+
+  LPPool3d model(LPPool3dOptions(norm_type, kernel_size).stride(stride));
+  auto x = torch::ones({1, 1, 1, 2, 5});
+  auto y = model(x);
+  auto expected =
+      (torch::pow(torch::tensor({{{{{1, 1}}}}}, torch::kFloat), norm_type) *
+       (kernel_size[0] * kernel_size[1] * kernel_size[2]))
+          .pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 1, 2}));
 }
 
 TEST_F(ModulesTest, Identity) {
@@ -4767,6 +4785,14 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
                             .stride({5, 6})
                             .ceil_mode(true))),
       "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
+  ASSERT_EQ(
+      c10::str(LPPool3d(2, std::vector<int64_t>({1, 2, 3}))),
+      "torch::nn::LPPool3d(norm_type=2, kernel_size=[1, 2, 3], stride=[1, 2, 3], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool3d(LPPool3dOptions(1, std::vector<int64_t>({3, 4, 5}))
+                            .stride({5, 6, 7})
+                            .ceil_mode(true))),
+      "torch::nn::LPPool3d(norm_type=1, kernel_size=[3, 4, 5], stride=[5, 6, 7], ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
