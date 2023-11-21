@@ -358,7 +358,6 @@ coverage_ignore_functions = [
     # torch.ao.quantization.quantizer.embedding_quantizer
     "get_embedding_operators_config",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "convert_scalars_to_attrs",
     "get_bias_qspec",
     "get_input_act_qspec",
     "get_output_act_qspec",
@@ -980,7 +979,6 @@ coverage_ignore_functions = [
     "parallel_and",
     "parallel_or",
     "sym_eq",
-    "tensor_has_hints",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
@@ -1205,6 +1203,8 @@ coverage_ignore_functions = [
     "rebuild_cuda_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",
+    "rebuild_sparse_coo_tensor",
+    "rebuild_sparse_compressed_tensor",
     "rebuild_storage_empty",
     "rebuild_storage_fd",
     "rebuild_storage_filename",
@@ -2871,6 +2871,9 @@ coverage_ignore_classes = [
     "ShapeGuardPrinter",
     "StrictMinMaxConstraint",
     "SymDispatchMode",
+    "SymbolicContext",
+    "StatelessSymbolicContext",
+    "StatefulSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",

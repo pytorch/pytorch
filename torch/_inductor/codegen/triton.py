@@ -2530,7 +2530,7 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
@@ -2651,7 +2651,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code
@@ -2696,7 +2696,7 @@ class TritonScheduling(BaseScheduling):
                     subkernel,
                 )
 
-                with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                with V.set_kernel_handler(subkernel):
                     for node in node_schedule:
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()

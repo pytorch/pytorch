@@ -2580,6 +2580,38 @@ class CPUReproTests(TestCase):
                 # TODO: support vectorization for int div
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_uint8_add(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.add(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_uint8_sub(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.sub(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
