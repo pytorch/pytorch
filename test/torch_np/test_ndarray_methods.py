@@ -671,16 +671,11 @@ class TestToBytes(TestCase):
             for i in range(8):
                 np_array[i] = tnp_array[i]
 
-            print("TNP ARRAY", tnp_array, type(tnp_array))
-
             assert tnp_array.tobytes() == np_array.tobytes()
 
     def test_tobytes_non_contiguous(self):
         array = [[10, 23, 45, 62], [414532, 2354, 324, 124454]]
-        for dtype in (
-            # float,
-            int,
-        ):
+        for dtype in (float, int, bool):
             tnp_array = np.array(array, dtype=dtype)
             np_array = numpy.array(array, dtype=dtype)
             for i in range(2):
