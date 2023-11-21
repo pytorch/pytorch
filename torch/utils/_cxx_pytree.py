@@ -14,7 +14,18 @@ collection support for PyTorch APIs.
 
 import functools
 import warnings
-from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    overload,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 import torch
 
@@ -23,20 +34,6 @@ if torch._running_with_deploy():
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
-
-from .typing import (
-    Context,
-    DumpableContext,
-    FlattenFunc,
-    FromDumpableContextFn,
-    PyTree,
-    R,
-    S,
-    T,
-    ToDumpableContextFn,
-    U,
-    UnflattenFunc,
-)
 
 
 __all__ = [
@@ -68,8 +65,21 @@ __all__ = [
 ]
 
 
+T = TypeVar("T")
+S = TypeVar("S")
+U = TypeVar("U")
+R = TypeVar("R")
+
+
+Context = Optional[Any]
+PyTree = Any
 TreeSpec = PyTreeSpec
+FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
+UnflattenFunc = Callable[[Iterable, Context], PyTree]
 OpTreeUnflattenFunc = Callable[[Context, Iterable], PyTree]
+DumpableContext = Any  # Any json dumpable text
+ToDumpableContextFn = Callable[[Context], DumpableContext]
+FromDumpableContextFn = Callable[[DumpableContext], Context]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
@@ -214,7 +224,7 @@ def register_pytree_node(
         namespace=namespace,
     )
 
-    from . import python
+    from . import _pytree as python
 
     python._private_register_pytree_node(
         cls,
@@ -351,8 +361,8 @@ def _register_pytree_node(
         )
     """
     warnings.warn(
-        "torch.utils._pytree.api.cxx._register_pytree_node is deprecated. "
-        "Please use torch.utils._pytree.api.cxx.register_pytree_node instead.",
+        "torch.utils._cxx_pytree._register_pytree_node is deprecated. "
+        "Please use torch.utils._cxx_pytree.register_pytree_node instead.",
         stacklevel=2,
     )
 
@@ -1022,7 +1032,7 @@ def treespec_dumps(treespec: TreeSpec) -> str:
             f"treespec_dumps(spec): Expected `spec` to be instance of "
             f"TreeSpec but got item of type {type(treespec)}."
         )
-    from .python import (
+    from ._pytree import (
         tree_structure as _tree_structure,
         treespec_dumps as _treespec_dumps,
     )
@@ -1033,7 +1043,7 @@ def treespec_dumps(treespec: TreeSpec) -> str:
 
 def treespec_loads(serialized: str) -> TreeSpec:
     """Deserialize a treespec from a JSON string."""
-    from .python import (
+    from ._pytree import (
         tree_unflatten as _tree_unflatten,
         treespec_loads as _treespec_loads,
     )
