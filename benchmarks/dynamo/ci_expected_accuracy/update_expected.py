@@ -82,7 +82,7 @@ def get_artifacts_urls(results, suites):
 
 def normalize_suite_filename(suite_name):
     strs = suite_name.split("_")
-    subsuite = strs[2] if strs[0] == "aot" else strs[1]
+    subsuite = strs[-1]
     if "timm" in subsuite:
         subsuite = subsuite.replace("timm", "timm_models")
 
@@ -143,13 +143,13 @@ if __name__ == "__main__":
     suites = {
         "aot_inductor_huggingface",
         "inductor_huggingface",
-        "inductor_huggingface_dynamic",
+        "dynamic_inductor_huggingface",
         "aot_inductor_timm",
         "inductor_timm",
-        "inductor_timm_dynamic",
+        "dynamic_inductor_timm",
         "aot_inductor_torchbench",
         "inductor_torchbench",
-        "inductor_torchbench_dynamic",
+        "dynamic_inductor_torchbench",
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
