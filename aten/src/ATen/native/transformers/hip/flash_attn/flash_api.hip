@@ -54,12 +54,7 @@
 #include <ATen/ops/pad.h>
 #endif
 
-// #include <cutlass/numeric_types.h>
-#include <ck/utility/data_type.hpp>
-
-#include <ATen/native/transformers/hip/flash_attn/flash.h>
 #include <ATen/native/transformers/hip/flash_attn/flash_api.h>
-#include <ATen/native/transformers/hip/flash_attn/static_switch.h>
 
 #include <c10/util/Exception.h>
 
