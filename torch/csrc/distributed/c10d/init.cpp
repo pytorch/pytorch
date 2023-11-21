@@ -598,10 +598,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_force_bucket_rebuild",
-          [](::c10d::Reducer& reducer) {
-            return reducer.force_bucket_rebuild();
-          },
+          "_reset_state",
+          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
