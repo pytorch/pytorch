@@ -282,6 +282,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         assert tx is tx.output.root_tx, "Only root tx can reconstruct"
         try:
             from ..codegen import PyCodegen
+
             cg = PyCodegen(tx)
             self.reconstruct(cg)
             return True

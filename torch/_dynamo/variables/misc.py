@@ -852,7 +852,9 @@ class SkipFilesVariable(VariableTracker):
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1
-            and (args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx))
+            and (
+                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
+            )
         ):
 
             def wraps(fn):
