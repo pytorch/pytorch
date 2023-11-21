@@ -1769,9 +1769,9 @@ def main():
             print(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
-            # run_tests(
-            #     test_batch.sharded_tests, test_directory, options, test_batch.failures
-            # )
+            run_tests(
+                test_batch.sharded_tests, test_directory, options, test_batch.failures
+            )
 
     finally:
         if options.coverage:
