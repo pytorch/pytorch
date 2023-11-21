@@ -381,6 +381,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
 
+    def guard_has_graph_break(self):
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.HAS_GRAPH_BREAK))
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
@@ -788,7 +791,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+        self,
+        tx,
+        partial_convert=False,
+        reason: Optional[GraphCompileReason] = None,
+        compile_return_value=False,
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -801,6 +808,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
+
+        if not compile_return_value:
+            # invalid graph to be cache hit for nopython
+            self.guard_has_graph_break()
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -1054,6 +1065,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
         self.call_cleanup_hooks()
+        old_fake_mode = self.tracing_context.fake_mode
+        if not self.export:
+            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            backend_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=old_fake_mode.shape_env,
+            )
+            # TODO(voz): Ostensibily, this should be scoped and
+            # restore back to old_fake_mode, but doing so currently violates
+            # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            self.tracing_context.fake_mode = backend_fake_mode
+
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)

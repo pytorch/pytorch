@@ -343,7 +343,9 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expect_rational=False
+        )
         try:
             return float(r)
         except Exception:
@@ -628,6 +630,14 @@ def _sympy_abs(a):
     return sympy.Abs(a)
 
 
+def _sympy_sym_float(a):
+    # Cannot use sympy.Float(a) here, coz it expects python literals
+    # Multiply by 1.0 to cast to float. This is needed when the input
+    # is a SymInt which has the assumption that it is integer and
+    # SymPy will otherwise assume that return value cannot be a float.
+    return a * 1.0
+
+
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": lambda a: ~a,
@@ -638,7 +648,7 @@ magic_methods = {
     "le": _sympy_le,
     "ge": _sympy_ge,
     "floor": _sympy_floor,
-    "sym_float": lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
+    "sym_float": _sympy_sym_float,
     "ceil": _sympy_ceil,
     "neg": lambda a: -a,
     "sym_min": _sympy_min,

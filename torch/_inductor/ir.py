@@ -202,6 +202,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
 
+    shape_fn: Callable[[Expr], Union[int, Expr]]
     if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
@@ -315,6 +316,9 @@ class IRNode:
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
 
+    def codegen_reference(self, writer=None):
+        raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
+
     # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
     # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
     # the code dynamically check for defined attributes.
@@ -327,7 +331,7 @@ class IRNode:
     has_exceeded_max_reads: Callable[[], bool]
     make_loader: Callable[[], Callable[[Any], Any]]
     make_indexer: Callable[[], Callable[[Any], Any]]
-    mark_reuse: Callable[[List[Any]], None]
+    mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
 
 
@@ -2574,7 +2578,7 @@ class Buffer(IRNode):
     def make_indexer(self):
         return self.layout.make_indexer()
 
-    def get_name(self):
+    def get_name(self) -> str:
         assert self.name
         return self.name
 
@@ -2769,19 +2773,22 @@ class InputBuffer(Buffer):
 
 
 class ConstantBuffer(InputBuffer):
-    override_device = None
+    override_device: Optional[torch.device] = None
 
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
             return ops.load(
-                V.graph.constant_name(self.name, self.override_device), indexer(index)
+                V.graph.constant_name(self.get_name(), self.override_device),
+                indexer(index),
             )
 
         return loader
 
     def constant_to_device(self, device):
-        return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
+        return ConstantBuffer(
+            V.graph.constant_name(self.get_name(), device), self.layout
+        )
 
 
 class NoneAsConstantBuffer(IRNode):
@@ -3381,7 +3388,7 @@ class ExternKernel(InputsKernel):
 
         is_arg_tensor = []
         tensor_args = []
-        non_tensor_args = []
+        non_tensor_args: List[Any] = []
         for arg in args_flat:
             is_arg_tensor.append(isinstance(arg, IRNode))
             if is_arg_tensor[-1]:
@@ -4169,16 +4176,34 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
+    # TODO: handle bools carefully
     def __init__(self, sym, data):
         super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
-        self.sym = sym
+        if isinstance(sym, sympy.Symbol):
+            self.sym = sym
+            self.is_bool = False
+        else:
+            # Special case for boolean.  For Reasons(TM), we don't represent
+            # boolean variables directly in sympy; instead, we generate an
+            # indicator integer variable which we then convert to a boolean by
+            # testing i0 == 1.  We have to identify the underlying indicator
+            # variable, and then bind i0 to the appropriate integer value
+            # based on the runtime boolean.
+            assert isinstance(sym, sympy.Eq), sym
+            assert isinstance(sym.args[0], sympy.Symbol), sym
+            assert sym.args[1] == 1, sym
+            self.sym = sym.args[0]
+            self.is_bool = True
 
     def get_unbacked_symbol_defs(self):
         return {self.sym}
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.sym} = {data}.item()")
+        if self.is_bool:
+            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
+        else:
+            wrapper.writeline(f"{self.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
@@ -4199,7 +4224,7 @@ class AssertScalar(ExternKernel):
         super().__init__(
             # Buffer(name, layotu)
             None,
-            NoneLayout(torch.device("cpu")),
+            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
             # InputsKernel(inputs)
             [],
         )  # type: ignore[arg-type]
@@ -4213,7 +4238,9 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper):
-        wrapper.writeline(f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:")
+        wrapper.writeline(
+            f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
+        )
         wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
@@ -4237,8 +4264,9 @@ has_c_shim = {
 }
 
 
-@dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
+    args_default_value: List[Dict[str, Any]]
+
     def __init__(
         self,
         layout,
@@ -6073,6 +6101,9 @@ class MutableBox(IRNode):
 
     def realize(self):
         return self.data.realize()
+
+    def codegen_reference(self, writer=None):
+        return self.data.codegen_reference(writer)
 
     @property
     def layout(self):
