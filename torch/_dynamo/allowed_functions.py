@@ -183,7 +183,7 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
     torch_object_ids = dict()
     ctx_mamager_classes = set()
     C_binding_in_graph_functions = set()
-    non_C_binding_in_graph_functions = set
+    non_C_binding_in_graph_functions = set()
     torch_name_rule_map = dict()
 
     # Add obj to ctx_mamager_classes set if it's a torch context manager class.
@@ -203,8 +203,11 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
     # if it's a torch function or method.
     # This is used to generate the in graph function list based on heuristic.
     def heuristic_record_if_in_graph_function(obj, module, name):
-        if hasattr(obj, "__wrapped__"):
-            obj = obj.__wrapped__
+        try:
+            if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                obj = obj.__wrapped__
+        except AssertionError:
+            pass
         if isinstance(
             obj,
             (
