@@ -919,6 +919,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_async_subclass_no_specialize(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
         @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
         def f(x):
             return x + 1

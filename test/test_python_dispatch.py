@@ -750,7 +750,7 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         # return some virtual storage that is safe to work with
         x = LoggingTensor(torch.ones(1))
         storage = x.untyped_storage()
-        storage.data_ptr()
+        self.assertEqual(storage.data_ptr(), 0)
 
     def test_make_wrapper_subclass_noalloc(self) -> None:
         # This is ludicrously big (8TB) and this should pass because wrapper

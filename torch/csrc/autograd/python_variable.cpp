@@ -702,14 +702,34 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
+    auto sym_sizes = r.symintlist(1);
+    auto sym_strides_own = r.symintlistOptional(2);
+    auto sym_strides =
+        static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
+    auto sym_storage_offset = r.toSymIntOptional(3);
+
+    c10::SymInt size_bytes;
+    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
+    if (sym_strides.has_value()) {
+      size_bytes = at::detail::computeStorageNbytes(
+          sym_sizes,
+          sym_strides.value(),
+          dtype_itemsize,
+          sym_storage_offset.value_or(0));
+    } else {
+      size_bytes = at::detail::computeStorageNbytesContiguous(
+          sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
+    }
+
     // We use storages **only** to track aliasing of subclasses during tracing.
     // The actual data pointers are not valid.
     Storage storage{
         Storage::use_byte_size_t{},
-        0,
-        at::DataPtr{nullptr, r.device(7)},
+        size_bytes,
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizable=*/true};
+    // TODO: constructor should probably accept data pointer
+    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
 
     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
@@ -718,18 +738,15 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), keys, options.dtype());
 
-    auto sym_sizes = r.symintlist(1);
-    auto sym_strides_own = r.symintlistOptional(2);
-    auto sym_strides = static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
-    auto sym_storage_offset = r.toSymIntOptional(3);
-
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
     if (sym_strides.has_value()) {
       tensor_impl->set_sizes_and_strides(
           sym_sizes, sym_strides.value(), sym_storage_offset);
     } else {
-      TORCH_INTERNAL_ASSERT(!sym_storage_offset.has_value());
+      TORCH_CHECK(
+          !sym_storage_offset.has_value(),
+          "setting storage offset without stride not supported");
       tensor_impl->generic_set_sizes_contiguous(sym_sizes);
     }
 
