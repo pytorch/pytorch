@@ -182,15 +182,12 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
                 tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
                 t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
                 dist.all_gather(tl, t, async_op=False)
-                print(f"{dist.get_rank()=}{self}")
                 return {}
 
             def load_state_dict(self, state_dict):
-                pass
-                # tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
-                # t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
-                # dist.all_gather(tl, t, async_op=False)
-                # print(f"{dist.get_rank()=}{self}")
+                tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
+                t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                dist.all_gather(tl, t, async_op=False)
 
         class Bar:
             def state_dict(self):
@@ -199,7 +196,8 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
                 return {}
 
             def load_state_dict(self, state_dict):
-                pass
+                tensor = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                dist.all_reduce(tensor, op=ReduceOp.SUM)
 
         if self.rank == 0:
             sd = {
@@ -208,17 +206,13 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             }
         else:
             sd = {
+                "B": Bar(),
                 "A": Foo(),
-                "B": Bar()
             }
 
-        print("save")
         DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
-
-        print("load")
         DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
 
-        dist.barrier()
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)

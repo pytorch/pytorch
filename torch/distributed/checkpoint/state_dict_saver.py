@@ -106,7 +106,7 @@ def save(
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
     dumpable_state_dict = {}
-    keys = _all_gather_keys(state_dict.keys())
+    keys = _all_gather_keys(state_dict)
     for key in keys:
         if key not in state_dict:
             continue

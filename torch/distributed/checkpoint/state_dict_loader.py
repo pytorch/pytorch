@@ -105,7 +105,8 @@ def load(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
-    keys = _all_gather_keys(state_dict.keys())
+
+    keys = _all_gather_keys(state_dict)
 
     statetful_sd = {}
     for key in keys:
@@ -118,12 +119,10 @@ def load(
     for key in keys:
         if key not in state_dict:
             continue
-        elem = statetful_sd[key]
-
+        elem = state_dict[key]
         if isinstance(elem, Stateful):
             elem.load_state_dict(statetful_sd[key])
         state_dict[key] = elem
-
 
 def _load_state_dict(
     state_dict: Dict[str, Any],
