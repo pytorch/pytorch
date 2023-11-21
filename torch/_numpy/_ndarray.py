@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import math
 import operator
+import warnings
 from typing import Sequence
 
 import torch
@@ -287,6 +288,14 @@ class ndarray:
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
         t = self.tensor.to(torch_dtype)
         return ndarray(t)
+
+    def tobytes(self, *args, **kwargs):
+        assert not args or kwargs, "Only order='C' is supported"
+        tensor = self.tensor
+        if not tensor.is_contiguous():
+            warnings.warn("Calling tobytes on non-contiguous tensor is experimental, ")
+            tensor = tensor.contiguous()
+        return bytes(tensor.view(torch.uint8))
 
     @normalizer
     def copy(self: ArrayLike, order: NotImplementedType = "C"):
