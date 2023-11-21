@@ -110,49 +110,6 @@ class CI(NamedTuple):
     device: str = "cuda"
 
 
-CI_SKIP = collections.defaultdict(list)
-
-CI_SKIP[CI("inductor", training=False, device="cpu")] = [
-    # TorchBench
-    "drq",  # Need to update torchbench
-    "detectron2_fasterrcnn_r_101_c4",
-    "detectron2_fasterrcnn_r_101_dc5",
-    "detectron2_fasterrcnn_r_101_fpn",
-    "detectron2_fasterrcnn_r_50_c4",
-    "detectron2_fasterrcnn_r_50_dc5",
-    "detectron2_fasterrcnn_r_50_fpn",
-    "detectron2_fcos_r_50_fpn",
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
-    "doctr_det_predictor",  # requires newer gcc
-    "doctr_reco_predictor",  # requires newer gcc
-    "gat",  # does not work with fp32
-    "gcn",  # does not work with fp32
-    "hf_Bert_large",  # OOM
-    "hf_GPT2_large",  # Intermittent failure on CI
-    "hf_T5_base",  # OOM
-    "mobilenet_v2_quantized_qat",
-    "pyhpc_turbulent_kinetic_energy",
-    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
-    "sage",  # does not work with fp32
-    # Huggingface
-    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
-    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
-    # TIMM
-    "cait_m36_384",  # Accuracy
-    "pnasnet5large",  # OOM
-    "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
-    "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
-]
-
-CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
-    *CI_SKIP[CI("inductor", training=False, device="cpu")],
-    "pyhpc_isoneutral_mixing",
-    "dpn107",
-]
-
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
@@ -2729,17 +2686,6 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
-        "--dynamic-ci-skips-only",
-        action="store_true",
-        help=(
-            "Run only the models that would have been skipped in CI "
-            "if dynamic-shapes, compared to running without dynamic-shapes.  "
-            "This is useful for checking if more models are now "
-            "successfully passing with dynamic shapes.  "
-            "Implies --dynamic-shapes and --ci"
-        ),
-    )
-    parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
@@ -3194,9 +3140,6 @@ def run(runner, args, original_dir=None):
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
-    if args.dynamic_ci_skips_only:
-        args.dynamic_shapes = True
-        args.ci = True
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -3213,20 +3156,9 @@ def run(runner, args, original_dir=None):
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
 
-        if args.dynamic_ci_skips_only:
-            # Test only the incremental set of jobs whose skipped was
-            # caused solely by turning on dynamic shapes
-            assert args.dynamic_shapes
-            ci = functools.partial(CI, args.backend, training=args.training)
-            args.filter = list(
-                set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
-            )
-        else:
-            ci = functools.partial(
-                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
-            )
-            for device in args.devices:
-                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
+        ci = functools.partial(
+            CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+        )
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
