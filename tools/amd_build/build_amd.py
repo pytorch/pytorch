@@ -134,7 +134,6 @@ ignores = [
     "torch/include/*",
     "aten/src/ATen/native/transformers/cuda/flash_attn/*",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/*",
-    "aten/src/ATen/native/transformers/cuda/attention*",
     "aten/src/ATen/native/transformers/cuda/sdp_utils.cpp",
 ]
 
