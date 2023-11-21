@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,42
+detectron2_fcos_r_50_fpn,infra_error,0
 
 
 
@@ -94,7 +94,7 @@ hf_Bart,pass,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_to_run,0
 
 
 
@@ -118,7 +118,7 @@ hf_T5,pass,0
 
 
 
-hf_T5_generate,pass,20
+hf_T5_generate,fail_to_run,10
 
 
 
@@ -186,7 +186,7 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
-pyhpc_turbulent_kinetic_energy,pass,0
+pyhpc_turbulent_kinetic_energy,infra_error,0
 
 
 

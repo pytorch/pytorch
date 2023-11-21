@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,fail_to_run,21
-
-
-
 LearningToPaint,pass,0
 
 
@@ -42,11 +38,11 @@ basic_gnn_sage,pass,0
 
 
 
-cm3leon_generate,pass,4
-
-
-
 dcgan,pass,0
+
+
+
+demucs,pass,3
 
 
 
@@ -54,7 +50,47 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,42
+detectron2_fasterrcnn_r_101_c4,pass,52
+
+
+
+detectron2_fasterrcnn_r_101_dc5,pass,52
+
+
+
+detectron2_fasterrcnn_r_101_fpn,pass,56
+
+
+
+detectron2_fasterrcnn_r_50_c4,pass,52
+
+
+
+detectron2_fasterrcnn_r_50_dc5,pass,52
+
+
+
+detectron2_fasterrcnn_r_50_fpn,pass,56
+
+
+
+detectron2_fcos_r_50_fpn,pass,44
+
+
+
+detectron2_maskrcnn_r_101_c4,fail_accuracy,67
+
+
+
+detectron2_maskrcnn_r_101_fpn,pass,74
+
+
+
+detectron2_maskrcnn_r_50_c4,pass,67
+
+
+
+detectron2_maskrcnn_r_50_fpn,pass,74
 
 
 
@@ -94,10 +130,6 @@ hf_Bart,pass,0
 
 
 
-hf_BigBird,fail_accuracy,0
-
-
-
 hf_DistilBert,pass,0
 
 
@@ -106,7 +138,7 @@ hf_GPT2,pass,0
 
 
 
-hf_GPT2_large,pass_due_to_skip,0
+hf_GPT2_large,infra_error,0
 
 
 
@@ -114,19 +146,7 @@ hf_Reformer,pass,5
 
 
 
-hf_T5,pass,0
-
-
-
-hf_T5_generate,pass,20
-
-
-
 hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,0
 
 
 
@@ -154,19 +174,15 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
-
-
-
-nanogpt,pass,0
-
-
-
 nvidia_deeprecommender,pass,0
 
 
 
 opacus_cifar10,pass,0
+
+
+
+phi_1_5,pass,74
 
 
 
@@ -218,10 +234,6 @@ resnext50_32x4d,pass,0
 
 
 
-sam,pass,0
-
-
-
 shufflenet_v2_x1_0,pass,0
 
 
@@ -238,15 +250,15 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
-
-
-
 stable_diffusion_unet,pass_due_to_skip,0
 
 
 
 timm_efficientnet,pass,0
+
+
+
+timm_nfnet,pass,0
 
 
 
@@ -278,7 +290,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,17
+vision_maskrcnn,pass,29
 
 
 
