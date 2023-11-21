@@ -3545,6 +3545,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x2), opt_fn(x2))
         self.assertEqual(counter.frame_count, 2)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_deferred_runtime_asserts(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            if y >= 0:
+                return x * 2
+            else:
+                return x * 3
+
+        f(torch.tensor([3]))
+        self.assertRaises(RuntimeError, lambda: f(torch.tensor([-2])))
+
     def test_addr_alpha_beta_out(self):
         inp = torch.randn(2, 3)
         vec1 = torch.randn(2)
