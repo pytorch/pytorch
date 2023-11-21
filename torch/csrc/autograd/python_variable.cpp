@@ -652,7 +652,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
@@ -698,38 +698,46 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // resizable (have to define a custom allocator in that case)
   Tensor tensor;
 
-  AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-  tracer::impl::NoTracerDispatchMode tracer_guard{};
+  {
+    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+    tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-  // We use storages **only** to track aliasing of subclasses during tracing.
-  // The actual data pointers are not valid.
-  Storage storage{
-      Storage::use_byte_size_t{},
-      0,
-      at::DataPtr{nullptr, r.device(7)},
-      /*allocator=*/c10::GetAllocator(c10::kMeta),
-      /*resizable=*/true};
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
+    Storage storage{
+        Storage::use_byte_size_t{},
+        0,
+        at::DataPtr{nullptr, r.device(7)},
+        /*allocator=*/c10::GetAllocator(c10::kMeta),
+        /*resizable=*/true};
 
-  auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
-  if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
-    keys = keys | *mb_extra_keys;
-  }
-  tensor = at::detail::make_tensor<TensorImpl>(
-      std::move(storage), keys, options.dtype());
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
+      keys = keys | *mb_extra_keys;
+    }
+    tensor = at::detail::make_tensor<TensorImpl>(
+        std::move(storage), keys, options.dtype());
 
-  auto sym_sizes = r.symintlist(1);
-  auto sym_strides = r.symintlist(2);
-  auto sym_storage_offset = r.toSymIntOptional(3);
+    auto sym_sizes = r.symintlist(1);
+    auto sym_strides_own = r.symintlistOptional(2);
+    auto sym_strides = static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
+    auto sym_storage_offset = r.toSymIntOptional(3);
 
-  TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-  tensor_impl->set_sizes_and_strides(
-      sym_sizes, sym_strides, sym_storage_offset.value_or(0));
+    if (sym_strides.has_value()) {
+      tensor_impl->set_sizes_and_strides(
+          sym_sizes, sym_strides.value(), sym_storage_offset);
+    } else {
+      TORCH_INTERNAL_ASSERT(!sym_storage_offset.has_value());
+      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
+    }
 
-  const auto sizes_strides_policy = r.stringViewOptional(10);
-  if (sizes_strides_policy.has_value()) {
-    tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
-        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+    const auto sizes_strides_policy = r.stringViewOptional(10);
+    if (sizes_strides_policy.has_value()) {
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
+    }
   }
 
   tensor.set_requires_grad(r.toBool(9));
