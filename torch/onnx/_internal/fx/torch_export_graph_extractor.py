@@ -63,6 +63,10 @@ class TorchExport(exporter.FXGraphExtractor):
         # tensor, etc), we flatten the collection and register each element as output.
         options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
+        options.fx_tracer.output_adapter.append_step(
+            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep(model)
+        )
+
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
 

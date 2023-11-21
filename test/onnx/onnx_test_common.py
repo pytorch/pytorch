@@ -439,27 +439,19 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_args = input_args
         ref_input_kwargs = input_kwargs
 
-    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-        ref_model(*ref_input_args, **ref_input_kwargs)
-    )
+    # ONNXProgram._model_torch holds a reference (not copy) to the original ref_model, including its state_dict.
+    # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
+    # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     ort_outputs = onnx_program(*input_args, **input_kwargs)
+    ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
+    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)
 
-    # When model is a torch.export.ExportedProgram, the number of outputs in the ONNX model can be greater
-    # than the number of outputs in the original model. This is because the ONNX model may contain
-    # additional outputs for the exported program's mutated inputs and buffers.
-    # Therefore, we need to ignore the first few outputs from ort_outputs when comparing results length, type and shape.
-    len_ref_outputs = len(ref_outputs)
-    ort_outputs_offset = 0  # The first ort_outputs_offset outputs from ort_outputs must be ignore by the checks below
-    if isinstance(model, torch.export.ExportedProgram):
-        len_ref_outputs = len(model.graph_signature.output_specs)
-        ort_outputs_offset = len_ref_outputs - len(ref_outputs)
-
-    if len_ref_outputs != len(ort_outputs):  # Ignore
+    if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
         )
 
-    for ref_output, ort_output in zip(ref_outputs, ort_outputs[ort_outputs_offset:]):
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )

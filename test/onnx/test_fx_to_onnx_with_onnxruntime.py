@@ -942,6 +942,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             loaded_exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        "Unsupported FX nodes: {'call_function': ['aten.add_.Tensor']}. "
+    )
     def test_exported_program_as_input_lifting_buffers_mutation(self):
         class CustomModule(torch.nn.Module):
             def __init__(self):
@@ -956,12 +959,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
-        exported_program: torch.export.ExportedProgram = torch.export.export(
-            CustomModule(), args=inputs
-        )
-
+        model = CustomModule()
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            exported_program, inputs, skip_dynamic_shapes_check=True
+            model, inputs, skip_dynamic_shapes_check=True
+        )
+        # Buffer will be mutated after the first iteration
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            model, inputs, skip_dynamic_shapes_check=True
         )
 
 
