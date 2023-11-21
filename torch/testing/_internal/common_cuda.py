@@ -28,7 +28,9 @@ SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
-PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: (TEST_CUDA and (not IS_WINDOWS) and SM80OrLater) or TEST_WITH_ROCM)
+GFX90A_Exact = LazyVal(lambda: torch.hip.is_available() and torch.cuda.get_device_properties().gcn_arch_name == 'gfx90a:sramecc+:xnack-')
+
+PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: (TEST_CUDA and (not IS_WINDOWS) and SM80OrLater) or TEST_WITH_ROCM and GFX90A_Exact)
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
