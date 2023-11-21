@@ -62,7 +62,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy",
 ]
 
@@ -154,6 +154,21 @@ def is_concrete_bool(a: Union[bool, SymBool]):
         return True
 
     return False
+
+def is_singleton(s):
+    # check for SingletonSymNode
+    if not isinstance(s, torch.SymInt):
+        return False
+    if s.node.singleton_int() is not None:
+        return True
+
+    # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
+    return (
+        s.node.is_symbolic()
+        and s.node.hint is not None
+        and isinstance(s.node.hint, torch.SymInt)
+        and s.node.hint.node.singleton_int() is not None
+    )
 
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
@@ -755,6 +770,27 @@ class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
     def __post_init__(self):
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
+
+
+@dataclass(frozen=True)
+class SubclassCreateSymbolicPolicy(CreateSymbolicPolicy):
+    """
+    The correct policy for a given inner tensor of a traceable tensor subclass
+    may differ from that of the outer policy. This structure allows for this
+    flexibility, with inner policies mapped via attr -> policy.
+    """
+    outer_policy: CreateSymbolicPolicy
+    inner_policies: Dict[str, CreateSymbolicPolicy]
+
+    # Convenience properties for call-sites that expect these.
+    @property
+    def dynamic_sizes(self):
+        return self.outer_policy.dynamic_sizes
+
+    @property
+    def constraint_sizes(self):
+        return self.outer_policy.constraint_sizes
+
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
@@ -1987,8 +2023,6 @@ class ShapeEnv:
         # The order of checking the guards matters. In this specific example:
         # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
         # we may have an unnessary shape speciliazation for y.
-        assert not ex.is_nested
-
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
             if is_symbolic(maybe_sym):
@@ -2068,7 +2102,8 @@ class ShapeEnv:
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None]
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
+                key=lambda x: (sys.maxsize, x[1]) if is_singleton(x[0]) else x
             )
             for _, i in val_list:
                 if stride[i] is None and ex_stride[i] in candidates:

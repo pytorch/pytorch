@@ -235,7 +235,7 @@ class MetaConverter:
             maybe_suppress = shape_env.suppress_guards
 
         def sym_sizes_strides_storage_offset(
-            t, src, inner_policy=policy
+            t, src, policy=policy
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
                 if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
@@ -252,20 +252,12 @@ class MetaConverter:
                 assert inner_policy is None
             return (t.size(), t.stride(), t.storage_offset())
 
-        def empty_create(
-            inner_t,
-            inner_src,
-            inner_policy=policy,
-        ):
+        def empty_create(inner_t, inner_src, policy=policy):
             (
                 inner_sizes,
                 inner_strides,
                 inner_storage_offset,
-            ) = sym_sizes_strides_storage_offset(
-                inner_t,
-                inner_src,
-                inner_policy=inner_policy,
-            )
+            ) = sym_sizes_strides_storage_offset(inner_t, inner_src, policy)
             return torch.empty_strided(
                 inner_sizes,
                 inner_strides,
@@ -586,29 +578,39 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    if not t.is_nested:
-                        # Nested tensor subclasses have special logic for
-                        # creating symbolic size/strides/storage_offset
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+
+                    from torch.fx.experimental.symbolic_shapes import (
+                        SubclassCreateSymbolicPolicy,
+                    )
+
+                    outer_policy = (
+                        policy.outer_policy
+                        if isinstance(policy, SubclassCreateSymbolicPolicy)
+                        else policy
+                    )
+
+                    (
+                        sizes,
+                        strides,
+                        storage_offset,
+                    ) = sym_sizes_strides_storage_offset(t, source, outer_policy)
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
                         # Note: transform_subclass will use __tensor_unflatten__ to generate
-                        # a fresh subclass wrapper, which is why sizes/strides are not passed in
-                        # to the creation function here.
-                        # We assume that if the inner tensors of the subclass are given symbolic sizes,
-                        # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
+                        # a fresh subclass wrapper. We assume that if the inner tensors of
+                        # the subclass are given symbolic sizes, their sizes will be used
+                        # to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
                         from torch.fx.experimental.symbolic_shapes import (
                             DimDynamic,
                             FreshCreateSymbolicPolicy,
                         )
 
+                        assert policy is None or isinstance(
+                            policy, SubclassCreateSymbolicPolicy
+                        )
                         if t.is_nested:
                             r = metafy_nt(t)
                         else:
@@ -618,8 +620,14 @@ class MetaConverter:
                                     lambda: empty_create(
                                         inner_t,
                                         AttrSource(source, attr),
+                                        policy=(
+                                            None
+                                            if policy is None
+                                            else policy.inner_policies[attr]
+                                        ),
                                     )
                                 ),
+                                outer_size=sizes,
                             )
                     else:
                         r = callback(
