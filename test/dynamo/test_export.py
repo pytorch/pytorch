@@ -35,14 +35,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
 
-try:
-    import torchvision.models
-
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "No torchvision.")
-
 
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
@@ -2265,10 +2257,22 @@ def forward(self, x):
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 
-    @skipIfNoTorchVision
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
-        model = torchvision.models.vgg16(weights=None).eval().cuda()
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                    ),
+                    torch.nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.features(x)
+
+        model = MyModule().eval().cuda()
         random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
         dim_x = torch.export.Dim("dim_x", min=1, max=32)
         exp_program = torch.export.export(
