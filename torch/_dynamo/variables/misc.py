@@ -861,22 +861,33 @@ class SkipFilesVariable(VariableTracker):
             else:
                 unimplemented("Unsupported arguments for itertools.groupby")
 
-            result = []
-            last_item = None
-
-            def gen_last_item(last_item):
+            def gen_last_pair(last_pair):
                 return variables.TupleVariable(
                     [
-                        last_item[0],
+                        last_pair[0],
                         variables.ListIteratorVariable(
-                            last_item[1], mutable_local=MutableLocal()
+                            last_pair[1], mutable_local=MutableLocal()
                         ),
                     ],
                     mutable_local=MutableLocal(),
                 )
 
+            def retrieve_const_key(key):
+                if isinstance(key, variables.SymNodeVariable):
+                    return key.evaluate_expr()
+                elif isinstance(key, variables.ConstantVariable):
+                    return key.as_python_constant()
+                else:
+                    raise unimplemented(
+                        "Unsupported key type in itertools.groupby: "
+                        + type(current_key)
+                    )
+
+            result = []
+            last_pair = None
             for item in seq:
                 try:
+                    # default key function is identity
                     current_key = (
                         keyfunc(tx, [item], {}) if keyfunc is not None else item
                     )
@@ -884,15 +895,18 @@ class SkipFilesVariable(VariableTracker):
                     raise unimplemented(  # noqa: TRY200
                         f"Unexpected failure in invoking function during itertools.groupby: failed running func {keyfunc}({item})",
                     )
-                if last_item is not None and current_key == last_item[0]:
-                    last_item[1].append(current_key)
-                else:
-                    if last_item is not None:
-                        result.append(gen_last_item(last_item))
-                    last_item = [current_key, [current_key]]
 
-            if last_item is not None:
-                result.append(gen_last_item(last_item))
+                if last_pair is not None and retrieve_const_key(
+                    current_key
+                ) == retrieve_const_key(last_pair[0]):
+                    last_pair[1].append(item)
+                else:
+                    if last_pair is not None:
+                        result.append(gen_last_pair(last_pair))
+                    last_pair = [current_key, [item]]
+
+            if last_pair is not None:
+                result.append(gen_last_pair(last_pair))
             return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif (
             self.value is functools.wraps
