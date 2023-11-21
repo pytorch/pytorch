@@ -715,7 +715,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        lowered_module = tx.output.get_submodule(args[0].module_key)
+        lowered_module = args[0].module
 
         lowered_node = make_attr(tx, args[0].module_key)
 

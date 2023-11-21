@@ -625,7 +625,7 @@ class GetAttrVariable(VariableTracker):
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError()
-        step1 = tx.output.get_submodule(self.obj.module_key)
+        step1 = self.obj.module
         if self.name not in step1.__dict__:
             raise NotImplementedError()
         step2 = inspect.getattr_static(step1, self.name)

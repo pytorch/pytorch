@@ -1345,7 +1345,7 @@ class BuiltinVariable(VariableTracker):
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
-            mod = tx.output.get_submodule(nn_mod_variable.module_key)
+            mod = nn_mod_variable.module
             return variables.ConstantVariable.create(id(mod))
         else:
             unimplemented(f"call_id with args {args}")
@@ -1382,12 +1382,12 @@ class BuiltinVariable(VariableTracker):
             and op in supported_const_comparison_ops.values()
         ):
             left = (
-                tx.output.get_submodule(left.module_key)
+                left.module,
                 if isinstance(left, NNModuleVariable)
                 else left.as_python_constant()
             )
             right = (
-                tx.output.get_submodule(right.module_key)
+                right.module,
                 if isinstance(right, NNModuleVariable)
                 else right.as_python_constant()
             )
