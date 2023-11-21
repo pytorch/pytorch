@@ -662,5 +662,34 @@ class TestIter(TestCase):
         assert_equal(lst[0], np.arange(5))
 
 
+class TestToBytes(TestCase):
+    def test_tobytes_simple(self):
+        array = [10, 23, 45, 62, 414532, 2354, 324, 124454]
+        for dtype in (float, int, bool):
+            tnp_array = np.array(array, dtype=dtype)
+            np_array = numpy.array(array, dtype=dtype)
+            for i in range(8):
+                np_array[i] = tnp_array[i]
+
+            print("TNP ARRAY", tnp_array, type(tnp_array))
+
+            assert tnp_array.tobytes() == np_array.tobytes()
+
+    def test_tobytes_non_contiguous(self):
+        array = [[10, 23, 45, 62], [414532, 2354, 324, 124454]]
+        for dtype in (
+            # float,
+            int,
+        ):
+            tnp_array = np.array(array, dtype=dtype)
+            np_array = numpy.array(array, dtype=dtype)
+            for i in range(2):
+                for j in range(4):
+                    np_array[i, j] = tnp_array[i, j]
+
+            assert not tnp_array.T.flags["C_CONTIGUOUS"]
+            assert tnp_array.T.tobytes() == np_array.T.tobytes()
+
+
 if __name__ == "__main__":
     run_tests()

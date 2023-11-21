@@ -293,9 +293,12 @@ class ndarray:
         assert not args or kwargs, "Only order='C' is supported"
         tensor = self.tensor
         if not tensor.is_contiguous():
-            warnings.warn("Calling tobytes on non-contiguous tensor is experimental, ")
+            warnings.warn(
+                "Calling tobytes on torch._numpy.ndarray on non-contiguous tensor is "
+                "experimental. Please check if it agrees with ndarray.tobytes."
+            )
             tensor = tensor.contiguous()
-        return bytes(tensor.view(torch.uint8))
+        return bytes(tensor.flatten().view(dtype=torch.uint8))
 
     @normalizer
     def copy(self: ArrayLike, order: NotImplementedType = "C"):
