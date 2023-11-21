@@ -964,6 +964,14 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1532,6 +1540,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
+    {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
