@@ -245,7 +245,7 @@ class LambdaLR(LRScheduler):
         return state_dict
 
     def load_state_dict(self, state_dict):
-        """Load the schedulers state.
+        """Load the scheduler's state.
 
         When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
 
