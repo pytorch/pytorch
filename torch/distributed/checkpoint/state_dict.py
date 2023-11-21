@@ -1,5 +1,4 @@
 import contextlib
-import itertools
 import functools
 import gc
 from dataclasses import asdict, dataclass, field
@@ -892,6 +891,7 @@ def set_state_dict(
         _verify_state_dict(model_state_dict, optim_state_dict, info)
         _load_optim_state_dict(model, optimizers, optim_state_dict, info)
         return _load_model_state_dict(model, model_state_dict, info)
+
 
 # TODO: correct the state_dict function signature.
 # TODO: this API is not yet fully tested. Make it private

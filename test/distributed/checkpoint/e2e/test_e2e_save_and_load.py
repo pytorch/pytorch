@@ -3,7 +3,6 @@
 from enum import auto, Enum
 
 import torch
-from torch.distributed.distributed_c10d import ReduceOp
 import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
@@ -13,6 +12,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_optimizer_state_dict,
     get_state_dict,
 )
+from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
@@ -174,29 +174,54 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @with_temp_dir
     def test_different_ordered_state_dict_keys(self):
+        """Tests that the order of keys in the state dict does not matter when loading or saving.
+        If order was not accounted for, the following test would cause a deadlock.
+        """
 
         world_size = self.world_size
 
         class Foo:
             def state_dict(self):
-                tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
-                t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                tl = [
+                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    for _ in range(world_size)
+                ]
+                t = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
                 dist.all_gather(tl, t, async_op=False)
                 return {}
 
             def load_state_dict(self, state_dict):
-                tl = [torch.ones(2, dtype=torch.int64, device="cuda") for _ in range(world_size)]
-                t = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                tl = [
+                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    for _ in range(world_size)
+                ]
+                t = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
                 dist.all_gather(tl, t, async_op=False)
 
         class Bar:
             def state_dict(self):
-                tensor = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                tensor = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
                 dist.all_reduce(tensor, op=ReduceOp.SUM)
                 return {}
 
             def load_state_dict(self, state_dict):
-                tensor = torch.arange(2, dtype=torch.int64, device="cuda") + 1 + 2 * dist.get_rank()
+                tensor = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
                 dist.all_reduce(tensor, op=ReduceOp.SUM)
 
         if self.rank == 0:
@@ -212,7 +237,6 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
         DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
-
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
