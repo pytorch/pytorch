@@ -488,6 +488,7 @@ def _export_to_torch_ir(
     constraints: Optional[List[Constraint]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    disable_constraint_solver: bool = False,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -515,6 +516,7 @@ def _export_to_torch_ir(
                     constraints=constraints,
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
+                    disable_constraint_solver=disable_constraint_solver,
                 )(
                     *args,
                     **kwargs,
@@ -604,7 +606,7 @@ def _export(
         args,
         kwargs,
         constraints,
-        preserve_module_call_signature=preserve_module_call_signature
+        preserve_module_call_signature=preserve_module_call_signature,
     )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
@@ -924,6 +926,7 @@ def aot_compile(
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -950,6 +953,8 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        disable_constraint_solver: Whether the dim constraint solver must be disabled.
+
     Returns:
         Path to the generated shared library
     """
@@ -966,7 +971,13 @@ def aot_compile(
 
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
-    gm = _export_to_torch_ir(f, args, kwargs, constraints)
+    gm = _export_to_torch_ir(
+        f,
+        args,
+        kwargs,
+        constraints,
+        disable_constraint_solver=disable_constraint_solver
+    )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():
