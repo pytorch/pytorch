@@ -954,6 +954,7 @@ def rewrite_signature(
     )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
+    print("FLAT", flat_results_traced)
 
     assert graph_captured_output is not None
     matched_output_elements_positions = produce_matching(
@@ -1175,6 +1176,7 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
+                print(graph.graph)
 
                 named_parameters = dict(graph.named_parameters(remove_duplicate=False))
                 named_buffers = dict(graph.named_buffers(remove_duplicate=False))
@@ -1203,6 +1205,7 @@ def export(
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
                     )
+                    print(graph_captured_result)
 
                 return graph_captured_result
 

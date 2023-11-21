@@ -83,6 +83,8 @@ from .utils import (
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
+from .variables.functions import UserFunctionVariable
+from .variables.builtin import BuiltinVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -911,6 +913,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
+            print("GRAPH", self.graph)
 
         # restore all the live local vars
         self.add_output_instructions(
