@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
     slowTest,
     set_default_dtype,
     gradcheck,
