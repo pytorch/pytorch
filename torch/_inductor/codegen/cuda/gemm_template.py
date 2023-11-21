@@ -803,6 +803,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
+        assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
+        assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
         if (
