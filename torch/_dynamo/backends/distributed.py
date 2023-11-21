@@ -343,7 +343,7 @@ or file a github issue."""
                 """
                 assert len(kwargs) == 0, "We assume only args for these modules"
 
-                class WrapperModule(torch.nn.Module):
+                class UnwrapperModule(torch.nn.Module):
                     def __init__(self, submod, unwrap_singleton_tuple):
                         super().__init__()
                         self.submod = submod
@@ -364,6 +364,7 @@ or file a github issue."""
                     if sn.op == "output":
                         if not isinstance(sn.args[0], tuple):
                             unwrap_singleton_tuple = True
+                            print(f"output node args {sn.args} got wrapped in tuple")
                             sn.args = (sn.args,)
 
                 input_mod.recompile()
@@ -375,11 +376,13 @@ or file a github issue."""
                         traceback.FrameSummary(__file__, 0, DDPOptimizer),
                     ],
                 )
-                wrapper = WrapperModule(
-                    self.compiler(input_mod, args),
-                    unwrap_singleton_tuple,
-                )
-                return wrapper
+
+                # we must let 'input_mod' return a tuple, to make AOT happy.
+                # (aot_autograd compile_fn literally requires that the output of a graph it compiles is a tuple).
+                # however, we don't acutally want this tuple to be returned, since the fx logic that calls the submod
+                # will again wrap outputs from the submod in a tuple.  So we unwrap it, and count on it being re-wrapped
+                compiled = self.compiler(input_mod, args)
+                return UnwrapperModule(compiled, unwrap_singleton_tuple)
 
             # Note:
             #
@@ -435,7 +438,11 @@ or file a github issue."""
 
                     # Finally, we have to produce inputs for use compiling the next submodule,
                     # and these need to be Real, so inductor strides are faithfully captured
-                    return curr_submod(*args, **kwargs)
+
+                    # previously called 'curr_submod(*args, **kwargs) But it wrapped an additional
+                    # tuple around the result, which caused problems when trying to pass the result to the next submod
+                    # also, maybe i was just not using the updated curr_submod after compile??
+                    return compiled_submod_real(*args, **kwargs)
                 else:
                     # placeholder or output nodes don't need to get compiled, just executed
                     return getattr(self, n.op)(n.target, args, kwargs)
