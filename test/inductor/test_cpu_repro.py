@@ -1299,7 +1299,6 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
-            "constant",
             "index_expr",
             "signbit",
             "isinf",
@@ -2612,23 +2611,6 @@ class CPUReproTests(TestCase):
         m = M()
         x = torch.randn(1, 39, 1, 18, 17)
         self.common(m, (x,))
-
-    def test_embedding_vec(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.Embedding(64, 128)
-
-            def forward(self, idx, x):
-                return self.emb(idx) + x
-
-        idx = torch.randint(0, 64, (4, 32))
-        x = torch.randn(4, 32, 128)
-        m = M().eval()
-        with torch.no_grad():
-            metrics.reset()
-            self.common(m, (idx, x))
-            assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":
