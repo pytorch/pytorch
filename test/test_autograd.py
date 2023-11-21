@@ -27,7 +27,7 @@ from torch import inf, nan
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx, emit_itt)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
@@ -5983,6 +5983,28 @@ for shape in [(1,), ()]:
         # Not passing explicitly warns
         with warnings.catch_warnings(record=True) as w:
             checkpoint(lambda x: x, a)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "please pass in use_reentrant=True or use_reentrant=False explicitly",
+            str(w[0].message)
+        )
+
+    def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
+        a = torch.randn(3, requires_grad=True)
+        modules_list = [
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3)
+        ]
+
+        # Passing explicitly should not warn
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
+        self.assertEqual(len(w), 0)
+
+        # Not passing explicitly warns
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint_sequential(modules_list, 3, a)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "please pass in use_reentrant=True or use_reentrant=False explicitly",

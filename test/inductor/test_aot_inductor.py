@@ -11,12 +11,14 @@ import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_quantization import skip_if_no_torchvision
 
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -58,7 +60,14 @@ except (unittest.SkipTest, ImportError) as e:
 
 class AOTInductorModelRunner:
     @classmethod
-    def compile(cls, model, example_inputs, options=None, constraints=None):
+    def compile(
+        cls,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,
@@ -66,6 +75,7 @@ class AOTInductorModelRunner:
             options=options,
             constraints=constraints,
             remove_runtime_assertions=True,
+            disable_constraint_solver=disable_constraint_solver,
         )
         return so_path
 
@@ -109,9 +119,21 @@ class AOTInductorModelRunner:
         return optimized
 
     @classmethod
-    def run(cls, device, model, example_inputs, options=None, constraints=None):
+    def run(
+        cls,
+        device,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         so_path = AOTInductorModelRunner.compile(
-            model, example_inputs, options=options, constraints=constraints
+            model,
+            example_inputs,
+            options=options,
+            constraints=constraints,
+            disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
         return optimized(example_inputs)
@@ -144,6 +166,7 @@ def check_model(
     example_inputs,
     options=None,
     constraints=None,
+    disable_constraint_solver=False,
 ):
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
@@ -156,7 +179,12 @@ def check_model(
 
         torch.manual_seed(0)
         actual = AOTInductorModelRunner.run(
-            self.device, model, example_inputs, options, constraints
+            self.device,
+            model,
+            example_inputs,
+            options,
+            constraints,
+            disable_constraint_solver,
         )
 
     self.assertTrue(same(actual, expected))
@@ -317,6 +345,21 @@ class AOTInductorTestsTemplate:
 
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
+
+    def test_simple_split(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        example_inputs = (torch.randn(2, 8, device=self.device),)
+        counters.clear()
+        self.check_model(Model(), example_inputs)
+        self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
     def test_missing_output(self):
         class Model(torch.nn.Module):
@@ -1044,6 +1087,42 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skip_if_no_torchvision
+    def test_missing_cubin(self):
+        from torchvision.models.resnet import Bottleneck, ResNet
+
+        class Model(ResNet):
+            def __init__(self):
+                super().__init__(
+                    block=Bottleneck,
+                    layers=[3, 4, 6, 3],
+                    replace_stride_with_dilation=[False, False, True],
+                    norm_layer=None,
+                )
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                f1 = x
+                x = self.maxpool(x)
+                x = self.layer1(x)
+                f2 = x
+                x = self.layer2(x)
+                f3 = x
+                x = self.layer3(x)
+                x = self.layer4(x)
+                f4 = x
+                return [f1, f2, f3, f4]
+
+        # Call eval() here so that batch_norm won't update the running stats
+        # Use float64 to avoid numeric difference failure
+        model = Model().to(device=self.device, dtype=torch.float64).eval()
+        example_inputs = (
+            torch.randn(4, 3, 64, 64, device=self.device, dtype=torch.float64),
+        )
+        self.check_model(model, example_inputs)
+
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -1152,6 +1231,78 @@ class AOTInductorTestsTemplate:
         ]
         self.check_model(Model(), (a,), constraints=constraints)
 
+    def test_triton_kernel_reinterpret_view(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        @triton.jit
+        def pass_kernel(x, y):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                pass_kernel[(1,)](x, torch.empty_like(x))
+                return x
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_shifted_constraint_ranges(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                torch._check(y.size(0) == x.size(0) + 1)
+                return x.sum(0) + y.sum(0)
+
+        a = torch.randn((4, 5), device=self.device)
+        b = torch.randn((5, 5), device=self.device)
+
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 2,
+            torch._export.dynamic_dim(a, 0) <= 1024,
+            torch._export.dynamic_dim(b, 0) >= 3,
+            torch._export.dynamic_dim(b, 0) <= 1025,
+        ]
+
+        self.check_model(
+            Model(),
+            (a, b),
+            constraints=constraints,
+            disable_constraint_solver=True,
+        )
+
+    def test_scatter_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                index: torch.Tensor,
+                src: torch.Tensor,
+            ):
+                return torch.scatter(inp, 1, index, src)
+
+        inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1178,6 +1329,8 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        # Need to support convolution
+        "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
@@ -1185,6 +1338,12 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # error: could not find s0
+        "test_shifted_constraint_ranges": TestFailure(
+            ("abi_compatible_cpu",), is_skip=True
+        ),
+        # the test segfaults
+        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
     },
 )
 
@@ -1203,6 +1362,8 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
+        # Need to support convolution
+        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
