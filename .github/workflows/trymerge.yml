@@ -45,8 +45,8 @@ jobs:
         run: |
           set -x
           if [ -n "${REBASE}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
-            if [ $? != 1 ]; then
+            # attempt to rebase, if it fails then comment on the PR that it failed
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
               python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
               exit 0
             fi
