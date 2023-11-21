@@ -891,7 +891,7 @@ class ChainedScheduler(LRScheduler):
     """Chains list of learning rate schedulers.
 
     It takes a list of chainable learning rate schedulers and performs
-    consecutive step() functions belonging to them by just one call.
+    their step() functions consecutively with just one call.
 
     Args:
         schedulers (list): List of chained schedulers.
