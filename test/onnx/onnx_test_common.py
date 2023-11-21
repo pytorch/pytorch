@@ -439,15 +439,11 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_args = input_args
         ref_input_kwargs = input_kwargs
 
-    # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
-        *input_args, **input_kwargs
-    )
-
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
-    ort_outputs = run_ort(onnx_program, onnx_format_args)
+
+    ort_outputs = onnx_program(*input_args, **input_kwargs)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
