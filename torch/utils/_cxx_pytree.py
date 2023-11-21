@@ -71,7 +71,7 @@ U = TypeVar("U")
 R = TypeVar("R")
 
 
-Context = Optional[Any]
+Context = Any
 PyTree = Any
 TreeSpec = PyTreeSpec
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
