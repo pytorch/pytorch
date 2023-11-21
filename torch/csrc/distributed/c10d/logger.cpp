@@ -13,6 +13,13 @@
 
 namespace c10d {
 
+static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
+    "TORCH_NCCL_BLOCKING_WAIT",
+    "NCCL_BLOCKING_WAIT"};
+static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+    "NCCL_ASYNC_ERROR_HANDLING"};
+
 // Logs runtime stats to configured destination. Note that since data collection
 // only runs every ddp_runtime_logging_sample_rate iterations, the actual
 // training iterations recorded will be like 10,
@@ -79,9 +86,9 @@ void Logger::set_env_variables() {
     ddp_logging_data_->strs_map["nccl_socket_ifname"] =
         getCvarString({"NCCL_SOCKET_IFNAME"}, "N/A");
     ddp_logging_data_->strs_map["nccl_blocking_wait"] =
-        getCvarString({"NCCL_BLOCKING_WAIT"}, "N/A");
+        getCvarString(TORCH_NCCL_BLOCKING_WAIT, "N/A");
     ddp_logging_data_->strs_map["nccl_async_error_handling"] =
-        getCvarString({"NCCL_ASYNC_ERROR_HANDLING"}, "N/A");
+        getCvarString(TORCH_NCCL_ASYNC_ERROR_HANDLING, "N/A");
     ddp_logging_data_->strs_map["nccl_debug"] =
         getCvarString({"NCCL_DEBUG"}, "N/A");
     ddp_logging_data_->strs_map["nccl_nthreads"] =
