@@ -2257,8 +2257,8 @@ class BaseScheduling:
 
     def ready_to_flush(self) -> bool:
         """
-        Check whether the backend is request scheduler flush the generated kernel.
-        If not support, please return False.
+        Check whether the backend is requesting the scheduler to flush the generated kernel.
+        If not supported, please return False.
         """
         return False
 
