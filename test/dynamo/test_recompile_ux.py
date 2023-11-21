@@ -10,7 +10,8 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 
 import torch._logging
-from torch.testing._internal.logging_utils import log_settings, kwargs_to_settings
+from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
+
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
     # TODO(whc) dynamo actually recompiles one more time than the cache limit
@@ -227,8 +228,9 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 tensor 'L['x']' size mismatch at index 0. expected 11, actual 12
 tensor 'L['x']' size mismatch at index 0. expected 10, actual 12
 tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
-tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split("\n"):
-
+tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
+            "\n"
+        ):
             self.assertIn(
                 line,
                 failure_str,
@@ -266,12 +268,10 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split("\n"):
             for line in """\
 len(L['x']) == 3
 L['x'][0] == 4
-L['x'][1] == 5""".split("\n"):
-                self.assertIn(
-                    line,
-                    filter_reasons()
-                )
-
+L['x'][1] == 5""".split(
+                "\n"
+            ):
+                self.assertIn(line, filter_reasons())
 
             failure_reasons.clear()
             opt_f([9])
@@ -280,12 +280,13 @@ L['x'][1] == 5""".split("\n"):
 len(L['x']) == 2
 L['x'][0] == 7
 len(L['x']) == 3
-L['x'][0] == 4""".split("\n"):
-                self.assertIn(
-                    line,
-                    filter_reasons()
-                )
+L['x'][0] == 4""".split(
+                "\n"
+            ):
+                self.assertIn(line, filter_reasons())
+
 
 if __name__ == "__main__":
     from torch._dynamo.testing import run_tests
+
     run_tests()
