@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,infra_error,0
 
 
 
@@ -46,7 +46,7 @@ dcgan,pass,8
 
 
 
-demucs,pass,11
+demucs,fail_to_run,5
 
 
 
@@ -82,7 +82,7 @@ hf_Bart,pass,7
 
 
 
-hf_BigBird,pass,7
+hf_BigBird,fail_to_run,4
 
 
 
@@ -190,7 +190,7 @@ soft_actor_critic,pass,7
 
 
 
-speech_transformer,pass,18
+speech_transformer,infra_error,0
 
 
 
