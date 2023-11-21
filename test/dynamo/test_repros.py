@@ -3637,7 +3637,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
-    
+
     def test_numpy_tobytes_no_error(self):
         def fn(x):
             x += 1
