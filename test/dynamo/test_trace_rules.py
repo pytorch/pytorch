@@ -12,9 +12,10 @@ from torch._dynamo.skipfiles import (
     MOD_INLINELIST,
 )
 from torch._dynamo.trace_rules import (
-    get_torch_obj_rule_map,
     load_object,
-    manual_torch_name_rule_map,
+    torch_C_binding_in_graph_functions,
+    torch_ctx_manager_classes,
+    torch_non_C_binding_in_graph_functions,
 )
 from torch._dynamo.utils import istype
 
@@ -24,7 +25,7 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_torch_name_rule_set = {
+ignored_ctx_manager_class_names = {
     "torch.ExcludeDispatchKeyGuard",
     "torch._C.DisableTorchFunction",
     "torch._C._AutoDispatchBelowAutograd",
@@ -79,14 +80,23 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
     return get_func_inlinelist
 
 
-# Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
-# allowed objects include:
-# - Torch context manager classes.
-def generate_allowed_object_set():
-    return gen_allowed_objs_and_ids().objects
-
-
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
+    def _check_set_equality(self, generated, used):
+        x = generated - used
+        y = used - generated
+        msg1 = (
+            f"New torch objects: {x} "
+            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        msg2 = (
+            f"Existing torch objects: {y} were removed. "
+            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        self.assertTrue(len(x) == 0, msg1)
+        self.assertTrue(len(y) == 0, msg2)
+
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
@@ -104,33 +114,35 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
 
-    def test_torch_name_rule_map(self):
-        manual_torch_obj_rule_set = {
-            load_object(x) for x in manual_torch_name_rule_map.keys()
+    def test_torch_name_rule_map_updated(self):
+        # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
+        objs = gen_allowed_objs_and_ids()
+        # Test ctx manager classes are updated in torch_name_rule_map.
+        generated = objs.ctx_mamager_classes
+        used = {
+            load_object(x)
+            for x in set(torch_ctx_manager_classes.keys())
+            | ignored_ctx_manager_class_names
         }
-        generated_torch_name_rule_set = (
-            generate_allowed_object_set() | manual_torch_obj_rule_set
-        )
-        ignored_torch_obj_rule_set = {
-            load_object(x) for x in ignored_torch_name_rule_set
-        }
-        used_torch_name_rule_set = (
-            set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
-        )
-        x = generated_torch_name_rule_set - used_torch_name_rule_set
-        y = used_torch_name_rule_set - generated_torch_name_rule_set
-        msg1 = (
-            f"New torch objects: {x} "
-            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        msg2 = (
-            f"Existing torch objects: {y} were removed. "
-            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        self.assertTrue(len(x) == 0, msg1)
-        self.assertTrue(len(y) == 0, msg2)
+        self._check_set_equality(generated, used)
+        # Test C binding in graph functions are updated in torch_name_rule_map.
+        generated = objs.C_binding_in_graph_functions
+        used = {load_object(x) for x in torch_C_binding_in_graph_functions.keys()}
+        self._check_set_equality(generated, used)
+        # For non C binding in graph functions, we only test if they can be loaded successfully.
+        for f in torch_non_C_binding_in_graph_functions:
+            self.assertTrue(
+                isinstance(
+                    load_object(f),
+                    (
+                        types.FunctionType,
+                        types.MethodType,
+                        types.BuiltinFunctionType,
+                        types.MethodDescriptorType,
+                        types.WrapperDescriptorType,
+                    ),
+                )
+            )
 
     def test_func_inlinelist_torch_function(self):
         def fn(x):
