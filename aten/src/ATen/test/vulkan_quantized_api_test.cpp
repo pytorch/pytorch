@@ -5,7 +5,9 @@
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Convert.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
 #include <ATen/native/vulkan/ops/Mm.h>
@@ -31,10 +33,12 @@ using namespace at::native::vulkan::api::utils;
 
 namespace {
 
+using namespace at::native::vulkan;
+
 #ifdef USE_VULKAN_FP16_INFERENCE
-  constexpr float kTolerance = 1e-2;
+constexpr float kTolerance = 1e-2;
 #else
-  constexpr float kTolerance = 1e-5;
+constexpr float kTolerance = 1e-5;
 #endif
 
 bool checkRtol(
@@ -136,12 +140,13 @@ inline std::vector<c10::IValue> callOpByName(
 }
 
 using namespace at::native::vulkan;
-using at::native::vulkan::api::utils::vec4;
 using at::native::vulkan::api::utils::ivec3;
 using at::native::vulkan::api::utils::ivec4;
+using at::native::vulkan::api::utils::vec4;
 
 std::ostream& operator<<(std::ostream& os, const vec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", " << v.data[3u] << ")";
+  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ")";
   return os;
 }
 
@@ -151,10 +156,10 @@ std::ostream& operator<<(std::ostream& os, const ivec3& v) {
 }
 
 std::ostream& operator<<(std::ostream& os, const ivec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ")";
+  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ")";
   return os;
 }
-
 
 } // namespace
 
@@ -3406,8 +3411,114 @@ TEST_F(VulkanAPITest, extract_texel_test) {
       has_failure = true;
     }
   }
-  ASSERT_FALSE(has_failure);
+  ASSERT_TRUE(!has_failure);
 }
+
+TEST_F(VulkanAPITest, channel_to_height_packing_test) {
+  int n = 3;
+  int c = 5;
+  int h = 6;
+  int w = 7;
+  int hw = h * w;
+  int chw = c * h * w;
+
+  auto data =
+      at::range(0, n * c * h * w - 1, at::device(at::kCPU).dtype(at::kFloat))
+          .reshape({n, c, h, w});
+
+  auto v_input = at::native::vulkan::ops::convert(data.vulkan());
+  auto v_output =
+      packing::convert_image_channels_packed_to_height_packed(v_input);
+  ASSERT_EQ(
+      v_output.gpu_memory_layout(), api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED);
+
+  // This output tensor is on vulkan, since we are interested in evaluating the
+  // actual layout
+  at::Tensor output = at::native::vulkan::ops::convert(v_output);
+
+  // This tensor will be height-packed. Meaning that each texel represent
+  // consecutive elements along the height dimension, element difference within
+  // a texel is "w".
+  std::tuple<ivec3, ivec4> test_cases[]{
+      {{0, 0, 0}, {0, w, 2 * w, 3 * w}},
+      {{0, 1, 0}, {4 * w, 5 * w, -1, -1}},
+      {{1, 0, 0}, {0 * w + 1, 1 * w + 1, 2 * w + 1, 3 * w + 1}},
+      {{1, 1, 0}, {4 * w + 1, 5 * w + 1, -1, -1}},
+      {{0, 0, 4}, {4 * hw, 4 * hw + w, 4 * hw + 2 * w, 4 * hw + 3 * w}},
+      {{0, 0, 4 + 2 * c},
+       {2 * chw + 4 * hw,
+        2 * chw + 4 * hw + w,
+        2 * chw + 4 * hw + 2 * w,
+        2 * chw + 4 * hw + 3 * w}},
+  };
+
+  bool has_failure = false;
+  for (const auto& test_case : test_cases) {
+    const auto [loc, expected] = test_case;
+
+    vec4 actual = ops::utils::extract_texel(output, loc);
+    if (!texel_almost_equal(expected, actual)) {
+      std::cout << "On loc: " << loc << " expected: " << expected
+                << " actual: " << actual << std::endl;
+      has_failure = true;
+    }
+  }
+  ASSERT_TRUE(!has_failure);
+}
+
+TEST_F(VulkanAPITest, channel_to_width_packing_test) {
+  int n = 3;
+  int c = 5;
+  int h = 6;
+  int w = 7;
+  int hw = h * w;
+  int chw = c * h * w;
+
+  auto data =
+      at::range(0, n * c * h * w - 1, at::device(at::kCPU).dtype(at::kFloat))
+          .reshape({n, c, h, w});
+
+  auto v_input = at::native::vulkan::ops::convert(data.vulkan());
+  auto v_output =
+      packing::convert_image_channels_packed_to_width_packed(v_input);
+  ASSERT_EQ(
+      v_output.gpu_memory_layout(), api::GPUMemoryLayout::TENSOR_WIDTH_PACKED);
+
+  // This output tensor is on vulkan, since we are interested in evaluating the
+  // actual layout
+  at::Tensor output = at::native::vulkan::ops::convert(v_output);
+
+  // This tensor will be width-packed. Meaning that each texel represent
+  // consecutive elements along the width dimension. The  differece between
+  // consecutive texels is 1.
+  std::tuple<ivec3, ivec4> test_cases[]{
+      {{0, 0, 0}, {0, 1, 2, 3}},
+      {{1, 0, 0}, {4, 5, 6, -1}},
+      {{0, 2, 0}, {2 * w + 0, 2 * w + 1, 2 * w + 2, 2 * w + 3}},
+      {{1, 2, 0}, {2 * w + 4, 2 * w + 5, 2 * w + 6, -1}},
+      {{0, 0, 4}, {4 * hw + 0, 4 * hw + 1, 4 * hw + 2, 4 * hw + 3}},
+      {{1, 0, 4}, {4 * hw + 4, 4 * hw + 5, 4 * hw + 6, -1}},
+      {{0, 0, 4 + 2 * c},
+       {2 * chw + 4 * hw,
+        2 * chw + 4 * hw + 1,
+        2 * chw + 4 * hw + 2,
+        2 * chw + 4 * hw + 3}},
+  };
+
+  bool has_failure = false;
+  for (const auto& test_case : test_cases) {
+    const auto [loc, expected] = test_case;
+
+    vec4 actual = ops::utils::extract_texel(output, loc);
+    if (!texel_almost_equal(expected, actual)) {
+      std::cout << "On loc: " << loc << " expected: " << expected
+                << " actual: " << actual << std::endl;
+      has_failure = true;
+    }
+  }
+  ASSERT_TRUE(!has_failure);
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */

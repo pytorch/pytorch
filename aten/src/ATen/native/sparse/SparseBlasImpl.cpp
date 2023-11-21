@@ -218,27 +218,42 @@ Tensor& _compressed_row_strided_addmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  auto alpha_val = alpha.toComplexDouble();
+  auto beta_val = beta.toComplexDouble();
   // If result is not the same as self, it could always be used as out argument to mm.
   if (!result.is_same(self)) {
-    _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
-
+    _compressed_row_strided_mm_out(mat1, mat2, result);
+    if (alpha_val != 1.) {
+      result.mul_(alpha);
+    }
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.add_(self.mul(beta));
+    if (beta_val != 0.) {
+      if (beta_val == 1.) {
+        result.add_(self);
+      } else {
+        result.add_(self.mul(beta));
+      }
     }
   }
   // Otherwise we need to allocate external memory for mm if beta != 0.
   else {
     // Process beta
-    if (beta.toComplexDouble() != 0.) {
-      result.mul_(beta);
+    if (beta_val != 0.) {
+      if (beta_val != 1.) {
+        result.mul_(beta);
+      }
       auto mm = at::empty_like(result);
       _compressed_row_strided_mm_out(mat1, mat2, mm);
-      mm.mul_(alpha);
+      if (alpha_val != 1.) {
+        mm.mul_(alpha);
+      }
       result.add_(mm);
     }
     else {
-      _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
+      _compressed_row_strided_mm_out(mat1, mat2, result);
+      if (alpha_val != 1.) {
+        result.mul_(alpha);
+      }
     }
   }
 
