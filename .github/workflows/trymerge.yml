@@ -33,6 +33,7 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
       - name: Merge PR
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
