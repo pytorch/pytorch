@@ -2,33 +2,15 @@ from __future__ import annotations
 
 import contextlib
 
-import dataclasses
-import enum
-import functools
 import logging
 import threading
 import traceback
 import unittest.mock
-import weakref
-from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, List, NamedTuple, Optional
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +33,8 @@ Note that you can end up with multiple TracingContext for a single compilation
 of a frame, as we reset the TracingContext whenever we restart analysis.
 CompileContext is a more overarching context that encompasses multiple restarts.
 """
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -71,7 +55,8 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode):
+
+    def __init__(self, fake_mode, instruction_translator):
         # TODO(voz): These will get moved to their own context file, along
         # with the checkpointable stuff and state management.
         self.guards_context = torch._guards.GuardsContext()
@@ -105,6 +90,8 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        self._current_tx = [] # List[InstructionTranslatorBase]
+        self.root_tx = instruction_translator
 
     @staticmethod
     @contextmanager
@@ -207,6 +194,18 @@ class TracingContext:
             filename, lineno, frame_name
         )
 
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
+
+    def cleanup(self):
+        self.root_tx = None
 
 
 class CompileId(NamedTuple):
@@ -293,6 +292,7 @@ class CompileContext:
             return None
         return TraceId(self.compile_id, self.attempt)
 
+
 @contextmanager
 def compile_context(context: CompileContext):
     old_context = getattr(_TLS, "compile_context", None)
@@ -301,6 +301,7 @@ def compile_context(context: CompileContext):
         yield context
     finally:
         _TLS.compile_context = old_context
+
 
 def detect_fake_mode(inputs: Any = None):
     """

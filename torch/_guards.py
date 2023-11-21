@@ -4,7 +4,6 @@ import dataclasses
 import enum
 import functools
 import logging
-import threading
 import weakref
 from abc import ABC, abstractmethod
 from typing import (

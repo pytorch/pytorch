@@ -283,7 +283,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context: TracingContext = TracingContext(fake_mode, root_tx)
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -310,7 +310,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.global_scope = global_scope
         self.local_scope = local_scope
-        self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
         # Given a source, what are the user stacks of all locations that
@@ -499,15 +498,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             torch.is_autocast_cache_enabled(),
         )
 
-    def push_tx(self, tx):
-        self._current_tx.append(tx)
-
-    def pop_tx(self):
-        return self._current_tx.pop()
-
     @property
     def current_tx(self):
-        return self.root_tx if not self._current_tx else self._current_tx[-1]
+        return self.tracing_context.current_tx()
+
+    @property
+    def root_tx(self):
+        return self.tracing_context.root_tx
 
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
@@ -1198,7 +1195,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
-        self.root_tx = None
+        self.tracing_context.cleanup()
         self.nn_modules.clear()
         self.param_name_to_source = None
 

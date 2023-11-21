@@ -1151,7 +1151,7 @@ def compile_fx(
     )
     tracing_context = (
         torch._tracing_context.TracingContext.try_get()
-        or torch._tracing_context.TracingContext(fake_mode)
+        or torch._tracing_context.TracingContext(fake_mode, None)
     )
 
     if V.aot_compilation is True:
