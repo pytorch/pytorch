@@ -317,6 +317,8 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
+    # Runs memory leak tess
+    "test_mps",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -357,7 +359,6 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
-    "test_mps", # Need to run sequentially to test for memory leaks
     "inductor/test_max_autotune",  # Testing, probably revert later
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
