@@ -126,8 +126,6 @@ def register_pytree_node(
     cls: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
@@ -157,8 +155,6 @@ def register_pytree_node(
         cls,
         flatten_fn,
         unflatten_fn,
-        to_str_fn=to_str_fn,  # deprecated
-        maybe_from_str_fn=maybe_from_str_fn,  # deprecated
         serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
@@ -212,16 +208,20 @@ def _register_pytree_node(
     """
     warnings.warn(
         "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch._utils._pytree.register_pytree_node instead.",
+        "Please use torch.utils._pytree.register_pytree_node instead.",
         stacklevel=2,
     )
+
+    if to_str_fn is not None or maybe_from_str_fn is not None:
+        warnings.warn(
+            "to_str_fn and maybe_from_str_fn is deprecated. "
+            "Please use to_dumpable_context and from_dumpable_context instead."
+        )
 
     _private_register_pytree_node(
         cls,
         flatten_fn,
         unflatten_fn,
-        to_str_fn=to_str_fn,  # deprecated
-        maybe_from_str_fn=maybe_from_str_fn,  # deprecated
         serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
@@ -232,8 +232,6 @@ def _private_register_pytree_node(
     cls: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
@@ -243,12 +241,6 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    if to_str_fn is not None or maybe_from_str_fn is not None:
-        warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
-        )
-
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
             raise ValueError(f"{cls} is already registered as pytree node.")
