@@ -553,7 +553,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         @torch._dynamo.optimize(check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
-
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
