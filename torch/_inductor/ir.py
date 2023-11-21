@@ -4175,16 +4175,34 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
+    # TODO: handle bools carefully
     def __init__(self, sym, data):
         super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
-        self.sym = sym
+        if isinstance(sym, sympy.Symbol):
+            self.sym = sym
+            self.is_bool = False
+        else:
+            # Special case for boolean.  For Reasons(TM), we don't represent
+            # boolean variables directly in sympy; instead, we generate an
+            # indicator integer variable which we then convert to a boolean by
+            # testing i0 == 1.  We have to identify the underlying indicator
+            # variable, and then bind i0 to the appropriate integer value
+            # based on the runtime boolean.
+            assert isinstance(sym, sympy.Eq), sym
+            assert isinstance(sym.args[0], sympy.Symbol), sym
+            assert sym.args[1] == 1, sym
+            self.sym = sym.args[0]
+            self.is_bool = True
 
     def get_unbacked_symbol_defs(self):
         return {self.sym}
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.sym} = {data}.item()")
+        if self.is_bool:
+            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
+        else:
+            wrapper.writeline(f"{self.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
