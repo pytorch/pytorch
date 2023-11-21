@@ -19,6 +19,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
   - [Imperative Experiences](#imperative-experiences)
   - [Fast and Lean](#fast-and-lean)
   - [Extensions Without Pain](#extensions-without-pain)
+  - [Supported Third-party Backends](#supported-third-party-backends)
 - [Installation](#installation)
   - [Binaries](#binaries)
     - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
@@ -139,6 +140,16 @@ You can write new neural network layers in Python using the torch API
 If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
 No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
+### Supported Third-party Backends
+
+The supported third-party backends are as follows:
+
+|Backend Name|Internal Dispatch Key|Repository|Pipeline Status|
+|---|---|---|---|
+|xpu|XPU|[intel-extension-for-pytorch](https://github.com/intel/intel-extension-for-pytorch)||
+|ipu|IPU|[poptorch](https://github.com/graphcore/poptorch)||
+|hpu|HPU|[lightning-Habana](https://github.com/Lightning-AI/lightning-Habana)||
+|npu|PrivateUse1|[Ascend Pytorch](https://github.com/ascend/pytorch)|[![Ascend NPU](https://github.com/Ascend/pytorch/actions/workflows/periodic.yml/badge.svg)](https://github.com/Ascend/pytorch/actions/workflows/periodic.yml)|
 
 ## Installation
 
