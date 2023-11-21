@@ -655,6 +655,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
         def repl(v: VariableTracker):
             if v.mutable_local is oldvar.mutable_local:
+                if not newvar.source:
+                    newvar.source = oldvar.source
                 return newvar
             return v
 

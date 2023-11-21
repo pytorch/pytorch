@@ -138,14 +138,14 @@ class SideEffects:
         self.save_for_backward = VariableTracker.apply(
             fn, self.save_for_backward, cache, skip_fn
         )
-        for t, _, _, _ in self.tensor_hooks.values():
-            print("Hook source pre?", t.source.name())
+        # for t, _, _, _ in self.tensor_hooks.values():
+            # print("Hook source pre?", t.source.name())
         self.tensor_hooks = VariableTracker.apply(fn, self.tensor_hooks, cache, skip_fn)
-        for t, _, _, _ in self.tensor_hooks.values():
-            if t.source:
-                print("Hook source post?", t.source.name())
-            else:
-                print("WHERE DID THE SOURCE GO??")
+        # for t, _, _, _ in self.tensor_hooks.values():
+        #     if t.source:
+        #         print("Hook source post?", t.source.name())
+        #     else:
+        #         print("WHERE DID THE SOURCE GO??")
 
     def __contains__(self, item):
         return id(item) in self.id_to_variable
