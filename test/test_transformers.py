@@ -21,6 +21,7 @@ from typing import List, Tuple, Optional
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    skipIfRocm,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -2891,6 +2892,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
     @onlyCUDA
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
