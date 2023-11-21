@@ -4850,10 +4850,12 @@ def _prepare_linear_fusion_create(
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    kernel_layout = FlexibleLayout(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        size=output_size,
+    output_stride = make_contiguous_strides_for(output_size)
+    kernel_layout = FixedLayout(
+        x.get_device(),
+        x.get_dtype(),
+        output_size,
+        output_stride,
     )
     constant_args: List[Any] = []
 
@@ -6004,9 +6006,6 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
-
-    def apply_constraint(self):
-        pass
 
 
 @dataclasses.dataclass
