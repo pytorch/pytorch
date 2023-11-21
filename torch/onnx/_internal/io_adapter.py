@@ -579,7 +579,8 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
         """
 
         ordered_buffers = tuple(
-            self.model.state_dict[name] for name in self.model.graph_signature.buffers  # type: ignore[union-attr,index]
+            self.model.state_dict[name]
+            for name in self.model.graph_signature.buffers_to_mutate.values()
         )
 
         # NOTE: calling convention is first mutated buffers, then outputs args as model returned them.
