@@ -83,6 +83,9 @@ __all__ = [
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
+ToStrFunc = Callable[["TreeSpec", List[str]], str]
+MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
+
 
 # A NodeDef holds two callables:
 # - flatten_fn should take the collection and return a flat list of values.
@@ -176,6 +179,8 @@ def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
+    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
+    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
@@ -203,9 +208,15 @@ def _register_pytree_node(
     """
     warnings.warn(
         "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch._utils._pytree.register_pytree_node instead.",
+        "Please use torch.utils._pytree.register_pytree_node instead.",
         stacklevel=2,
     )
+
+    if to_str_fn is not None or maybe_from_str_fn is not None:
+        warnings.warn(
+            "to_str_fn and maybe_from_str_fn is deprecated. "
+            "Please use to_dumpable_context and from_dumpable_context instead."
+        )
 
     _private_register_pytree_node(
         cls,

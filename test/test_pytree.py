@@ -2,7 +2,7 @@
 
 import inspect
 import unittest
-from collections import namedtuple, OrderedDict
+from collections import namedtuple, OrderedDict, UserDict
 
 import torch
 import torch.utils._pytree as _pytree
@@ -99,6 +99,45 @@ class TestGenericPytree(TestCase):
                                 f"for API `{name}`"
                             ),
                         )
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_register_pytree_node(self, pytree_impl):
+        class MyDict(UserDict):
+            pass
+
+        d = MyDict(a=1, b=2, c=3)
+
+        # Custom types are leaf nodes by default
+        values, spec = pytree_impl.tree_flatten(d)
+        self.assertEqual(values, [d])
+        self.assertIs(values[0], d)
+        self.assertEqual(d, pytree_impl.tree_unflatten(values, spec))
+        self.assertTrue(spec.is_leaf())
+
+        # Register MyDict as a pytree node
+        pytree_impl.register_pytree_node(
+            MyDict,
+            lambda d: (list(d.values()), list(d.keys())),
+            lambda values, keys: MyDict(zip(keys, values)),
+        )
+
+        values, spec = pytree_impl.tree_flatten(d)
+        self.assertEqual(values, [1, 2, 3])
+        self.assertEqual(d, pytree_impl.tree_unflatten(values, spec))
+
+        # Do not allow registering the same type twice
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            pytree_impl.register_pytree_node(
+                MyDict,
+                lambda d: (list(d.values()), list(d.keys())),
+                lambda values, keys: MyDict(zip(keys, values)),
+            )
 
     @parametrize(
         "pytree_impl",
@@ -481,6 +520,21 @@ class TestGenericPytree(TestCase):
 
 
 class TestPythonPytree(TestCase):
+    def test_deprecated_register_pytree_node(self):
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertWarnsRegex(
+            UserWarning, "torch.utils._pytree._register_pytree_node"
+        ):
+            py_pytree._register_pytree_node(
+                DummyType,
+                lambda dummy: ([dummy.x, dummy.y], None),
+                lambda xs, _: DummyType(*xs),
+            )
+
     def test_treespec_equality(self):
         self.assertTrue(
             py_pytree.LeafSpec() == py_pytree.LeafSpec(),

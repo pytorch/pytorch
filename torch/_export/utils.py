@@ -7,11 +7,11 @@ import torch
 from torch._export import ExportedProgram
 
 from torch.utils._pytree import (
+    _register_pytree_node,
     Context,
     DumpableContext,
     FlattenFunc,
     FromDumpableContextFn,
-    register_pytree_node,
     ToDumpableContextFn,
     tree_flatten,
     UnflattenFunc,
@@ -122,7 +122,7 @@ def register_dataclass_as_pytree_node(
         else default_from_dumpable_context
     )
 
-    register_pytree_node(
+    _register_pytree_node(
         cls,
         flatten_fn,
         unflatten_fn,
