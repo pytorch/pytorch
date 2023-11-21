@@ -2493,7 +2493,7 @@ class TestDifferentiableOptimizer(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):
-        from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
+        from torch.optim import (adam, nadam, sgd, radam, rmsprop, rprop,
                                  asgd, adamax, adadelta, adagrad)
         multi_optims = ((Adam, adam, "_multi_tensor_adam"),
                         (AdamW, adam, "_multi_tensor_adam"),
