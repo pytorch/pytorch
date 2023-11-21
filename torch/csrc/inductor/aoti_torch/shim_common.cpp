@@ -224,11 +224,14 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     c10::Device device = c10_device(device_type, device_index);
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor = new at::Tensor(at::for_blob(data, sizes)
-                                                .strides(strides)
-                                                .storage_offset(storage_offset)
-                                                .options(options)
-                                                .make_tensor());
+    at::Tensor* new_tensor = (data != nullptr)
+        ? new at::Tensor(at::for_blob(data, sizes)
+                             .strides(strides)
+                             .storage_offset(storage_offset)
+                             .options(options)
+                             .make_tensor())
+        // data == nullptr can happen for a 0-size tensor
+        : new at::Tensor(at::empty_strided(sizes, strides, options));
     *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
