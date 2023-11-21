@@ -312,7 +312,7 @@ class FakeTensorConverter:
         shape_env=None,
         *,
         source=None,
-        policy=None,
+        symbolic_context=None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -348,7 +348,7 @@ class FakeTensorConverter:
             shape_env=shape_env,
             callback=mk_fake_tensor,
             source=source,
-            policy=policy,
+            symbolic_context=symbolic_context,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -383,7 +383,7 @@ class FakeTensorConverter:
         make_constant=False,
         shape_env=None,
         source=None,
-        policy=None,
+        symbolic_context=None,
         memoized_only=False,
     ):
         return self.from_real_tensor(
@@ -392,7 +392,7 @@ class FakeTensorConverter:
             make_constant,
             shape_env=shape_env,
             source=source,
-            policy=policy,
+            symbolic_context=symbolic_context,
             memoized_only=memoized_only,
         )
 
@@ -1855,7 +1855,7 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         static_shapes=None,
         source: Optional[Source] = None,
-        policy=None,
+        symbolic_context=None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1864,14 +1864,16 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert policy is None, "cannot set both static_shapes and policy"
+            assert (
+                symbolic_context is None
+            ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
             source=source,
-            policy=policy,
+            symbolic_context=symbolic_context,
             memoized_only=memoized_only,
         )
 

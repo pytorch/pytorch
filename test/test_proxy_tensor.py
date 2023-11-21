@@ -755,7 +755,17 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    pass
+    def test_error_on_data_dependent_ops(self):
+        def f():
+            x = torch.randn([])
+            y = torch.randn([])
+            assert torch.allclose(x * y, y * x)
+            z = float(x)
+            z2 = float(y)
+
+        # Smoke tests
+        make_fx(f, _error_on_data_dependent_ops=False)()
+        make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -1727,7 +1737,6 @@ symbolic_tensor_failures = {
     xfail('renorm', ''),
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
-    xfail('randint_like', ''),  # when unpacking SymInt, expected int but got s0
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
