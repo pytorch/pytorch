@@ -7320,6 +7320,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
 
+    @parametrize_test('device', ['cuda'] if TEST_CUDA else [])
+    @largeTensorTest("60GB", "cpu")
+    @largeTensorTest("16GB", "cuda")
+    def test_avg_pool_large_tensor(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/113833
+        a = torch.randn(128, 256, 256, 256, dtype=torch.half, device='cuda', requires_grad=True)
+        a_cpu = a.detach().cpu().float()
+        m = torch.nn.AvgPool2d(2)
+        o = m(a)
+        a_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(a_cpu)
+        o_cpu.sum().backward()
+        self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+
     def test_fractional_max_pool2d_invalid_output_ratio(self):
         arg_1 = [2, 1]
         arg_2 = [0.5, 0.5, 0.6]
