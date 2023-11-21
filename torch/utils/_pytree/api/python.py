@@ -123,7 +123,7 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
 def register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -176,7 +176,7 @@ def register_pytree_node(
 
 
 def _register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     to_str_fn: Optional[ToStrFunc] = None,  # deprecated
@@ -229,7 +229,7 @@ def _register_pytree_node(
 
 
 def _private_register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -348,7 +348,7 @@ _private_register_pytree_node(
     serialized_type_name="builtins.tuple",
 )
 _private_register_pytree_node(
-    namedtuple,
+    namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten,
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
@@ -518,12 +518,12 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     return tree_flatten(tree)[1]
 
 
-def tree_map(func: Any, tree: PyTree) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(tree)
     return tree_unflatten([func(i) for i in flat_args], spec)
 
 
-def tree_map_(func: Any, tree: PyTree) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args = tree_leaves(tree)
     deque(map(func, flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
@@ -905,8 +905,8 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return str_spec
 
 
-def treespec_loads(data: str) -> TreeSpec:
-    protocol, json_schema = json.loads(data)
+def treespec_loads(serialized: str) -> TreeSpec:
+    protocol, json_schema = json.loads(serialized)
 
     if protocol in _SUPPORTED_PROTOCOLS:
         return _SUPPORTED_PROTOCOLS[protocol].json_to_treespec(json_schema)

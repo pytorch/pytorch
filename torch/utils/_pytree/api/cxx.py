@@ -1015,7 +1015,7 @@ def _broadcast_to_and_flatten(
         return None
 
 
-def treespec_dumps(treespec: TreeSpec) -> str:
+def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
     if not isinstance(treespec, TreeSpec):
         raise TypeError(
@@ -1028,7 +1028,7 @@ def treespec_dumps(treespec: TreeSpec) -> str:
     )
 
     orig_treespec = _tree_structure(tree_unflatten([0] * treespec.num_leaves, treespec))
-    return _treespec_dumps(orig_treespec)
+    return _treespec_dumps(orig_treespec, protocol=protocol)
 
 
 def treespec_loads(serialized: str) -> TreeSpec:
