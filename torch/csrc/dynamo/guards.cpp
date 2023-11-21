@@ -1,9 +1,9 @@
 #define PY_SSIZE_T_CLEAN
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
