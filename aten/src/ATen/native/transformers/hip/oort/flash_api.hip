@@ -520,7 +520,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 #define CALL_BWD(FP, BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT)                                                \
   do {                                                                                                                      \
     dim3  grid;                                                                                                             \
-    grid.x = (seqlen_q + BLOCK_M - 1) / BLOCK_M;                                                                            \
+    grid.x = (seqlen_k + BLOCK_M - 1) / BLOCK_M;                                                                            \
     grid.y = batch_size * num_heads;                                                                                        \
     grid.z = 1;                                                                                                             \
     std::cerr << "grid.x = " << grid.x << " grid.y = " << grid.y << std::endl;                                              \
@@ -536,6 +536,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                     v_t.stride(0), v_t.stride(1), v_t.stride(2), v_t.stride(3),                                             \
                     q_t.sizes()[0], q_t.sizes()[1], seqlen_q, seqlen_k, p_dropout,                                          \
                     (uint64_t)(philox_args.seed_.val), (uint32_t)(philox_args.offset_.val), stream);                        \
+    grid.x = (seqlen_q + BLOCK_M - 1) / BLOCK_M;                                                                            \
     oort::bwd_kernel_dq<BLOCK_M, BLOCK_DMODEL, BLOCK_N, CAUSAL, ENABLE_DROPOUT> dq_opt;                                     \
     err = dq_opt(grid, block,                                                                                               \
                  (FP*)(q_t.data_ptr()), (FP*)(k_t.data_ptr()), (FP*)(v_t.data_ptr()),                                       \
