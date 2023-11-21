@@ -378,17 +378,15 @@ def _single_tensor_adam(params: List[Tensor],
                 (param.is_cuda and step_t.is_cuda) or (param.is_xla and step_t.is_xla)
             ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
-        if not decoupled_weight_decay:
-            # update step
-            step_t += 1
+        # update step
+        step_t += 1
 
-            if weight_decay != 0:
+        if weight_decay != 0:
+            if not decoupled_weight_decay:
                 grad = grad.add(param, alpha=weight_decay)
-        else:
-            # update step
-            step_t += 1
-            # Perform stepweight decay
-            param.mul_(1 - lr * weight_decay)
+            else:
+                # Perform stepweight decay
+                param.mul_(1 - lr * weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
