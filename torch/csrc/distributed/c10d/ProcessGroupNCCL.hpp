@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>

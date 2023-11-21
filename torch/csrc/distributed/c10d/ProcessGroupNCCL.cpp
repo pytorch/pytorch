@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 #include <fstream>
 #include <mutex>
 #include <sstream>
