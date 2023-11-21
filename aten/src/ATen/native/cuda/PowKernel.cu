@@ -190,7 +190,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
         return pow_(base, exp);
       });
     });
-  } else if (isFloatingType(iter.common_dtype()) || exp_scalar.isIntegral(false)) {
+  } else if (isFloatingType(iter.common_dtype()) || exp_scalar.isIntegral(false) || exp_scalar.isBoolean()) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
