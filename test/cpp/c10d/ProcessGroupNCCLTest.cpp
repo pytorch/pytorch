@@ -41,7 +41,10 @@ class NCCLTestBase {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =
         c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
-    setenv(c10d::ENABLE_NCCL_HEALTH_CHECK[0].c_str(), "1", /* overwrite */ 1);
+    setenv(
+        c10d::TORCH_ENABLE_NCCL_HEALTH_CHECK[0].c_str(),
+        "1",
+        /* overwrite */ 1);
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
   }
@@ -749,7 +752,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
 
   void TearDown() override {
     // Reset NCCL_BLOCKING_WAIT environment variable after each run.
-    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
   }
 
   bool skipTest() {
