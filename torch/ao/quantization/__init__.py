@@ -13,6 +13,7 @@ from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 from .pt2e.eval_utils import _move_exported_model_to_eval as move_exported_model_to_eval
+from .pt2e.generate_numeric_debug_handle import generate_numeric_debug_handle  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
@@ -138,6 +139,7 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
+    "generate_numeric_debug_handle",
 ]
 
 def default_eval_fn(model, calib_data):
