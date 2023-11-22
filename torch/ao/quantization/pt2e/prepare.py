@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 
-def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
+def _find_root_edge_or_node(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
     """Find the root node for the sharing tree
     Args:
         edge_or_node: edge/node that we want to find the root
@@ -42,7 +42,7 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
     parent = shared_with_map[edge_or_node]
     if parent == edge_or_node:
         return edge_or_node
-    root = _find_root(parent, shared_with_map)
+    root = _find_root_edge_or_node(parent, shared_with_map)
     # path compression
     shared_with_map[edge_or_node] = root
     return root
@@ -50,8 +50,8 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
 def _union(parent: EdgeOrNode, child: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> None:
     """Merge the subtree for `child` with `parent`, the order is important here
     """
-    root_parent = _find_root(parent, shared_with_map)
-    root_child = _find_root(child, shared_with_map)
+    root_parent = _find_root_edge_or_node(parent, shared_with_map)
+    root_child = _find_root_edge_or_node(child, shared_with_map)
     # union the two trees by pointing the root of child to root of parent
     shared_with_map[root_child] = root_parent
 
@@ -66,22 +66,21 @@ def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, s
         # qspec for a = SharedQuantizationSpec(b) means `a` points to `b`
         _union(sharing_with, edge_or_node, shared_with_map)
 
-# TODO: simplify this
-def _find_root_qspec(
+def _unwrap_shared_qspec(
     qspec: QuantizationSpecBase,
     edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
     shared_with_map: Dict[EdgeOrNode, EdgeOrNode]
 ) -> QuantizationSpecBase:
     """Unwraps qspec to get the final root qspec (non SharedQuantizationSpec)
     if qspec is SharedQuantizationSpec
-       (1). tries to find the root node for the node that the qspec points to
+       (1). tries to find the root edge or node for the node that the qspec points to
        (2). recursively find the root qspec based on the qspec for the root node
     """
     if isinstance(qspec, SharedQuantizationSpec):
         sharing_with = qspec.edge_or_node
-        root = _find_root(sharing_with, shared_with_map)
+        root = _find_root_edge_or_node(sharing_with, shared_with_map)
         qspec = edge_or_node_to_qspec[root]
-        return _find_root_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
+        return _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     return qspec
 
 def _has_same_dtype(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
@@ -115,10 +114,11 @@ def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, 
     return edge_or_node_to_qspec
 
 def _union_input_edge_with(input_edge, input_edge_root_qspec, edge_or_node, edge_or_node_to_qspec, shared_with_map):
+    # find root_qspec for `arg` Node (the output of previous node)
     root_qspec = None
     if edge_or_node in edge_or_node_to_qspec:
         qspec = edge_or_node_to_qspec[edge_or_node]
-        root_qspec = _find_root_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
+        root_qspec = _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     # TODO: add assertions for types of root qspecs
     if (
         root_qspec is not None and
@@ -190,11 +190,8 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
             _update_shared_with(output_node, qspec, shared_with_map)
         else:
             input_edge = edge_or_node
-            input_edge_root = _find_root(input_edge, shared_with_map)
-            input_edge_root_qspec = edge_or_node_to_qspec[input_edge_root]
-            input_edge_root_qspec = _find_root_qspec(input_edge_root_qspec, edge_or_node_to_qspec, shared_with_map)
+            input_edge_root_qspec = _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
 
-            # find root_qspec for `arg` Node (the output of previous node)
             assert isinstance(input_edge, tuple)
             arg, n = input_edge
             if n.meta["quantization_annotation"].allow_implicit_sharing:
@@ -221,7 +218,7 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
     cur_group_id = 0
     edge_or_node_to_group_id: Dict[EdgeOrNode, int] = {}
     for edge_or_node in shared_with_map.keys():
-        root = _find_root(edge_or_node, shared_with_map)
+        root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
             cur_group_id += 1
