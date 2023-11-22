@@ -110,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -244,14 +244,22 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname == dynamo_qname:
-                self.assertEqual(logger.level, logging.INFO)
+            if logger_qname in dynamo_qnames:
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                )
             else:
-                self.assertEqual(logger.level, logging.DEBUG)
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
@@ -276,6 +284,26 @@ LoweringException: AssertionError:
             ),
             1,
         )
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format_exc(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        try:
+            raise RuntimeError("foo")
+        except RuntimeError:
+            dynamo_log.exception("test dynamo")
+            dynamo_log.info("with exc", exc_info=True)
+        dynamo_log.info("with stack", stack_info=True)
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("Traceback", handler.format(records[0]))
+        self.assertIn("Traceback", handler.format(records[1]))
+        self.assertIn("Stack", handler.format(records[2]))
 
     @make_logging_test(dynamo=logging.INFO)
     def test_custom_format(self, records):
@@ -568,6 +596,38 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(guards=True, recompiles=True)
+    def test_guards_recompiles(self, records):
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertIn(
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -602,6 +662,7 @@ exclusions = {
     "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",

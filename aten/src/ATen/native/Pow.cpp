@@ -3,7 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
-#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -51,9 +50,9 @@ TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, c
 }
 
 TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar& exp, const Tensor& out) {
-  if (exp.equal(0.0)) {
+  if (exp.equal(0.0) || exp.equal(false)) {
     out.fill_(1);
-  } else if (exp.equal(1.0)) {
+  } else if (exp.equal(1.0) || exp.equal(true) ) {
     out.copy_(base);
   } else {
     pow_tensor_scalar_stub(device_type(), *this, exp);
