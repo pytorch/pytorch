@@ -2536,7 +2536,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
     @unittest.skipIf(
-        sys.version_info < (3, 9), "zip strict kwargs not implemented for Python < 3.9"
+        sys.version_info < (3, 10), "zip strict kwargs not implemented for Python < 3.10"
     )
     def test_zip_strict(self):
         def fn(x, ys, zs):
