@@ -440,6 +440,19 @@ class TestDeserialize(TestCase):
 
         self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
 
+    def test_list_of_optional_tensors(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y, z):
+                indices = [None, None, torch.tensor([1, 3, 5, 7])]
+                indexed = torch.ops.aten.index.Tensor(x + y, indices)
+                return indexed + z
+
+        inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
+        self.check_graph(MyModule(), inputs)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -603,7 +616,7 @@ class TestSaveLoad(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
-                loaded_ep = load(f)
+                load(f)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):

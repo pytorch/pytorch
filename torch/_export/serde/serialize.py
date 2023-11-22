@@ -11,7 +11,7 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Union
 
 import sympy
 
@@ -55,11 +55,11 @@ from .schema import (  # type: ignore[attr-defined]
     SymBool,
     SymBoolArgument,
     SymExpr,
+    SymExprHint,
     SymInt,
     SymIntArgument,
     TensorArgument,
     TensorMeta,
-    TensorValue,
     TREESPEC_VERSION,
     UserInputSpec,
     UserOutputSpec,
@@ -181,7 +181,10 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
             return SymInt.create(as_int=int(s))
         else:
             assert isinstance(s, torch.SymInt)
-            return SymInt.create(as_expr=SymExpr(str(s), s.node.hint))
+            if s.node.hint is None:
+                return SymInt.create(as_expr=SymExpr(str(s)))
+            else:
+                return SymInt.create(as_expr=SymExpr(str(s), hint=SymExprHint.create(as_int=s.node.hint)))
     else:
         raise SerializeError(
             f"SymInt should be either symbol or int, got `{s}` of type `{type(s)}`"
@@ -193,7 +196,7 @@ def serialize_sym_bool(s: Union[bool, torch.SymBool]) -> SymBool:
         if symbolic_shapes.is_concrete_bool(s):
             return SymBool.create(as_bool=bool(s))
         else:
-            return SymBool.create(as_expr=str(s))
+            return SymBool.create(as_expr=SymExpr(expr_str=str(s)))
     else:
         raise SerializeError(
             f"SymBool should be either symbol or bool, got `{s}` of type `{type(s)}`"
@@ -276,24 +279,6 @@ def serialize_range_constraints(
     }
 
 
-def serialize_equality_constraints(
-    equality_constraints: List[Tuple[torch._export.exported_program.InputDim, torch._export.exported_program.InputDim]]
-) -> List[Tuple[Tuple[str, int], Tuple[str, int]]]:
-    return [
-        ((v1.input_name, v1.dim), (v2.input_name, v2.dim))
-        for (v1, v2) in equality_constraints
-    ]
-
-
-def deserialize_equality_constraints(
-    equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
-) -> List[Tuple[torch._export.exported_program.InputDim, torch._export.exported_program.InputDim]]:
-    return [
-        (torch._export.exported_program.InputDim(v1[0], v1[1]), torch._export.exported_program.InputDim(v2[0], v2[1]))
-        for (v1, v2) in equality_constraints
-    ]
-
-
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
     returns = target._schema.returns
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
@@ -314,7 +299,7 @@ class GraphState:
     inputs: List[Argument] = field(default_factory=list)
     outputs: List[Argument] = field(default_factory=list)
     nodes: List[Node] = field(default_factory=list)
-    tensor_values: Dict[str, TensorValue] = field(default_factory=dict)
+    tensor_values: Dict[str, TensorMeta] = field(default_factory=dict)
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
     is_single_tensor_return: bool = False
@@ -344,9 +329,7 @@ class GraphModuleSerializer:
         assert node.op == "placeholder"
         if isinstance(node.meta['val'], torch.Tensor):
             graph_input = Argument.create(as_tensor=TensorArgument(name=node.name))
-            self.graph_state.tensor_values[node.name] = TensorValue(
-                meta=serialize_tensor_meta(node.meta["val"])
-            )
+            self.graph_state.tensor_values[node.name] = serialize_tensor_meta(node.meta["val"])
         elif isinstance(node.meta['val'], torch.SymInt):
             raise AssertionError("SymInt graph input is not implemented yet.")
         elif isinstance(node.meta['val'], (int, bool, str, float, type(None))):
@@ -675,7 +658,7 @@ class GraphModuleSerializer:
 
     def serialize_tensor_output(self, name, meta_val) -> TensorArgument:
         assert name not in self.graph_state.tensor_values
-        self.graph_state.tensor_values[name] = TensorValue(meta=serialize_tensor_meta(meta_val))
+        self.graph_state.tensor_values[name] = serialize_tensor_meta(meta_val)
         return TensorArgument(name=name)
 
     def serialize_sym_int_output(self, name, meta_val) -> SymIntArgument:
@@ -973,14 +956,12 @@ class ExportedProgramSerializer:
             ).serialize(exported_program.graph_module)
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
-        serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
 
         return SerializedArtifact(
             ExportedProgram(
                 graph_module=serialized_graph_module,
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
-                equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
                 dialect=exported_program.dialect,
             ),
@@ -1053,7 +1034,13 @@ class GraphModuleDeserializer:
                             runtime_max=vr.upper  # type: ignore[arg-type]
                         )
 
-            return self.shape_env.create_symintnode(sym, hint=val.hint)
+            if val.hint is None:
+                hint = None
+            else:
+                assert val.hint.type == "as_int"
+                hint = val.hint.value
+
+            return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
@@ -1065,7 +1052,7 @@ class GraphModuleDeserializer:
     def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
         val = s.value
         if s.type == "as_expr":
-            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
+            expr = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
             return self.shape_env.create_symboolnode(expr)
         elif s.type == "as_bool":
             assert isinstance(val, bool)
@@ -1102,7 +1089,7 @@ class GraphModuleDeserializer:
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
-            meta_val = self.deserialize_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
+            meta_val = self.deserialize_tensor_meta(tensor_value, self.fake_tensor_mode)
             self.serialized_name_to_meta[name] = meta_val
 
         for name, sym_int_value in serialized_graph.sym_int_values.items():
@@ -1580,9 +1567,6 @@ class ExportedProgramDeserializer:
 
         state_dict = deserialize_torch_artifact(serialized_artifact.state_dict)
         tensor_constants = deserialize_torch_artifact(serialized_artifact.tensor_constants)
-        equality_constraints = deserialize_equality_constraints(
-            serialized_artifact.exported_program.equality_constraints
-        )
 
         exported_program = ep.ExportedProgram(
             res.graph_module,
@@ -1590,7 +1574,7 @@ class ExportedProgramDeserializer:
             res.signature,
             state_dict,  # type: ignore[arg-type]
             range_constraints,
-            equality_constraints,
+            [],
             res.module_call_graph,
             None,
             load_verifier(serialized_artifact.exported_program.dialect),
