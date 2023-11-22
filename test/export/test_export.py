@@ -623,16 +623,23 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-        # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
+        @dataclass
+        class MyOtherDataClass:  # the pytree registration don't allow registering the same class twice
+            x: int
+            y: int
+            z: int = None
 
+        # Override the registration with keep none fields
+        register_dataclass_as_pytree_node(MyOtherDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyOtherDataClass")
+
+        dt = MyOtherDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass,
+                MyOtherDataClass,
                 (
-                    MyDataClass,
+                    MyOtherDataClass,
                     ['x', 'y', 'z'],
                     [],
                 ),
@@ -642,7 +649,7 @@ class TestExport(TestCase):
         self.assertEqual(flat, [3, 4, None])
 
         orig_dt = tree_unflatten(flat, spec)
-        self.assertTrue(isinstance(orig_dt, MyDataClass))
+        self.assertTrue(isinstance(orig_dt, MyOtherDataClass))
         self.assertEqual(orig_dt.x, 3)
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)
@@ -1611,6 +1618,115 @@ def forward(self, arg0_1):
 
         inp = (torch.randn(2, 8),)
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
+
+    def test_export_with_fake_tensor_inputs(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+    def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        # Manualy set the fake_device of fake tensors.
+        x.fake_device = torch.device('cuda:0')
+        for n, p in model.named_parameters():
+            p.fake_device = torch.device('cuda:0')
+
+        # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
+        # doesn't quite work well with aot_autograd right now due to some logic fails
+        # the check in call getDeviceGuardImpl in InputMetadata.
+        x.requires_grad = False
+        for n, p in model.named_parameters():
+            p.requires_grad = False
+
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+
+    def test_export_graph_with_no_inputs(self):
+        # We saw this pattern when users want to export
+        # a graph that initlizes the states of a model.
+        def f():
+            return torch.randn(3, 4), torch.randn(3, 4)
+
+        ep = torch.export.export(f, ())
+        a, b = ep()
+        self.assertEqual(a.size(), torch.Size([3, 4]))
+        self.assertEqual(b.size(), torch.Size([3, 4]))
+
+    def test_export_then_compile_tensor_ctor(self):
+        class M(torch.nn.Module):
+            def __init__(self,):
+                super().__init__()
+
+            def forward(self, scores, mask):
+                scores = scores.masked_fill(
+                    mask, torch.tensor(torch.finfo(scores.dtype).min)
+                )  # (bs, n_heads, q_length, k_length)
+                return scores
+
+        tensor_cpu = torch.randn(2, 4)
+        mask_cpu = torch.BoolTensor(
+            [[False,  True, False, False],
+            [False, False, False, False]]
+        )
+
+        m = M().eval()
+        # res_ref = m(tensor_cpu, mask_cpu)
+        # print("res_ref is: {}".format(res_ref), flush=True)
+
+        exported_model = capture_pre_autograd_graph(
+            m,
+            (tensor_cpu, mask_cpu),
+        )
+        optimized_model = torch.compile(exported_model)
+        optimized_model(tensor_cpu, mask_cpu)
 
 
 if __name__ == '__main__':

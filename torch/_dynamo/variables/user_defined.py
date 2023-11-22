@@ -273,9 +273,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if method is collections.OrderedDict.keys and self.source:
+            # [NOTE] OrderedDict, dict subtypes must always have source
+            # We cannot instantiate such subtypes in-graph due to builtin __new__
+            if method is collections.OrderedDict.keys:
                 # subclass of OrderedDict
                 assert not (args or kwargs)
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
@@ -289,16 +292,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
 
-            if (
-                method is collections.OrderedDict.items
-                and isinstance(self.value, collections.OrderedDict)
-                and self.source
+            if method is collections.OrderedDict.items and isinstance(
+                self.value, collections.OrderedDict
             ):
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
@@ -312,6 +315,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
                 assert not kwargs
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
             # check for methods implemented in C++
@@ -423,7 +427,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         elif callable(self.value):
-            install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)

@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -20,7 +20,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer
+from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -359,7 +359,7 @@ class WrapperCodeGen(CodeGen):
                 self.write_constant(name, hashed)
 
         self.allocated = set()
-        self.freed = set()
+        self.freed: Set[str] = set()
 
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
@@ -577,7 +577,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -606,7 +606,7 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
-                self.wrapper_call.writeline("end_graph()")
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
@@ -653,7 +653,9 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
         )
 
-    def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
+    def codegen_inputs(
+        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+    ):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
@@ -834,14 +836,12 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
-        from ..ir import Buffer
-
         original_name = kernel.__name__
 
         # Distinguish between different functions using function id
         cache_key = [id(kernel.fn)]
         for arg in kwargs.values():
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 cache_key.append(arg.get_dtype())
             elif len(configs) > 0:
                 # We need to key on non tensor arg only in autotune mode
@@ -880,9 +880,15 @@ class WrapperCodeGen(CodeGen):
             ):
                 constants[key] = arg
                 continue
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
-                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                    TensorArg(
+                        key,
+                        arg.codegen_reference(),
+                        arg.get_dtype(),
+                        # For ReinterpretView, we do not want to check alignment
+                        not isinstance(arg, ReinterpretView),
+                    )
                 )
             else:
                 signature.append(SizeArg(key, arg))
@@ -981,6 +987,12 @@ class WrapperCodeGen(CodeGen):
         )
         stack.enter_context(self.wrapper_call.indent())
 
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
+
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
 
@@ -1041,9 +1053,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, ComputedBuffer):
-            return s.codegen_reference()
-        elif isinstance(s, InputBuffer):
+        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -1785,6 +1795,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            # call the ABI shim function instead of the ATen one
+            kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
         if fn == "aten.scatter_":
             if src_is_tensor:
@@ -1866,6 +1879,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
 
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():
@@ -2342,9 +2361,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, ComputedBuffer):
-            return val.codegen_reference()
-        elif isinstance(val, InputBuffer):
+        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)

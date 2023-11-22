@@ -373,7 +373,6 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
-aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result
@@ -577,15 +576,12 @@ aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input
-aten::_upsample_nearest_exact1d
 aten::_upsample_nearest_exact1d.out
 aten::_upsample_nearest_exact1d_backward
 aten::_upsample_nearest_exact1d_backward.grad_input
-aten::_upsample_nearest_exact2d
 aten::_upsample_nearest_exact2d.out
 aten::_upsample_nearest_exact2d_backward
 aten::_upsample_nearest_exact2d_backward.grad_input
-aten::_upsample_nearest_exact3d
 aten::_upsample_nearest_exact3d.out
 aten::_upsample_nearest_exact3d_backward
 aten::_upsample_nearest_exact3d_backward.grad_input
