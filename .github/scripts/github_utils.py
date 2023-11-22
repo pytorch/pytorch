@@ -187,3 +187,5 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
             warnings.warn(
                 f"Failed to open {pr_num} because its head branch has been deleted: {err}"
             )
+        else:
+            raise
