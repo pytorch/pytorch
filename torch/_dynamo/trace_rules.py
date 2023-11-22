@@ -396,6 +396,7 @@ torch_C_binding_in_graph_functions = {
     "torch._C._has_Standard_Deleter": TorchInGraphFunctionVariable,
     "torch._C._has_storage": TorchInGraphFunctionVariable,
     "torch._C._has_tensorexpr_cpp_tests": TorchInGraphFunctionVariable,
+    "torch._C._run_tensorexpr_cpp_tests": TorchInGraphFunctionVariable,
     "torch._C._has_torch_function_unary": TorchInGraphFunctionVariable,
     "torch._C._has_torch_function_variadic": TorchInGraphFunctionVariable,
     "torch._C._has_torch_function": TorchInGraphFunctionVariable,
@@ -1971,6 +1972,9 @@ torch_C_binding_in_graph_functions = {
 
 if sys.version_info >= (3, 9):
     torch_C_binding_in_graph_functions["math.lcm"] = TorchInGraphFunctionVariable
+if sys.version_info >= (3, 11):
+    torch_C_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
+    torch_C_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
 
 # In graph functions (including constant folding) that are not C bindings
