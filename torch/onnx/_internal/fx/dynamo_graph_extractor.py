@@ -40,7 +40,11 @@ class _PyTreeExtensionContext:
 
     def __enter__(self):
         for class_type, (flatten_func, unflatten_func) in self._extensions.items():
-            pytree._register_pytree_node(class_type, flatten_func, unflatten_func)
+            pytree._private_register_pytree_node(
+                class_type,
+                flatten_func,
+                unflatten_func,
+            )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -93,8 +97,11 @@ class _PyTreeExtensionContext:
         # All 'ModelOutput' subclasses are defined under module 'modeling_outputs'.
         named_model_output_classes = inspect.getmembers(
             modeling_outputs,
-            lambda x: inspect.isclass(x)
-            and issubclass(x, modeling_outputs.ModelOutput),
+            lambda x: (
+                inspect.isclass(x)
+                and issubclass(x, modeling_outputs.ModelOutput)
+                and x is not modeling_outputs.ModelOutput
+            ),
         )
 
         for _, class_type in named_model_output_classes:
