@@ -78,6 +78,14 @@ class ValueRanges:
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
         assert isinstance(upper, SympyBoolean) == self.is_bool
 
+    def boolify(self):
+        if self.is_bool:
+            return self
+        elif self == ValueRanges.unknown():
+            return ValueRanges.unknown_bool()
+        else:
+            raise AssertionError(f"not bool like {self}")
+
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
@@ -117,6 +125,10 @@ class ValueRanges:
     @classmethod
     def unknown(cls):
         return cls(-sympy.oo, sympy.oo)
+
+    @classmethod
+    def unknown_bool(cls):
+        return cls(sympy.false, sympy.true)
 
     @classmethod
     def wrap(cls, arg):
@@ -214,6 +226,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
+        a = a.boolify()
         assert a.is_bool
         return ValueRanges.decreasing_map(a, sympy.Not)
 
@@ -455,7 +468,7 @@ class SymPyValueRangeAnalysis:
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
-        assert a.is_bool
+        a = a.boolify()
         assert b.is_bool == c.is_bool
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
@@ -467,7 +480,7 @@ class SymPyValueRangeAnalysis:
     # and defer the analysis to piecewise
     @staticmethod
     def expr_cond_pair(a, b):
-        assert b.is_bool, f"expect cond_expr's ValueRange to be a boolean range but got {b}"
+        b = b.boolify()
         return (a, b)
 
     # piecewise function can be used to convert a SymBool to SymInt:
