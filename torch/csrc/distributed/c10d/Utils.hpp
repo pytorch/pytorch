@@ -187,10 +187,6 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   return ret;
 }
 
-inline bool parseEnvVarFlag(const char* envVarName) {
-  return getCvarBool({envVarName}, false);
-}
-
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
