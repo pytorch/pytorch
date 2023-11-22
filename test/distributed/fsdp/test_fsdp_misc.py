@@ -527,7 +527,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
             torch.manual_seed(42 + self.rank)
             inp = torch.randn(2, 2)
-            for _ in range(3):
+            for _ in range(10):
                 losses = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     loss = _model(inp, inp).sum()
