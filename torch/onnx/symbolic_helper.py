@@ -1388,6 +1388,8 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
         return _unimplemented("index_fill", "input rank not accessible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, "i")
+    if dim_value < 0:
+        dim_value += self_dim
     unsqueezed_index = _unsqueeze_helper(
         g, index, [i for i in range(self_dim) if i != dim_value]
     )
