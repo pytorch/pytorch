@@ -1526,7 +1526,7 @@ def run_test_module(
     import math
     delta = math.abs(duration - test.get_time())
     # Identify gross misestimates
-    if delta > 60 and delta/test.get_time() > 0.3:
+    if delta > 60 and delta/(test.get_time() + 0.1) > 0.3:
         print_to_stderr(f"ZR: GROSS MISESTIMATE {str(test)}. Delta {delta} [expected {test.get_time()}, got {duration}]")
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
