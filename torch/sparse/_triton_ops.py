@@ -909,8 +909,6 @@ if has_triton():
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
-        BLOCKSIZE_ROW: tl.constexpr,
-        BLOCKSIZE_COL: tl.constexpr,
         # values prologue
         values_ptr,
         values_batch_stride,
@@ -944,6 +942,13 @@ if has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        #
+        # gh-113754: Always keep all constexpr arguments at the end of
+        # triton kernel arguments list because with triton 2.1 or
+        # earlier non-contiguous outputs will corrupt CUDA state due
+        # to a triton bug (fixed in openai/triton#2262).
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
         acc_dtype: tl.constexpr,
         allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
@@ -1059,8 +1064,8 @@ if has_triton():
 
         def kernel(grid, *sliced_tensors):
             _bsr_strided_dense_rowspace_kernel[grid](
-                *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
+                *blocksize,
                 acc_dtype=acc_dtype,
                 allow_tf32=allow_tf32,
                 **meta)
@@ -1202,7 +1207,8 @@ if has_triton():
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None
+        meta: Optional[dict] = None,
+        enable_bsr_scatter_mm: bool = True
     ):
         f_name = "bsr_dense_mm"
         m, kl = bsr.shape[-2:]
@@ -1249,13 +1255,19 @@ if has_triton():
 
         blocksize = bsr.values().shape[-2:]
 
-        if max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
+        if enable_bsr_scatter_mm and max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
+            dtype = bsr.dtype
             # bsr_scatter_mm is more performant than bsr_dense_mm for
             # 16x16 blocksizes and large enough input shapes:
             if (
-                    (m >= 4096 and n >= 8192)
-                    or (m == 2048 and n >= 32768)
-                    or (n >= 131072)
+                    (dtype in {torch.float16, torch.bfloat16}
+                     and ((m >= 4096 and n >= 8192)
+                          or (m == 2048 and n >= 32768)
+                          or (n >= 131072))) or
+                    (dtype == torch.float32
+                     and (m >= 1024
+                          or (m == 512 and n >= 512)
+                          or (m == 256 and n >= 2048)))
             ):
                 return bsr_scatter_mm(bsr, dense, out=out)
 
