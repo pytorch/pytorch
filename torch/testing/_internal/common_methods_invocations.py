@@ -8315,6 +8315,53 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
 
     yield from samples
 
+def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    batch, num_heads, head_dim = 4, 4, 8
+    seq_q = 11
+    seq_kv = 32
+
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
+
+    qkv_shapes = [(dim_4_q_shape, dim_4_kv_shape)]
+    samples = []
+    scales = [None, 1.0]
+
+    for qkv_shape, is_causal, dropout_p, ret_debug_mask, scale in product(
+            qkv_shapes, [True, False], [0.0, 0.5], [False, True], scales):
+        shape_q, shape_kv = qkv_shape
+        samples.append(SampleInput(
+            make(shape_q).transpose(1, 2),
+            make(shape_kv).transpose(1, 2),
+            make(shape_kv).transpose(1, 2),
+            cum_seq_q=None,
+            cum_seq_k=None,
+            max_q=None,
+            max_k=None,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            return_debug_mask=ret_debug_mask,
+            scale=scale,
+        ))
+
+    # Add non standard shapes
+    diff_v_head_dim = SampleInput(
+        make((batch, seq_q, num_heads, head_dim)),
+        make((batch, seq_kv, num_heads, head_dim)),
+        make((batch, seq_kv, num_heads, head_dim + 8)),
+        cum_seq_q=None,
+        cum_seq_k=None,
+        max_q=None,
+        max_k=None,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        return_debug_mask=ret_debug_mask,
+        scale=scale,
+    )
+
+    yield from samples
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -14001,6 +14048,31 @@ op_db: List[OpInfo] = [
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
+    ),
+    OpInfo(
+        'torch.ops.aten._flash_attention_forward',
+        sample_inputs_func=sample_inputs_flash_attention_forward,
+        dtypes=empty_types(),
+        dtypesIfCUDA=custom_types(torch.float16, torch.float32)
+        if not SM80OrLater
+        else custom_types(torch.float16, torch.float32, torch.bfloat16),
+        supports_out=False,
+        supports_autograd=True,
+        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=False,
+        check_batched_forward_grad=False,
+        decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support flash attention")],
+        skips=(
+            # Device mismatch due to philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+            # Checking the scaler value of the philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+            # None Mismatch Tensor
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+        )
     ),
     OpInfo(
         'torch.ops.aten._efficient_attention_forward',

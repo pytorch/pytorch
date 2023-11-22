@@ -2085,6 +2085,8 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
+make_fallback(torch.ops.aten._flash_attention_forward.default)
+make_fallback(torch.ops.aten._flash_attention_backward.default)
 make_fallback(torch.ops.aten._efficient_attention_forward.default)
 make_fallback(torch.ops.aten._efficient_attention_backward.default)
 make_fallback(aten.sort)
