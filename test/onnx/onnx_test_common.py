@@ -11,6 +11,7 @@ import logging
 import os
 import unittest
 import warnings
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -61,6 +62,11 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
+
+
+class TorchModelType(Enum):
+    TORCH_NN_MODULE = auto()
+    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
@@ -255,7 +261,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if input_kwargs is None:
             input_kwargs = {}
 
-        if has_mutation:
+        if (
+            has_mutation
+            and self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
                 input_args, input_kwargs
@@ -264,6 +273,19 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_model = model
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
+
+        assert isinstance(ref_model, torch.nn.Module) or callable(
+            ref_model
+        ), "Model must be a torch.nn.Module or callable"
+        if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            if (
+                self.dynamic_shapes
+            ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
+                #       https://github.com/pytorch/pytorch/issues/113705
+                pytest.xfail(
+                    reason="torch.export.ExportedProgram does not support dynamic shapes"
+                )
 
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
@@ -373,7 +395,10 @@ def run_ort(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
 
-    ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    ort_input = {
+        k: torch.Tensor.numpy(v, force=True)
+        for k, v in zip(input_names, pytorch_inputs)
+    }
     return session.run(None, ort_input)
 
 
@@ -414,15 +439,11 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_args = input_args
         ref_input_kwargs = input_kwargs
 
-    # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
-        *input_args, **input_kwargs
-    )
-
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
-    ort_outputs = run_ort(onnx_program, onnx_format_args)
+
+    ort_outputs = onnx_program(*input_args, **input_kwargs)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
