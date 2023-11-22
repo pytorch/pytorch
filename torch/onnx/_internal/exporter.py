@@ -804,6 +804,9 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         **model_kwargs,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -820,6 +823,7 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
+            model: The PyTorch model to get extra state from. If not specified, the model used during export is used.
             model_args: The PyTorch model inputs.
             model_kwargs: The PyTorch model keyword inputs.
 
@@ -858,11 +862,13 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.apply(*model_args, **model_kwargs)
+        return self._input_adapter.apply(*model_args, model=model, **model_kwargs)
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
-        self, model_outputs: Any
+        self,
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        model_outputs: Any,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -878,6 +884,7 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
+            model: The PyTorch model to get extra state from.
             model_outputs: The PyTorch model outputs.
 
         Returns:
@@ -907,7 +914,7 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model_outputs)
+        return self._output_adapter.apply(model, model_outputs)
 
     @_beartype.beartype
     def save(
