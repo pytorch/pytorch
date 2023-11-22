@@ -258,6 +258,8 @@ inline std::string retrieveDesyncReport(
   return report;
 }
 
+/* Trace Utils Related to Flight Recorder */
+
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
       {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
@@ -282,7 +284,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   LOG(INFO) << "Wrote finished ";
 }
 
-std::string pickle_str(const c10::IValue& v) {
+static std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
   {
     auto writer = [&](const char* data, size_t size) {
@@ -296,11 +298,13 @@ std::string pickle_str(const c10::IValue& v) {
   }
   return std::string(result.begin(), result.end());
 }
-c10::Dict<c10::IValue, c10::IValue> new_dict() {
+
+static c10::Dict<c10::IValue, c10::IValue> new_dict() {
   return c10::Dict<c10::IValue, c10::IValue>(
       c10::AnyType::get(), c10::AnyType::get());
 }
-c10::List<c10::IValue> new_list() {
+
+static c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
@@ -506,7 +510,7 @@ struct NCCLTraceBuffer {
   }
 };
 
-std::string dump_nccl_trace() {
+static std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump();
 }
 
