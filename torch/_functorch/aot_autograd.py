@@ -1700,7 +1700,7 @@ class AOTConfig:
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
     # will attempt to create joint graph, unless no output requires grad
-    trace_joint: bool = True
+    allow_joint_graph: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -4462,7 +4462,7 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = aot_config.trace_joint and (
+        needs_autograd = aot_config.allow_joint_graph and (
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             or torch.is_grad_enabled()
         )
@@ -5333,7 +5333,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
-        trace_joint=trace_joint,
+        allow_joint_graph=trace_joint,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
