@@ -744,7 +744,7 @@ if _enabled:
 
             save(f, _extra_files={})
 
-            See :func:`torch.jit.save <torch.jit.save>` witch accepts a file-like object.
+            See :func:`torch.jit.save <torch.jit.save>` which accepts a file-like object.
             This function, torch.save(), converts the object to a string, treating it as a path.
             DO NOT confuse these two functions when it comes to the 'f' parameter functionality.
             """
