@@ -1522,9 +1522,8 @@ def run_test_module(
     handler = CUSTOM_HANDLERS.get(test_name, run_test)
     return_code = handler(test, test_directory, options)
     duration = time.time() - start_time
-    import math
 
-    delta = math.abs(duration - test.get_time())
+    delta = abs(duration - test.get_time())
     # Identify gross misestimates
     if delta > 60 and delta / (test.get_time() + 0.1) > 0.3:
         print_to_stderr(
