@@ -395,7 +395,7 @@ class DTensorSpec:
         # Make sure to recompute the hash in case any of the hashed attributes
         # change (though we do not expect `mesh` or `placements` to change)
         if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
-            self._hash = self._hash_impl()
+            self._hash = None
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding

@@ -56,6 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
+    'sym_sqrt',
     'export', 'autocast', 'cond',
 ]
 
@@ -414,8 +415,15 @@ def sym_not(a):
     Args:
         a (SymBool or bool): Object to negate
     """
+    import sympy
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_not, (a,), a)
     if hasattr(a, '__sym_not__'):
         return a.__sym_not__()
+    if isinstance(a, sympy.Basic):
+        return ~a  # type: ignore[operator]
     return not a
 
 def sym_float(a):
@@ -424,6 +432,10 @@ def sym_float(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_float, (a,), a)
     if isinstance(a, SymFloat):
         return a
     elif hasattr(a, '__sym_float__'):
@@ -437,6 +449,10 @@ def sym_int(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_int, (a,), a)
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
@@ -445,6 +461,10 @@ def sym_int(a):
 
 def sym_max(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_max, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
@@ -456,13 +476,31 @@ def sym_max(a, b):
 
 def sym_min(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_min, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_sqrt, (a,), a)
+    if hasattr(a, "__sym_sqrt__"):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
 def sym_ite(b, t, f):
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((b, t, f)):
+        return handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
