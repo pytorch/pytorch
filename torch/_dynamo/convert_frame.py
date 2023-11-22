@@ -671,9 +671,21 @@ def _placeholder_remote_fetch(unique_frame_id, frame):
             serialized = file.read()
 
         attributes, guard_code = pickle.loads(serialized)
-        # breakpoint()
+        breakpoint()
+        with open("hack_remap.pkl", 'rb') as file:
+            breakpoint()
+            global_alias_table_serialized = file.read()
+
+        breakpoint()
+        global_alias_table = pickle.loads(global_alias_table_serialized)
+        breakpoint()
+        for alias, name in global_alias_table.items():
+            breakpoint()
+            frame.f_globals[alias] = eval(name, frame.f_globals)
+
         check_fn = CheckFunctionManager.guard_fn_from_pycode(guard_code, frame.f_globals)
         code_obj = types.CodeType(*attributes)
+        breakpoint()
         check_fn(frame.f_locals)
         breakpoint()
         return code_obj, check_fn
@@ -699,7 +711,7 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
             # breakpoint()
             # Cache miss, check remote
             remote_code, remote_guards = _placeholder_remote_fetch("my_frame", frame)
-            # breakpoint()
+            breakpoint()
             if remote_code and remote_guards:
                 # pickle.dumps((name, compiled_fn), "hack_comp.pkl")
                 breakpoint()
@@ -712,7 +724,7 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
                 result = GuardedCode(remote_code, remote_guards)
             else:
                 result = inner_convert(frame, cache_entry, hooks, frame_state)
-                # breakpoint()
+                breakpoint()
                 code_attrs = attrs_code_object(result.code)
                 # func_attrs = attrs_function(result.check_fn)
                 guard_py_code = result.check_fn.pycode

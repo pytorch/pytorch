@@ -590,6 +590,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+    global_alias_table = {}
 
     def mark_inconsistent_side_effects(self):
         """
@@ -958,6 +959,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
+        breakpoint()
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
@@ -969,6 +971,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        self.global_alias_table[alias] = module_name
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -1979,6 +1983,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.random_calls = []
 
         self.strict_checks_enabled = False
+        self.global_alias_table = {}
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2356,6 +2361,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             tracer = InliningInstructionTranslator(
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
+
+        tracer.global_alias_table = parent.global_alias_table
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_enabled:

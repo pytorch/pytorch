@@ -1031,6 +1031,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         with open("hack_comp.pkl", 'wb') as file:
             pickle.dump((name, compiled_fn), file)
 
+        with open("hack_remap.pkl", 'wb') as file:
+            breakpoint()
+            pickle.dump(tx.global_alias_table, file)
+
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
         return cg.get_instructions()

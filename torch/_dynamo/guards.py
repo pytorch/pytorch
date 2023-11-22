@@ -281,7 +281,11 @@ class GuardBuilder(GuardBuilderBase):
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        if config.generate_interpreter_agnostic_code:
+            obj_name = str(t)
+            code = f"str(type({self.arg_ref(guard)})) == \"{obj_name}\""
+        else:
+            code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
 
     def DICT_VERSION(self, guard: Guard):
@@ -416,7 +420,7 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, float) and math.isnan(val):
             code = list()
             if config.generate_interpreter_agnostic_code:
-                code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+                code.append(f"str(type({ref})) == \"{str(type(t))})\"")
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
@@ -433,7 +437,7 @@ class GuardBuilder(GuardBuilderBase):
 
             for idx, elem in enumerate(val):
                 if config.generate_interpreter_agnostic_code:
-                    code.append(f"___check_type(str(type({ref}[{idx}])), {str(type(elem))})")
+                    code.append(f"str(type({ref}[{idx}])) == \"{str(type(elem))})\"")
                 else:
                     code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
@@ -441,7 +445,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
             if config.generate_interpreter_agnostic_code:
-                code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+                code.append(f"str(type({ref})) == \"{str(type(t))})\"")
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
@@ -519,7 +523,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"len({ref}) == {len(value)}")
@@ -533,7 +537,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
@@ -556,7 +560,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
@@ -581,7 +585,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
@@ -596,7 +600,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"___check_type(str(type({ref})), {str(type(t))})")
+            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
@@ -626,6 +630,8 @@ class GuardBuilder(GuardBuilderBase):
 
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
+        if config.generate_interpreter_agnostic_code:
+            return
         assert guard.source is GuardSource.GLOBAL
         backend_id = (
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
@@ -1261,15 +1267,16 @@ class CheckFunctionManager:
 
 
         out: Dict[str, Any] = dict()
+        global_scope = {
+            "G": global_scope,
+        }
         exec(pycode, global_scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         # guard_fn.code_parts = code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {
-            "G": global_scope,
-        }
+        guard_fn.global_scope = global_scope
         guard_fn.pycode = pycode
         # guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
@@ -1297,7 +1304,7 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
         guard_body.writelines(preface)
         guard_body.writeline(f"if not ({expr}):")
         with guard_body.indent():
-            guard_body.writeline("breakpoint()")
+            # guard_body.writeline("breakpoint()")
             guard_body.writeline("return False")
 
     # Wrap the inner body into the actual guard function.
