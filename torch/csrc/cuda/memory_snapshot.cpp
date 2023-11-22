@@ -195,6 +195,7 @@ std::string _memory_snapshot_pickled() {
   IValue frames_s = "frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
+  IValue time_us_s = "time_us";
 
   auto empty_frames = new_list();
 
@@ -310,6 +311,7 @@ std::string _memory_snapshot_pickled() {
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }
+      trace_entry.insert(time_us_s, te.time_.t_);
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);

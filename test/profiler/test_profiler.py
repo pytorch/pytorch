@@ -1797,6 +1797,25 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_event_list(self):
+        # AFAIK event list is part of legacy profiler and/or used when kineto is not available.
+        # This test has basic sanity checks to test against obvious regressions.
+        x, y = (torch.rand((4, 4), requires_grad=True, device="cuda") for _ in range(2))
+        with profile(with_stack=True) as p:
+            z = (x @ y).relu().sum()
+            z.backward()
+
+        event_list = torch.autograd.profiler_util.EventList(p.events())
+        # event_list._build_tree()
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                json.load(f)
+
+        event_list.table()
+
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):

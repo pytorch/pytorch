@@ -491,6 +491,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf: Union[ir.Buffer, ir.TensorBox]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -504,7 +505,7 @@ class BaseSchedulerNode:
             # Kind of a lazy way to get the MultiOutput nodes corresponding to
             # a MultiOutputLayout
             if isinstance(buf.layout, MultiOutputLayout):
-                users = self.scheduler.name_to_node[buf.name].users
+                users = self.scheduler.name_to_node[buf.get_name()].users
                 buf_elems = sum(get_buf_elems(user.node.node) for user in users)
             else:
                 buf_elems = get_buf_elems(buf)
@@ -1216,7 +1217,7 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device = None
+        self.current_device: torch.device = None  # type: ignore[assignment]
         self.buffer_names_to_free = set()
 
         # fx graph node to the position it appears in the graph
@@ -1603,20 +1604,20 @@ class Scheduler:
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
-                log.debug(
-                    "Skip fusion because of register spilling of the first kernel"
+                fusion_log.debug(
+                    "cannot fuse (benchmark): register spilling of the first kernel"
                 )
                 return False
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
-                log.debug(
-                    "Skip fusion because of register spilling of the second kernel"
+                fusion_log.debug(
+                    "cannot fuse (benchmark): register spilling of the second kernel"
                 )
                 return False
             ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
-                log.debug(
-                    "Skip fusion because of register spilling of the fused kernel"
+                fusion_log.debug(
+                    "cannot fuse (benchmark): register spilling of the fused kernel"
                 )
                 return False
         except CompilationError as e:
@@ -1626,17 +1627,17 @@ class Scheduler:
             else:
                 raise
 
-        if log.isEnabledFor(logging.DEBUG):
+        if fusion_log.isEnabledFor(logging.DEBUG):
             if ms_fused < ms1 + ms2:
-                log.debug(
-                    "Fusing %s with %s cause %sx speedup",
+                fusion_log.debug(
+                    "can fuse (benchmark): fusing %s with %s cause %sx speedup",
                     node1.get_names(),
                     node2.get_names(),
                     green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
                 )
             else:
-                log.debug(
-                    "Fusing %s with %s cause %sx slowdown",
+                fusion_log.debug(
+                    "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
                     node1.get_names(),
                     node2.get_names(),
                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
@@ -1939,7 +1940,7 @@ class Scheduler:
             return False
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].ancestors:
-                log.debug(
+                fusion_log.debug(
                     "cannot fuse (vert:2): intermediate nodes between node1 & node2"
                 )
                 return False
@@ -2012,7 +2013,7 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
             elif name in V.graph.graph_inputs:
                 storage = V.graph.graph_inputs[name].data
-                assert storage.is_input_buffer()
+                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
                 V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
