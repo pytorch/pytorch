@@ -548,12 +548,12 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
         key = "mps_3d_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" + to_string(stride[2]) + ":" +
         to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(dilation[2]) + ":" + to_string(padding[0]) + ":" +
         to_string(padding[1]) + ":" + to_string(padding[2]) + ":" + to_string(groups) + ":" + mem_format_key +
-        getTensorsStringKey({grad_output_t, input_t}) + ":" + string([ns_shape_key UTF8String]);
+        getTensorsStringKey({grad_output_t, input_t, grad_weight_t}) + ":" + string([ns_shape_key UTF8String]);
     } else {
         key = "mps_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":" +
         to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":" + to_string(padding[0]) + ":" +
         to_string(padding[1]) + ":" + to_string(groups) + ":" + mem_format_key +
-        getTensorsStringKey({grad_output_t, input_t}) + ":" + string([ns_shape_key UTF8String]);
+        getTensorsStringKey({grad_output_t, input_t, grad_weight_t}) + ":" + string([ns_shape_key UTF8String]);
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
 
