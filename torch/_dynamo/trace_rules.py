@@ -2727,10 +2727,10 @@ def load_object(name):
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
+        if hasattr(val, "__wrapped__"):
+            val = val.__wrapped__
     except (AttributeError, ModuleNotFoundError):
         val = None
-    if hasattr(val, "__wrapped__"):
-        val = val.__wrapped__
     return val
 
 
