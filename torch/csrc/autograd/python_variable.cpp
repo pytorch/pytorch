@@ -694,8 +694,6 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
-  // TODO: for_blob produces non-resizable tensors, we might want this to be
-  // resizable (have to define a custom allocator in that case)
   Tensor tensor;
 
   {
