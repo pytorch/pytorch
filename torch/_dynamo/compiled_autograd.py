@@ -147,7 +147,6 @@ class AutogradCompilerInstance:
             hook,
             input,
         )
-        # breakpoint()
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
             self.bind_tensors_to_proxies(input, proxies)

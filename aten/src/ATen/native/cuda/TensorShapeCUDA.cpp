@@ -11,7 +11,6 @@
 #endif
 
 #include <iostream>
-
 namespace at::native {
 
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
@@ -28,7 +27,6 @@ Tensor& set_cuda_(Tensor& result) {
   TORCH_INTERNAL_ASSERT(dtype == result.dtype());
   return result;
 }
-
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {

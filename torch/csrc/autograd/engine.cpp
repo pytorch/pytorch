@@ -849,10 +849,6 @@ void validate_outputs(
       if (metadata.is_expandable_to_shape(grad)) {
         grad = metadata.reduce_grad(grad);
       }
-      // else {
-        // const auto message = metadata.incompatible_shape_error_message(i, grad);
-        // TORCH_CHECK(false, format_error(message.str()));
-      // }
     }
 
     bool input_is_complex =

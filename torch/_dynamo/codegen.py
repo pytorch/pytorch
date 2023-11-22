@@ -125,7 +125,6 @@ class PyCodegen:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
-
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:

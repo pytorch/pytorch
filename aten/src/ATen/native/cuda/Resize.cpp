@@ -12,7 +12,6 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-
 namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
