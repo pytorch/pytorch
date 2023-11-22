@@ -348,7 +348,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
             dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
             dt_out = torch.matmul(dt, dt2)
             dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
-            return dt_out.to_local()
+            return dt_out_redistribute.to_local()
 
         opt_fn = torch.compile(
             fn, backend=aot_eager_graph, fullgraph=True, dynamic=False
