@@ -168,7 +168,7 @@ class GraphArgument:
 
 @dataclass
 class CustomObjArgument:
-    blob: bytes
+    name: str
 
 
 # This is actually a union type
