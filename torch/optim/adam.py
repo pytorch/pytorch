@@ -38,11 +38,10 @@ class Adam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        self._decoupled_weight_decay = decoupled_weight_decay
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
-                        differentiable=differentiable, fused=fused)
+                        differentiable=differentiable, fused=fused, decoupled_weight_decay=decoupled_weight_decay)
         super().__init__(params, defaults)
 
         if fused:
@@ -72,6 +71,7 @@ class Adam(Optimizer):
             group.setdefault('capturable', False)
             group.setdefault('differentiable', False)
             group.setdefault('fused', None)
+            group.setdefault('decoupled_weight_decay', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -185,7 +185,7 @@ class Adam(Optimizer):
                 fused=group['fused'],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
-                decoupled_weight_decay=self._decoupled_weight_decay
+                decoupled_weight_decay=group['decoupled_weight_decay'],
             )
 
         return loss
@@ -382,11 +382,11 @@ def _single_tensor_adam(params: List[Tensor],
         step_t += 1
 
         if weight_decay != 0:
-            if not decoupled_weight_decay:
-                grad = grad.add(param, alpha=weight_decay)
-            else:
+            if decoupled_weight_decay:
                 # Perform stepweight decay
                 param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)

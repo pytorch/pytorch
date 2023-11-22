@@ -4,6 +4,7 @@ import math
 import unittest
 import functools
 import itertools
+import io
 from copy import deepcopy
 
 import torch
@@ -1266,6 +1267,20 @@ class TestOptim(TestCase):
             self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2))
             self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2, amsgrad=True))
 
+    def test_adamw_serialization(self):
+        model = torch.nn.Linear(5,5)
+        optim = torch.optim.AdamW(model.parameters())
+
+        buffer = io.BytesIO()
+        torch.save(optim.state_dict(), buffer)
+        buffer.seek(0)
+        loaded_dict = torch.load(buffer)
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(loaded_dict)
+
+        self.assertTrue(new_optim.param_groups[0]['decoupled_weight_decay'])
+
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: SparseAdam(params, lr=4e-2), [], True
@@ -2527,3 +2542,4 @@ class TestDifferentiableOptimizer(TestCase):
 
 if __name__ == "__main__":
     print("These tests should be run through test/test_optim.py instead")
+
