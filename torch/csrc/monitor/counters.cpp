@@ -1,7 +1,5 @@
 #include <torch/csrc/monitor/counters.h>
-#include <torch/csrc/monitor/events.h>
 
-#include <sstream>
 #include <unordered_set>
 
 namespace torch {

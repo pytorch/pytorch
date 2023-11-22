@@ -45,7 +45,9 @@ VkFormat vk_format(const at::ScalarType dtype) {
 
     default:
       TORCH_CHECK(
-          false, "Vulkan vk_format(): no corresponding format for dtype");
+          false,
+          "Vulkan vk_format(): no corresponding format for dtype: ",
+          dtype);
   }
 }
 
