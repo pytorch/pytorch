@@ -9,7 +9,7 @@ import logging
 import math
 import operator
 import os
-from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -812,8 +812,8 @@ class TritonKernel(Kernel):
     def __init__(
         self,
         *groups,
-        index_dtype,
-        mutations=None,
+        index_dtype: str,
+        mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
@@ -822,21 +822,21 @@ class TritonKernel(Kernel):
             pid_cache = {}
         super().__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
-        self.mutations = mutations
+        self.mutations: Set[str] = mutations if mutations is not None else set()
         self.range_trees: List[IterationRangesRoot] = []
-        self.range_tree_nodes = {}
+        self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
-        self.outside_loop_vars = set()
+        self.outside_loop_vars: Set[Any] = set()
         self.reduction_hint = reduction_hint
-        self.index_dtype = index_dtype
+        self.index_dtype: str = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
-        self.last_usage = set()
+        self.last_usage: Set[str] = set()
 
-        self.persistent_reduction = self.should_use_persistent_reduction()
+        self.persistent_reduction: bool = self.should_use_persistent_reduction()
         self.no_x_dim = (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
@@ -858,7 +858,7 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
 
-    def should_use_persistent_reduction(self):
+    def should_use_persistent_reduction(self) -> bool:
         """
         Heuristic to set self.persistent_reduction and add guards
         if needed.
@@ -1058,6 +1058,7 @@ class TritonKernel(Kernel):
                 # Non-iterated variables, e.g. strides
                 continue
             entry = self.range_tree_nodes[symbol]
+            assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
         # If the index variables only iterate over a subset of the kernel
@@ -1143,7 +1144,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
+            elif var.name.startswith(("s", "ps", "i")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1490,6 +1491,9 @@ class TritonKernel(Kernel):
             ),
             value,
         )
+
+        dim: int
+        root_op: str
 
         def final_reduction(value):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
@@ -1916,8 +1920,11 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.output_buffers[mutation])
         mutated_args = sorted(mutated_args)
 
+        triton_meta_signature = signature_to_meta(
+            signature, size_dtype=self.index_dtype
+        )
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": triton_meta_signature,
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
@@ -1933,7 +1940,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(
+                triton_meta_signature[len(argdefs)] = signature_of(
                     sizearg, size_dtype=self.index_dtype
                 )
                 argdefs.append(f"{tree.prefix}numel")
@@ -2392,7 +2399,9 @@ class TritonScheduling(BaseScheduling):
             return node.node.data.reduction_hint
 
     @staticmethod
-    def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
+    def can_use_32bit_indexing(
+        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+    ) -> bool:
         int_max = torch.iinfo(torch.int32).max
         size_hint = V.graph.sizevars.size_hint
         has_hint = V.graph.sizevars.shape_env.has_hint
@@ -2438,7 +2447,7 @@ class TritonScheduling(BaseScheduling):
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
-        def _get_buffer(name: str) -> ir.Buffer:
+        def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
             if name in V.graph.name_to_buffer:
                 return V.graph.name_to_buffer[name]
             elif name in V.graph.graph_inputs:
@@ -2531,7 +2540,7 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
@@ -2652,7 +2661,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code
@@ -2697,7 +2706,7 @@ class TritonScheduling(BaseScheduling):
                     subkernel,
                 )
 
-                with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                with V.set_kernel_handler(subkernel):
                     for node in node_schedule:
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()

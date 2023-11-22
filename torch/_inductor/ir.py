@@ -201,6 +201,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
 
+    shape_fn: Callable[[Expr], Union[int, Expr]]
     if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
@@ -314,6 +315,9 @@ class IRNode:
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
 
+    def codegen_reference(self, writer=None):
+        raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
+
     # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
     # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
     # the code dynamically check for defined attributes.
@@ -326,7 +330,7 @@ class IRNode:
     has_exceeded_max_reads: Callable[[], bool]
     make_loader: Callable[[], Callable[[Any], Any]]
     make_indexer: Callable[[], Callable[[Any], Any]]
-    mark_reuse: Callable[[List[Any]], None]
+    mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
 
 
@@ -984,7 +988,7 @@ class Reduction(Loops):
         if split == -1:
             assert input_node is not None
             new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node
+                input_node  # type: ignore[arg-type]
             )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
@@ -2084,9 +2088,8 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        if not free_unbacked_symbols(start) and not free_unbacked_symbols(end):
-            end = sizevars.evaluate_min(end, new_size[dim])
-            start = sizevars.evaluate_min(start, end)
+        end = sympy.Min(end, new_size[dim])
+        start = sympy.Min(start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -2571,7 +2574,7 @@ class Buffer(IRNode):
     def make_indexer(self):
         return self.layout.make_indexer()
 
-    def get_name(self):
+    def get_name(self) -> str:
         assert self.name
         return self.name
 
@@ -2766,19 +2769,22 @@ class InputBuffer(Buffer):
 
 
 class ConstantBuffer(InputBuffer):
-    override_device = None
+    override_device: Optional[torch.device] = None
 
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
             return ops.load(
-                V.graph.constant_name(self.name, self.override_device), indexer(index)
+                V.graph.constant_name(self.get_name(), self.override_device),
+                indexer(index),
             )
 
         return loader
 
     def constant_to_device(self, device):
-        return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
+        return ConstantBuffer(
+            V.graph.constant_name(self.get_name(), device), self.layout
+        )
 
 
 class NoneAsConstantBuffer(IRNode):
@@ -3378,7 +3384,7 @@ class ExternKernel(InputsKernel):
 
         is_arg_tensor = []
         tensor_args = []
-        non_tensor_args = []
+        non_tensor_args: List[Any] = []
         for arg in args_flat:
             is_arg_tensor.append(isinstance(arg, IRNode))
             if is_arg_tensor[-1]:
@@ -4166,16 +4172,34 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
+    # TODO: handle bools carefully
     def __init__(self, sym, data):
         super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
-        self.sym = sym
+        if isinstance(sym, sympy.Symbol):
+            self.sym = sym
+            self.is_bool = False
+        else:
+            # Special case for boolean.  For Reasons(TM), we don't represent
+            # boolean variables directly in sympy; instead, we generate an
+            # indicator integer variable which we then convert to a boolean by
+            # testing i0 == 1.  We have to identify the underlying indicator
+            # variable, and then bind i0 to the appropriate integer value
+            # based on the runtime boolean.
+            assert isinstance(sym, sympy.Eq), sym
+            assert isinstance(sym.args[0], sympy.Symbol), sym
+            assert sym.args[1] == 1, sym
+            self.sym = sym.args[0]
+            self.is_bool = True
 
     def get_unbacked_symbol_defs(self):
         return {self.sym}
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.sym} = {data}.item()")
+        if self.is_bool:
+            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
+        else:
+            wrapper.writeline(f"{self.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
@@ -4187,13 +4211,20 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
-fbcode_use_proxy_executor = {
-    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+has_c_shim = {
+    aten._scaled_dot_product_flash_attention.default,
+    aten.addmm.out,
+    aten.bmm.out,
+    aten.mm.out,
+    aten._scaled_mm.default,
+    aten.repeat_interleave.Tensor,
+    aten.nonzero.default,
 }
 
 
-@dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
+    args_default_value: List[Dict[str, Any]]
+
     def __init__(
         self,
         layout,
@@ -4349,7 +4380,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
 
         # serialize_outputs
         def handle_single_output(return_type, output):
@@ -4376,7 +4407,7 @@ class FallbackKernel(ExternKernelAlloc):
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
         target = self.op_overload
-        returns = target._schema.returns
+        returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, self.outputs)]
@@ -4392,7 +4423,7 @@ class FallbackKernel(ExternKernelAlloc):
         node = ExternKernelNode(
             name=self.get_name(),
             node=export_schema.Node(
-                target=self.cpp_kernel,
+                target=self.op_overload.name(),
                 inputs=named_arguments,
                 outputs=output_arguments,
                 metadata={},
@@ -4411,7 +4442,11 @@ class FallbackKernel(ExternKernelAlloc):
             op_base_name = kernel.__name__.split(".")[0]
 
             if V.graph.cpp_wrapper:
-                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                if config.is_fbcode() and kernel not in has_c_shim:
+                    log.warning(
+                        "%s is missing a c-shim implementation, using proxy executor as fallback",
+                        kernel,
+                    )
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
                 else:
@@ -6024,6 +6059,9 @@ class MutableBox(IRNode):
 
     def realize(self):
         return self.data.realize()
+
+    def codegen_reference(self, writer=None):
+        return self.data.codegen_reference(writer)
 
     @property
     def layout(self):
