@@ -1517,11 +1517,11 @@ def run_test_module(
     test_name = test.name
 
     # Printing the date here can help diagnose which tests are slow
-    start_time = time.now()
+    start_time = time.time()
     print_to_stderr(f"ZR Running {str(test)} ... [{datetime.now()}]")
     handler = CUSTOM_HANDLERS.get(test_name, run_test)
     return_code = handler(test, test_directory, options)
-    duration = time.now() - start_time
+    duration = time.time() - start_time
     import math
 
     delta = math.abs(duration - test.get_time())
