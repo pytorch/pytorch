@@ -69,8 +69,8 @@
 - .ci/docker/ci_commit_pins/triton.txt
 
 "module: distributed":
-- /torch/csrc/distributed/**
-- /torch/distributed/**
-- /torch/nn/parallel/**
-- /test/distributed/**
-- /torch/testing/_internal/distributed/**
+- torch/csrc/distributed/**
+- torch/distributed/**
+- torch/nn/parallel/**
+- test/distributed/**
+- torch/testing/_internal/distributed/**
