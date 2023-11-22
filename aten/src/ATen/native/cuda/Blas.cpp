@@ -690,7 +690,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   if (dprops->major == 7 || dprops->major == 8) {
     if (args.transa == args.transb) {
       TORCH_WARN("Only TN and NT formats are supported on SM 7.5 and SM 8.x");
-    }    
+    }
   }
   if (reinterpret_cast<uintptr_t>(args.mata->data_ptr<int8_t>()) % 4 != 0 ||
       reinterpret_cast<uintptr_t>(args.matb->data_ptr<int8_t>()) % 4 != 0 ||
