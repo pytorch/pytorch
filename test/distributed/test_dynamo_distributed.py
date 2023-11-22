@@ -37,6 +37,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 )
 from torch._dynamo.comptime import comptime
+from torch.distributed._functional_collectives import _maybe_wrap_tensor
 
 def reset_rng_state():
     torch.manual_seed(1337)
@@ -1128,6 +1129,18 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             self.assertEqual(cnt.frame_count, 1)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
+
+    def test_async_subclass_no_specialize(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x):
+            return x + 1
+
+        f(_maybe_wrap_tensor(torch.randn(10)))
+        f(_maybe_wrap_tensor(torch.randn(12)))
+
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

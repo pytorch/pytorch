@@ -12573,8 +12573,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: This operator is not Composite Compliant: the
                # storage_offset of the tensor was modified directly without
                # going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance'),
-
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
 
                # These fail because the test changes the input's in-memory layout
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing'),
