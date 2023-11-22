@@ -130,7 +130,7 @@ class ConstDictVariable(VariableTracker):
 
             if istensor(k):
                 tx.store_global_weakref(global_key_name(k), k)
-            newval = collections.OrderedDict(val)
+            newval = dict(val)
             newval[k] = args[1]
 
             return tx.replace_all(
@@ -152,7 +152,7 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and self.mutable_local
         ):
-            newval = collections.OrderedDict(val)
+            newval = dict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
             tx.replace_all(self, self.modifed(newval))
             return result
@@ -162,7 +162,7 @@ class ConstDictVariable(VariableTracker):
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
-            newval = collections.OrderedDict(val)
+            newval = dict(val)
             newval.update(args[0].items)
             result = self.modifed(newval)
             return tx.replace_all(self, result)
@@ -202,10 +202,8 @@ class ConstDictVariable(VariableTracker):
     def is_valid_key(cls, key):
         return (
             key.is_python_constant()
-            or isinstance(key, TensorVariable)
-            and key.specialized_value is not None
-            or isinstance(key, ConstantVariable)
-            and key.python_type() is torch.dtype
+            or (isinstance(key, TensorVariable) and key.specialized_value is not None)
+            or (isinstance(key, ConstantVariable) and key.python_type() is torch.dtype)
         )
 
     @classmethod
@@ -257,7 +255,7 @@ class DefaultDictVariable(ConstDictVariable):
                 else:
                     if istensor(k):
                         tx.store_global_weakref(global_key_name(k), k)
-                    new_val = collections.OrderedDict(self.items)
+                    new_val = dict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
                     tx.replace_all(self, self.modifed(new_val))
@@ -473,7 +471,7 @@ class DataClassVariable(ConstDictVariable):
         bound = inspect.signature(user_cls).bind(*args, **kwargs)
         bound.apply_defaults()
         assert set(bound.arguments.keys()) == set(keys)
-        items = collections.OrderedDict()
+        items = {}
         for key in keys:
             val = bound.arguments[key]
             if isinstance(val, VariableTracker):
@@ -497,7 +495,7 @@ class DataClassVariable(ConstDictVariable):
         keys = [f.name for f in dataclasses.fields(user_cls)]
 
         excluded = []
-        items = collections.OrderedDict()
+        items = {}
         for key in keys:
             # __init__ function of a dataclass might not have yet defined the key
             if hasattr(obj, key):
@@ -594,7 +592,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
         if not args and not kwargs:
             # CustomDict() init with empty arguments
-            raw_items = collections.OrderedDict()
+            raw_items = {}
         elif dataclasses.is_dataclass(user_cls):
             # @dataclass CustomDict(a=1, b=2)
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
@@ -602,14 +600,14 @@ class CustomizedDictVariable(ConstDictVariable):
             raw_items = bound.arguments
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
-            raw_items = collections.OrderedDict(kwargs)
+            raw_items = dict(kwargs)
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             raw_items = args[0].items
         else:
             unimplemented("custom dict init with args/kwargs unimplemented")
 
-        items = collections.OrderedDict()
+        items = {}
         for key in raw_items.keys():
             val = raw_items[key]
             if isinstance(val, VariableTracker):
