@@ -23,7 +23,7 @@ from torch.utils.weak import WeakIdRef
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+    from torch.fx.experimental.symbolic_shapes import SymbolicContext
 
 DimList = List
 
@@ -184,8 +184,7 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        symbolic_context: Optional["SymbolicContext"] = None,
     ):
         from torch._subclasses.fake_tensor import FakeTensor
 
@@ -251,12 +250,10 @@ class MetaConverter:
                         # the wrapper tensor and any inner tensors.
                         # We can revisit this if this assumption does not hold
                         # for any important subclasses later.
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
+                        symbolic_context=symbolic_context,
                     )
             else:
-                assert dynamic_dims is None
-                assert constraint_dims is None
+                assert symbolic_context is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -316,18 +313,24 @@ class MetaConverter:
                     assert t._is_view()
 
                     from torch._dynamo.source import AttrSource
-                    from torch.fx.experimental.symbolic_shapes import DimDynamic
+                    from torch.fx.experimental.symbolic_shapes import (
+                        DimDynamic,
+                        StatelessSymbolicContext,
+                    )
 
                     if shape_env and not t.is_nested and not t._base.is_nested:
-                        base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
+                        base_symbolic_context = StatelessSymbolicContext(
+                            dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
+                            constraint_sizes=[None] * t._base.dim(),
+                        )
                     else:
-                        base_dynamic_dims = None
+                        base_symbolic_context = None
                     base = self.meta_tensor(
                         t._base,
                         shape_env,
                         callback,
                         source=AttrSource(source, "_base"),
-                        dynamic_dims=base_dynamic_dims,
+                        symbolic_context=base_symbolic_context,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -617,8 +620,7 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
+                        symbolic_context=symbolic_context,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -634,22 +636,13 @@ class MetaConverter:
         shape_env=None,
         *,
         callback=lambda t: t(),
-        ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        symbolic_context=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        from torch._subclasses.fake_tensor import FakeTensor
 
-        if (
-            type(t) is torch.Tensor
-            or type(t) is torch.nn.Parameter
-            or (ignore_subclass and isinstance(t, torch.Tensor))
-            or is_traceable_wrapper_subclass(t)
-            or isinstance(t, FakeTensor)
-        ):
+        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
@@ -689,8 +682,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                symbolic_context=symbolic_context,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -708,31 +700,20 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                symbolic_context=symbolic_context,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
                 return NotImplemented
             else:
                 self.hit += 1
-                # When ignoring subclasses, we treat the input tensor "as if" it
-                # were a normal tensor and create a non-subclassed fake tensor
-                # that, modulo type and attributes, resembles the original tensor.
-                # This can be helpful if you're planning to simulate the subclassness
-                # by hand, e.g., as is done in Dynamo
-                ctx = contextlib.nullcontext()
-                if ignore_subclass:
-                    ctx = torch._C.DisableTorchFunctionSubclass()
-                with ctx:
-                    r = self.meta_tensor(
-                        t,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
-                    )
+                r = self.meta_tensor(
+                    t,
+                    shape_env=shape_env,
+                    callback=callback,
+                    source=source,
+                    symbolic_context=symbolic_context,
+                )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
