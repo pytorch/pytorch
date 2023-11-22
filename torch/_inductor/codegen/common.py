@@ -311,6 +311,12 @@ class ExprPrinter(Printer):
         else:  # exp == 0
             return "1"
 
+    def _print_Infinity(self, expr):
+        return "math.inf"
+
+    def _print_NegativeInfinity(self, expr):
+        return "-math.inf"
+
     def _print_Relational(self, expr):
         return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
 
