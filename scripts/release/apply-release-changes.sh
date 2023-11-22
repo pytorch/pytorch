@@ -39,6 +39,12 @@ sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
 
+# Pin Unstable and disabled jobs
+UNSTABLE_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix unstable-jobs.json --query 'Versions[?IsLatest].[VersionId]' --output text)
+DISABLED_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix disabled-jobs.json --query 'Versions[?IsLatest].[VersionId]' --output text)
+sed -i -e s#unstable-jobs.json#"unstable-jobs.json?versionid=${UNSTABLE_VER}"# .github/scripts/filter_test_configs.py
+sed -i -e s#disabled-jobs.json#"disabled-jobs.json?versionid=${DISABLED_VER}"# .github/scripts/filter_test_configs.py
+
 # Optional
 # git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release {RELEASE_VERSION}"
 # git push origin "${RELEASE_BRANCH}"

@@ -1,17 +1,17 @@
-
 import generate_binary_build_matrix
 import os
 import subprocess
 import argparse
+from typing import Dict
 
-def tag_image( image, default_tag, release_version, dry_run, tagged_images):
+def tag_image( image: str, default_tag: str, release_version: str, dry_run: str, tagged_images: Dict[str, bool]) -> None:
     if image not in tagged_images:
         release_image = image.replace(f'-{default_tag}', f'-{release_version}')
         print(f"Tagging {image} to {release_image} , dry_run: {dry_run}")
         if dry_run == 'disabled':
-            subprocess.run(["docker", "pull", image])
-            subprocess.run(["docker", "tag", image, release_image])
-            subprocess.run(["docker", "push", release_image])
+            subprocess.check_call(["docker", "pull", image])
+            subprocess.check_call(["docker", "tag", image, release_image])
+            subprocess.check_call(["docker", "push", release_image])
 
         tagged_images[image] = True
 
@@ -21,6 +21,7 @@ def main() -> None:
         "--version",
         help="Version to tag",
         type=str,
+        default="2.2",
     )
     parser.add_argument(
         "--dry-run",
@@ -32,20 +33,16 @@ def main() -> None:
 
     options = parser.parse_args()
     tagged_images = {}
-    wheel_images = generate_binary_build_matrix.WHEEL_CONTAINER_IMAGES
-    libtorch_images = generate_binary_build_matrix.LIBTORCH_CONTAINER_IMAGES
-    conda_images = generate_binary_build_matrix.CONDA_CONTAINER_IMAGES
+    platform_images = [
+        generate_binary_build_matrix.WHEEL_CONTAINER_IMAGES,
+        generate_binary_build_matrix.LIBTORCH_CONTAINER_IMAGES,
+        generate_binary_build_matrix.CONDA_CONTAINER_IMAGES
+        ]
     default_tag = generate_binary_build_matrix.DEFAULT_TAG
 
-    for arch in libtorch_images.keys():
-        tag_image(libtorch_images[arch], default_tag, options.version, options.dry_run, tagged_images)
-
-    for arch in wheel_images.keys():
-        tag_image(wheel_images[arch], default_tag, options.version, options.dry_run, tagged_images)
-
-    for arch in conda_images.keys():
-        tag_image(conda_images[arch], default_tag, options.version, options.dry_run, tagged_images)
-
+    for platform_image in platform_images:
+        for arch in platform_image.keys():
+            tag_image(platform_image[arch], default_tag, options.version, options.dry_run, tagged_images)
 
 if __name__ == "__main__":
     main()

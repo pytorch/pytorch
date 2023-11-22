@@ -92,13 +92,8 @@ def arch_type(arch_version: str) -> str:
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
-
 # This can be updated to the release version when cutting release branch, i.e. 2.1
-DEFAULT_TAG = "main"
-release_version = os.getenv("RELEASE_VERSION_TAG")
-# if release_version is specified, use it to validate the packages
-if(release_version):
-    DEFAULT_TAG = release_version
+DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
@@ -161,31 +156,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
-
-def get_DEFAULT_TAG() -> str:
-    """
-    Returns the default tag used by the manylinux builder images.
-    """
-    return DEFAULT_TAG
-
-def get_CONDA_CONTAINER_IMAGES() -> Dict[str, str]:
-    """
-    Returns a dict of GPU architecture to container image name.
-    """
-    return CONDA_CONTAINER_IMAGES
-
-def get_LIBTORCH_CONTAINER_IMAGES() -> Dict[Tuple[str, str], str]:
-    """
-    Returns a dict of (GPU architecture, ABI) to container image name.
-    """
-    return LIBTORCH_CONTAINER_IMAGES
-
-def get_WHEEL_CONTAINER_IMAGES() -> Dict[str, str]:
-    """
-    Returns a dict of GPU architecture to container image name.
-    """
-    return WHEEL_CONTAINER_IMAGES
-
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     return {
