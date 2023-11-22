@@ -4,8 +4,8 @@ from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
 import torch
-from torch.nn import Parameter
 from torch import Tensor
+from torch.nn import Parameter
 from torch.optim import (
     Adadelta,
     Adagrad,
