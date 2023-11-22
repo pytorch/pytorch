@@ -3205,6 +3205,10 @@ def create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
+
+            # Ignores ambient no_grad if there is a joint graph.
+            # enable_grad is (in theory) required to correctly create the outputs
+            # that require_grad.
             with torch.enable_grad(), torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_with_args(
                     compiled_fn,
