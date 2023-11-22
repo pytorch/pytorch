@@ -10,6 +10,8 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
+#include <cstdint>
+#include <iostream>
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
@@ -891,8 +893,11 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
-    const void* bias_ptr,
+    // const void* bias_ptr,
     ScalarType bias_dtype,
+    const void* c_ptr,
+    const void* c_scale_ptr,
+    bool is_row_bias,
     void* result_ptr,
     const void *result_scale_ptr,
     int64_t result_ld,
@@ -908,6 +913,7 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_C_SCALE_POINTER, c_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
@@ -915,8 +921,10 @@ void scaled_gemm(
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
-  if (bias_ptr) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
+
+  if (c_ptr && is_row_bias) {
+    std::cout<<"bias is row bias"<<std::endl;
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, c_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
@@ -955,7 +963,7 @@ void scaled_gemm(
       mat2_ptr,
       Bdesc.descriptor(),
       &beta_val,
-      nullptr,
+      is_row_bias ? nullptr : c_ptr,
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),

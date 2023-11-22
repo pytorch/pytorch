@@ -251,11 +251,14 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
-    def test_float8_bias(self, device) -> None:
-        (k, l, m) = (16, 48, 32)
-        x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
-        y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
-        bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
+    @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize("bias_shape", ["vector", "matrix"])
+    def test_float8_bias(self, device, float8_dtype: torch.dtype, bias_shape: str) -> None:
+        (m, k, n) = (16, 48, 32)
+        x = torch.rand((m, k), device=device).to(torch.float8_e4m3fn)
+        y = torch.full((n, k), .25, device=device, dtype=float8_dtype).t()
+        bias_shape_map = {"vector": (n,), "matrix": (m, n)}
+        bias = torch.full(bias_shape_map[bias_shape], 4.0, device=device).to(torch.bfloat16)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y)
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
@@ -314,6 +317,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
+
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")

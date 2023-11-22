@@ -737,8 +737,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        "scale_b must be a float scalar");
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
-  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
-       " but got ", bias->numel());
   TORCH_CHECK(
       mat1.sizes()[1] % 16 == 0,
       "Expected trailing dimension of mat1 to be divisble by 16 ",
@@ -757,7 +755,20 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
+  bool is_row_bias = false;
   if (bias) {
+    // Bias can either be a row bias, e.g. a vector of size mat2.sizes()[1] that is contiguous
+    // Or a full bias, e.g. a matrix of size mat1.sizes()[0] x mat2.sizes()[1] that is row major contiguous
+    TORCH_CHECK(bias->dim() == 1 || bias->dim() == 2, "Bias must be either a vector or a matrix");
+    if (bias->dim()==1){
+      TORCH_CHECK(bias->is_contiguous() && bias->sizes()[0] == mat2.sizes()[1],
+      "Bias must be size {", mat2.sizes()[1],"}"
+         " but got {", bias->sizes()[0], "}");
+      is_row_bias=true;
+    } else {
+      TORCH_CHECK(bias->is_contiguous() && bias->sizes()[0] == mat1.sizes()[0] && bias->sizes()[1] == mat2.sizes()[1],
+         "Bias must be size {", mat1.sizes()[0], ",", mat2.sizes()[1], "} but got {", bias->sizes()[0], ",", bias->sizes()[1], "}.");
+    }
     TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
          "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
@@ -801,8 +812,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       scale_b ? scale_b->data_ptr() : nullptr,
       args.ldb,
       args.matb->scalar_type(),
-      bias ? bias->data_ptr(): nullptr,
       bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
+      bias ? bias->data_ptr(): nullptr,
+      nullptr,
+      is_row_bias,
       args.result->data_ptr(),
       scale_result ? scale_result->data_ptr() : nullptr,
       args.result_ld,
