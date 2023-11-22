@@ -346,7 +346,7 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
-
+        key = self.module_key
         module = self.module
 
         def generic_call_method_helper(name):

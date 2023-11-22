@@ -500,7 +500,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @property
     def current_tx(self):
-        return self.tracing_context.current_tx()
+        return self.tracing_context.current_tx
 
     @property
     def root_tx(self):
