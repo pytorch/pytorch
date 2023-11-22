@@ -124,6 +124,7 @@ def adamw(
     maximize: bool,
 ):
     r"""Functional API that performs AdamW algorithm computation.
+
     See :class:`~torch.optim.AdamW` for details.
     """
     adam(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, foreach=foreach,
