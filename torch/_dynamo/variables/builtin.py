@@ -1382,12 +1382,12 @@ class BuiltinVariable(VariableTracker):
             and op in supported_const_comparison_ops.values()
         ):
             left = (
-                left.module,
+                left.module
                 if isinstance(left, NNModuleVariable)
                 else left.as_python_constant()
             )
             right = (
-                right.module,
+                right.module
                 if isinstance(right, NNModuleVariable)
                 else right.as_python_constant()
             )
