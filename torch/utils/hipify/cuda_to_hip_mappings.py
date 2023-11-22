@@ -7272,11 +7272,23 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cublasDrotmg_v2",
             ("hipblasDrotmg_v2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
-        ("cublasComputeType_t", ("hipblasComputeType_t" if rocm_version >= (6,0,0) else "hipblasLtComputeType_t", CONV_MATH_FUNC, API_BLAS)),
-        ("CUBLAS_COMPUTE_32I", ("HIPBLAS_COMPUTE_32I" if rocm_version >= (6,0,0) else "HIPBLASLT_COMPUTE_I32", CONV_MATH_FUNC, API_BLAS)),
-        ("CUBLAS_COMPUTE_32F", ("HIPBLAS_COMPUTE_32F" if rocm_version >= (6,0,0) else "HIPBLASLT_COMPUTE_F32", CONV_MATH_FUNC, API_BLAS)),
-        ("CUBLAS_COMPUTE_64F", ("HIPBLAS_COMPUTE_64F" if rocm_version >= (6,0,0) else "HIPBLASLT_COMPUTE_F64", CONV_MATH_FUNC, API_BLAS)),
-        #("CUBLAS_COMPUTE_32F_FAST_TF32", ("HIPBLASLT_COMPUTE_TF32_FAST", CONV_MATH_FUNC, API_BLAS)),
+        (
+            "cublasComputeType_t",
+            ("hipblasComputeType_t" if rocm_version >= (6, 0, 0) else "hipblasLtComputeType_t",
+                CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
+            "CUBLAS_COMPUTE_32I",
+            ("HIPBLAS_COMPUTE_32I" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_I32", CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
+            "CUBLAS_COMPUTE_32F",
+            ("HIPBLAS_COMPUTE_32F" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_F32", CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
+            "CUBLAS_COMPUTE_64F",
+            ("HIPBLAS_COMPUTE_64F" if rocm_version >= (6, 0, 0) else "HIPBLASLT_COMPUTE_F64", CONV_MATH_FUNC, API_BLAS)
+        ),
         ("cublasLtEpilogue_t", ("hipblasLtEpilogue_t", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_EPILOGUE_DEFAULT", ("HIPBLASLT_EPILOGUE_DEFAULT", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_EPILOGUE_RELU", ("HIPBLASLT_EPILOGUE_RELU", CONV_MATH_FUNC, API_BLAS)),
@@ -7725,8 +7737,14 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
                 HIP_UNSUPPORTED,
             ),
         ),
-        ("cuComplex", ("hipComplex" if rocm_version >= (6,0,0) else "hipblasComplex", CONV_TYPE, API_BLAS)),
-        ("cuDoubleComplex", ("hipDoubleComplex" if rocm_version >= (6,0,0) else "hipblasDoubleComplex", CONV_TYPE, API_BLAS)),
+        (
+            "cuComplex",
+            ("hipComplex" if rocm_version >= (6, 0, 0) else "hipblasComplex", CONV_TYPE, API_BLAS)
+        ),
+        (
+            "cuDoubleComplex",
+            ("hipDoubleComplex" if rocm_version >= (6, 0, 0) else "hipblasDoubleComplex", CONV_TYPE, API_BLAS),
+        ),
         ("cufftResult_t", ("hipfftResult_t", CONV_TYPE, API_FFT)),
         ("cufftResult", ("hipfftResult", CONV_TYPE, API_FFT)),
         ("CUFFT_SUCCESS", ("HIPFFT_SUCCESS", CONV_NUMERIC_LITERAL, API_FFT)),
