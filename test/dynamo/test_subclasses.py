@@ -781,6 +781,77 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_torch_function_call_to_size_within_aot_autograd_graph(self):
+        # In some places we rely on calling ops with Proxy during tracing in
+        # AOTAutograd. If your tensor subclass implemented __torch_function__,
+        # torch function subclasses may be disabled. This test isn't exhaustive
+        # but tests one of the situations where this can happen.
+        class TestTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    # Importantly, for this test to work, the symint of the
+                    # outer tensor must not be a plain Symbol, e.g. here we
+                    # derive the outer size in terms of the inner one.
+                    # Otherwise, dynamo would choose to pass the symint into the
+                    # graph.
+                    (inner.shape[0] * 2, *inner.shape[1:]),
+                    inner.stride(),
+                    None,
+                    None,
+                    inner.dtype,
+                    inner.layout,
+                    inner.device,
+                    False,
+                    inner.requires_grad,
+                )
+
+            def __init__(self, inner):
+                self._size = inner.shape
+                self._strides = inner.stride()
+                self.inner_elem = inner
+                self._numel = inner.numel()
+                self._storage_offset = inner.storage_offset()
+
+            def __tensor_flatten__(self):
+                return ["inner_elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, _):
+                return TestTensor(inner_tensors["inner_elem"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                args_inner = torch.utils._pytree.tree_map_only(
+                    TestTensor, lambda x: x.inner_elem, args
+                )
+                return TestTensor(func(*args_inner, **kwargs) * 2)
+
+            @classmethod
+            # See https://github.com/pytorch/pytorch/issues/114369
+            @torch._dynamo.disable(recursive=False)
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
+
+        def fn(x, y):
+            z = x.shape[0] * y.shape[0]
+            return x * z
+
+        with torch._dynamo.config.patch(
+            error_on_recompile=True, traceable_tensor_subclasses={TestTensor}
+        ):
+            inp = torch.ones(4, 4)
+            x = TestTensor(inp)
+            torch._dynamo.mark_dynamic(x, 0)
+            y = TestTensor(inp)
+            torch._dynamo.mark_dynamic(y, 0)
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            compiled_fn(x, y)
+
     def test_support_bases(self):
         import abc
 
