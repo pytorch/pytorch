@@ -660,6 +660,7 @@ class Tracer(TracerBase):
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):
             if len(arg_names) != len(concrete_args):
+                breakpoint()
                 raise RuntimeError(
                     f"Tracing expected {len(arg_names)} arguments but got {len(concrete_args)} concrete arguments"
                 )

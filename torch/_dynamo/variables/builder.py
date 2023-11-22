@@ -144,7 +144,9 @@ from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    LeafSpecVariable,
     SourcelessGraphModuleVariable,
+    TreeSpecVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -1363,8 +1365,23 @@ def wrap_fx_proxy_cls(
         if example_value is None:
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
-            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
+            def pack_hook(x):
+                # How do I create proxy here?
+                return x
+
+            def unpack_hook(x):
+                return x
+
+            if proxy.node.op == "call_function":
+                with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+                    example_value = get_fake_value(
+                        proxy.node, tx, allow_non_graph_fake=True
+                    )
+            else:
+                example_value = get_fake_value(
+                    proxy.node, tx, allow_non_graph_fake=True
+                )
         # Handle recursive calls here
         elif maybe_get_fake_mode(example_value) is tx.fake_mode:
             pass
@@ -1807,6 +1824,10 @@ class SourcelessBuilder:
             return MethodWrapperVariable(value)
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
+        elif isinstance(value, torch.utils._pytree.api.python.TreeSpec):
+            return TreeSpecVariable(value)
+        elif isinstance(value, torch.utils._pytree.api.python.LeafSpec):
+            return LeafSpecVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

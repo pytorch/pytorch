@@ -709,14 +709,85 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # have to
                     fn_ = torch._refs.tensor
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+            import inspect
+
+            from functorch import make_fx
+
+            from torch._dispatch.python import enable_python_dispatcher
+            from ..utils import get_fake_value
+            from .base import MutableLocal
+            from .builder import SourcelessBuilder
+            from .lists import BaseListVariable
+
+            # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
+            allowed_torch_fn = fn_.__name__ != "_make_grads"
+
+            definanilly_no_composite_kernel = type(
+                fn_
+            ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
+                fn_.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             )
+
+            if allowed_torch_fn and not definanilly_no_composite_kernel:
+                # convert he arguments from VariableTracker to fake tensors + constants again
+                fake_value_args = []
+                # TODO(JackCaoG): include kwargs handling here
+                for arg in args:
+                    if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                        fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+                    else:
+                        # mostly handle tuple and scalar
+                        fake_value_args.append(arg.as_proxy())
+
+                def get_default_args(func):
+                    try:
+                        signature = inspect.signature(func)
+                    except ValueError as ve:
+                        # no signature found, just return an empty dict
+                        return []
+                    return [
+                        v.default
+                        for k, v in signature.parameters.items()
+                        if v.default is not inspect.Parameter.empty
+                    ]
+
+                # It seems like make_fx requires caller to pass into all args including
+                # those with default value.
+                default_args = get_default_args(fn_)
+                fake_value_args += default_args
+                with enable_python_dispatcher():
+                    fx_g = make_fx(fn_, pre_dispatch=True)(*fake_value_args)
+
+                print("\nfx code")
+                print(fx_g.code)
+
+                # TODO(JackCaoG): handle kwargs
+                def dummy_user_function_to_inline_bm(gm, args):
+                    return gm(*args)
+
+                # now inline this fx graph and return the output
+                # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
+                user_fn_variable = SourcelessBuilder()(
+                    tx, dummy_user_function_to_inline_bm
+                )
+                gm_variable = SourcelessBuilder()(tx, fx_g)
+                cls = BaseListVariable.cls_for(list)
+                input_list_variable = cls(
+                    args,
+                    mutable_local=MutableLocal(),
+                )
+                tensor_variable = tx.inline_user_function_return(
+                    user_fn_variable, (gm_variable, input_list_variable), {}
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
 
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)

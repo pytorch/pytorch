@@ -8,7 +8,6 @@ from typing import Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -289,7 +288,9 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
+            # if tx.output.is_root_tracer() and is_allowed(mod.__class__):
+            # What if we always inline?
+            if tx.output.is_root_tracer() and False:
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -375,6 +376,19 @@ class NNModuleVariable(VariableTracker):
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
+            # Hack: inline the forward instead
+            mod = tx.output.get_submodule(self.module_key)
+            fn = mod.forward.__func__
+            fn_source = AttrSource(self.source, "__call__")
+            fn_source = AttrSource(fn_source, "__func__")
+            args = [self] + args
+            res = tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=fn_source),
+                args,
+                kwargs,
+            )
+            return res
+
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.

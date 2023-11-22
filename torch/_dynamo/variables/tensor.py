@@ -136,6 +136,11 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        print(
+            "create tensor variable with fake tensor id"
+            + str(id(self.proxy.node.meta.get("example_value")))
+        )
+        print("Rensor Variable name is " + str(self.proxy.node) + "\n")
         fake_tensor_to_tensor_variable_dict[
             self.proxy.node.meta.get("example_value")
         ] = self

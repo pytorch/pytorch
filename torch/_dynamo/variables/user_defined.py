@@ -249,7 +249,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             from torch._dynamo import compiled_autograd
             from torch.autograd.variable import Variable
-            from .lists import BaseListVariable
             from .tensor import map_fake_tensor_to_tensor_variable
 
             assert len(args) == 5
@@ -284,6 +283,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tensor_variables = [
                     map_fake_tensor_to_tensor_variable(x) for x in input
                 ]
+                for i in range(len(input)):
+                    if tensor_variables[i] == None:
+                        print(i)
+                        print(input[i])
+                        print(id(input[i]))
+                breakpoint()
                 input_list_variable = cls(
                     tensor_variables,
                     mutable_local=MutableLocal(),
@@ -312,7 +317,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 [proxy.node.meta.get("example_value") for proxy in args[0].as_proxy()]
             )
             grad_tensors_example = tuple(
-                (proxy.node.meta.get("example_value") for proxy in args[1].as_proxy())
+                proxy.node.meta.get("example_value") for proxy in args[1].as_proxy()
             )
             retain_graph = args[2].as_python_constant()
             create_graph = args[3].as_python_constant()
@@ -378,6 +383,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
                 assert not kwargs
                 return self.odict_getitem(tx, args[0])
+
+            if method is collections.OrderedDict.__contains__ and len(args) == 1:
+                from .misc import GetAttrVariable
+
+                if (
+                    isinstance(args[0], GetAttrVariable)
+                    and args[0].name == "type"
+                    and isinstance(args[0].obj, GetAttrVariable)
+                    and args[0].obj.name == "_in_spec"
+                ):
+                    # seems wrong for me to do constant folding here?
+                    return variables.ConstantVariable.create(
+                        self.value.__contains__(args[0].obj.obj.value._in_spec.type)
+                    )
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -590,6 +609,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
+            elif (
+                type(subobj) == torch.utils._pytree.api.python.TreeSpec
+                or type(subobj) == torch.utils._pytree.api.python.LeafSpec
+                or type(value) == torch.utils._pytree.api.python.TreeSpec
+            ):
+                # TODO(Jack): these fx function we want to inline should share the same
+                # source as the origional line
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder()(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -691,6 +720,24 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
+
+
+class TreeSpecVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+
+class LeafSpecVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
