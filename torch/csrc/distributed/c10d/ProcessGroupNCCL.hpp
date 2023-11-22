@@ -344,10 +344,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
-#ifdef NCCL_HAS_COMM_SPLIT
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
-#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially

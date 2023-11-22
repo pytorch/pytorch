@@ -2360,13 +2360,10 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-#ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-#endif
-      ;
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color);
 
 #endif
 
