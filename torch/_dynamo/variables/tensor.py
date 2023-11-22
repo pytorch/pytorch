@@ -589,13 +589,12 @@ class TensorVariable(VariableTracker):
                     return False
 
             if (
-                not config.capture_dynamic_output_shape_ops
-                and has_bool_key(key)
+                has_bool_key(key)
                 and isinstance(value, TensorVariable)
                 and value.requires_grad
             ):
                 unimplemented(
-                    "boolean masking setitem backwards requires dynamic shapes"
+                    "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
                 )
             tx.output.create_proxy(
                 "call_function",
@@ -917,6 +916,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
+        if name == "tobytes":
+            unimplemented("tobytes is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
