@@ -1639,7 +1639,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         for Module in [Foo, Bar, FooBar]:
             mod = Module()
-            x = torch.randn([3, 3])
+            x = torch.randn([3, 3], requires_grad=True)
             pred = torch.tensor(x[0][0].item() < 0)
             real_result = mod.forward(pred, x)
             out_graph, _ = torch._dynamo.export(mod.forward)(pred, x)
@@ -1682,16 +1682,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
-        mod = Module()
-        x = torch.randn(2, 2)
-        out_graph, _ = torch._dynamo.export(mod)(x)
-        test_x = torch.randn(3, 2)
-        self.assertEqual(out_graph(test_x), mod(test_x))
-
-    def test_export_with_cond_dynamic_shape_pred_tuple_operands(self):
-        from functorch.experimental.control_flow import cond
-
-        class Module(torch.nn.Module):
+        class Module2(torch.nn.Module):
             def forward(self, x):
                 def true_fn(x):
                     return x + x
@@ -1701,11 +1692,54 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
-        mod = Module()
-        x = torch.randn(2, 2)
-        out_graph, _ = torch._dynamo.export(mod)(x)
-        test_x = torch.randn(3, 2)
-        self.assertEqual(out_graph(test_x), mod(test_x))
+        mods = [Module(), Module2()]
+        for mod in mods:
+            x = torch.randn(2, 2)
+            out_graph, guards = torch._dynamo.export(mod)(x)
+            self.assertExpectedInline(
+                out_graph.code.strip(),
+                """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    size = l_x_.size()
+    getitem = size[0];  size = None
+    le = getitem <= 2;  getitem = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
+    getitem_2 = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_true_0.code.strip(),
+                """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    add = l_x__1 + l_x__1;  l_x__1 = None
+    return (add,)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_false_0.code.strip(),
+                """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
+    return (getitem,)""",
+            )
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                # True branch and false branch return tensors of different shape
+                torch._dynamo.export(mod)(torch.randn(3, 2))
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                # True branch and false branch return tensors of different shape
+                test_x = torch.randn(3, 2)
+                mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -3152,8 +3186,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected each tensor to have same metadata but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
