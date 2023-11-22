@@ -222,6 +222,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 "To construct DTensor from torch.Tensor, it's recommended to "
                 "use local_tensor.detach() and make requires_grad consistent."
             )
+        if isinstance(local_tensor, torch._subclasses.fake_tensor.FakeTensor) and any(
+            isinstance(x, torch.SymInt) for x in local_tensor.shape
+        ):
+            raise RuntimeError(
+                """
+DTensor does not yet support dynamic shapes. You can run with static shapes with torch.compile
+by compiling with `torch.compile(m, dynamic=False)`. If you need dynamism, please file an issue"""
+            )
 
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
