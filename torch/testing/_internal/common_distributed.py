@@ -458,15 +458,6 @@ def init_multigpu_helper(world_size: int, backend: str):
     nGPUs = torch.cuda.device_count()
     visible_devices = range(nGPUs)
 
-    if backend == "nccl":
-        # This is a hack for a known NCCL issue using multiprocess
-        # in conjunction with multiple threads to manage different GPUs which
-        # may cause ncclCommInitRank to fail.
-        # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
-        # It slows down the performance of collective operations.
-        # Without this setting NCCL might throw unhandled error.
-        os.environ["NCCL_MAX_NRINGS"] = "1"
-
     # If rank is less than or equal to number of available GPU's
     # then each rank can be mapped to corresponding GPU.
     nGPUs_per_process = 1
@@ -863,7 +854,7 @@ def has_efa() -> bool:
 
     try:
         EFA_PROBE_RESULT = (
-            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"]).returncode == 0
+            subprocess.run(["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False).returncode == 0
         )
     except FileNotFoundError:
         EFA_PROBE_RESULT = False

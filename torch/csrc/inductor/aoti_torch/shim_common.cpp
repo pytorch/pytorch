@@ -18,7 +18,6 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
-#include <ATen/ops/_scaled_mm.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -27,6 +26,7 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
+#include <ATen/ops/scatter.h>
 
 #endif
 
@@ -42,17 +42,6 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
-
-template <class T>
-c10::optional<T> pointer_to_optional(T* ptr) {
-  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
-}
-
-template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
-c10::optional<T> pointer_to_optional(U* ptr) {
-  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
-}
-
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -61,14 +50,6 @@ int32_t aoti_torch_device_type_cpu() {
 
 int32_t aoti_torch_device_type_cuda() {
   return (int32_t)c10::DeviceType::CUDA;
-}
-
-int32_t aoti_torch_dtype_float8_e5m2() {
-  return (int32_t)c10::ScalarType::Float8_e5m2;
-}
-
-int32_t aoti_torch_dtype_float8_e4m3fn() {
-  return (int32_t)c10::ScalarType::Float8_e4m3fn;
 }
 
 int32_t aoti_torch_dtype_bfloat16() {
@@ -243,11 +224,14 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     c10::Device device = c10_device(device_type, device_index);
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor = new at::Tensor(at::for_blob(data, sizes)
-                                                .strides(strides)
-                                                .storage_offset(storage_offset)
-                                                .options(options)
-                                                .make_tensor());
+    at::Tensor* new_tensor = (data != nullptr)
+        ? new at::Tensor(at::for_blob(data, sizes)
+                             .strides(strides)
+                             .storage_offset(storage_offset)
+                             .options(options)
+                             .make_tensor())
+        // data == nullptr can happen for a 0-size tensor
+        : new at::Tensor(at::empty_strided(sizes, strides, options));
     *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
@@ -312,41 +296,6 @@ AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* out_tensor = new at::Tensor();
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
-  });
-}
-
-AOTITorchError aoti_torch__scaled_mm(
-    AtenTensorHandle self,
-    AtenTensorHandle mat2,
-    AtenTensorHandle bias,
-    int32_t* out_dtype,
-    AtenTensorHandle scale_a,
-    AtenTensorHandle scale_b,
-    AtenTensorHandle scale_result,
-    int8_t use_fast_accum,
-    AtenTensorHandle* ret0,
-    AtenTensorHandle* ret1) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
-    at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
-    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
-    at::Tensor* scale_a_tensor = tensor_handle_to_tensor_pointer(scale_a);
-    at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
-    at::Tensor* scale_result_tensor =
-        tensor_handle_to_tensor_pointer(scale_result);
-    auto [r0, r1] = at::_scaled_mm(
-        *self_tensor,
-        *mat2_tensor,
-        pointer_to_optional(bias_tensor),
-        pointer_to_optional<c10::ScalarType>(out_dtype),
-        pointer_to_optional(scale_a_tensor),
-        pointer_to_optional(scale_b_tensor),
-        pointer_to_optional(scale_result_tensor),
-        use_fast_accum);
-    at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
-    *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
-    at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
-    *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
   });
 }
 
@@ -437,12 +386,12 @@ AOTITorchError aoti_torch_nonzero(
 
 AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
-    int64_t* output_size,
+    int64_t output_size,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
-    at::Tensor out_tensor = at::_ops::repeat_interleave_Tensor::call(
-        *repeats_tensor, pointer_to_optional<c10::SymInt>(output_size));
+    at::Tensor out_tensor =
+        at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
     at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
     *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });
@@ -460,6 +409,21 @@ AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
         assert(false);
       }
     }
+  });
+}
+
+AOTITorchError aoti_torch_scatter_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::scatter_out(*out_tensor, *self_tensor, dim, *index_tensor, *src_tensor);
   });
 }
 
