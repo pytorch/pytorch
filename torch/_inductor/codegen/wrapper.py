@@ -577,7 +577,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -606,7 +606,7 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
-                self.wrapper_call.writeline("end_graph()")
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
@@ -986,6 +986,12 @@ class WrapperCodeGen(CodeGen):
             f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
         )
         stack.enter_context(self.wrapper_call.indent())
+
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
 
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
@@ -1873,6 +1879,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
 
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():

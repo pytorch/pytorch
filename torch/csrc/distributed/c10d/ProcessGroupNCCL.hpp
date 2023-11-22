@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -342,6 +341,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
+
+    // Optional "parent" backend and color to create communicators from
+    // via `ncclCommSplit`
+#ifdef NCCL_HAS_COMM_SPLIT
+    std::shared_ptr<ProcessGroupNCCL> split_from;
+    int64_t split_color{0};
+#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -510,6 +516,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Return the total number of splits the communicators held by this process
+  // group have performed.
+  uint64_t getCommSplitCounter() const;
+
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;
@@ -518,9 +528,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
-
-  // Tests if the UCC fallback path is available
-  bool isUCCAvailable() const;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
@@ -888,11 +895,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The callback function to store NCCL debug info.
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
-#ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle and ProcessGroup pointer
-  static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<Backend> uccPG_;
-#endif
   size_t uid_;
 };
 
