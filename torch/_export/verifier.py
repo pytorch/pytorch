@@ -1,4 +1,5 @@
 import inspect
+import math
 import operator
 from collections.abc import Iterable
 from typing import Any, Dict, final, List, Optional, Tuple, Type
@@ -6,13 +7,13 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ExportGraphSignature,
     InputKind,
     SymIntArgument,
     TensorArgument,
 )
-from torch.export.exported_program import ExportedProgram
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 
@@ -101,6 +102,11 @@ class Verifier(metaclass=_VerifierMeta):
             operator.and_,
             operator.or_,
             operator.not_,
+            operator.pow,
+            operator.neg,
+            operator.abs,
+            math.ceil,
+            math.floor,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
@@ -151,11 +157,15 @@ class Verifier(metaclass=_VerifierMeta):
                 assert not any(t is object for t in ret)
                 return ret
 
+            # TODO Remove this allowlist.
+            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
+
             if not isinstance(op, _allowed_op_types()):
-                if op not in _allowed_builtin_ops():
+                if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
                     raise SpecViolationError(
                         f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
                         f"Valid builtin ops: {_allowed_builtin_ops()}"
+                        f"Valid torch functions: {_allowed_torch_functions}"
                     )
 
             if isinstance(op, OpOverload):
