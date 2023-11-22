@@ -1426,7 +1426,7 @@ def install_guard(*guards, skip=0):
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    from torch._guards import TracingContext
+    from torch._tracing_context import TracingContext
 
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:

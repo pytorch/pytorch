@@ -686,7 +686,9 @@ class TorchLogsFormatter(logging.Formatter):
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
         record.traceid = ""
-        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        if (
+            trace_id := torch._tracing_context.CompileContext.current_trace_id()
+        ) is not None:
             record.traceid = f" [{trace_id}]"
 
         prefix = f"{record.rankprefix}[{record.asctime}]{record.traceid} {record.name}: [{record.levelname}]"
@@ -820,5 +822,5 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
-import torch._guards
+import torch._tracing_context
 import torch.distributed as dist
