@@ -10,8 +10,8 @@ architectures:
     * Latest ROCM
 """
 
-from typing import Dict, List, Optional, Tuple
 import os
+from typing import Dict, List, Optional, Tuple
 
 CUDA_ARCHES = ["11.8", "12.1"]
 
@@ -37,6 +37,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = (
     "nvidia-nccl-cu12==2.19.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
     "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'"
 )
+
 
 def get_nccl_submodule_version() -> str:
     from pathlib import Path
@@ -91,6 +92,7 @@ def arch_type(arch_version: str) -> str:
         return "cpu-aarch64"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
+
 
 # This can be updated to the release version when cutting release branch, i.e. 2.1
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
@@ -156,6 +158,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
+
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     return {
