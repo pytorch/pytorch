@@ -138,24 +138,25 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         _train(dist_model, dist_optim, train_steps=2)
 
         original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
-        DCP.save(
+
+        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir)
+        checkpointer.save(
             state_dict={
                 "model": dist_model,
                 "optimizer": dist_optim,
                 "s": original_stateful_obj,
-            },
-            storage_writer=DCP.FileSystemWriter(self.temp_dir),
+            }
         )
 
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
-        DCP.load(
+
+        checkpointer.load(
             state_dict={
                 "model": dist_model,
                 "optimizer": dist_optim,
                 "s": loaded_stateful_obj,
-            },
-            storage_reader=DCP.FileSystemReader(self.temp_dir),
+            }
         )
 
         self.assertEqual(original_stateful_obj, loaded_stateful_obj)

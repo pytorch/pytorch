@@ -38,12 +38,14 @@ from .planner import (
 
 from .utils import _create_file_view
 
+from torch.distributed.checkpoint.checkpointer import Checkpointer
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch._utils import _get_device_module
 
 __all__ = [
     "FileSystemWriter",
     "FileSystemReader",
+    "FileSystemCheckpointer"
 ]
 
 
