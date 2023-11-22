@@ -16,6 +16,7 @@ from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import (
@@ -79,6 +80,18 @@ def only_consist_of(var, types):
     if isinstance(var, ConstDictVariable):
         return all(only_consist_of(item, types) for item in var.items.values())
     return False
+
+
+# A more read-able syntax sugar for creating a UserFunctionVariable for f
+# and run call_function on it. Make it return a function to preserve the calling
+# convention of the original f.
+def _make_inlined(tx, f):
+    assert callable(f), "Expect f to be a python callable."
+
+    def inline_call(*args, **kwargs):
+        return UserFunctionVariable(f).call_function(tx, args, kwargs)
+
+    return inline_call
 
 
 def validate_args_and_maybe_create_graph_inputs(
@@ -225,9 +238,9 @@ def speculate_subgraph(
             treespec = None
             if should_flatten_outputs:
                 # Flatten the speculated subgraph output.
-                tree_flatten = UserFunctionVariable(pytree.tree_flatten)
-                tree_flatten_output = tree_flatten.call_function(tx, [output], {})
-                output, treespec = tree_flatten_output.unpack_var_sequence(tx)
+                output, treespec = _make_inlined(tx, pytree.tree_flatten)(
+                    output
+                ).unpack_var_sequence(tx)
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
                 output = BuiltinVariable(tuple).call_function(tx, [output], {})
@@ -418,18 +431,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
-        if not all(
-            isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
-        ):
+        if not only_consist_of(args[3], (TensorVariable,)):
             unimplemented(
-                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
-                    actual_args=[
-                        str(operand.python_type())
-                        if isinstance(operand, VariableTracker)
-                        else str(type(operand))
-                        for operand in operands
-                    ],
-                ),
+                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # branches
@@ -476,7 +480,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             # TODO: Support kwargs
-            (ret_val, _), ret_graph, ret_lifted_freevars = speculate_subgraph(
+            (
+                (ret_val, ret_treespec),
+                ret_graph,
+                ret_lifted_freevars,
+            ) = speculate_subgraph(
                 tx,
                 args[ix],
                 operands,
@@ -486,19 +494,53 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "cond",
                 source_target=self.value,
                 manually_set_subgraph_inputs=False,
+                should_flatten_outputs=True,
             )
 
-            if not isinstance(ret_val, TensorVariable):
+            if not only_consist_of(ret_val, (TensorVariable,)):
                 unimplemented(
-                    "Expected branch to return a single tensor",
+                    "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
                 )
-            return ret_val, ret_graph, ret_lifted_freevars
+            return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
-        (true_r, true_graph, true_lifted_freevars) = speculate_branch(True)
+        (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
+            True
+        )
         true_nn_modules = tx.copy_graphstate().output.nn_modules
 
-        (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
+        (
+            false_r,
+            false_treespec,
+            false_graph,
+            false_lifted_freevars,
+        ) = speculate_branch(False)
         false_nn_modules = tx.copy_graphstate().output.nn_modules
+
+        same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            true_treespec, false_treespec
+        )
+        if not same_treespec.as_python_constant():
+            unimplemented("Expected branches to return the same pytree structure.")
+
+        def diff_meta(tensor_vars1, tensor_vars2):
+            assert all(
+                isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2
+            )
+            all_diffs = []
+            for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
+                # We check the meta data associated with meta["example_value"]
+                meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
+                meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
+                if meta1 != meta2:
+                    all_diffs.append((f"pair{i}:", meta1, meta2))
+            return all_diffs
+
+        if diffs := diff_meta(
+            true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
+        ):
+            unimplemented(
+                f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
+            )
 
         def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
             shared_freevars = true_lifted_freevars.keys() & false_lifted_freevars.keys()
@@ -581,12 +623,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_node,
             shared + unique_true + unique_false,
         )
-        # TODO: assert that the true/false return values are
-        # consistent
-        example_value = true_r.as_proxy().node.meta["example_value"]
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            true_r.as_proxy(),
+        )
 
         # Store the invocation as a call
-        return wrap_fx_proxy(
+        flat_variable = wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
@@ -594,7 +638,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=tuple(p_args),
                 kwargs={},
             ),
-            example_value=example_value,
+            example_value=flat_example_value,
+        )
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        flat_list_variable = BuiltinVariable(list).call_function(
+            tx, [flat_variable], {}
+        )
+        return (
+            _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, true_treespec)
+            if true_treespec
+            else flat_variable
         )
 
 
@@ -953,9 +1008,8 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Trace into tree_flatten with the list of batch_input_args.
-        tree_flatten = UserFunctionVariable(pytree.tree_flatten)
-        flat_args, arg_spec = tree_flatten.call_function(
-            tx, [ListVariable(batch_input_args)], {}
+        flat_args, arg_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(batch_input_args)
         ).unpack_var_sequence(tx)
 
         # Transform in_dims into a list if it's not an integer literal.
@@ -965,12 +1019,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else BuiltinVariable(list).call_function(tx, [in_dims], {})
         )
 
-        # Trace into broadcast_to_and_flatten with the transformed in_dims.
-        broadcast_to_and_flatten = UserFunctionVariable(
-            pytree._broadcast_to_and_flatten
-        )
-        broadcasted_in_dims = broadcast_to_and_flatten.call_function(
-            tx, [in_dims_v, arg_spec], {}
+        # Trace into _broadcast_to_and_flatten with the transformed in_dims.
+        broadcasted_in_dims = _make_inlined(tx, pytree._broadcast_to_and_flatten)(
+            in_dims_v, arg_spec
         )
 
         # We want to pass unbatched input to speculate subgraph.
@@ -993,7 +1044,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Ban ops like `stride`, `storage_offset` in the traced functions.
         # NOTE: We are conservatively banning more ops (vmap should be able
         #       to handle a few of them).
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
             _, body_graph, body_lifted_freevars = speculate_subgraph(
@@ -1001,8 +1051,8 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 fn,
                 # Returns a ListVariable, since that's where we started flattening.
                 # However, we really want to pass the inner Python list as argument.
-                tree_unflatten.call_function(
-                    tx, [ListVariable(unbatched_input_args), arg_spec], {}
+                _make_inlined(tx, pytree.tree_unflatten)(
+                    ListVariable(unbatched_input_args), arg_spec
                 ).unpack_var_sequence(tx),
                 {},
                 graph_checkpoint,
@@ -1196,11 +1246,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = add_subgraph(
             tx,
             self.source,
             "wrap_body",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+            body_gmod,
         )
 
         body_node = make_attr(tx, body_name)
@@ -1216,7 +1267,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, treespec
+        return proxy_args, {}, example_value, treespec, body_gmod
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1224,7 +1275,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
+        p_args, p_kwargs, example_value, treespec, _ = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
 
@@ -1250,8 +1301,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
-        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1294,17 +1344,25 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
         from .builder import wrap_fx_proxy
 
+        context_fn = None
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
-            context_fn = kwargs.pop("context_fn")
-            self.value.context_fn = context_fn.fn
+            context_fn = kwargs.pop("context_fn").fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value, treespec = self.create_wrapped_node(
+        (
+            p_args,
+            _,
+            example_value,
+            treespec,
+            checkpointed_gmod,
+        ) = self.create_wrapped_node(
             tx, args, gmod_kwargs, "torch.utils.checkpoint.checkpoint"
         )
+        if context_fn is not None:
+            checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
@@ -1327,8 +1385,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         # speculate_subgraph function) so as to respect the pytree API typing.
         variable = BuiltinVariable(list).call_function(tx, [variable], {})
 
-        tree_unflatten = UserFunctionVariable(pytree.tree_unflatten)
-        return tree_unflatten.call_function(tx, [variable, treespec], {})  # type: ignore[arg-type]
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):

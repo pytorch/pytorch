@@ -11,7 +11,11 @@ funcol = torch.ops.c10d_functional
 class CommDebugMode(TorchDispatchMode):
     """
     ``CommDebugMode`` is a context manager that counts the number of
-    communications within its context. It does this using a ``TorchDispatchMode``.
+    functional collectives within its context. It does this using a
+    ``TorchDispatchMode``.
+
+    NOTE: this mode only works for functional collective atm and the
+    distributed_c10d collectives are not supported yet.
 
     Example usage
 
@@ -27,9 +31,13 @@ class CommDebugMode(TorchDispatchMode):
     def __init__(self):
         self.comm_counts: Dict[Any, int] = defaultdict(int)
         self.comm_registry = {
-            funcol.all_reduce,
             funcol.all_gather_into_tensor,
+            funcol.all_gather_into_tensor_coalesced,
+            funcol.all_reduce,
+            funcol.all_to_all_single,
+            funcol.broadcast,
             funcol.reduce_scatter_tensor,
+            funcol.reduce_scatter_tensor_coalesced,
         }
 
     def get_total_counts(self) -> int:

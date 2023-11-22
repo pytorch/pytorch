@@ -1,11 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 import itertools
 import sys
 from functools import wraps
 from typing import (
     Any,
     Callable,
+    Generator,
     Iterator,
     Tuple,
     Dict,
@@ -31,8 +34,10 @@ from torch.distributed._tensor import (
     Shard,
     Replicate,
     distribute_tensor,
+    redistribute,
 )
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.placement_types import Placement, DTensorSpec
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
@@ -74,6 +79,35 @@ def skip_unless_torch_gpu(method: T) -> T:
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+
+
+@dataclass
+class RedistributeProfile:
+    num_calls: int
+
+
+@contextmanager
+def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
+
+    orig_redistribute_local_tensor = redistribute.redistribute_local_tensor
+    profile: RedistributeProfile = RedistributeProfile(num_calls=0)
+
+    # pyre-ignore[53]
+    def patched_redistribute_local_tensor(
+        local_tensor: torch.Tensor,
+        current_spec: DTensorSpec,
+        target_spec: DTensorSpec,
+    ) -> DTensor:
+        result = orig_redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        profile.num_calls += 1
+        return result
+
+    try:
+        # pyre-ignore[9]
+        redistribute.redistribute_local_tensor = patched_redistribute_local_tensor
+        yield profile
+    finally:
+        redistribute.redistribute_local_tensor = orig_redistribute_local_tensor
 
 
 class DTensorTestBase(MultiProcessTestCase):
@@ -121,13 +155,19 @@ class DTensorTestBase(MultiProcessTestCase):
 
     # pyre-ignore[2]:
     def _test_op(self, mesh: DeviceMesh, op_call, *args, **kwargs) -> None:
-        out = op_call(*args, **kwargs)
-        dtc = DTensorConverter(mesh, args, kwargs)
-        for d_args, d_kwargs in dtc:
-            # pyre can't find assertTrue anymore?
-            self.assertEqual(dtc.successful(), True)
-            d_out = op_call(*d_args, **d_kwargs)
-            self.assertEqual(d_out.full_tensor(), out)
+        with redistribute_profiler() as profile:
+            out = op_call(*args, **kwargs)
+            dtc = DTensorConverter(mesh, args, kwargs)
+            for d_args, d_kwargs in dtc:
+                # pyre can't find assertTrue anymore?
+                self.assertEqual(dtc.successful(), True)
+                d_out = op_call(*d_args, **d_kwargs)
+                self.assertEqual(
+                    d_out.redistribute(
+                        mesh, [Replicate()] * mesh.ndim
+                    ).to_local(),
+                    out,
+                )
 
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)

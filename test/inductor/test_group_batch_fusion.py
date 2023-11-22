@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 
 import torch
 import torch._inductor
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -15,6 +16,9 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
+    pass
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):
@@ -220,7 +224,7 @@ class MyModule7(torch.nn.Module):
 
 
 @requires_cuda()
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@torch._inductor.config.patch(post_grad_fusion_options={"group_linear": {}})
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -432,6 +436,4 @@ class TestGroupBatchFusion(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests()
+    run_tests()
