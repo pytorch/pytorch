@@ -182,12 +182,12 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: List[Placement],
     ):
         current_spec = input._spec
         ctx.current_spec = current_spec
         target_spec = DTensorSpec(
-            device_mesh, placements, tensor_meta=input._spec.tensor_meta
+            device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta
         )
 
         local_tensor = input._local_tensor
