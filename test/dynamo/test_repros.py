@@ -1438,6 +1438,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
+    def test_issue114171(self):
+        device = torch.device("cpu")
+
+        def fcnn(in_dim, out_dim, hidden_dim, activation=torch.nn.GELU):
+            layers = [
+                torch.nn.Linear(in_dim, hidden_dim, device=device),
+                activation(),
+                torch.nn.Linear(hidden_dim, out_dim, device=device),
+            ]
+            return torch.nn.Sequential(*layers)
+
+        class testmodel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.interaction_networks = torch.nn.ModuleList(
+                    [fcnn(262, 1174, 400) for _ in range(4)]
+                )
+
+            def interact(self, x, cycle):
+                return self.interaction_networks[cycle](x)
+
+        model = testmodel()
+        forward_aot = torch.compile(
+            model.interact, fullgraph=True, dynamic=True, backend="eager"
+        )
+
+        x = torch.rand([111, 262], device=device)
+        y2 = forward_aot(x, 2)  # previously failed
+
     def test_issue175(self):
         n_heads = 2
         d_model = 64

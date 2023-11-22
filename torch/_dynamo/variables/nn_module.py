@@ -577,7 +577,13 @@ class NNModuleVariable(VariableTracker):
                 )
                 return new_module_variable
 
-            key = args[0].as_python_constant()
+            from .tensor import SymNodeVariable
+
+            if isinstance(args[0], SymNodeVariable):
+                key = args[0].evaluate_expr(tx.output)
+            else:
+                key = args[0].as_python_constant()
+
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,
