@@ -402,7 +402,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             )
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
-            mod = value.module
+            mod = self.output.get_submodule(value.module_key)
             if truth_fn(mod):
                 push and self.push(value)
                 self.jump(inst)
@@ -2345,7 +2345,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
-            module = args[0].module
+            module = parent.output.get_submodule(args[0].module_key)
             if isinstance(module, torch.fx.GraphModule):
                 # The inline call might not actually be a call to `forward`,
                 # but it is enough to add a context for `forward` in case it is called.
