@@ -127,7 +127,7 @@ def get_platform_specific_sdpa():
         return [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
     if TEST_CUDA:
         return [SDPBackend.EFFICIENT_ATTENTION]
-    return []
+    return [SDPBackend.MATH] # Should be empty, but an empty list causes "An empty arg_values was passed to @parametrize"
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
