@@ -20,7 +20,6 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
-    PairwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
@@ -105,8 +104,12 @@ class TestNew2dParallelTraining(DTensorTestBase):
             mesh_2d = init_device_mesh(
                 self.device_type, (2, self.world_size // 2), mesh_dim_names=("tp", "dp")
             )
+            parallelize_plan = {
+                "net1": ColwiseParallel(),
+                "net2": RowwiseParallel(),
+            }
             model_2d = parallelize_module(
-                SimpleModel().cuda(), mesh_2d["tp"], PairwiseParallel()
+                SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan
             )
 
     @with_comms
@@ -138,7 +141,11 @@ class TestNew2dParallelTraining(DTensorTestBase):
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
-        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, PairwiseParallel())
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, parallelize_plan)
         model_2d = FSDP(
             model_2d,
             device_mesh=dp_mesh,
@@ -246,9 +253,11 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
-        model_2d = parallelize_module(
-            simple_model().cuda(), tp_mesh, PairwiseParallel()
-        )
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        model_2d = parallelize_module(simple_model().cuda(), tp_mesh, parallelize_plan)
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
 
         FSDP.set_state_dict_type(
@@ -292,9 +301,11 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
-        model_2d = parallelize_module(
-            simple_model().cuda(), tp_mesh, PairwiseParallel()
-        )
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        model_2d = parallelize_module(simple_model().cuda(), tp_mesh, parallelize_plan)
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
@@ -351,9 +362,11 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
-        model_2d = parallelize_module(
-            simple_model().cuda(), mesh_2d["tp"], PairwiseParallel()
-        )
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        model_2d = parallelize_module(simple_model().cuda(), mesh_2d["tp"], parallelize_plan)
         model_2d = FSDP(model_2d, device_mesh=mesh_2d["dp"], use_orig_params=True)
         FSDP.set_state_dict_type(
             model_2d,

@@ -681,13 +681,18 @@ class ONNXProgram:
         self._export_exception = export_exception
 
     def __call__(
-        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+        self,
+        *args: Any,
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        options: Optional[ONNXRuntimeOptions] = None,
+        **kwargs: Any,
     ) -> Any:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
+            model: The PyTorch model  to fetch state from.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
@@ -695,7 +700,7 @@ class ONNXProgram:
         """
         import onnxruntime  # type: ignore[import]
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
+        onnx_input = self.adapt_torch_inputs_to_onnx(*args, model=model, **kwargs)
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
@@ -855,7 +860,7 @@ class ONNXProgram:
             >>> onnx_program = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple))
+            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model=model))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
@@ -907,7 +912,7 @@ class ONNXProgram:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(onnx_program.adapt_torch_outputs_to_onnx(pt_output))
+            >>> print(onnx_program.adapt_torch_outputs_to_onnx(func, pt_output))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::

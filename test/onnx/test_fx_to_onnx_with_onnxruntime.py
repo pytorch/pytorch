@@ -198,15 +198,23 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ),
         )
         onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
+            tensor_x, model=func, b=8.0
+        )
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+            func, func(tensor_x, 8.0)
+        )
         ort_outputs = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
         # test on different non-tensor input - xfail
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
+            tensor_x, model=func, b=9.0
+        )
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+            func, func(tensor_x, 9.0)
+        )
         _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
@@ -808,10 +816,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
             ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                model(*args, **kwargs)
+                model, model(*args, **kwargs)
             )
             # ORT outputs.
-            args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args)
+            args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args, model=model)
 
             # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
             args_not_none = args_not_none[: len(args) - len(kwargs)]
@@ -947,27 +955,31 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "github issue: https://github.com/pytorch/pytorch/issues/114406"
     )
     def test_exported_program_as_input_lifting_buffers_mutation(self):
-        class CustomModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("my_buffer", torch.tensor(4.0))
+        for persistent in (True, False):
 
-            def forward(self, x, b):
-                output = x + b
-                (
-                    self.my_buffer.add_(1.0) + 3.0
-                )  # Mutate buffer through in-place addition
-                return output
+            class CustomModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer(
+                        "my_buffer", torch.tensor(4.0), persistent=persistent
+                    )
 
-        inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
-        model = CustomModule()
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, inputs, skip_dynamic_shapes_check=True
-        )
-        # Buffer will be mutated after the first iteration
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model, inputs, skip_dynamic_shapes_check=True
-        )
+                def forward(self, x, b):
+                    output = x + b
+                    (
+                        self.my_buffer.add_(1.0) + 3.0
+                    )  # Mutate buffer through in-place addition
+                    return output
+
+            inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
+            model = CustomModule()
+            self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                model, inputs, skip_dynamic_shapes_check=True
+            )
+            # Buffer will be mutated after the first iteration
+            self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                model, inputs, skip_dynamic_shapes_check=True
+            )
 
 
 def _parameterized_class_attrs_and_values_with_fake_options():
@@ -1116,10 +1128,12 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 kwargs = create_kwargs()
                 # Original outputs.
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model(*args, **kwargs)
+                    real_model, real_model(*args, **kwargs)
                 )
                 # ORT outputs.
-                args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args, **kwargs)
+                args_not_none = onnx_program.adapt_torch_inputs_to_onnx(
+                    *args, model=real_model, **kwargs
+                )
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,
