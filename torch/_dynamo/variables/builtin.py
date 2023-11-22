@@ -1479,6 +1479,11 @@ class BuiltinVariable(VariableTracker):
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
 
+        if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
+            return ConstantVariable.create(op(left.fn, right.fn))
+
+        _unimplemented()
+
     def call_and_(self, tx, a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):

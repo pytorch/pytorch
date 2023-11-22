@@ -3099,18 +3099,17 @@ def forward(self, x):
             )(*example_inputs)
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
-        def f_branch_return_multiple_tensors(x, y):
-            return cond(x, lambda x: (x, x), lambda x: (x, x), [y])
+        def f_branch_return_multiple_tensors(pred, x, y):
+            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
 
-        example_inputs = (torch.randn(4), torch.randn(2))
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            torch._dynamo.export(
-                f_branch_return_multiple_tensors,
-                aten_graph=True,
-            )(*example_inputs)
+        example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
+        gm, _ = torch._dynamo.export(
+            f_branch_return_multiple_tensors,
+            aten_graph=True,
+        )(*example_inputs)
+        self.assertEqual(
+            gm(*example_inputs), f_branch_return_multiple_tensors(*example_inputs)
+        )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -3654,7 +3653,8 @@ def forward(self, pred, x):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
-    return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
+    getitem = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )
 
         self.assertExpectedInline(
@@ -3671,7 +3671,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
     cos_2 = d_true_branch.cos();  d_true_branch = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
-    return add_3""",
+    return (add_3,)""",
         )
 
         self.assertExpectedInline(
@@ -3688,7 +3688,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add_1 = add + sin_1;  add = sin_1 = None
     sin_2 = c_false_branch.sin();  c_false_branch = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
-    return add_2""",
+    return (add_2,)""",
         )
 
     @unittest.skipIf(
@@ -3989,7 +3989,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 def forward(self, arg0_1, arg1_1, arg2_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
         self.assertExpectedInline(
@@ -3998,7 +3998,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, arg0_1, arg1_1, arg2_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
     def test_export_nn_module_stack_patched_module(self):
