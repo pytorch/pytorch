@@ -1009,6 +1009,15 @@ void initJITBindings(PyObject* module) {
             using namespace torch::jit::tensorexpr;
             getOptConditionals() = opt_conds;
           })
+      .def("_set_symbolic_storage_offset",
+          // TODO: (testing - if we keep this, move it somewhere else)
+          [](at::Tensor& t, const at::SymInt& offset) {
+            TORCH_INTERNAL_ASSERT(t.defined());
+            auto impl = t.unsafeGetTensorImpl();
+            const auto& sizes = impl->sym_sizes();
+            const auto& strides = impl->sym_strides();
+            impl->set_sizes_and_strides(sizes, strides, offset);
+          })
       .def(
           "_llvm_enabled",
           []() {

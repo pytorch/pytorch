@@ -545,6 +545,7 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
+                        torch._C._set_symbolic_storage_offset(r, storage_offset)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
