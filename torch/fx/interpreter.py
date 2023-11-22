@@ -12,7 +12,6 @@ import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
 
-
 __all__ = ['Interpreter', 'Transformer']
 
 @compatibility(is_backward_compatible=True)

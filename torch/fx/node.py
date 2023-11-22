@@ -523,7 +523,6 @@ class Node:
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
-
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
                               replace_with : 'Node',
