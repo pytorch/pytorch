@@ -47,8 +47,9 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 class ToyModel(nn.Module):
-    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
         super().__init__()
+        self.ctx_manager = ctx_manager
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
             + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
@@ -57,10 +58,14 @@ class ToyModel(nn.Module):
         )
 
     def forward(self, inputs):
-        return self.net(inputs)
+        if self.ctx_manager is not None:
+            with self.ctx_manager():
+                return self.net(inputs)
+        else:
+            return self.net(inputs)
 
-def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
-    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(device)
+def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(device)
     m.apply(init_weights)
     inputs = torch.rand(bsz, in_feat).to(device)
     outputs = m(inputs)
@@ -508,8 +513,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Use TestMultiProc for things that really need to run on multiple nodes
     """
 
-    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
-        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
+    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(self.device)
         m.apply(init_weights)
         inputs = torch.rand(bsz, in_feat).to(self.device)
         outputs = m(inputs)
@@ -538,6 +543,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
+        assert config.optimize_ddp
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -566,8 +572,60 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
+    def test_graph_split_ctx_manager(self):
+        """
+        Ensures that we get the right number of splits and that the respective
+        context managers' effects are applied to the computation.
+        """
+
+        for get_compiler in [
+            lambda: CheckSplitsCompiler(),
+            lambda: None,
+        ]:
+            for ctx_manager, output_test in [
+                (
+                    lambda: torch.autocast(torch.device(self.device).type, torch.float16),
+                    lambda out: self.assertEqual(out.dtype, torch.float16),
+                ),
+                (
+                    torch.enable_grad,
+                    lambda out: self.assertTrue(out.requires_grad)
+                ),
+                (
+                    torch.no_grad,
+                    lambda out: self.assertTrue(not out.requires_grad)
+                ),
+            ]:
+                m, inputs, correct_outputs = self.get_model(out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager)
+                # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+                # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+                bucket_cap_mb = 3.5  # 4MB
+                ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
+
+                compiler = get_compiler()
+
+                @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
+                def opt_fn(inputs):
+                    return ddp_m(inputs)
+
+                opt_outputs = opt_fn(inputs)
+                self.assertTrue(same(correct_outputs, opt_outputs))
+                if compiler:
+                    self.assertEqual(compiler.compiler_called, 4)
+
+                output_test(opt_outputs)
+
+                # ensure compatibility with dynamo explain
+
+                explain_out = torch._dynamo.explain(ddp_m)(inputs)
+                break_reasons = explain_out.break_reasons
+                self.assertEqual(len(break_reasons), 4)
+                self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
+
+    @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
+        assert config.optimize_ddp
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -581,6 +639,45 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
+    @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations(self):
+        assert config.optimize_ddp
+        channel_dim = 512
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+
+        class ToyModelConv(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                return self.net(inputs)
+
+        def get_model():
+            m = ToyModelConv().to(self.device)
+            m.apply(init_weights)
+            inputs = torch.rand(2, channel_dim, channel_dim, 128).to(self.device)
+            outputs = m(inputs)
+            return m, inputs, outputs
+
+        m, inputs, correct_outputs = get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        @torch._dynamo.optimize("inductor")
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
@@ -758,7 +855,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             (False, "local")
         ):
             torch._dynamo.reset()
-            torch._dynamo.config.skip_fsdp_guards = skip_guards
 
             class ToyModel(nn.Module):
                 def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
@@ -784,8 +880,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             m.apply(init_weights)
             correct_outputs = m(inputs)
             fsdp_m = FSDP(m, use_orig_params=True)
-            opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
-            outputs = opt_m(inputs)
+
+            with torch._dynamo.config.patch(skip_fsdp_guards=skip_guards):
+                opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+                outputs = opt_m(inputs)
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck() \
