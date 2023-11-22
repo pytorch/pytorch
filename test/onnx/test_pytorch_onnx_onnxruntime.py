@@ -3771,13 +3771,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, input):
                 index = torch.tensor([2, 0])
                 source = torch.ones(3, 2, 5)
-                return input.index_copy(1, index, source)
+                return input.index_copy(self.dim, index, source)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(IndexCopyModel(), x)
+        for dim in (1, -2):
+            self.run_test(IndexCopyModel(dim), x)
 
     def test_select(self):
         class Select(torch.nn.Module):
@@ -3977,9 +3982,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
         # situation of axis=2 mapping to the same axis as axis=-2
-        model = torch.nn.LayerNorm([10, 10, 10])
-        x = torch.randn(20, 5, 10, 10, 10)
-        self.run_test(model, x)
+        for elementwise_affine in (True, False):
+            for bias in (True, False):
+                model = torch.nn.LayerNorm(
+                    [10, 10, 10], elementwise_affine=elementwise_affine, bias=bias
+                )
+                x = torch.randn(20, 5, 10, 10, 10)
+                self.run_test(model, x)
 
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
