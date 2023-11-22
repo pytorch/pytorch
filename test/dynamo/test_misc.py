@@ -8008,7 +8008,7 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
 
-    def test_itertools_groupby_pure_python_abs_func(self):
+    def test_itertools_groupby_pure_python_key_func(self):
         counters.clear()
 
         def fn(l):
