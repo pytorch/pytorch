@@ -284,7 +284,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   LOG(INFO) << "Wrote finished ";
 }
 
-static std::string pickle_str(const c10::IValue& v) {
+inline std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
   {
     auto writer = [&](const char* data, size_t size) {
@@ -299,12 +299,12 @@ static std::string pickle_str(const c10::IValue& v) {
   return std::string(result.begin(), result.end());
 }
 
-static c10::Dict<c10::IValue, c10::IValue> new_dict() {
+inline c10::Dict<c10::IValue, c10::IValue> new_dict() {
   return c10::Dict<c10::IValue, c10::IValue>(
       c10::AnyType::get(), c10::AnyType::get());
 }
 
-static c10::List<c10::IValue> new_list() {
+inline c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
@@ -510,7 +510,7 @@ struct NCCLTraceBuffer {
   }
 };
 
-static std::string dump_nccl_trace() {
+inline std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump();
 }
 
