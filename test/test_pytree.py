@@ -42,7 +42,18 @@ class TestGenericPytree(TestCase):
             py_api = getattr(py_pytree, name)
 
             self.assertEqual(inspect.isclass(cxx_api), inspect.isclass(py_api))
-            self.assertEqual(inspect.isfunction(cxx_api), inspect.isfunction(py_api))
+            if name not in {
+                "is_namedtuple",
+                "is_namedtuple_class",
+                "is_structseq",
+                "is_structseq_class",
+            }:
+                # In C++ pytree, the above functions are implemented as PyCapsule
+                # in C++ rather than Python functions.
+                self.assertEqual(
+                    inspect.isfunction(cxx_api),
+                    inspect.isfunction(py_api),
+                )
             if inspect.isfunction(cxx_api):
                 cxx_signature = inspect.signature(cxx_api)
                 py_signature = inspect.signature(py_api)
