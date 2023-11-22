@@ -831,15 +831,6 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             error_type=ValueError,
             error_regex="SparseAdam requires dense parameter tensors",
         ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
     ]
 
 

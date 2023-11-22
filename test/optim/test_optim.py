@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
 from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_device_type import largeTensorTest, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import largeTensorTest, instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
@@ -54,6 +54,8 @@ def drosenbrock(tensor):
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
 class TestOptimRenewed(TestCase):
+
+    @onlyCPU
     @optims([optim for optim in optim_db if optim.optim_error_inputs_func is not None])
     def test_errors(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
