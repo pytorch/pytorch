@@ -16,9 +16,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
-    SequenceParallel,
+    ColwiseParallel,
     parallelize_module,
+    RowwiseParallel,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
@@ -195,13 +195,20 @@ class TestFakePG(TestCase):
             mesh_dim_names=["dp", "tp"]
         )
 
-        # TODO: update test to use RowwiseParallel and ColwiseParallel instead.
-        for parallel_style in [SequenceParallel(), PairwiseParallel()]:
+        sequence_parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0)),
+            "net2": RowwiseParallel(output_layouts=Shard(0)),
+        }
+        pairwise_parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        for parallel_plan in [sequence_parallelize_plan, pairwise_parallelize_plan]:
 
             my_module = parallelize_module(
                 MLPModule(device="cuda"),
                 device_mesh["tp"],
-                parallel_style,
+                parallel_plan,
             )
 
             sharded_module = FSDP(

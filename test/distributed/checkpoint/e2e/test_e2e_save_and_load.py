@@ -9,7 +9,11 @@ from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -88,7 +92,11 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             )
             tp_mesh = mesh_2d["tp"]
             dp_mesh = mesh_2d["dp"]
-            model = parallelize_module(dummy_model, tp_mesh, PairwiseParallel())
+            parallelize_plan = {
+                "net1": ColwiseParallel(),
+                "net2": RowwiseParallel(),
+            }
+            model = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
         else:
             model = dummy_model
