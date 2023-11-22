@@ -48,7 +48,7 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
+TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
@@ -311,8 +311,8 @@ class ExprPrinter(Printer):
         else:  # exp == 0
             return "1"
 
-    def _print_Unequality(self, expr):
-        return " != ".join(map(self.paren, map(self._print, expr.args)))
+    def _print_Relational(self, expr):
+        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -633,6 +633,7 @@ class KernelArgs:
                     inplaced.inner_name,
                     inplaced.other_names[-1],
                     V.graph.get_dtype(inplaced.other_names[-1]),
+                    True,
                 )
             )
         for outer, inner in chain(
@@ -642,7 +643,9 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
+            precompile_args.append(
+                TensorArg(inner, outer, V.graph.get_dtype(outer), True)
+            )
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
@@ -1171,7 +1174,7 @@ class OptimizationContext:
     # Load value as mask
     is_load_as_mask: bool = False
 
-    dtype: torch.dtype = None
+    dtype: Optional[torch.dtype] = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 

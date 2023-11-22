@@ -2979,7 +2979,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3210,7 +3210,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
-    @torch._dynamo.config.patch(suppress_errors=True)
+    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3233,7 +3233,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
-    @torch._dynamo.config.patch(suppress_errors=True)
+    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
@@ -3259,6 +3259,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                     else:
                         self.assertTrue(t.grad is None)
 
+    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
     def test_jagged_layout_construction_with_pinned_memory(self, device):
@@ -3324,6 +3325,66 @@ class TestNestedTensorSubclass(NestedTestCase):
         ):
             nt, _ = jagged_from_list(test_tensor_list, None)
             _ = torch.nn.functional.layer_norm(nt, (nt.shape[-2], nt.shape[-1]))
+
+    def test_narrow(self, device):
+        starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        nt = torch.nested.narrow(
+            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone().detach(),
+            1,
+            starts,
+            lengths,
+            layout=torch.jagged
+        )
+
+        # TODO: Use this approach when unbind is functional
+        # unbinded_nt = nt.unbind()
+        # for i in range(starts.shape[0]):
+        #     self.assertEqual(torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64), unbinded_nt[i])
+        for i in range(starts.shape[0]):
+            self.assertEqual(
+                torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64),
+                nt.values()[nt.offsets()[i]:(nt.offsets()[i] + nt.lengths()[i])]
+            )
+
+    def test_is_contiguous(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt_contiguous, _ = jagged_from_list([a, b, c], None)
+
+        starts_nc = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths_nc = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        narrow_base = torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone()
+        nt_noncontiguous = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_nc,
+            lengths_nc,
+            layout=torch.jagged
+        )
+
+        starts_c = torch.tensor([1, 0, 0, 0, 0], device=device, dtype=torch.int64)
+        lengths_c = torch.tensor([9, 10, 10, 10, 8], device=device, dtype=torch.int64)
+        nt_contiguous_narrow = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_c,
+            lengths_c,
+            layout=torch.jagged
+        )
+
+        # Test contiguous case
+        assert nt_contiguous.is_contiguous()
+
+        # Test narrow case
+        assert not nt_noncontiguous.is_contiguous()
+        assert nt_contiguous_narrow.is_contiguous()
+
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
 
 instantiate_parametrized_tests(TestNestedTensor)

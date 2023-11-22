@@ -54,6 +54,7 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterator,
     List,
@@ -129,6 +130,7 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
+    constants: Tuple[torch.Tensor, ...]
 
 
 def clear_cublass_cache():
@@ -393,6 +395,7 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
+    constants: Tuple[torch.Tensor, ...] = (),
 ):
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
@@ -408,6 +411,7 @@ def cudagraphify(
         static_input_idxs,
         stack_traces,
         mode,
+        constants,
     )
 
 
@@ -485,7 +489,7 @@ def is_live(weak_ref: Optional[StorageWeakRefWrapper]) -> bool:
 
 def maybe_deref(
     weak_ref: Optional[StorageWeakRefWrapper],
-) -> Optional[Tuple[UntypedStorage, int]]:
+) -> Optional[Tuple[StorageWeakRefPointer, int]]:
     if weak_ref is None:
         return None
     r = weak_ref()
@@ -556,7 +560,7 @@ class CUDAWarmupNode:
         wrapped_function: WrappedFunction,
         parent,
         cuda_graphs_pool: Tuple[int, int],
-        existing_cuda_graph: torch.cuda.Graph,
+        existing_cuda_graph: Optional[torch.cuda.CUDAGraph],
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
@@ -582,14 +586,18 @@ class CUDAWarmupNode:
         existing_path_data_ptrs = {
             t.data_ptr() for t in self.path_live_weakrefs() if t()
         }
-        non_cudagraph_inps = set()
-        for i in range(len(new_inputs)):
-            if (
-                isinstance(new_inputs[i], torch.Tensor)
-                and new_inputs[i].untyped_storage().data_ptr()
-                not in existing_path_data_ptrs
-            ):
-                non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
+
+        def get_non_cudagraph_inps():
+            non_cudagraph_inps = set()
+            for t in itertools.chain(new_inputs, self.wrapped_function.constants):
+                if (
+                    isinstance(t, torch.Tensor)
+                    and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
+                ):
+                    non_cudagraph_inps.add(t.untyped_storage().data_ptr())
+            return non_cudagraph_inps
+
+        non_cudagraph_inps = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
@@ -777,7 +785,7 @@ class CUDAGraphNode:
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
-        self.static_input_data_ptrs: InputList[int] = [
+        self.static_input_data_ptrs: InputList[Optional[int]] = [
             (
                 inputs[i].data_ptr()
                 if isinstance(inputs[i], torch.Tensor) and i in self.static_input_idxs
@@ -833,7 +841,7 @@ class CUDAGraphNode:
         del inputs
 
         # graph used for recording model invocation
-        self.graph = torch.cuda.CUDAGraph()
+        self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -841,7 +849,7 @@ class CUDAGraphNode:
         # we reconstruct tensors at the correct data pointers of our inputs which are
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
-        self.reconstructed_inputs: InputList[Tensor] = [
+        self.reconstructed_inputs: InputList[Union[Tensor, int]] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)
             else x
@@ -962,7 +970,7 @@ class CUDAGraphNode:
         if not self.cached_tensor_outputs:
             self._initialize_cached_tensors()
 
-        outputs: List[torch.Tensor] = []
+        outputs: List[Optional[Union[int, torch.Tensor]]] = []
 
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
@@ -993,7 +1001,7 @@ class CUDAGraphNode:
             else:
                 assert isinstance(storage, int)
                 out = self._reconstruct_from_tensor_metadata(
-                    metadata, outputs[storage].untyped_storage()
+                    metadata, cast(torch.Tensor, outputs[storage]).untyped_storage()
                 )
 
             outputs.append(out)
@@ -1039,6 +1047,7 @@ class CUDAGraphNode:
         return output_storages
 
     def run_graph(self):
+        assert self.graph is not None
         self.graph.replay()
 
     def all_outputs_are_dead(self):
@@ -1051,12 +1060,19 @@ class CUDAGraphNode:
     def _record(self, model, inputs):
         "Record the model"
 
+        def static_input_iter():
+            for i in self.wrapped_function.static_input_idxs:
+                if isinstance(
+                    inputs[i], torch.Tensor
+                ) and not self._is_cuda_graph_recorded_tensor(inputs[i]):
+                    yield inputs[i]
+
         # see: output_is_alias_of_persistent_static_inputs above
         static_input_persistent_storage_ptrs: Dict[int, StorageWeakRefWrapper] = {
-            inputs[i].untyped_storage().data_ptr(): StorageWeakRefWrapper(inputs[i])
-            for i in self.wrapped_function.static_input_idxs
-            if isinstance(inputs[i], torch.Tensor)
-            and not self._is_cuda_graph_recorded_tensor(inputs[i])
+            inp.untyped_storage().data_ptr(): StorageWeakRefWrapper(inp)
+            for inp in itertools.chain(
+                static_input_iter(), self.wrapped_function.constants
+            )
         }
 
         if config.triton.slow_path_cudagraph_asserts:
@@ -1121,7 +1137,7 @@ class CUDAGraphNode:
                 continue
 
             torch._check(
-                o.is_cuda,
+                o.is_cuda or o.untyped_storage().data_ptr() == 0,
                 lambda: (
                     "Expected all cuda outputs in cuda graph recording. Non cuda output "
                     f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
@@ -1134,7 +1150,7 @@ class CUDAGraphNode:
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
             is_empty_storage = o.untyped_storage().data_ptr() == 0
-            if ref and ref() is not None or is_empty_storage:
+            if (ref and ref() is not None) or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
                 continue
@@ -1463,7 +1479,7 @@ class CUDAGraphNode:
 
         torch.cuda.synchronize()
         self.stream.wait_stream(torch.cuda.current_stream())
-        recording_inputs = []
+        recording_inputs: List[Union[Tensor, int]] = []
 
         with warnings.catch_warnings(record=True), torch.cuda.device(
             self.device
@@ -1508,7 +1524,7 @@ class CUDAGraphNode:
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
         for idx in self.cudagraph_managed_idxs:
-            inputs[idx] = None
+            inputs[idx] = None  # type: ignore[call-overload]
 
         torch._check(
             self._check_liveness(
@@ -1679,10 +1695,8 @@ class CUDAGraphTreeManager:
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
 
-            self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
-            self.graph = torch.cuda.CUDAGraph()
-
+            self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
             with warnings.catch_warnings(record=True), torch.cuda.graph(
@@ -1909,10 +1923,16 @@ class CUDAGraphTreeManager:
         static_input_idxs,
         stack_traces,
         mode,
+        constants,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(model, static_input_idxs, id)
+        self.ids_to_funcs[id] = WrappedFunction(
+            model,
+            static_input_idxs,
+            id,
+            tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
+        )
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
