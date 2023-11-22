@@ -1,7 +1,9 @@
 from typing import Optional
+import warnings
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.stateful import Stateful
 from .planner import SavePlanner
 from .default_planner import DefaultSavePlanner
 
@@ -11,12 +13,28 @@ from .storage import (
 )
 
 from .metadata import Metadata, STATE_DICT_TYPE
-from .utils import _DistWrapper
+from .utils import _DistWrapper, _all_gather_keys
 
-__all__ = ["save_state_dict"]
+__all__ = ["save_state_dict", "save"]
 
 
 def save_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
+    """This method is deprecated. Please switch to 'save'."""
+    warnings.warn(
+        "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
+    )
+
+    # TODO: test returning `save` here instead.
+    return _save_state_dict(state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+
+def save(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -29,6 +47,9 @@ def save_state_dict(
 
     This function is different from ``torch.save()`` as it handles
     ``ShardedTensor`` by having each rank only save their local shards.
+
+    For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
+    load will call ``state_dict`` before serialization.
 
     .. warning::
         There is no guarantees of Backwards Compatibility across PyTorch versions
@@ -82,6 +103,27 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+
+    dumpable_state_dict = {}
+    keys = _all_gather_keys(state_dict)
+    for key in keys:
+        if key not in state_dict:
+            continue
+        elem = state_dict[key]
+        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+
+    return _save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+
+def _save_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
+
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
