@@ -25,10 +25,10 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -287,10 +287,6 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
         "Capturing NCCL collectives is only allowed with NCCL >= 2.9.6");
   }
 }
-
-} // namespace
-
-namespace {
 
 } // namespace
 
