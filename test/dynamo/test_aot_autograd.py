@@ -800,6 +800,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 decompositions=None,
                 num_params_buffers=param_and_buf_len,
                 no_tangents=True,
+                trace_joint=True,
             )
 
         # Walk all the nodes in fx graph.

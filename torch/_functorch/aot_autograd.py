@@ -5143,7 +5143,10 @@ The output at index {output_loss_index} was marked as the loss, but it does not 
                 raise RuntimeError(f"""\
 We require the output marked as the loss (at index {output_loss_index}) to be a scalar, but it has shape {out_loss.shape}""")
             return out
+        ctx = nullcontext
     else:
+        # Run under no_grad, so our tracing machinery only traces an inference graph.
+        ctx = torch.no_grad
         fn_to_trace = functional_call
 
     full_args = []
@@ -5156,14 +5159,15 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # Next, the input args
     full_args.extend(args)
 
-    fx_g, metadata, in_spec, out_spec = _aot_export_function(
-        fn_to_trace,
-        full_args,
-        decompositions=decompositions,
-        num_params_buffers=params_len,
-        no_tangents=True,
-        trace_joint=trace_joint
-    )
+    with ctx():
+        fx_g, metadata, in_spec, out_spec = _aot_export_function(
+            fn_to_trace,
+            full_args,
+            decompositions=decompositions,
+            num_params_buffers=params_len,
+            no_tangents=True,
+            trace_joint=trace_joint
+        )
     if trace_joint:
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
@@ -5242,13 +5246,19 @@ def aot_export_joint_simple(
 
     Note: this function is only lightly tested today. It will probably be tested more heavily by higher order ops.
     """
+    if trace_joint:
+        ctx = nullcontext
+    else:
+        # Run under no_grad, so our tracing machinery only traces an inference graph.
+        ctx = torch.no_grad
 
-    fx_g, metadata, in_spec, out_spec = _aot_export_function(
-        func,
-        args,
-        decompositions=decompositions,
-        trace_joint=trace_joint,
-    )
+    with ctx():
+        fx_g, metadata, in_spec, out_spec = _aot_export_function(
+            func,
+            args,
+            decompositions=decompositions,
+            trace_joint=trace_joint,
+        )
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
