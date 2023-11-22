@@ -684,7 +684,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
       TORCH_WARN("m and k must be multiples of 4 on SM 9.0");
     }
     if (args.lda % 4 != 0 || args.ldb % 4 != 0) {
-      TORCH_WARN("Leading dimensions must be multiples of 4 on SM 9.0.");
+      TORCH_WARN("Leading dimensions must be multiples of 4 on SM 9.0");
     }
   }
   if (dprops->major == 7 || dprops->major == 8) {
