@@ -672,7 +672,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
-  
+
 #if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION >= 11070
   cublasCommonArgs args(self, mat2, result);
   auto dprops = at::cuda::getCurrentDeviceProperties();
