@@ -1699,6 +1699,8 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    # will attempt to create joint graph, unless no output requires grad
+    trace_joint: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -4460,7 +4462,7 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = (
+        needs_autograd = aot_config.trace_joint and (
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             or torch.is_grad_enabled()
         )
@@ -5141,10 +5143,7 @@ The output at index {output_loss_index} was marked as the loss, but it does not 
                 raise RuntimeError(f"""\
 We require the output marked as the loss (at index {output_loss_index}) to be a scalar, but it has shape {out_loss.shape}""")
             return out
-        ctx = nullcontext
     else:
-        # Run under no_grad, so our tracing machinery only traces an inference graph.
-        ctx = torch.no_grad
         fn_to_trace = functional_call
 
     full_args = []
@@ -5157,14 +5156,14 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # Next, the input args
     full_args.extend(args)
 
-    with ctx():
-        fx_g, metadata, in_spec, out_spec = _aot_export_function(
-            fn_to_trace,
-            full_args,
-            decompositions=decompositions,
-            num_params_buffers=params_len,
-            no_tangents=True,
-        )
+    fx_g, metadata, in_spec, out_spec = _aot_export_function(
+        fn_to_trace,
+        full_args,
+        decompositions=decompositions,
+        num_params_buffers=params_len,
+        no_tangents=True,
+        trace_joint=trace_joint
+    )
     if trace_joint:
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
@@ -5243,18 +5242,13 @@ def aot_export_joint_simple(
 
     Note: this function is only lightly tested today. It will probably be tested more heavily by higher order ops.
     """
-    if trace_joint:
-        ctx = nullcontext
-    else:
-        # Run under no_grad, so our tracing machinery only traces an inference graph.
-        ctx = torch.no_grad
 
-    with ctx():
-        fx_g, metadata, in_spec, out_spec = _aot_export_function(
-            func,
-            args,
-            decompositions=decompositions,
-        )
+    fx_g, metadata, in_spec, out_spec = _aot_export_function(
+        func,
+        args,
+        decompositions=decompositions,
+        trace_joint=trace_joint,
+    )
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -5309,6 +5303,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    trace_joint: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -5338,6 +5333,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        trace_joint=trace_joint,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
