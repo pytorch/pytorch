@@ -112,3 +112,198 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_adamw_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # TODO: add fused_adamw support
+        adamw_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "amsgrad": True,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "maximize": True,
+                "amsgrad": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in adamw_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.AdamW(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.AdamW(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_sgd_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        sgd_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "momentum": 0.05},
+            {"lr": 0.1, "momentum": 0.05, "foreach": True},
+            {"lr": 0.1, "momentum": 0.06, "dampening": 0.07, "foreach": True},
+            {
+                "lr": 0.1,
+                "momentum": 0.08,
+                "weight_decay": 0.05,
+                "nesterov": True,
+                "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "momentum": 0.08,
+                "weight_decay": 0.05,
+                "nesterov": True,
+                "maximize": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in sgd_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.SGD(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.SGD(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_adagrad_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        adagrad_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "lr_decay": 0.05},
+            {"lr": 0.1, "lr_decay": 0.02, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "lr_decay": 0.02,
+                "weight_decay": 0.05,
+                "initial_accumulator_value": 0.03,
+            },
+            {
+                "lr": 0.1,
+                "lr_decay": 0.02,
+                "weight_decay": 0.05,
+                "initial_accumulator_value": 0.03,
+                "eps": 1e-6,
+            },
+            {
+                "lr": 0.1,
+                "lr_decay": 0.02,
+                "weight_decay": 0.05,
+                "initial_accumulator_value": 0.03,
+                "eps": 1e-6,
+                "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "lr_decay": 0.02,
+                "weight_decay": 0.05,
+                "initial_accumulator_value": 0.03,
+                "eps": 1e-6,
+                "maximize": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in adagrad_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.Adagrad(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.Adagrad(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_RMSprop_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        RMSprop_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "alpha": 0.85},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+                "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "alpha": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "momentum": 0.9,
+                "centered": True,
+                "maximize": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in RMSprop_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.RMSprop(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.RMSprop(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
