@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 from __future__ import annotations
 
 import contextlib
@@ -37,9 +39,14 @@ from torch import _guards
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    DimDynamic,
+    StatelessSymbolicContext,
+)
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -111,7 +118,7 @@ def _reset_guarded_backend_cache():
 
 
 @contextlib.contextmanager
-def backend_cache_wrapper(callback: CompilerFn):
+def backend_cache_wrapper(callback: DynamoCallback):
     _maybe_init_guarded_backend_cache()
 
     # callback is False for RunOnlyContext. RunOnlyContext is used
@@ -151,7 +158,7 @@ DONT_WRAP_FILES = {
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
-) -> List[CacheEntry]:  # type: ignore[valid-type]
+) -> List[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
      stored in this code.
@@ -171,6 +178,9 @@ class OptimizedModule(torch.nn.Module):
     Wraps the original nn.Module object and later patches its
     forward method to optimized self.forward method.
     """
+
+    _torchdynamo_orig_callable: Callable[..., Any]
+    get_compiler_config: Callable[[], Any]
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
@@ -276,19 +286,22 @@ def _maybe_init_guarded_config_cache():
     if not hasattr(config_cache, "saved_config_and_hash"):
         # Optional[ConfigAndHash]
         config_cache.saved_config_and_hash = None
+        config_cache.nopython = None
 
 
 @contextlib.contextmanager
 def restore_guarded_dynamo_config(
-    first_ctx: bool, saved_config_and_hash: ConfigAndHash
+    first_ctx: bool, saved_config_and_hash: ConfigAndHash, nopython: bool
 ):
     _maybe_init_guarded_config_cache()
     # Set exactly once from top-level compile
     is_top_level = False
     try:
         if first_ctx and config_cache.saved_config_and_hash is None:
+            assert config_cache.nopython is None
             is_top_level = True
             config_cache.saved_config_and_hash = saved_config_and_hash
+            config_cache.nopython = nopython
             log.debug(
                 "Setting top-level compile config hash: %s",
                 saved_config_and_hash.hash.hex(),
@@ -303,6 +316,7 @@ def restore_guarded_dynamo_config(
                 config_cache.saved_config_and_hash.hash.hex(),
             )
             config_cache.saved_config_and_hash = None
+            config_cache.nopython = None
 
 
 def _get_config_and_hash(dynamic=None):
@@ -335,6 +349,7 @@ class _TorchDynamoContext:
         dynamic=None,
         compiler_config=None,
         save_config=True,
+        nopython=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -346,6 +361,7 @@ class _TorchDynamoContext:
         self.dynamic = dynamic
         self.compiler_config = compiler_config
         self.save_config = save_config and first_ctx
+        self.nopython = nopython
         if self.save_config:
             self.save_and_hash_config()
         patch_fn()
@@ -373,7 +389,7 @@ class _TorchDynamoContext:
         self.backend_ctx.__enter__()
         if self.save_config:
             self.dynamo_config_ctx = restore_guarded_dynamo_config(
-                self.first_ctx, self.saved_config_and_hash
+                self.first_ctx, self.saved_config_and_hash, self.nopython
             )
             self.dynamo_config_ctx.__enter__()
 
@@ -412,7 +428,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+            new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
         assert callable(fn)
@@ -466,7 +482,7 @@ class _TorchDynamoContext:
             backend_ctx.__enter__()
             if self.save_config:
                 dynamo_config_ctx = restore_guarded_dynamo_config(
-                    self.first_ctx, self.saved_config_and_hash
+                    self.first_ctx, self.saved_config_and_hash, self.nopython
                 )
                 dynamo_config_ctx.__enter__()
             try:
@@ -545,6 +561,7 @@ class OptimizeContext(_TorchDynamoContext):
         dynamic=None,
         save_config=True,
         compiler_config=None,
+        nopython=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -558,6 +575,7 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
             save_config=save_config,
+            nopython=nopython,
         )
 
 
@@ -647,6 +665,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     save_config=True,
+    nopython=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -655,6 +674,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         save_config=save_config,
+        nopython=nopython,
     )
 
 
@@ -883,12 +903,15 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
                     arg.node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i],
-                        dynamic_dims=[
-                            DimDynamic.DYNAMIC
-                            if d in flat_args_dynamic_dims[i]
-                            else DimDynamic.STATIC
-                            for d in range(len(flat_args[i].shape))
-                        ],
+                        symbolic_context=StatelessSymbolicContext(
+                            dynamic_sizes=[
+                                DimDynamic.DYNAMIC
+                                if d in flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
+                                for d in range(len(flat_args[i].shape))
+                            ],
+                            constraint_sizes=[None] * len(flat_args[i].shape),
+                        ),
                     )
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
@@ -900,6 +923,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             arg.node.meta["val"] = self.current_node.meta["val"]
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        if "example_value" in self.current_node.meta:
+            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -913,6 +938,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if "example_value" in self.current_node.meta:
+            result_proxy.node.meta["example_value"] = self.current_node.meta[
+                "example_value"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
@@ -922,7 +951,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
-    guards: Set[_guards.Guard]
+    guards: _guards.GuardsSet
     # NB: Do not add new fields without overriding __iter__; people are
     # destructuring so it is BC-breaking
 
@@ -1153,6 +1182,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
+    disable_constraint_solver: bool = False,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1177,6 +1207,8 @@ def export(
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
+
+        disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
 
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
@@ -1215,7 +1247,7 @@ def export(
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
 
-        def guard_export_print(guards: Set[_guards.Guard]):
+        def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
             assert (
                 out_guards is None
@@ -1313,7 +1345,8 @@ def export(
         remove_from_cache(f)
 
         if (
-            (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+            not disable_constraint_solver
+            and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
             and not skipfiles.check(call_to_inspect)
         ):
@@ -1451,6 +1484,7 @@ def optimize_assert(
         backend_ctx_ctor,
         dynamic=dynamic,
         save_config=save_config,
+        nopython=True,
     )
 
 
@@ -1557,7 +1591,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            opt.step.hooked = True
+            opt.step.hooked = True  # type: ignore[attr-defined]
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

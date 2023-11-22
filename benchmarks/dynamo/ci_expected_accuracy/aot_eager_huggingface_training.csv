@@ -6,11 +6,19 @@ AlbertForMaskedLM,pass,6
 
 
 
+AlbertForQuestionAnswering,pass,6
+
+
+
 AllenaiLongformerBase,pass,10
 
 
 
 BartForCausalLM,pass,14
+
+
+
+BartForConditionalGeneration,pass,26
 
 
 
@@ -43,6 +51,10 @@ DebertaForQuestionAnswering,pass,6
 
 
 DebertaV2ForMaskedLM,pass_due_to_skip,0
+
+
+
+DebertaV2ForQuestionAnswering,eager_1st_run_OOM,0
 
 
 
