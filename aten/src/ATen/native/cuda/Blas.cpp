@@ -672,10 +672,31 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
-
+  
 #if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION >= 11070
   cublasCommonArgs args(self, mat2, result);
-
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major == 9) {
+    if (args.transa != 't' || args.transb != 'n') {
+      TORCH_WARN("Only TN format is supported on SM 9.0");
+    }
+    if (args.m % 4 != 0 || args.k % 4 != 0) {
+      TORCH_WARN("m and k must be multiples of 4 on SM 9.0");
+    }
+    if (args.lda % 4 != 0 || args.ldb % 4 != 0) {
+      TORCH_WARN("Leading dimensions must be multiples of 4 on SM 9.0.");
+    }
+  }
+  if (dprops->major == 7 || dprops->major == 8) {
+    if (args.transa == args.transb) {
+      TORCH_WARN("Only TN and NT formats are supported on SM 7.5 and SM 8.x");
+    }    
+  }
+  if (reinterpret_cast<uintptr_t>(args.mata->data_ptr<int8_t>()) % 4 != 0 ||
+      reinterpret_cast<uintptr_t>(args.matb->data_ptr<int8_t>()) % 4 != 0 ||
+      reinterpret_cast<uintptr_t>(args.result->data_ptr<int32_t>()) % 4 != 0 ) {
+    TORCH_WARN("All pointers must be 4-byte aligned.");
+  }
   at::cuda::blas::int8_gemm(
       args.transa == 't',
       args.transb == 't',
