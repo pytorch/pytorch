@@ -9702,18 +9702,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             t2.foo = "bar"
             holder = []
             holder.append(t1)
-            t1_ref = weakref.ref(t1)
 
             self._checked_swap(t1, t2)
 
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
-            self.assertIs(t1_ref(), t2)
-            self.assertIsNot(t1_ref(), t1)
-            del t2, holder
-            # Dynamo keeps it alive
-            if not TEST_WITH_TORCHDYNAMO:
-                self.assertIs(t1_ref(), None)
+
+            wr = weakref.ref(t1)
+            with self.assertRaisesRegex(RuntimeError, "has weakref"):
+                torch.utils.swap_tensors(t1, t2)
 
     def test_swap_fail_slots(self):
         class MyTwoTensor(TwoTensor):

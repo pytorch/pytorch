@@ -6,6 +6,7 @@ from .cpp_backtrace import get_cpp_backtrace
 from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
 from . import deterministic
 from . import collect_env
+import weakref
 
 def set_module(obj, mod):
     """
@@ -29,15 +30,23 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different number of slots.
     """
-    # torch._C._swap(t1, t2)
+    # Ensure there are no weakrefs
+    if weakref.getweakrefs(t1):
+        raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
+    if weakref.getweakrefs(t2):
+        raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
 
-    # First move type
     def swap_attr(name):
         tmp = getattr(t1, name)
         setattr(t1, name, (getattr(t2, name)))
         setattr(t2, name, tmp)
 
+    # Swap the types
+    # Note that this will fail if there are mismatched slots
     swap_attr("__class__")
+
+    # Swap the dynamic attributes
     swap_attr("__dict__")
 
+    # Swap the at::Tensorr they point to
     torch._C._swap_tensor_impl(t1, t2)

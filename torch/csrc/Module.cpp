@@ -334,152 +334,17 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
 
-  //// Part 1: Basic type checks
-  // Ensure we have Tensors and their c++ structs are the same size
+  // Ensure we have Tensors
   TORCH_CHECK(THPVariable_Check(a_));
   TORCH_CHECK(THPVariable_Check(b_));
 
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
+  // Swap the Tensor Impl
   c10::MaybeOwned<at::Tensor> tmp = a->cdata;
   a->cdata = b->cdata;
   b->cdata = tmp;
-
-  //// Part 2: Fix weakrefs
-  // Move the lists and fix their content
-  // Note that the tp_weaklistoffset is always correct, even in the managed case
-#define GET_WR_OBJECT(obj) \
-  ((PyWeakReference**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset))
-
-  PyWeakReference* list = *GET_WR_OBJECT(a_);
-  *GET_WR_OBJECT(a_) = *GET_WR_OBJECT(b_);
-  *GET_WR_OBJECT(b_) = list;
-
-  PyWeakReference* head = *GET_WR_OBJECT(a_);
-  while (head != NULL) {
-    head->wr_object = a_;
-    head = head->wr_next;
-  }
-  head = *GET_WR_OBJECT(b_);
-  while (head != NULL) {
-    head->wr_object = b_;
-    head = head->wr_next;
-  }
-
-#undef GET_WR_OBJECT
-
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  PyObject* a_ = nullptr;
-  PyObject* b_ = nullptr;
-  if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
-    return nullptr;
-  }
-
-  //// Part 1: Basic type checks
-  // Ensure we have Tensors and their c++ structs are the same size
-  TORCH_CHECK(THPVariable_Check(a_));
-  TORCH_CHECK(THPVariable_Check(b_));
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_basicsize == Py_TYPE(b_)->tp_basicsize,
-      "The two Tensors cannot be swapped, are you using slots and, if so, are they the same number of them?");
-
-  //// Part 2: Compute real PyObject size in memory
-  // The code below ensures that from CPython feature point of view, the two
-  // objects do have the same size in memory by checking the appropriate type
-  // flags
-
-  // Managed dict was introduced in 3.11.a3
-  // in https://github.com/python/cpython/pull/29879
-
-  // Managed weakref was introduced in 3.12.a1
-  // in https://github.com/python/cpython/pull/95996
-
-  // The Tensor class uses both as soon as they're available.
-  auto start_pyobj_offset = 0;
-#if PY_VERSION_HEX > 0x030B00A3
-  // Always use managed dict here
-  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_DICT));
-  TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_DICT));
-  start_pyobj_offset += 1;
-#if PY_VERSION_HEX > 0x030C00A1
-  // Only use managed weakref when available
-  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_MANAGED_WEAKREF));
-  TORCH_CHECK(PyType_HasFeature(Py_TYPE(b_), Py_TPFLAGS_MANAGED_WEAKREF));
-  start_pyobj_offset += 1;
-#endif // PY_VERSION_HEX > 0x030B00A1
-#endif // PY_VERSION_HEX > 0x030A00A3
-
-  // dict, weaklist and vectorcall should always be at the same place
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_weaklistoffset == Py_TYPE(b_)->tp_weaklistoffset,
-      "Inconsistent weaklist offset for object for the swap function");
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_dictoffset == Py_TYPE(b_)->tp_dictoffset,
-      "Inconsistent dict offset for object for the swap function");
-  TORCH_CHECK(
-      Py_TYPE(a_)->tp_vectorcall_offset == Py_TYPE(b_)->tp_vectorcall_offset,
-      "Inconsistent vectorcall offset for object for the swap function");
-
-  // There always is a PyGC_Head just before the PyObject*
-  TORCH_CHECK(PyType_HasFeature(Py_TYPE(a_), Py_TPFLAGS_HAVE_GC));
-
-  //// Part 3: Get raw pointer and sizes
-  // PyObject should be PyDictOrValues but we don't have access to it
-  void* a =
-      (void*)((char*)a_ - start_pyobj_offset * sizeof(PyObject*) - sizeof(PyGC_Head));
-  void* b =
-      (void*)((char*)b_ - start_pyobj_offset * sizeof(PyObject*) - sizeof(PyGC_Head));
-  auto actual_size = Py_TYPE(a_)->tp_basicsize +
-      start_pyobj_offset * sizeof(PyObject*) + sizeof(PyGC_Head);
-
-  //// Part 4: Swap the full content of the PyObjects
-  std::vector<char> tmp(actual_size);
-  memcpy(tmp.data(), a, actual_size);
-  memcpy(a, b, actual_size);
-  memcpy(b, tmp.data(), actual_size);
-  tmp.clear();
-
-  //// Part 5: Put back the gc informations (ref count and linked list)
-  // To make sure that everyone holding a PyObject* reference
-  // to this is still correct, we put everything back.
-  Py_ssize_t tmp_refcnt = Py_REFCNT(a_);
-  Py_SET_REFCNT(a_, Py_REFCNT(b_));
-  Py_SET_REFCNT(b_, tmp_refcnt);
-
-  // We didn't move gc trackers
-  PyGC_Head* a_gc = _Py_AS_GC(a_);
-  PyGC_Head* b_gc = _Py_AS_GC(b_);
-  uintptr_t tmp_gc_head = a_gc->_gc_next;
-  a_gc->_gc_next = b_gc->_gc_next;
-  b_gc->_gc_next = tmp_gc_head;
-  tmp_gc_head = a_gc->_gc_prev;
-  a_gc->_gc_prev = b_gc->_gc_prev;
-  b_gc->_gc_prev = tmp_gc_head;
-
-  //// Part 6: Fix weakrefs
-  // The lists were moved but the object pointed by each ref were not
-  // Note that the tp_weaklistoffset is always correct, even in the managed case
-#define GET_WR_OBJECT(obj) \
-  (PyWeakReference**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset)
-
-  PyWeakReference* head = *GET_WR_OBJECT(a_);
-  while (head != NULL) {
-    head->wr_object = a_;
-    head = head->wr_next;
-  }
-  head = *GET_WR_OBJECT(b_);
-  while (head != NULL) {
-    head->wr_object = b_;
-    head = head->wr_next;
-  }
-
-#undef GET_WR_OBJECT
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1245,7 +1110,6 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
-    {"_swap", THPModule_swap, METH_VARARGS, nullptr},
     {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
