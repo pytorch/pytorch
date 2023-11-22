@@ -508,3 +508,37 @@ class FileSystemReader(StorageReader):
         self, global_plan: List[LoadPlan]
     ) -> List[LoadPlan]:
         return global_plan
+
+class FileSystemCheckpointer(Checkpointer):
+
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
+        ,*
+        single_file_per_rank: bool = True,
+        sync_files: bool = True,
+        thread_count: int = 1,
+        per_thread_copy_ahead: int = 10_000_000,
+        process_group,
+        coordinator_rank,
+        no_dist,
+        planner
+    ):
+
+        storage_writer = FileSystemWriter(
+            path,
+            single_file_per_rank,
+            sync_files,
+            thread_count,
+            per_thread_copy_ahead
+        )
+        storage_reader = FileSystemReader(path)
+
+        super().__init__(
+            storage_writer,
+            storage_reader,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner
+        )
