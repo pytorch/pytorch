@@ -92,6 +92,30 @@ if(HIP_FOUND)
     message("\n***** ROCm version from rocm_version.h ****\n")
   endif()
 
+  # check whether hipblaslt is using its own types
+  set(file "${PROJECT_BINARY_DIR}/hipblaslt_test.cc")
+  file(WRITE ${file} ""
+    "#include <hipblaslt/hipblaslt.h>\n"
+    "int main() {\n"
+    "    hipblasltDatatype_t bar = HIPBLASLT_R_16F;\n"
+    "    hipblasLtComputeType_t baz = HIPBLASLT_COMPUTE_F32;\n"
+    "    return 0;\n"
+    "}\n"
+    )
+
+  try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+    COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__
+    OUTPUT_VARIABLE hipblaslt_compile_output)
+
+  if(hipblaslt_compile_result)
+    set(HIPBLASLT_CUSTOM_TYPES ON)
+    message("hipblaslt is using custom types: ${hipblaslt_compile_output}")
+  else()
+    set(HIPBLASLT_CUSTOM_TYPES OFF)
+    message("hipblaslt is NOT using custom types: ${hipblaslt_compile_output}")
+  endif()
+
   string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+).*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
 
   if(ROCM_VERSION_DEV_MATCH)

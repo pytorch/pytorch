@@ -570,6 +570,48 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #define hipDataType hipblasDatatype_t
 #endif
 
+// hipblaslt custom types were a temporary work-around
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_TYPES
+hipblasltDatatype_t hipToLt(hipDataType type) {
+    switch (type) {
+        case HIP_R_32F: return HIPBLASLT_R_32F;
+        case HIP_R_64F: return HIPBLASLT_R_64F;
+        case HIP_R_16F: return HIPBLASLT_R_16F;
+        case HIP_R_8I: return HIPBLASLT_R_8I;
+        case HIP_C_32F: return HIPBLASLT_C_32F;
+        case HIP_C_64F: return HIPBLASLT_C_64F;
+        case HIP_C_16F: return HIPBLASLT_C_16F;
+        case HIP_C_8I: return HIPBLASLT_C_8I;
+        case HIP_R_8U: return HIPBLASLT_R_8U;
+        case HIP_C_8U: return HIPBLASLT_C_8U;
+        case HIP_R_32I: return HIPBLASLT_R_32I;
+        case HIP_C_32I: return HIPBLASLT_C_32I;
+        case HIP_R_32U: return HIPBLASLT_R_32U;
+        case HIP_C_32U: return HIPBLASLT_C_32U;
+        case HIP_R_16BF: return HIPBLASLT_R_16B;
+        case HIP_C_16BF: return HIPBLASLT_C_16B;
+        default: TORCH_CHECK(false);
+    }
+}
+
+hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
+    switch (type) {
+        case HIPBLAS_COMPUTE_32F: return HIPBLASLT_COMPUTE_F32;
+        case HIPBLAS_COMPUTE_32F_FAST_16F: return HIPBLASLT_COMPUTE_F32_FAST_F16;
+        case HIPBLAS_COMPUTE_32F_FAST_TF32: return HIPBLASLT_COMPUTE_F32_FAST_XF32;
+        case HIPBLAS_COMPUTE_64F: return HIPBLASLT_COMPUTE_F64;
+        case HIPBLAS_COMPUTE_32I: return HIPBLASLT_COMPUTE_I32;
+        default: TORCH_CHECK(false);
+    }
+}
+
+#define HIPTOLT(type) hipToLt(type)
+#define HIPCOMPTOLT(type) hipblasToLt(type)
+#else
+#define HIPTOLT(type) type
+#define HIPCOMPTOLT(type) type
+#endif
+
 namespace {
 // Following the pattern of CuSparseDescriptor
 // Defined here for now because this is the only place cublas_lt interface is
@@ -607,7 +649,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
       cudaDataType_t scale_type) {
     cublasLtMatmulDesc_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
-        cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
+        cublasLtMatmulDescCreate(&raw_descriptor, HIPCOMPTOLT(compute_type), HIPTOLT(scale_type)));
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
@@ -628,7 +670,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       bool t = false) {
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
-        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
+        cublasLtMatrixLayoutCreate(&raw_descriptor, HIPTOLT(type), t ? cols : rows, t ? rows : cols, ld));
     descriptor_.reset(raw_descriptor);
   }
 };
