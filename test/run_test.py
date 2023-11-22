@@ -1518,9 +1518,16 @@ def run_test_module(
     test_name = test.name
 
     # Printing the date here can help diagnose which tests are slow
-    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+    start_time = time.now()
+    print_to_stderr(f"ZR Running {str(test)} ... [{datetime.now()}]")
     handler = CUSTOM_HANDLERS.get(test_name, run_test)
     return_code = handler(test, test_directory, options)
+    duration = time.now() - start_time
+    import math
+    delta = math.abs(duration - test.get_time())
+    # Identify gross misestimates
+    if delta > 60 and delta/test.get_time() > 0.3:
+        print_to_stderr(f"ZR: GROSS MISESTIMATE {str(test)}. Delta {delta} [expected {test.get_time()}, got {duration}]")
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
     ), f"While running {str(test)} got non integer return code {return_code}"
