@@ -944,6 +944,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
         "Unsupported FX nodes: {'call_function': ['aten.add_.Tensor']}. "
+        "github issue: https://github.com/pytorch/pytorch/issues/114406"
     )
     def test_exported_program_as_input_lifting_buffers_mutation(self):
         class CustomModule(torch.nn.Module):
