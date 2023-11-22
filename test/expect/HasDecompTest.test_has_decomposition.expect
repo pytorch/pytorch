@@ -576,15 +576,12 @@ aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input
-aten::_upsample_nearest_exact1d
 aten::_upsample_nearest_exact1d.out
 aten::_upsample_nearest_exact1d_backward
 aten::_upsample_nearest_exact1d_backward.grad_input
-aten::_upsample_nearest_exact2d
 aten::_upsample_nearest_exact2d.out
 aten::_upsample_nearest_exact2d_backward
 aten::_upsample_nearest_exact2d_backward.grad_input
-aten::_upsample_nearest_exact3d
 aten::_upsample_nearest_exact3d.out
 aten::_upsample_nearest_exact3d_backward
 aten::_upsample_nearest_exact3d_backward.grad_input

@@ -1348,6 +1348,7 @@ class Scheduler:
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             for s in node.node.get_unbacked_symbol_defs():
+                assert isinstance(s, sympy.Symbol)
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
@@ -1402,6 +1403,9 @@ class Scheduler:
         for node in V.graph.graph_outputs:
             if isinstance(node, ir.ShapeAsConstantBuffer):
                 for s in free_unbacked_symbols(node.shape):
+                    assert (
+                        s in unbacked_symbol_to_origin_node
+                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                     node_name = unbacked_symbol_to_origin_node[s].node.name
                     log.debug(
                         "scheduling output %s for unbacked symint %s", node_name, s
