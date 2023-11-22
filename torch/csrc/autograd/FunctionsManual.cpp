@@ -825,7 +825,7 @@ Tensor prod_backward(
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
-  } else if (zero_idx.size(0) > 1) {
+  } else if (!at::GradMode::is_enabled() && zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -2106,7 +2106,7 @@ Tensor _nested_split_with_sizes_backward(
     if (grads[i].defined()) {
       grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
     } else {
-      const auto& length = split_sizes[i].expect_int();
+      const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
       for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
@@ -4429,19 +4429,22 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper) {
+    const bool upper,
+    std::array<bool, 2> output_mask) {
   at::NoTF32Guard disable_tf32;
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.mH());
-    common_term = common_term + common_term.mH();
+    if (output_mask[1]) {
+      Tensor common_term = at::matmul(grad_self, result.mH());
+      common_term = common_term + common_term.mH();
 
-    if (upper) {
-      grad_input2 = -at::matmul(input2, common_term);
-    } else {
-      grad_input2 = -at::matmul(common_term, input2);
+      if (upper) {
+        grad_input2 = -at::matmul(input2, common_term);
+      } else {
+        grad_input2 = -at::matmul(common_term, input2);
+      }
     }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};

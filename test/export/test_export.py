@@ -623,16 +623,23 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-        # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
+        @dataclass
+        class MyOtherDataClass:  # the pytree registration don't allow registering the same class twice
+            x: int
+            y: int
+            z: int = None
 
+        # Override the registration with keep none fields
+        register_dataclass_as_pytree_node(MyOtherDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyOtherDataClass")
+
+        dt = MyOtherDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass,
+                MyOtherDataClass,
                 (
-                    MyDataClass,
+                    MyOtherDataClass,
                     ['x', 'y', 'z'],
                     [],
                 ),
@@ -642,7 +649,7 @@ class TestExport(TestCase):
         self.assertEqual(flat, [3, 4, None])
 
         orig_dt = tree_unflatten(flat, spec)
-        self.assertTrue(isinstance(orig_dt, MyDataClass))
+        self.assertTrue(isinstance(orig_dt, MyOtherDataClass))
         self.assertEqual(orig_dt.x, 3)
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)
@@ -1583,6 +1590,35 @@ def forward(self, arg0_1):
         # there is no functionalization.
         self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
 
+    def test_issue_113041(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.a
+
+        def forward_hook(
+            module: torch.nn.Module, inputs, output
+        ) -> torch.Tensor:
+            return 2 * output
+
+        seq = torch.nn.Sequential(TestModule()).eval()
+        seq.b = torch.tensor(2)
+        handle = seq.register_forward_hook(forward_hook)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = seq
+
+            def forward(self, x):
+                return self.seq(x) + self.seq.b
+
+        inp = (torch.randn(2, 8),)
+        ep = export(M(), inp)  # This errors because dynamo adds an extra input
+
     def test_export_with_fake_tensor_inputs(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -1651,6 +1687,46 @@ def forward(self, arg0_1):
             self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
 
         check_device_and_fake_mode()
+
+
+    def test_export_graph_with_no_inputs(self):
+        # We saw this pattern when users want to export
+        # a graph that initlizes the states of a model.
+        def f():
+            return torch.randn(3, 4), torch.randn(3, 4)
+
+        ep = torch.export.export(f, ())
+        a, b = ep()
+        self.assertEqual(a.size(), torch.Size([3, 4]))
+        self.assertEqual(b.size(), torch.Size([3, 4]))
+
+    def test_export_then_compile_tensor_ctor(self):
+        class M(torch.nn.Module):
+            def __init__(self,):
+                super().__init__()
+
+            def forward(self, scores, mask):
+                scores = scores.masked_fill(
+                    mask, torch.tensor(torch.finfo(scores.dtype).min)
+                )  # (bs, n_heads, q_length, k_length)
+                return scores
+
+        tensor_cpu = torch.randn(2, 4)
+        mask_cpu = torch.BoolTensor(
+            [[False,  True, False, False],
+            [False, False, False, False]]
+        )
+
+        m = M().eval()
+        # res_ref = m(tensor_cpu, mask_cpu)
+        # print("res_ref is: {}".format(res_ref), flush=True)
+
+        exported_model = capture_pre_autograd_graph(
+            m,
+            (tensor_cpu, mask_cpu),
+        )
+        optimized_model = torch.compile(exported_model)
+        optimized_model(tensor_cpu, mask_cpu)
 
 
 if __name__ == '__main__':
