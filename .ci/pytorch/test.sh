@@ -235,7 +235,7 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --continue-through-error --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
