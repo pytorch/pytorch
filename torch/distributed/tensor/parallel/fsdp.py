@@ -251,13 +251,13 @@ def _chunk_dtensor(
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), Replicate()).
         replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
-        shard_placements = [Replicate() for _ in range(parent_mesh.ndim)]
-        shard_placements[0] = DShard(0)  # type: ignore[call-overload]
+        shard_placements = [DShard(0)]
+        # shard_placements[0] = DShard(0)  # type: ignore[call-overload]
 
         return DTensor.from_local(
             tensor, parent_mesh, replicate_placements
         ).redistribute(
-            device_mesh=parent_mesh,
+            device_mesh=device_mesh,
             placements=shard_placements,
         )
 
