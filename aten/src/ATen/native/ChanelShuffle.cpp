@@ -5,7 +5,6 @@
 #endif
 #include <c10/util/Exception.h>
 
-#include <ATen/native/TensorTransformations.h>
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

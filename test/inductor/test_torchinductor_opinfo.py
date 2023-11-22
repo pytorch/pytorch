@@ -211,7 +211,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "linalg.cross": {f16},
-    "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -224,29 +223,32 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
     "view_as_complex": {f16},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
     "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
-    "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
-    "svd_lowrank": {f32, f64},
+    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
 }
+
+
+# intentionally not handled
+intentionally_not_handled = {
+    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
+}
+
+inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
