@@ -494,7 +494,7 @@ def enable_fake_mode():
     # Mixed fake/real tensors are only allowed when `torch.onnx.dynamo_export` is not called within `FakeTensorMode`
     # This is needed because models can create new parameters during `forward(self, *args, **kwargs)` run
     fake_mode = fake_tensor.FakeTensorMode(
-        allow_non_fake_inputs=not torch._guards.detect_fake_mode(),
+        allow_non_fake_inputs=not torch._tracing_context.detect_fake_mode(),
         shape_env=ShapeEnv(
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),

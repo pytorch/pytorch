@@ -22,7 +22,8 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, tracing, TracingContext
+from torch._guards import Checkpointable
+from torch._tracing_context import tracing, TracingContext
 
 from . import (
     config,
@@ -811,7 +812,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def run(self):
         with self.run_ctx_mgr():
             try:
-                self.output.push_tx(self)
+                self.output.tracing_context.push_tx(self)
                 while (
                     self.instruction_pointer is not None
                     and not self.output.should_exit
@@ -825,7 +826,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
                 raise
             finally:
-                self.output.pop_tx()
+                self.output.tracing_context.pop_tx()
                 # Cleanup the outputGraph to delete the held tensors. We perform the
                 # cleanup only for InstructionTranslator and not
                 # InliningInstructionTranslator. The InliningInstructionTranslator

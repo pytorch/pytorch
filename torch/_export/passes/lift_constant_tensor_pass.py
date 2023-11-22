@@ -1,7 +1,7 @@
 from typing import Dict
 
 import torch
-from torch._guards import detect_fake_mode
+from torch._tracing_context import detect_fake_mode
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 
 

@@ -557,7 +557,7 @@ def _get_updated_range_constraints(
             for node in gm.graph.nodes
             if node.meta.get("val", None) is not None
         ]
-        from torch._guards import detect_fake_mode
+        from torch._tracing_context import detect_fake_mode
 
         fake_mode = detect_fake_mode(vals)
         if fake_mode is not None:

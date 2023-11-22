@@ -55,8 +55,8 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
     from torch._logging import LazyString
+    from torch._tracing_context import detect_fake_mode  # noqa: F401n
     from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.

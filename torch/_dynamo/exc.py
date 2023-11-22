@@ -6,6 +6,8 @@ from typing import cast, NoReturn, Optional
 
 import torch._guards
 
+import torch._tracing_context
+
 from . import config
 from .config import is_fbcode
 
@@ -87,7 +89,7 @@ class BackendCompilerFailed(TorchDynamoException):
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super().__init__(msg)
-        self.real_stack = torch._guards.TracingContext.extract_stack()
+        self.real_stack = torch._tracing_context.TracingContext.extract_stack()
         self.msg = msg
         self.category: Optional[str] = None
         self.add_to_stats()
