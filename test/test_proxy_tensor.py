@@ -923,6 +923,16 @@ class TestSymbolicTracing(TestCase):
             lambda: interp.run(torch.randn(3, 3))
         )
 
+    def test_int_input(self):
+        def f(x, y):
+            return x.view(y)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 4), 12).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    view = torch.ops.aten.view.default(x_1, [y_1]);  x_1 = y_1 = None
+    return view""")
+
     def test_resize_from_zero(self):
         def f(x, y):
             x.resize_(y.size(0))
@@ -1705,10 +1715,19 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
+
+    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
+    xfail('dist', ''),
+    xfail('norm', ''),
+    xfail('linalg.vector_norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('renorm', ''),
+
+    xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
+    xfail('randint_like', ''),  # when unpacking SymInt, expected int but got s0
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
@@ -1736,6 +1755,11 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+
+    xfail('linalg.norm', ''),
+    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1799,6 +1823,11 @@ out_symbolic_tensor_failures = {
     xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
+
+    # SymIntArrayRef expected to contain only concrete
+    xfail('ones', ''),
+    xfail('randn', ''),
+    xfail('zeros', ''),
 }
 
 out_symbolic_tensor_segfaults = {
