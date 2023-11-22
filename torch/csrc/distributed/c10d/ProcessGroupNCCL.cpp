@@ -339,6 +339,10 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump();
+}
+
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;

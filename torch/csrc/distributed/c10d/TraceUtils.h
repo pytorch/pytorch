@@ -14,6 +14,9 @@
 #include <vector>
 
 namespace c10d {
+
+/* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
+
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
   return pgName + "_" + std::to_string(rank) + "_trace_start";
 }
@@ -259,6 +262,9 @@ inline std::string retrieveDesyncReport(
 }
 
 /* Trace Utils Related to Flight Recorder */
+
+/* Note: this is only used by PGNCCL (could be generalized in an ideal world but
+ * wasn't done that way, so isn't expected to be fully general at the moment) */
 
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
@@ -509,9 +515,5 @@ struct NCCLTraceBuffer {
     return pickle_str(entries);
   }
 };
-
-inline std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
-}
 
 } // namespace c10d
