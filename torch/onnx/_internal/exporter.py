@@ -1,5 +1,6 @@
-# necessary to surface onnx.ModelProto through ONNXProgram:
-from __future__ import annotations
+from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
+    annotations,
+)
 
 import abc
 
@@ -52,6 +53,7 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import onnx
+    import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
@@ -602,6 +604,41 @@ class LargeProtobufONNXProgramSerializer:
             )
 
 
+class ONNXRuntimeOptions:
+    """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    Attributes:
+        session_options: ONNX Runtime session options.
+        execution_providers: ONNX Runtime execution providers to use during model execution.
+        execution_provider_options: ONNX Runtime execution provider options.
+    """
+
+    session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
+    """ONNX Runtime session options."""
+
+    execution_providers: Optional[
+        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
+    ] = None
+    """ONNX Runtime execution providers to use during model execution."""
+
+    execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
+    """ONNX Runtime execution provider options."""
+
+    @_beartype.beartype
+    def __init__(
+        self,
+        *,
+        session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None,
+        execution_providers: Optional[
+            Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
+        ] = None,
+        execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None,
+    ):
+        self.session_options = session_options
+        self.execution_providers = execution_providers
+        self.execution_provider_options = execution_provider_options
+
+
 class ONNXProgram:
     """An in-memory representation of a PyTorch model that has been exported to ONNX.
 
@@ -642,6 +679,34 @@ class ONNXProgram:
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
+
+    def __call__(
+        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+    ) -> Any:
+        """Runs the ONNX model using ONNX Runtime
+
+        Args:
+            args: The positional inputs to the model.
+            kwargs: The keyword inputs to the model.
+            options: The options to use for running the model with ONNX Runtime.
+
+        Returns:
+            The model output as computed by ONNX Runtime
+        """
+        import onnxruntime  # type: ignore[import]
+
+        onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
+        options = options or ONNXRuntimeOptions()
+        providers = options.execution_providers or onnxruntime.get_available_providers()
+        onnx_model = self.model_proto.SerializeToString()
+        ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+
+        onnxruntime_input = {
+            k.name: v.numpy(force=True)
+            for k, v in zip(ort_session.get_inputs(), onnx_input)
+        }
+
+        return ort_session.run(None, onnxruntime_input)
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -1416,6 +1481,7 @@ __all__ = [
     "ExportOptions",
     "ONNXProgram",
     "ONNXProgramSerializer",
+    "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
     "OnnxRegistry",
