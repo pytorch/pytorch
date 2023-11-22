@@ -13,12 +13,13 @@
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 #include <cublasLt.h>
 #endif
 
 #ifdef USE_ROCM
 // until hipblas has an API to accept flags, we must use rocblas here
+#include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
 #define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
 #define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
@@ -64,6 +65,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 // until we use hiblas v2
 // hipify correctly maps things like CUDA_R_16F to HIP_R_16F,
 // however hipblas v1 is still using its custom type
+#ifndef HIPBLAS_V2
 #define HIP_R_16F  HIPBLAS_R_16F
 #define HIP_R_32F  HIPBLAS_R_32F
 #define HIP_R_64F  HIPBLAS_R_64F
@@ -80,6 +82,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 #define HIP_C_32U  HIPBLAS_C_32U
 #define HIP_R_16BF HIPBLAS_R_16B
 #define HIP_C_16BF HIPBLAS_C_16B
+#endif
 #endif
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
@@ -167,6 +170,7 @@ static void _cublasAdjustLdLevel3(
   }
 }
 
+#ifndef USE_ROCM
 uint32_t _getAlignment(uintptr_t address) {
   // alignment are in bytes
   uint32_t alignment = 256;
@@ -176,18 +180,25 @@ uint32_t _getAlignment(uintptr_t address) {
     }
   }
 }
+#endif
 
 static size_t _parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+#ifdef USE_ROCM
+  if (!val) {
+    // accept either env var
+    val = getenv("HIPBLASLT_WORKSPACE_SIZE");
+  }
+#endif
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
   if (val) {
     try {
       workspace_size = std::stoi(val);
     } catch(std::invalid_argument const& e) {
-      TORCH_WARN("invalid CUBLAS_LT_WORKSPACE_SIZE,",
+      TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " bytes.");
     } catch(std::out_of_range const& e) {
-      TORCH_WARN("CUBLAS_LT_WORKSPACE_SIZE out of range,",
+      TORCH_WARN("CUBLASLT_WORKSPACE_SIZE out of range,",
                  " using default workspace size of ", workspace_size, " bytes.");
     }
   }
@@ -346,7 +357,13 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
                                   (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
-                                  (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+                                  (int)num_batches,
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+                                  CUBLAS_COMPUTE_32F,
+#else
+                                  CUDA_R_32F,
+#endif
+                                  CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template <>
@@ -536,12 +553,22 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       c,
       CUDA_R_16BF,
       ldc,
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+      CUBLAS_COMPUTE_32F,
+#else
       CUDA_R_32F,
+#endif
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+
+#if defined(USE_ROCM) && ROCM_VERSION >= 50700 && ROCM_VERSION < 60000
+// only for rocm 5.7 where we first supported hipblaslt, it was difficult
+// to hipify correctly without this change.
+#define hipDataType hipblasDatatype_t
+#endif
 
 namespace {
 // Following the pattern of CuSparseDescriptor
@@ -645,13 +672,19 @@ void gemm_and_bias(
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   if constexpr (std::is_same_v<Dtype, double>) {
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
+#else
+    TORCH_CHECK(false, "gemm_and_bias is only supported for double type on ROCm 6.0 and above");
+#endif
   } else if constexpr (std::is_same_v<Dtype, float>) {
+#ifndef USE_ROCM
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
+#endif
     abcType = CUDA_R_32F;
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
     abcType = CUDA_R_16F;
@@ -668,7 +701,7 @@ void gemm_and_bias(
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-#if CUDA_VERSION >= 11040
+#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
@@ -685,6 +718,7 @@ void gemm_and_bias(
   size_t workspaceSize = _getWorkspaceSize();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
+#ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
   uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
@@ -693,6 +727,7 @@ void gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
+#endif
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
@@ -952,6 +987,7 @@ void int8_gemm(
     int64_t mat2_ld,
     int32_t* result_ptr,
     int64_t result_ld) {
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
   cudaDataType_t scaleType = CUDA_R_32I;
@@ -1022,11 +1058,13 @@ void int8_gemm(
       computeType,
       " scaleType ",
       scaleType);
+#endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+  TORCH_CHECK(false, "int8_gemm is only supported for ROCm 6.0 and above");
 }
-#endif // !defined(USE_ROCM) && !defined(_MSC_VER)
+#endif // (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
-#if defined(USE_ROCM) && ROCM_VERSION <= 56000
+#if defined(USE_ROCM) && ROCM_VERSION <= 50600
 #define ROCM_CONST_BUG
 #else
 #define ROCM_CONST_BUG const

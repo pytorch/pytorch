@@ -1253,6 +1253,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1276,8 +1279,13 @@ if(USE_ROCM)
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-    set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB} ${hipblaslt_LIBRARIES})
+    else()
+      set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    endif()
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)

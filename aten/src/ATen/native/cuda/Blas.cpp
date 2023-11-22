@@ -153,7 +153,7 @@ enum class Activation {
   GELU,
 };
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
@@ -171,9 +171,35 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
+#ifdef USE_ROCM
+    // allow both CUDA and HIP env var names for ROCm builds
+    // also, current default for ROCm builds is disable by default
+    if (env_value == nullptr) {
+        env_value = std::getenv("DISABLE_ADDMM_HIP_LT");
+    }
+    if (env_value != nullptr && strcmp(env_value, "0") == 0) {
+      return false;
+    }
+    return true;
+#else
     if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
+    return false;
+#endif
+}
+
+static bool isSupportedHipLtROCmArch(int index) {
+    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
+    std::string device_arch = prop->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    TORCH_CHECK(false, "Attempting to use HIPBlasLT on a unsupported architecture!");
     return false;
 }
 
@@ -198,7 +224,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)) || defined(USE_ROCM) && ROCM_VERSION >= 50700
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
@@ -211,10 +237,17 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
+#ifdef USE_ROCM
+          isSupportedHipLtROCmArch(self.device().index()) &&
+          (scalar_type == at::ScalarType::Float ||
+           scalar_type == at::ScalarType::Half ||
+           scalar_type == at::ScalarType::BFloat16) &&
+#else
           (scalar_type == at::ScalarType::Double ||
            scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
+#endif
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
@@ -277,7 +310,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
   if (useLtInterface) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -299,7 +332,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
               activation_to_gemm_and_blas_arg(activation)
 #else
               // GELU is not supported (and does not compile!) prior
@@ -357,7 +390,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // gating activation_to_gemm_and_blas_arg above; here we are manually
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
-#if !defined(CUDA_VERSION) || CUDA_VERSION < 11080
+#if !(defined(CUDA_VERSION) && CUDA_VERSION >= 11080) && !defined(USE_ROCM)
   if (useLtInterface && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
