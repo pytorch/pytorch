@@ -1,7 +1,4 @@
-"""
-This module implements modules which are used to perform fake quantization
-during QAT.
-"""
+"""Implements modules  used to perform fake quantization."""
 
 import torch
 from torch.nn import Module
@@ -58,7 +55,9 @@ def _is_float_qparams(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_channel_affine_float_qparams, ]
 
 class FakeQuantizeBase(ABC, Module):
-    r""" Base fake quantize module
+    r"""Base fake quantize module.
+
+    Base fake quantize module
     Any fake quantize implementation should derive from this class.
 
     Concrete fake quantize module should follow the same API. In forward, they will update
@@ -72,6 +71,7 @@ class FakeQuantizeBase(ABC, Module):
     observer_enabled: torch.Tensor
 
     def __init__(self):
+        """Set fake_quant_enabled and observer_enabled."""
         super().__init__()
         # fake_quant_enabled and observer_enabled are buffers to support their
         # replication in DDP. Data type is uint8 because NCCL does not support
@@ -112,7 +112,8 @@ class FakeQuantizeBase(ABC, Module):
         return fake_quant_constructor
 
 class FakeQuantize(FakeQuantizeBase):
-    r""" Simulate the quantize and dequantize operations in training time.
+    r"""Simulate the quantize and dequantize operations in training time.
+
     The output of this module is given by::
 
         x_out = (
@@ -138,7 +139,6 @@ class FakeQuantize(FakeQuantizeBase):
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
-
         activation_post_process (Module): User provided module that collects statistics on the input tensor and
           provides a method to calculate scale and zero-point.
 
@@ -259,7 +259,9 @@ class FakeQuantize(FakeQuantizeBase):
 
 
 class FixedQParamsFakeQuantize(FakeQuantize):
-    """ Simulate quantize and dequantize with fixed quantization
+    """Simulate quantize and dequantize in training time.
+
+    Simulate quantize and dequantize with fixed quantization
     parameters in training time. Only per tensor quantization
     is supported.
     """
@@ -281,6 +283,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
 
     @torch.jit.export
     def extra_repr(self):
+        """Define a string representation of the object's attributes."""
         return 'fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, ' \
                'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
                    self.fake_quant_enabled, self.observer_enabled,
@@ -289,7 +292,9 @@ class FixedQParamsFakeQuantize(FakeQuantize):
 
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
-    r"""Fused module that is used to observe the input tensor (compute min/max), compute
+    r"""Define a fused module to observe the tensor.
+
+    Fused module that is used to observe the input tensor (compute min/max), compute
     scale/zero_point and fake_quantize the tensor.
     This module uses calculation similar MovingAverageMinMaxObserver for the inputs,
     to compute the min/max values in order to compute the scale/zero_point.
@@ -477,8 +482,7 @@ Fused version of `default_per_channel_weight_fake_quant`, with the 8-bit values 
 
 
 def _is_fake_quant_script_module(mod):
-    ''' Returns true if given mod is an instance of FakeQuantize script module.
-    '''
+    """Return true if given mod is an instance of FakeQuantize script module."""
     if isinstance(mod, torch.jit.RecursiveScriptModule):
         # qualified name looks like '__torch__.torch.ao.quantization.fake_quantize.___torch_mangle_2.FakeQuantize'
         suffix = mod._c.qualified_name.split('.', 1)[1]
@@ -488,7 +492,8 @@ def _is_fake_quant_script_module(mod):
     return False
 
 def disable_fake_quant(mod):
-    """
+    """Disable fake quantization for the module.
+
     Disable fake quantization for this module, if applicable. Example usage::
 
       # model is any PyTorch model
@@ -499,7 +504,8 @@ def disable_fake_quant(mod):
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
-    """
+    """Enable fake quantization for the module.
+
     Enable fake quantization for this module, if applicable. Example usage::
 
       # model is any PyTorch model
@@ -510,7 +516,8 @@ def enable_fake_quant(mod):
         mod.enable_fake_quant()
 
 def disable_observer(mod):
-    """
+    """Disable observation for this module.
+
     Disable observation for this module, if applicable. Example usage::
 
       # model is any PyTorch model
@@ -521,7 +528,8 @@ def disable_observer(mod):
         mod.disable_observer()
 
 def enable_observer(mod):
-    """
+    """Enable observation for this module.
+
     Enable observation for this module, if applicable. Example usage::
 
       # model is any PyTorch model
