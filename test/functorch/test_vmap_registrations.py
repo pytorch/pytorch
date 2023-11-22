@@ -38,7 +38,6 @@ xfail_not_implemented = {
     "aten::align_to.ellipsis_idx",
     "aten::alpha_dropout",
     "aten::alpha_dropout_",
-    "aten::arctan2_",
     "aten::argwhere",
     "aten::bilinear",
     "aten::can_cast",
