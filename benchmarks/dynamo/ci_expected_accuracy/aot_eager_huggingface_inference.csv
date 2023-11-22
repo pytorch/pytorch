@@ -18,6 +18,10 @@ BartForCausalLM,pass,0
 
 
 
+BartForConditionalGeneration,pass,0
+
+
+
 BertForMaskedLM,pass,0
 
 
@@ -51,6 +55,10 @@ DebertaForQuestionAnswering,pass,0
 
 
 DebertaV2ForMaskedLM,pass_due_to_skip,0
+
+
+
+DebertaV2ForQuestionAnswering,pass,0
 
 
 
