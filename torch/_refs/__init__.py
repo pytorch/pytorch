@@ -1074,7 +1074,10 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, TensorLike):
+            b = prims.mul(b, alpha)
+        else:
+            b = b * alpha
 
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
@@ -5900,7 +5903,6 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert generator is None
     assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
@@ -5937,6 +5939,7 @@ def normal(
         dtype=dtype,
         device=device,
         requires_grad=False,
+        generator=generator,
     )
     return std * normal_samples + mean
 
