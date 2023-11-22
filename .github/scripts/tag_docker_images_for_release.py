@@ -5,15 +5,16 @@ import argparse
 from typing import Dict
 
 def tag_image( image: str, default_tag: str, release_version: str, dry_run: str, tagged_images: Dict[str, bool]) -> None:
-    if image not in tagged_images:
-        release_image = image.replace(f'-{default_tag}', f'-{release_version}')
-        print(f"Tagging {image} to {release_image} , dry_run: {dry_run}")
-        if dry_run == 'disabled':
-            subprocess.check_call(["docker", "pull", image])
-            subprocess.check_call(["docker", "tag", image, release_image])
-            subprocess.check_call(["docker", "push", release_image])
-
-        tagged_images[image] = True
+    if image in tagged_images:
+        return
+    release_image = image.replace(f'-{default_tag}', f'-{release_version}')
+    print(f"Tagging {image} to {release_image} , dry_run: {dry_run}")
+    
+    if dry_run == 'disabled':
+        subprocess.check_call(["docker", "pull", image])
+        subprocess.check_call(["docker", "tag", image, release_image])
+        subprocess.check_call(["docker", "push", release_image])
+    tagged_images[image] = True
 
 def main() -> None:
     parser = argparse.ArgumentParser()
