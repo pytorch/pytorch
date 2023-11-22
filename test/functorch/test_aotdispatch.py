@@ -433,7 +433,49 @@ class TestAOTAutograd(AOTTestCase):
         self.verify_aot_autograd(F(), [x, y], dynamic=False)
         self.verify_aot_autograd(F(), [x, y], dynamic=True)
 
+    def test_ambient_no_grad_with_output_requires_grad(self):
+        def fn(x):
+            with torch.enable_grad():
+                out = x + 1
+            out2 = x + 2
+            return out, out2
 
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        inp = torch.ones(10, requires_grad=True)
+        opt_inp = torch.ones(10, requires_grad=True)
+
+        with torch.no_grad():
+            res = fn(inp)
+            opt_res = opt_fn(opt_inp)
+
+            self.assertTrue(all(id(a) != id(b) for a, b in zip(res, res[1:])))
+            self.assertTrue(all(id(a) != id(b) for a, b in zip(opt_res, opt_res[1:])))
+
+            self.assertTrue(all(res.requires_grad == ref for res, ref in zip(res, (True, False))))
+            self.assertTrue(all(res.requires_grad == opt.requires_grad for res, opt in zip(res, opt_res)))
+
+    def test_ambient_enable_grad_with_output_not_requires_grad(self):
+        def fn(x):
+            with torch.no_grad():
+                out = x + 1
+            out2 = x + 2
+            return out, out2
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        inp = torch.ones(10, requires_grad=True)
+        opt_inp = torch.ones(10, requires_grad=True)
+
+        with torch.enable_grad():
+            res = fn(inp)
+            opt_res = opt_fn(opt_inp)
+
+            self.assertTrue(all(id(a) != id(b) for a, b in zip(res, res[1:])))
+            self.assertTrue(all(id(a) != id(b) for a, b in zip(opt_res, opt_res[1:])))
+
+            self.assertTrue(all(res.requires_grad == ref for res, ref in zip(res, (False, True))))
+            self.assertTrue(all(res.requires_grad == opt.requires_grad for res, opt in zip(res, opt_res)))
 
     def test_input_mutation_simple(self):
         def f(a):
