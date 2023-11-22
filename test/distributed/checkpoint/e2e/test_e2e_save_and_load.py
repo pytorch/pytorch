@@ -174,7 +174,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @with_temp_dir
     def test_different_ordered_state_dict_keys(self):
-        """Tests that the order of keys in the state dict does not matter when loading or saving.
+        """Tests that the order of keys in the state dict does not matter when loading
         If order was not accounted for, the following test would cause a deadlock.
         """
 
@@ -182,16 +182,6 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         class Foo:
             def state_dict(self):
-                tl = [
-                    torch.ones(2, dtype=torch.int64, device="cuda")
-                    for _ in range(world_size)
-                ]
-                t = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
-                    + 1
-                    + 2 * dist.get_rank()
-                )
-                dist.all_gather(tl, t, async_op=False)
                 return {}
 
             def load_state_dict(self, state_dict):
@@ -208,12 +198,6 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         class Bar:
             def state_dict(self):
-                tensor = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
-                    + 1
-                    + 2 * dist.get_rank()
-                )
-                dist.all_reduce(tensor, op=ReduceOp.SUM)
                 return {}
 
             def load_state_dict(self, state_dict):

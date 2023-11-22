@@ -13,7 +13,7 @@ from .storage import (
 )
 
 from .metadata import Metadata, STATE_DICT_TYPE
-from .utils import _DistWrapper, _all_gather_keys
+from .utils import _DistWrapper
 
 __all__ = ["save_state_dict", "save"]
 
@@ -105,15 +105,20 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+
     dumpable_state_dict = {}
-    keys = _all_gather_keys(state_dict)
-    for key in keys:
-        if key not in state_dict:
-            continue
-        elem = state_dict[key]
+    for key, elem in state_dict.items():
         dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
-    return _save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+    return _save_state_dict(
+        dumpable_state_dict,
+        storage_writer,
+        process_group,
+        coordinator_rank,
+        no_dist,
+        planner
+    )
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
