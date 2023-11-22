@@ -27,7 +27,7 @@ from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import is_safe_constant, NP_SUPPORTED_MODULES
+from .utils import hashable, is_safe_constant, NP_SUPPORTED_MODULES
 
 """
 A note on allowed functions:
@@ -199,6 +199,14 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
             ] = TorchCtxManagerClassVariable
             ctx_mamager_classes.add(obj)
 
+    # In some platforms, these functions were loaded as classes instead of functions.
+    # To mitigate these weired cases, we need this special check.
+    def is_special_functions(obj):
+        return hashable(obj) and obj in {
+            torch._C._cuda_isCurrentStreamCapturing,
+            torch._C._graph_pool_handle,
+        }
+
     # Add obj to C_binding_in_graph_functions set or non_C_binding_in_graph_functions set
     # if it's a torch function or method.
     # This is used to generate the in graph function list based on heuristic.
@@ -217,7 +225,7 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
                 types.MethodDescriptorType,
                 types.WrapperDescriptorType,
             ),
-        ):
+        ) or is_special_functions(obj):
             torch_name_rule_map[
                 f"{module.__name__}.{name}"
             ] = TorchInGraphFunctionVariable
