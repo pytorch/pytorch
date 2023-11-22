@@ -453,7 +453,7 @@ class CppCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges):
         super().__init__(name, bounds)
         self.is_vec = False
-        self.dtype = None
+        self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def update_on_args(self, name, args, kwargs):
@@ -1834,6 +1834,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 self.compute, f"to_float_mask({scalar_var.name})"
             )
         else:
+            assert scalar_var.dtype is not None
             vec_var = self.cse.generate(
                 self.compute,
                 f"at::vec::Vectorized<{DTYPE_TO_CPP[scalar_var.dtype]}>({scalar_var.name})",
