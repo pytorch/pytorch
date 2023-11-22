@@ -774,6 +774,10 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+    # TODO: Should onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM also be tested?
+    model_type: onnx_test_common.TorchModelType = (
+        onnx_test_common.TorchModelType.TORCH_NN_MODULE
+    )
 
     fp16_low_precision_list = [
         "nn.functional.batch_norm",

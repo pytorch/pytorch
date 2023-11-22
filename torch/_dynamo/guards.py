@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from weakref import ReferenceType
 
 
@@ -110,6 +110,7 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
+    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -194,7 +195,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
+        lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
@@ -276,7 +277,7 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def TYPE_MATCH(self, guard: Guard):
+    def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
@@ -318,7 +319,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
             )
 
         ref = self.arg_ref(guard)
@@ -609,6 +610,13 @@ class GuardBuilder(GuardBuilderBase):
         assert guard.source is GuardSource.GLOBAL
         code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
         self.config_hash = config_hash
+        self._produce_guard_code(guard, code)
+
+    def HAS_GRAPH_BREAK(self, guard: Guard):
+        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
+        # if the compiled object needs nopython. We only need to install this guard if
+        # there is a graph break.
+        code = ["not ___needs_nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):

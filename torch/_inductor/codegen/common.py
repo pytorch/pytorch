@@ -48,7 +48,7 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
+TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
@@ -633,6 +633,7 @@ class KernelArgs:
                     inplaced.inner_name,
                     inplaced.other_names[-1],
                     V.graph.get_dtype(inplaced.other_names[-1]),
+                    True,
                 )
             )
         for outer, inner in chain(
@@ -642,7 +643,9 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
+            precompile_args.append(
+                TensorArg(inner, outer, V.graph.get_dtype(outer), True)
+            )
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
