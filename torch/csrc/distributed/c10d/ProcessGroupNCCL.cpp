@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -841,7 +840,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
             rank_,
             "] Work ",
             (*this),
-            " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
+            " timed out in blocking wait (TORCH_NCCL_BLOCKING_WAIT=1).");
         LOG(ERROR) << exceptionMsg;
         break;
       }
@@ -953,10 +952,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  blockingWait_ = getCvarBool(NCCL_BLOCKING_WAIT, false);
+  blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      getCvarInt(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = getCvarBool(NCCL_DESYNC_DEBUG, false) ||
+      getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
+  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
@@ -964,42 +963,44 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
       getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
-      getCvarBool(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
+      getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
   if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
     LOG(INFO)
         << "[Rank " << rank_
-        << "] disables NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+        << "] disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
   }
 #endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
-      LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
-                << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
-                << "should not both be enabled. "
-                << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+      LOG(INFO)
+          << "[Rank " << rank_ << "] TORCH_NCCL_BLOCKING_WAIT and "
+          << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
+          << "should not both be enabled. "
+          << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
       asyncErrorHandling_ = NoHandling;
       desyncDebug_ = false;
     }
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
-      LOG(INFO) << "[Rank " << rank_
-                << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
-                << "must both be enabled. "
-                << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
+          << "must both be enabled. "
+          << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
     }
   }
 
-  if (getCvarBool(ENABLE_NCCL_HEALTH_CHECK, false)) {
+  if (getCvarBool(TORCH_ENABLE_NCCL_HEALTH_CHECK, false)) {
     // Perform health check by initializing dummy communicators and destroying
     // them. This will help indicate any NCCL-related issues prior to the first
     // collective.
@@ -1021,16 +1022,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion()
-            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
 #endif
             << ", TORCH_NCCL_ENABLE_MONITORING: "
@@ -1062,28 +1063,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         &cacheAllocatorDeregisterHook);
     allocatorHooksAttached = true;
   }
-
-#ifdef USE_NCCL_WITH_UCC
-  static c10::once_flag initialize_ucc_lib_flag;
-  c10::call_once(initialize_ucc_lib_flag, [&] {
-    uccLib_ = loadTorchUCC();
-    if (uccLib_ != nullptr) {
-      LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    }
-  });
-
-  if (uccLib_ != nullptr) {
-    LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    typedef c10::intrusive_ptr<Backend> fn(
-        const c10::intrusive_ptr<Store>& store, int rank, int size);
-    auto createProcessGroupUCC =
-        reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
-    if (createProcessGroupUCC != nullptr) {
-      uccPG_ = createProcessGroupUCC(store, rank_, size_);
-      LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupUCC created.";
-    }
-  }
-#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1163,7 +1142,7 @@ void ProcessGroupNCCL::registerOnCompletionHook(
       ValueError,
       enableTiming_.load(),
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
-      "events which require setting NCCL_ENABLE_TIMING environment variable. "
+      "events which require setting TORCH_NCCL_ENABLE_TIMING environment variable. "
       "This is only available for NCCL version >= 2.4.");
   onCompletionHook_ = std::move(hook);
   onCompletionHookThread_ = std::thread(&ProcessGroupNCCL::runHookLoop, this);
@@ -1550,11 +1529,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
               dumpingDebugInfo->detach();
             }
           } catch (const std::exception& e) {
-            LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
+            LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
-                << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
+                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
                 << " Please file an issue.";
           }
         }
@@ -2311,18 +2290,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // Bump collective counter
   seq_++;
 
-  // Currently, the API permits two scenarios where inputs.size() and
+  // Currently, the API permits one scenario where inputs.size() and
   // outputs.size() are > 0.
   // 1. If the call was a _coalesced call, all inputs must be on the same
   // device.
   //    The group of nccl calls applies the collective separately to each input,
   //    but the group as a whole should be efficient, and might even execute as
   //    a single fused kernel.
-  // 2. If the call was a _multigpu call, all inputs must be on different
-  // devices.
-  //    The nccl group applies the collective across them (eg, if the collective
-  //    is an allreduce, the output on each device contains contributions summed
-  //    across `inputs' tensors).
   const auto devices = getDeviceList(inputs);
   const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
@@ -2492,10 +2466,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // when it's safe to release the input back to the allocator,
   // and the present call has no way to know it's not an isend.
   // Therefore, we warn and fall back to the typical recordStream logic:
-  TORCH_WARN_ONCE(
-      avoidRecordStreams_,
-      "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
-      "collectives.");
+  if (avoidRecordStreams_) {
+    TORCH_WARN_ONCE(
+        "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
+        "collectives.");
+  }
 
   // Bump sequence number, updated in collective() as well
   seq_++;
@@ -4097,18 +4072,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base",
       avoidRecordStreams);
-}
-
-#ifdef USE_NCCL_WITH_UCC
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
-#endif
-
-bool ProcessGroupNCCL::isUCCAvailable() const {
-#ifdef USE_NCCL_WITH_UCC
-  return (uccPG_ != nullptr);
-#else
-  return false;
-#endif
 }
 
 } // namespace c10d
