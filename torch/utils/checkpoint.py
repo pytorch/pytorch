@@ -101,11 +101,13 @@ def _get_device_module(device="cuda"):
 class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
+
     If no non-CPU tensors are present, the default device type will
     be used. The default value is 'cuda'. The device type is used in
     the checkpointing process when determining which device states
     to save and restore for recomputation.
     """
+
     _default_device_type = "cuda"
 
     @staticmethod
@@ -347,7 +349,7 @@ def checkpoint(
     debug: bool = False,
     **kwargs
 ):
-    r"""Checkpoint a model or part of the model
+    r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
     Instead of keeping tensors needed for backward alive until they are used in
@@ -493,13 +495,13 @@ def checkpoint(
             return ret
 
 
-def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
-    r"""A helper function for checkpointing sequential models.
+def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
+    r"""Checkpoint a sequential model to save memory.
 
     Sequential models execute a list of modules/functions in order
     (sequentially). Therefore, we can divide such a model in various segments
     and checkpoint each segment. All segments except the last will not store
-    the intermediate  activations. The inputs of each checkpointed segment will
+    the intermediate activations. The inputs of each checkpointed segment will
     be saved for re-running the segment in the backward pass.
 
     .. warning::
@@ -537,6 +539,17 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
+    if use_reentrant is None:
+        warnings.warn(
+            "torch.utils.checkpoint.checkpoint_sequential: please pass in "
+            "use_reentrant=True or use_reentrant=False explicitly. The default "
+            "value of use_reentrant will be updated to be False in the future. "
+            "To maintain current behavior, pass use_reentrant=True. It is "
+            "recommended that you use use_reentrant=False. Refer to docs for "
+            "more details on the differences between the two variants."
+        )
+        use_reentrant = True
+
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs:
@@ -713,8 +726,7 @@ _enable_checkpoint_early_stop = True
 
 @contextlib.contextmanager
 def set_checkpoint_early_stop(enable: bool):
-    """Context manager that sets whether checkpoint should stop recomputation
-    early.
+    """Context manager that sets whether checkpoint should stop recomputation early.
 
     By default, non-reentrant checkpoint stops recomputation as soon as it
     has computed all needed Tensors. This context manager can be used to disable
@@ -1155,7 +1167,7 @@ uid = count(1)
 _ignored_ops = {
     torch.ops.prim.device.default,
     torch.ops.aten.detach.default,
-}
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
@@ -1297,7 +1309,8 @@ def _checkpoint_without_reentrant_generator(
     *args,
     **kwargs
 ):
-    """Checkpointing without reentrant autograd
+    """Checkpointing without reentrant autograd.
+
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
