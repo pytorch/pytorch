@@ -1772,15 +1772,11 @@ class SourcelessBuilder:
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
-        elif isinstance(value, set):
-            return SetVariable(
-                {ConstantVariable.create(x) for x in value},
-                mutable_local=MutableLocal(),
-            )
         elif isinstance(value, dict):
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
             return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
+            # Nb. value is a set here so the iteration below is non-deterministic!
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
             )

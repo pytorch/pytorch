@@ -886,7 +886,7 @@ class BuiltinVariable(VariableTracker):
         # Can we merge this implementation and call_dict's one?
         assert not kwargs
         if not args:
-            return SetVariable({}, mutable_local=MutableLocal())
+            return SetVariable([], mutable_local=MutableLocal())
         assert len(args) == 1
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
@@ -1480,6 +1480,11 @@ class BuiltinVariable(VariableTracker):
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
+
+        if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
+            return ConstantVariable.create(op(left.fn, right.fn))
+
+        _unimplemented()
 
     def call_and_(self, tx, a, b):
         # Rely on constant_handler

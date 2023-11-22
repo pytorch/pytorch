@@ -644,6 +644,13 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, device_stream.str());
       return out << ")";
     }
+    case IValue::Tag::Generator: {
+      auto generator = v.toGenerator();
+      out << "torch.Generator(device=";
+      c10::printQuotedString(out, generator.device().str());
+      out << ", seed=" << generator.current_seed() << ")";
+      return out;
+    }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {
@@ -956,6 +963,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
+    case IValue::Tag::Generator:
     case IValue::Tag::Uninitialized: {
       copy = *this;
     } break;
