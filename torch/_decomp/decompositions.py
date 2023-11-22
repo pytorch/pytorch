@@ -1225,7 +1225,7 @@ def split_with_sizes(
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
-        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+        lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
     num_splits = len(split_sizes)
     splits = []
@@ -2331,7 +2331,6 @@ def uniform(
     x: Tensor,
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
-    generator: Optional[torch.Generator] = None,
 ):
     return prims._uniform_helper(
         x.shape,
@@ -2339,13 +2338,13 @@ def uniform(
         high=sym_float(high),
         dtype=x.dtype,
         device=x.device,
-        generator=generator,
     )
 
 
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
-    return self.copy_(uniform(self, low, high, generator))
+    assert generator is None
+    return self.copy_(uniform(self, low, high))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
