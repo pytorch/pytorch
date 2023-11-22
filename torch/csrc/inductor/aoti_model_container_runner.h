@@ -11,14 +11,16 @@ struct DynamicLibrary;
 
 namespace torch::inductor {
 
-class TORCH_API AOTIModelRunner {
+class TORCH_API AOTIModelContainerRunner {
  public:
-  AOTIModelRunner() = delete;
-  AOTIModelRunner(const AOTIModelRunner& other) = delete;
-  AOTIModelRunner(AOTIModelRunner&& other) = delete;
-  AOTIModelRunner& operator=(const AOTIModelRunner& other) = delete;
-  AOTIModelRunner& operator=(AOTIModelRunner&& other) = delete;
-  ~AOTIModelRunner();
+  AOTIModelContainerRunner() = delete;
+  AOTIModelContainerRunner(const AOTIModelContainerRunner& other) = delete;
+  AOTIModelContainerRunner(AOTIModelContainerRunner&& other) = delete;
+  AOTIModelContainerRunner& operator=(const AOTIModelContainerRunner& other) =
+      delete;
+  AOTIModelContainerRunner& operator=(AOTIModelContainerRunner&& other) =
+      delete;
+  ~AOTIModelContainerRunner();
 
   std::vector<at::Tensor> run(
       std::vector<at::Tensor> inputs,
@@ -27,7 +29,7 @@ class TORCH_API AOTIModelRunner {
 
   std::vector<const char*> get_call_spec();
 
-  AOTIModelRunner(
+  AOTIModelContainerRunner(
       const char* model_path,
       size_t num_models,
       bool is_cpu,
@@ -44,19 +46,20 @@ class TORCH_API AOTIModelRunner {
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 };
 
-class TORCH_API AOTIModelRunnerCpu : public AOTIModelRunner {
+class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
  public:
-  AOTIModelRunnerCpu(const char* model_path, size_t num_models = 1)
-      : AOTIModelRunner(model_path, num_models, true, nullptr) {}
+  AOTIModelContainerRunnerCpu(const char* model_path, size_t num_models = 1)
+      : AOTIModelContainerRunner(model_path, num_models, true, nullptr) {}
 
   std::vector<at::Tensor> run(
       std::vector<at::Tensor> inputs,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr) {
-    return AOTIModelRunner::run(inputs, nullptr, proxy_executor_handle);
+    return AOTIModelContainerRunner::run(
+        inputs, nullptr, proxy_executor_handle);
   }
 
   std::vector<const char*> get_call_spec() {
-    return AOTIModelRunner::get_call_spec();
+    return AOTIModelContainerRunner::get_call_spec();
   }
 };
 

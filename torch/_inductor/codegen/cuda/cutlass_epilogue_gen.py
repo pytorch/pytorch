@@ -84,7 +84,7 @@ class CutlassEVTEpilogueTypeFormatter:
             template_output_node_name, evt_type_name
         )
 
-        with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
+        with virtualized.V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             for node in epilogue_nodes:
@@ -253,7 +253,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             template_output_node_name,
         )
 
-        with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
+        with virtualized.V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             for node in epilogue_nodes:
