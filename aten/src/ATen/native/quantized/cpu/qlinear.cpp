@@ -969,11 +969,13 @@ static at::Tensor linear_int8_with_onednn_weight(
       tensor::desc();
 
   dnnl::algorithm post_op_algo;
-  if (post_op_algorithm == "None"){
-    post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
-  }
-  if (post_op_algorithm == "tanh"){
-    post_op_algo = dnnl::algorithm::eltwise_gelu_tanh;
+  if (post_op_name == "gelu"){
+    if (post_op_algorithm == "None"){
+      post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
+    }
+    else if (post_op_algorithm == "tanh"){
+      post_op_algo = dnnl::algorithm::eltwise_gelu_tanh;
+    }
   }
 
   auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args, post_op_algo);

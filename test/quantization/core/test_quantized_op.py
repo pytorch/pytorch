@@ -4224,7 +4224,7 @@ class TestQuantizedLinear(TestCase):
                 )
 
     @skipIfNoONEDNN
-    def test_qlinear_pt2e_gelu(self):
+    def test_qlinear_gelu_pt2e(self):
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         qlinear = torch.ops.onednn.qlinear_pointwise
 
@@ -4234,9 +4234,8 @@ class TestQuantizedLinear(TestCase):
         out_channels_list = [16, 32]
         batch_size = 1
         use_bias_list = [True, False]
-        supported_post_ops = 'gelu'
+        post_op = 'gelu'
         weight_quant_per_channel_list = [True, False]
-        # fp32_output_list = [True, False]
         output_dtype_list = [None, torch.float32, torch.bfloat16]
         x_scale, x_zp = 1.2, 1
         w_scale, w_zp = 0.8, 0
@@ -4244,9 +4243,9 @@ class TestQuantizedLinear(TestCase):
         post_op_args = []
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
-            supported_post_ops, weight_quant_per_channel_list, output_dtype_list, post_op_algorithm)
+            weight_quant_per_channel_list, output_dtype_list, post_op_algorithm)
         with override_quantized_engine('onednn'):
-            for ic, oc, use_bias, post_op, weight_quant_per_channel, output_dtype, post_op_algo in cases:
+            for ic, oc, use_bias, weight_quant_per_channel, output_dtype, post_op_algo in cases:
                 used_y_scale = y_scale
                 used_y_zp = y_zp
                 fp32_out = output_dtype == torch.float32

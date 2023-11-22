@@ -328,7 +328,7 @@ static ideep::attr_t create_attr_by_post_op(
     return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0].value().to<float>());
   } else if (post_op == Tanh) {
     return ideep::attr_t::fuse_tanh();
-  }else if (post_op == Gelu) {
+  } else if (post_op == Gelu) {
     return ideep::attr_t::fuse_gelu_v2(0.f, 0.f, post_algorithm);
   }
   return ideep::attr_t();
