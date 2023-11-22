@@ -1225,8 +1225,9 @@ class TestTransformers(NNTestCase):
                         _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
+    @skipIfRocm # Missing EFFICIENT_ATTENTION
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
     )
     def test_is_causal_gpu(self):
         device = 'cuda'
