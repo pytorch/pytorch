@@ -212,9 +212,9 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
     # This is used to generate the in graph function list based on heuristic.
     def heuristic_record_if_in_graph_function(obj, module, name):
         try:
-            if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+            if hasattr(obj, "__wrapped__"):
                 obj = obj.__wrapped__
-        except AssertionError:
+        except Exception:
             pass
         if isinstance(
             obj,

@@ -128,11 +128,13 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         objs = gen_allowed_objs_and_ids()
         # Test ctx manager classes are updated in torch_name_rule_map.
         generated = objs.ctx_mamager_classes
-        used = {
-            load_object(x)
-            for x in set(torch_ctx_manager_classes.keys())
-            | ignored_ctx_manager_class_names
-        }
+        used = set()
+        for x in (
+            set(torch_ctx_manager_classes.keys()) | ignored_ctx_manager_class_names
+        ):
+            obj = load_object(x)
+            if obj is not None:
+                used.add(obj)
         self._check_set_equality(
             generated,
             used,
@@ -141,11 +143,14 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         )
         # Test C binding in graph functions are updated in torch_name_rule_map.
         generated = objs.C_binding_in_graph_functions
-        used = {
-            load_object(x)
-            for x in set(torch_C_binding_in_graph_functions.keys())
+        used = set()
+        for x in (
+            set(torch_C_binding_in_graph_functions.keys())
             | ignored_C_binding_in_graph_function_names
-        }
+        ):
+            obj = load_object(x)
+            if obj is not None:
+                used.add(obj)
         self._check_set_equality(
             generated,
             used,
