@@ -6,7 +6,7 @@ import inspect
 import os
 import re
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -359,7 +359,7 @@ class WrapperCodeGen(CodeGen):
                 self.write_constant(name, hashed)
 
         self.allocated = set()
-        self.freed = set()
+        self.freed: Set[str] = set()
 
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
@@ -577,7 +577,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -606,7 +606,7 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
-                self.wrapper_call.writeline("end_graph()")
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
@@ -653,7 +653,9 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
         )
 
-    def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
+    def codegen_inputs(
+        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+    ):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
@@ -880,7 +882,13 @@ class WrapperCodeGen(CodeGen):
                 continue
             if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
-                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                    TensorArg(
+                        key,
+                        arg.codegen_reference(),
+                        arg.get_dtype(),
+                        # For ReinterpretView, we do not want to check alignment
+                        not isinstance(arg, ReinterpretView),
+                    )
                 )
             else:
                 signature.append(SizeArg(key, arg))
@@ -978,6 +986,12 @@ class WrapperCodeGen(CodeGen):
             f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
         )
         stack.enter_context(self.wrapper_call.indent())
+
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
 
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
@@ -1865,6 +1879,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
 
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():

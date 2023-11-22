@@ -1117,11 +1117,6 @@ def main():
         "fsspec",
     ]
 
-    if IS_WINDOWS and sys.version_info >= (3, 12, 0):
-        # torch.version requires this and it is not part
-        # of the default cpython install on windows in 3.12+
-        install_requires.append("packaging")
-
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1227,7 +1222,6 @@ def main():
         "include/ATen/core/dispatch/*.h",
         "include/ATen/core/op_registration/*.h",
         "include/c10/core/impl/*.h",
-        "include/c10/core/impl/cow/*.h",
         "include/c10/util/*.h",
         "include/c10/cuda/*.h",
         "include/c10/cuda/impl/*.h",

@@ -29,7 +29,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
@@ -93,19 +93,6 @@ OutputType = Enum(
         # Instead, we'll treat this output "normally", and trace its backward into the graph.
         "custom_function_view",
     )
-)
-
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
 )
 
 def partial_asdict(obj: Any) -> Any:
@@ -4381,17 +4368,14 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-
-
+                # TODO: Ensure that this codepath is never exercised from
+                # Dynamo
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
-                    # TODO: Ensure that this codepath is never exercised from
-                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-
-                return torch._dynamo.utils.to_fake_tensor(x, fake_mode)
+                return fake_mode.from_tensor(x, static_shapes=False)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
