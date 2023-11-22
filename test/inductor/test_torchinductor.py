@@ -2514,6 +2514,20 @@ class CommonTemplate:
             rtol=0.001,
         )
 
+    @skipIfRocm
+    def test_convolution4(self):
+        def fn(x, w):
+            x = F.conv2d(x, w, groups=w.shape[0])
+            return x.sum()
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 20]),
+                torch.randn([3, 1, 5, 5]),
+            ),
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d channels_last")
