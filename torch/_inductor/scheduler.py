@@ -2134,7 +2134,6 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
-            device = None
             try:
                 log.debug(
                     "Generating code for node %s with estimated runtime %f",
@@ -2190,8 +2189,10 @@ class Scheduler:
 
             self.available_buffer_names.update(node.get_names())
 
-            if device is not None and self.get_backend(device).ready_to_flush():
-                self.flush()
+            if not isinstance(node, NopKernelSchedulerNode):
+                device = node.get_device()
+                if self.get_backend(device).ready_to_flush():
+                    self.flush()
 
         self.flush()
 
