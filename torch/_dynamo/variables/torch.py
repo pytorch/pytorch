@@ -575,7 +575,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # NB: This includes UnspecializedPythonVariable
                     if isinstance(x, (TensorVariable, SymNodeVariable)):
                         return True
-                    elif isinstance(x, ListVariable):
+                    elif isinstance(x, (ListVariable, TupleVariable)):
                         return any(check_any_unspec(y) for y in x.items)
                     # TODO: there maybe other recursive structures you need to
                     # check
