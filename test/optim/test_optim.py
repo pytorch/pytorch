@@ -2542,4 +2542,3 @@ class TestDifferentiableOptimizer(TestCase):
 
 if __name__ == "__main__":
     print("These tests should be run through test/test_optim.py instead")
-
