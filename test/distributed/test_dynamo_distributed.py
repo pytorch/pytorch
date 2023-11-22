@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 )
 from torch._dynamo.comptime import comptime
+from torch.distributed._functional_collectives import _maybe_wrap_tensor
 
 def reset_rng_state():
     torch.manual_seed(1337)
@@ -47,8 +48,9 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 class ToyModel(nn.Module):
-    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
         super().__init__()
+        self.ctx_manager = ctx_manager
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
             + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
@@ -57,10 +59,14 @@ class ToyModel(nn.Module):
         )
 
     def forward(self, inputs):
-        return self.net(inputs)
+        if self.ctx_manager is not None:
+            with self.ctx_manager():
+                return self.net(inputs)
+        else:
+            return self.net(inputs)
 
-def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
-    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(device)
+def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(device)
     m.apply(init_weights)
     inputs = torch.rand(bsz, in_feat).to(device)
     outputs = m(inputs)
@@ -508,8 +514,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Use TestMultiProc for things that really need to run on multiple nodes
     """
 
-    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
-        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
+    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(self.device)
         m.apply(init_weights)
         inputs = torch.rand(bsz, in_feat).to(self.device)
         outputs = m(inputs)
@@ -564,6 +570,57 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_graph_split_ctx_manager(self):
+        """
+        Ensures that we get the right number of splits and that the respective
+        context managers' effects are applied to the computation.
+        """
+
+        for get_compiler in [
+            lambda: CheckSplitsCompiler(),
+            lambda: None,
+        ]:
+            for ctx_manager, output_test in [
+                (
+                    lambda: torch.autocast(torch.device(self.device).type, torch.float16),
+                    lambda out: self.assertEqual(out.dtype, torch.float16),
+                ),
+                (
+                    torch.enable_grad,
+                    lambda out: self.assertTrue(out.requires_grad)
+                ),
+                (
+                    torch.no_grad,
+                    lambda out: self.assertTrue(not out.requires_grad)
+                ),
+            ]:
+                m, inputs, correct_outputs = self.get_model(out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager)
+                # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+                # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
+                bucket_cap_mb = 3.5  # 4MB
+                ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=bucket_cap_mb)
+
+                compiler = get_compiler()
+
+                @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
+                def opt_fn(inputs):
+                    return ddp_m(inputs)
+
+                opt_outputs = opt_fn(inputs)
+                self.assertTrue(same(correct_outputs, opt_outputs))
+                if compiler:
+                    self.assertEqual(compiler.compiler_called, 4)
+
+                output_test(opt_outputs)
+
+                # ensure compatibility with dynamo explain
+
+                explain_out = torch._dynamo.explain(ddp_m)(inputs)
+                break_reasons = explain_out.break_reasons
+                self.assertEqual(len(break_reasons), 4)
+                self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -758,7 +815,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             (False, "local")
         ):
             torch._dynamo.reset()
-            torch._dynamo.config.skip_fsdp_guards = skip_guards
 
             class ToyModel(nn.Module):
                 def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
@@ -784,8 +840,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             m.apply(init_weights)
             correct_outputs = m(inputs)
             fsdp_m = FSDP(m, use_orig_params=True)
-            opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
-            outputs = opt_m(inputs)
+
+            with torch._dynamo.config.patch(skip_fsdp_guards=skip_guards):
+                opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+                outputs = opt_m(inputs)
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck() \
@@ -914,6 +972,18 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             self.assertEqual(cnt.frame_count, 1)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
+
+    def test_async_subclass_no_specialize(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x):
+            return x + 1
+
+        f(_maybe_wrap_tensor(torch.randn(10)))
+        f(_maybe_wrap_tensor(torch.randn(12)))
+
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

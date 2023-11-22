@@ -9,11 +9,11 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
@@ -400,5 +400,11 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int> src) {
 template <>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {
   return src;
+}
+
+inline at::vec::Vectorized<float> to_float_mask(int src) {
+  float mask;
+  *(uint32_t*)&mask = src ? 0xFFFFFFFF : 0;
+  return at::vec::Vectorized<float>(mask);
 }
 #endif

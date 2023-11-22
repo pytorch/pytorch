@@ -166,14 +166,15 @@ static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_n
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                       \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                       \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                                       \
             ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool,              \
             ScalarType::BFloat16, ScalarType::Float8_e5m2, ScalarType::Float8_e4m3fn, \
+            ScalarType::Float8_e5m2fnuz, ScalarType::Float8_e4m3fnuz,                 \
             TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...)              \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(                    \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(                    \
             kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                               \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                                               \
@@ -203,6 +204,12 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
     });
   } else if (dtype == ScalarType::ComplexHalf) {
     cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
+  } else if (isBitsType(dtype)) {
+    AT_DISPATCH_BIT_TYPES(dtype, "copy_kernel", [&] {
+      cpu_kernel(
+          iter,
+          [=](scalar_t a) -> scalar_t { return a; });
+    });
   } else {
     _AT_DISPATCH_ALL_TYPES_NO_CF(dtype, "copy_kernel", [&] {
       cpu_kernel_vec(
