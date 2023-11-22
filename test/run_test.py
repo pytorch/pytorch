@@ -1432,7 +1432,6 @@ def load_test_times_from_file(
         print_to_stderr(
             f"::warning:: Failed to find test times file `{path}`. Using round robin sharding."
         )
-        exit()
         return {}
 
     with open(path) as f:
@@ -1524,10 +1523,13 @@ def run_test_module(
     return_code = handler(test, test_directory, options)
     duration = time.now() - start_time
     import math
+
     delta = math.abs(duration - test.get_time())
     # Identify gross misestimates
-    if delta > 60 and delta/(test.get_time() + 0.1) > 0.3:
-        print_to_stderr(f"ZR: GROSS MISESTIMATE {str(test)}. Delta {delta} [expected {test.get_time()}, got {duration}]")
+    if delta > 60 and delta / (test.get_time() + 0.1) > 0.3:
+        print_to_stderr(
+            f"ZR: GROSS MISESTIMATE {str(test)}. Delta {delta} [expected {test.get_time()}, got {duration}]"
+        )
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
     ), f"While running {str(test)} got non integer return code {return_code}"

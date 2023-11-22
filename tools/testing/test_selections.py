@@ -118,13 +118,17 @@ def get_with_pytest_shard(
         if duration is not None and duration < 0:
             print("ZR: Negative duration")
             negative_durations.append(test)
-            duration = 3 # We don't know it, but it's probably small. Assume it's the same as the pytest starup costs
+            duration = 3  # We don't know it, but it's probably small. Assume it's the same as the pytest starup costs
         if duration is not None and duration > THRESHOLD:
-            if file_duration < duration:
-                print("ZR: Woah, file duration is less than duration")
-                long_durations.append(test)
-                #duration = file_duration # Patch the difference
-            print(f"ZR: Duration difference: {file_duration - duration}")
+            if file_duration is None:
+                print("ZR: File duration was None")
+            else:
+                if file_duration < duration:
+                    print("ZR: Woah, file duration is less than duration")
+                    long_durations.append(test)
+                    # duration = file_duration # Patch the difference
+
+                print(f"ZR: Duration difference: {file_duration - duration}")
             num_shards = math.ceil(duration / THRESHOLD)
             print(f"ZR: Sharding {test} into {num_shards} shards")
             for i in range(num_shards):
@@ -201,10 +205,18 @@ def calculate_shards(
     for shard_idx in range(num_shards):
         print(f"  Shard {shard_idx + 1}:")
         print(f"    Number of serial tests:     {len(sharded_jobs[shard_idx].serial)}")
-        print(f"    Duration of serial tests:   {sum(test.get_time() for test in sharded_jobs[shard_idx].serial)}")
-        print(f"    Number of parallel tests:   {len(sharded_jobs[shard_idx].parallel)}")
-        print(f"    Duration of parallel tests: {sum(test.get_time() for test in sharded_jobs[shard_idx].parallel)}") # Should this be divided by the number of tests we can run in parallel?
-        print(f"    Total duration:             {sharded_jobs[shard_idx].get_total_time()}")
+        print(
+            f"    Duration of serial tests:   {sum(test.get_time() for test in sharded_jobs[shard_idx].serial)}"
+        )
+        print(
+            f"    Number of parallel tests:   {len(sharded_jobs[shard_idx].parallel)}"
+        )
+        print(
+            f"    Duration of parallel tests: {sum(test.get_time() for test in sharded_jobs[shard_idx].parallel)}"
+        )  # Should this be divided by the number of tests we can run in parallel?
+        print(
+            f"    Total duration:             {sharded_jobs[shard_idx].get_total_time()}"
+        )
 
     return [job.convert_to_tuple() for job in sharded_jobs]
 
