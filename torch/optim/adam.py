@@ -75,7 +75,7 @@ class Adam(Optimizer):
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s['step'] = torch.tensor(float(s['step']), dtype=torch.float32)
 
     def _init_group(
         self,
@@ -103,9 +103,9 @@ class Adam(Optimizer):
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((), dtype=torch.float, device=p.device)
+                        torch.zeros((), dtype=torch.float32, device=p.device)
                         if group['capturable'] or group['fused']
-                        else torch.tensor(0.)
+                        else torch.tensor(0.0, dtype=torch.float32)
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
@@ -132,7 +132,7 @@ class Adam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -279,9 +279,9 @@ def adam(params: List[Tensor],
          eps: float,
          maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
+
     See :class:`~torch.optim.Adam` for details.
     """
-
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl

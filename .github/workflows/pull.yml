@@ -353,13 +353,13 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-rocm5_6-py3_8-build:
+  linux-focal-rocm5_7-py3_8-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.6-py3.8
+    name: linux-focal-rocm5.7-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.6-py3.8
+      build-environment: linux-focal-rocm5.7-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -393,3 +393,23 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+
+  linux-jammy-py3-clang12-executorch-build:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
+      test-matrix: |
+        { include: [
+          { config: "executorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-jammy-py3-clang12-executorch-test:
+    name: linux-jammy-py3-clang12-executorch
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3-clang12-executorch-build
+    with:
+      build-environment: linux-jammy-py3-clang12-executorch
+      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}

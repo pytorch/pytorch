@@ -1,5 +1,6 @@
 import os  # noqa: C101
 import sys
+from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
@@ -84,11 +85,25 @@ split_cat_fx_passes = True
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
-# enable pattern match with group fusion (using fbgemm)
+# Deprecated
 group_fusion = False
 
-# enable pattern match with batch fusion (using torch op)
+# Deprecated
 batch_fusion = True
+
+# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
+    "batch_linear": {},
+    "batch_linear_lhs": {},
+    "batch_layernorm": {},
+    "batch_tanh": {},
+    "batch_relu": {},
+}
+
+# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -290,7 +305,7 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil  # type: ignore[import]
+    from libfb.py import parutil
 
     try:
         if __package__:
@@ -614,6 +629,8 @@ _save_config_ignore = {
     "trace.upload_tar",
 }
 
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 
