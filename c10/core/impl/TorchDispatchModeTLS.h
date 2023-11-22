@@ -23,28 +23,22 @@ struct C10_API TorchDispatchModeTLS {
   // Pops the top mode of the stack,
   // giving precedence to user modes before attempting to pop
   // any infra modes
-  static const std::shared_ptr<SafePyObject> pop_stack(
-      bool is_pre_dispatch = false);
+  static const std::shared_ptr<SafePyObject> pop_stack();
   // Returns the highest-priority infra mode on the stack,
   // along with its mode key.
   static const std::tuple<std::shared_ptr<SafePyObject>, TorchDispatchModeKey>
   pop_highest_infra_mode();
 
-  static const std::shared_ptr<SafePyObject>& get_stack_at(
-      int64_t idx,
-      bool is_pre_dispatch = false);
-  static int64_t stack_len(bool is_pre_dispatch = false);
+  static const std::shared_ptr<SafePyObject>& get_stack_at(int64_t idx);
+  static int64_t stack_len();
 
   static const c10::optional<std::shared_ptr<SafePyObject>> get_mode(
-      TorchDispatchModeKey mode_key,
-      bool is_pre_dispatch = false);
+      TorchDispatchModeKey mode_key);
   static const c10::optional<std::shared_ptr<SafePyObject>> unset_mode(
-      TorchDispatchModeKey mode_key,
-      bool is_pre_dispatch = false);
+      TorchDispatchModeKey mode_key);
   static void set_mode(
       const std::shared_ptr<SafePyObject>& mode,
-      TorchDispatchModeKey mode_key,
-      bool is_pre_dispatch = false);
+      TorchDispatchModeKey mode_key);
 
   static const TorchDispatchModeTLS& get_state();
   static void set_state(TorchDispatchModeTLS state);
@@ -53,7 +47,6 @@ struct C10_API TorchDispatchModeTLS {
 
  private:
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
-  std::vector<std::shared_ptr<c10::SafePyObject>> pre_dispatch_stack_;
   // Users are allowed to push multiple ProxyTorchDispatchMode objects onto the
   // stack
   // However, we only allow a single FakeTensorMode onto the stack at a time
@@ -62,10 +55,6 @@ struct C10_API TorchDispatchModeTLS {
       c10::optional<std::shared_ptr<c10::SafePyObject>>,
       static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS)>
       infra_modes_;
-  std::array<
-      c10::optional<std::shared_ptr<c10::SafePyObject>>,
-      static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS)>
-      pre_dispatch_infra_modes_;
 };
 
 C10_API bool dispatch_mode_enabled();
