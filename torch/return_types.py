@@ -19,11 +19,7 @@ def pytree_register_structseq(cls):
     def structseq_unflatten(values, context):
         return context(values)
 
-    torch.utils._pytree._register_pytree_node(
-        cls,
-        structseq_flatten,
-        structseq_unflatten,
-    )
+    torch.utils._pytree.register_pytree_node(cls, structseq_flatten, structseq_unflatten)
 
 
 for name in dir(return_types):
