@@ -5256,29 +5256,6 @@ def meta__flash_attention_forward(
 
     max_seqlen_batch_k = key.size(2)
 
-    if device_hint(query) == "cpu":
-        attention = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-            dtype=query.dtype,
-            device=query.device,
-        ).transpose(1, 2)
-        logsumexp = torch.empty(
-            (
-                batch_size,
-                max_seqlen_batch_q,
-                num_heads,
-            ),
-            dtype=torch.float,
-            device=query.device,
-        ).transpose(1, 2)
-        return (
-            attention,
-            logsumexp,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=query.dtype, device=query.device),
-        )
-
     # Cuda Path
     query_t = query.transpose(1, 2)
     attention = torch.empty_like(query_t).transpose(1, 2)
@@ -5335,12 +5312,6 @@ def meta__flash_attention_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
-    if device_hint(query) != "cpu":
-        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
-        return grad_q, grad_k, grad_v
-
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
