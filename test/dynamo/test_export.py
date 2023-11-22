@@ -3251,6 +3251,9 @@ def forward(self, x):
                     x,
                     policy=FreshCreateSymbolicPolicy(
                         dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
+                        constraint_sizes=[None] * x.dim(),
+                        dynamic_offset=DimDynamic.DYNAMIC,
+                        constraint_offset=None,
                     ),
                 )
                 for i, size in enumerate(size_tests):

@@ -543,7 +543,9 @@ class FakeTensorTest(TestCase):
             torch.randn(10),
             policy=FreshCreateSymbolicPolicy(
                 dynamic_sizes=[DimDynamic.DYNAMIC],
-                constraint_sizes=[None]
+                constraint_sizes=[None],
+                dynamic_offset=DimDynamic.DYNAMIC,
+                constraint_offset=None,
             )
         )
         mode2 = FakeTensorMode(shape_env=shape_env)

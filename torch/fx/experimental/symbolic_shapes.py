@@ -749,10 +749,10 @@ class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
-    constraint_sizes: DimList[DimConstraint] = None
+    constraint_sizes: DimList[DimConstraint]
     dynamic_offset: DimDynamic
     constraint_offset: Optional[DimConstraint] = None
-    # TODO: add storage offset and stride policy
+    # TODO: add stride policy
 
     def __post_init__(self):
         if self.constraint_sizes is None:
@@ -2049,7 +2049,12 @@ class ShapeEnv:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
-            policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+            policy = FreshCreateSymbolicPolicy(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims,
+                dynamic_offset=DimDynamic.DYNAMIC,
+                constraint_offset=None,
+            )
 
         assert isinstance(policy, FreshCreateSymbolicPolicy)
         constraint_dims = policy.constraint_sizes

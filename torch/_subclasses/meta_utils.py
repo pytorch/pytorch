@@ -322,6 +322,8 @@ class MetaConverter:
                         base_policy = FreshCreateSymbolicPolicy(
                             dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
                             constraint_sizes=[None] * t._base.dim(),
+                            dynamic_offset=DimDynamic.DYNAMIC,
+                            constraint_offset=None,
                         )
                     else:
                         base_policy = None

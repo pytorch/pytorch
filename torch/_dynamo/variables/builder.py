@@ -1764,7 +1764,7 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
         dynamic_offset=dynamic_storage_offset,
-        constraint_offset=None,  # TODO
+        constraint_offset=None,
     )
 
 

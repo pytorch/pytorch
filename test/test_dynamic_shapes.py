@@ -139,7 +139,9 @@ def create_symbolic_tensor(name, arg, shape_env):
             source=ConstantSource(name),
             policy=FreshCreateSymbolicPolicy(
                 dynamic_sizes=dynamic_dims,
-                constraint_sizes=constraint_dims
+                constraint_sizes=constraint_dims,
+                dynamic_offset=DimDynamic.DYNAMIC,
+                constraint_offset=None,
             ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
