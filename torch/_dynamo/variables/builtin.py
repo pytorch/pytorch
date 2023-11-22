@@ -11,7 +11,6 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
-from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -52,6 +51,23 @@ from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariab
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
+
+
+IN_PLACE_DESUGARING_MAP = {
+    operator.iadd: operator.add,
+    operator.isub: operator.sub,
+    operator.imul: operator.mul,
+    operator.ifloordiv: operator.floordiv,
+    operator.itruediv: operator.truediv,
+    operator.imod: operator.mod,
+    operator.imatmul: operator.imatmul,
+    operator.ilshift: operator.lshift,
+    operator.irshift: operator.rshift,
+    operator.ipow: operator.pow,
+    operator.iand: operator.and_,
+    operator.ior: operator.or_,
+    operator.ixor: operator.xor,
+}
 
 
 class BuiltinVariable(VariableTracker):
@@ -488,11 +504,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
-                if self.fn is operator.iadd and isinstance(
+
+                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
                 ):
-                    # Work around weird bug in hf_T5
-                    fn, args = operator.add, [args[1], args[0]]
+                    # In-place operators like += usually mustate tensor
+                    # values, but in the edge case of immutable values they
+                    # re-bind the variable.
+                    #
+                    # The easiest way to keep the graph consistent in this
+                    # scenario is to de-sugar eagerly.
+                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
 
                 if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
@@ -735,20 +757,11 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, variables.ConstantVariable
-        ):
-            if self.fn is max:
-                return variables.ConstantVariable.create(max(a.value, b.value))
-            else:
-                return variables.ConstantVariable.create(min(a.value, b.value))
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
-        else:
-            unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -1039,6 +1052,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1079,12 +1093,8 @@ class BuiltinVariable(VariableTracker):
                             VariableBuilder(tx, GetItemSource(source, i))(b)
                             for i, b in enumerate(bases)
                         ]
-                    elif len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C.TensorBase
-                    ):
-                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
-                        unimplemented(f"unexpected sourceless type bases: {bases}")
+                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
@@ -1151,6 +1161,10 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1158,12 +1172,10 @@ class BuiltinVariable(VariableTracker):
                 return build_checkpoint_variable(**options)
             elif trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
-            elif is_allowed(member):
-                return TorchVariable(member, **options)
-            elif ConstantVariable.is_literal(member):
-                return ConstantVariable.create(member, **options)
-            else:
+            elif source is not None:
                 return VariableBuilder(tx, source)(member)
+            else:
+                return SourcelessBuilder()(tx, member)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 
@@ -1198,15 +1210,10 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if name == "data" and all(
-                isinstance(t, variables.TensorVariable)
-                # and not (t.source is None or is_constant_source(t.source))
-                for t in [val, obj]
-            ):
+            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
                 unimplemented(
-                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
-                    "need to graph break to apply the aliasing (or track new aliased tensors) "
-                    "to continue to trace the graph"
+                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
                 )
             tx.output.side_effects.store_attr(obj, name, val)
             return val
@@ -1260,28 +1267,21 @@ class BuiltinVariable(VariableTracker):
         return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         try:
             py_type = obj.python_type()
-        except NotImplementedError:
-            py_type = None
+        except NotImplementedError as error:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                str(error),
+                case_name="unknown_python_type",
+            ) from None
 
-        if istype(obj, variables.TupleVariable):
-            return BuiltinVariable(py_type)
-
-        if py_type is not None and obj.source:
+        if obj.source is None:
+            return SourcelessBuilder()(tx, py_type)
+        else:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
-
-        if py_type is not None:
-            return ConstantVariable.create(py_type)
-
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            f"Can't call type() on generated custom object {obj}. "
-            "Please use __class__ instead",
-            case_name="type_reflection_method",
-        )
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
@@ -1463,9 +1463,6 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
-            return ConstantVariable.create(op(left.value, right.value))
-
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
@@ -1482,10 +1479,10 @@ class BuiltinVariable(VariableTracker):
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
 
-        _unimplemented()
-
-    # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
@@ -1499,8 +1496,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
-    # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
