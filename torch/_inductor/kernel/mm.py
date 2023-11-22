@@ -9,6 +9,7 @@ from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    NoValidChoicesError,
     TritonTemplate,
 )
 from ..utils import (
@@ -152,12 +153,22 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if len(choices) == 1 and isinstance(layout, FixedLayout):
             # If we are not autotuning, we can swap to a FlexibleLayout
             # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+            out_layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
+            choices = [aten_mm.bind((mat1, mat2), out_layout)]
+    try:
+        return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+    except NoValidChoicesError:
+        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+        choices = [aten_mm.bind((mat1, mat2), layout)]
+        if len(choices) == 1 and isinstance(layout, FixedLayout):
+            # If we are not autotuning, we can swap to a FlexibleLayout
+            # in order to get fusion optimizations to kick in, e.g. ConcatFusion
             layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
-            choices = [aten_mm.bind((mat1, mat2), layout)]
-
-    return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+            return aten_mm.bind((mat1, mat2), layout).output_node()
 
 
 @register_lowering(aten._int_mm)
@@ -215,12 +226,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if use_cutlass_template(layout, m, n, k):
-        out_layout = FlexibleLayout(
-            device=layout.device, dtype=layout.dtype, size=layout.size
-        )
+        # Note: Do not use FlexibleLayout for the output here, as it will
+        # lead to runtime errors if the output layout is made incompatible with
+        # the bias layout later.
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
-            out_layout,
+            layout,
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
@@ -259,10 +270,20 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
                 ),
             )
-
-    return autotune_select_algorithm(
-        "addmm", choices, [inp_expanded, mat1, mat2], layout
-    )
+    try:
+        return autotune_select_algorithm(
+            "addmm", choices, [inp_expanded, mat1, mat2], layout
+        )
+    except NoValidChoicesError:
+        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+        fallback_choice = aten_addmm.bind(
+            (inp, mat1, mat2),
+            layout,
+            ordered_kwargs_for_cpp_kernel,
+            alpha=alpha,
+            beta=beta,
+        )
+        return fallback_choice.output_node()
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):

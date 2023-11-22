@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 import logging
+import math
 import sys
 import textwrap
 import time
@@ -746,6 +747,8 @@ class ErrorFromChoice(RuntimeError):
         super().__init__(msg)
         self.choice = choice
 
+class NoValidChoicesError(RuntimeError):
+    pass
 
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
@@ -829,7 +832,12 @@ class AlgorithmSelectorCache(PersistentCache):
             or log.getEffectiveLevel() == logging.DEBUG
         ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
-        selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
+
+        selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
+        if (not isinstance(selected_time, float)) or (selected_time<0.0) or (not math.isfinite(selected_time)) or math.isnan(selected_time):
+            raise NoValidChoicesError()
+        selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
