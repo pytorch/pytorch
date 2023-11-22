@@ -1075,6 +1075,22 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_with_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1302,6 +1318,28 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), inputs)
+
+    def test_zero_size_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, channel, r=8):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveAvgPool2d(1)
+                self.net = torch.nn.Sequential(
+                    torch.nn.Linear(channel, channel // r, bias=False),
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(channel // r, channel, bias=False),
+                    torch.nn.Sigmoid(),
+                )
+
+            def forward(self, inp):
+                b, c, _, _ = inp.shape
+                x = self.pool(inp).view(b, c)
+                x = self.net(x).view(b, c, 1, 1)
+                x = inp * x
+                return x
+
+        inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
+        self.check_model(Model(4), inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

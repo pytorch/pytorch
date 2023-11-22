@@ -737,7 +737,7 @@ class TestOptim(TestCase):
                     actual = mt_p_state[k]
                     self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
-    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
+    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag, reduced_precision=False):
         if not torch.cuda.is_available():
             return
         assert flag in ("foreach", "fused")
@@ -794,15 +794,20 @@ class TestOptim(TestCase):
 
             st_state = state[0]
             mt_state = state[1]
+
+            assert_eq_kwargs = {}
+            if reduced_precision:
+                assert_eq_kwargs = {'atol': 1e-5, 'rtol': 1e-4}
+
             for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p)
+                self.assertEqual(st_p, mt_p, **assert_eq_kwargs)
 
                 # check that optimizer states are the same
                 st_p_state = st_state[st_p]
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    self.assertEqual(st_p_state[k], mt_p_state[k])
+                    self.assertEqual(st_p_state[k], mt_p_state[k], **assert_eq_kwargs)
 
     def _test_foreach_memory(self, optimizer_pairs_with_flags):
         if not torch.cuda.is_available():
@@ -958,6 +963,21 @@ class TestOptim(TestCase):
 
     def test_multi_tensor_optimizers(self):
         self._test_derived_optimizers(self._multi_tensor_optimizer_configs, "foreach")
+
+    def test_multi_tensor_optimizers_default_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/110940
+        # We coerce step to always be float32
+        default_dtype = torch.tensor(0.0).dtype
+        for dtype in [torch.float64, torch.float16]:
+            try:
+                torch.set_default_dtype(dtype)
+                self._test_derived_optimizers(
+                    self._multi_tensor_optimizer_configs,
+                    "foreach",
+                    reduced_precision=dtype == torch.float16
+                )
+            finally:
+                torch.set_default_dtype(default_dtype)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
