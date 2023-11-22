@@ -1,4 +1,4 @@
-#include <c10/core/impl/cow/COWDeleter.h>
+#include <c10/core/impl/COWDeleter.h>
 #include <c10/util/Exception.h>
 #include <mutex>
 

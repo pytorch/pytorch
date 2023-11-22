@@ -257,11 +257,12 @@ class autocast:
             self._cache_enabled = cache_enabled
 
         if self.device == "cpu":
-            supported_dtype = [torch.bfloat16]
+            supported_dtype = [torch.bfloat16, torch.float16]
             if self.fast_dtype not in supported_dtype and enabled:
                 error_message = "In CPU autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += "CPU Autocast only supports dtype of "
                 error_message += (
-                    "CPU Autocast only supports dtype of torch.bfloat16 currently."
+                    ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
                 )
                 warnings.warn(error_message)
                 enabled = False
