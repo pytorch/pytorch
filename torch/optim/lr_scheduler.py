@@ -99,7 +99,7 @@ class LRScheduler:
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
     def load_state_dict(self, state_dict):
-        """Load the schedulers state.
+        """Load the scheduler's state.
 
         Args:
             state_dict (dict): scheduler state. Should be an object returned
