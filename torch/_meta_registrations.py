@@ -5838,6 +5838,29 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
     )
 
 
+@register_meta(aten._cslt_sparse_mm)
+def meta__cslt_sparse_mm(
+    compressed_A: torch.Tensor,
+    dense_B: torch.Tensor,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    transopose_result: bool = False,
+):
+    is_uint8_input_type = compressed_A.dtype == torch.uint8
+    compression_factor = 10 if is_uint8_input_type else 9
+    k = dense_B.size(0)
+    n = dense_B.size(1)
+    m = (compressed_A.numel() * 16 / compression_factor  ) / k;
+    mixed_dtype = out_dtype is not None and (is_uint8_input_type != out_dtype)
+    result = None
+    if mixed_dtype:
+        result = dense_B.new_empty((n, m), dtype=out_dtype) if transopose_result else dense_B.new_empty((m, n), dtype=out_dtype)
+    else:
+        result = dense_B.new_empty((n, m)) if transopose_result else dense_B.new_empty((m, n))
+
+    return result
+
+
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
 @out_wrapper()
