@@ -129,6 +129,8 @@ def get_platform_specific_sdpa():
         return [SDPBackend.EFFICIENT_ATTENTION]
     return []
 
+PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
+
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
                      requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
     """Creates rand dense or nested tensor with given shape and type.
@@ -1288,7 +1290,7 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
-        get_platform_specific_sdpa(),
+        PLATFORM_SPECIFIC_SDPA,
     )
     def test_invalid_fused_inputs_dim_3(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
@@ -1306,7 +1308,7 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
-        get_platform_specific_sdpa(),
+        PLATFORM_SPECIFIC_SDPA,
     )
     def test_invalid_fused_inputs_broadcast(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
@@ -1322,7 +1324,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", get_platform_specific_sdpa())
+    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_sequence_lengths(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Passing in a q,k,v with 0 length sequences will error
@@ -1336,7 +1338,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", get_platform_specific_sdpa())
+    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Passing in a q,k,v with 0 length sequences will error
@@ -1351,7 +1353,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not flash_attention fused scaled dot product attention")
-    @parametrize("kernel", get_platform_specific_sdpa())
+    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # The embed dim per head is not divisible by 8 for flash attention
@@ -1366,7 +1368,7 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
-        get_platform_specific_sdpa(),
+        PLATFORM_SPECIFIC_SDPA,
     )
     def test_invalid_fused_inputs_invalid_dtype(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
@@ -1439,7 +1441,7 @@ class TestSDPAFailureModes(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
-    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
+    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
     def test_invalid_inputs_different_datatypes(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Different datatypes
@@ -1450,7 +1452,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
+    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
         # Different devices
         shape = (1, 4, 8, 16)
@@ -1459,7 +1461,7 @@ class TestSDPAFailureModes(NNTestCase):
         value = torch.randn(shape, dtype=torch.float16, device='cpu')
         self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @parametrize("kernel", [SDPBackend.MATH] + get_platform_specific_sdpa())
+    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
     def test_invalid_inputs_1_dimensional_inputs(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # 1 dimensional input
@@ -2588,7 +2590,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16,])
     @parametrize("scale", [None, "l1"])
-    @parametrize("fused_kernel", get_platform_specific_sdpa())
+    @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
                                                          is_causal: bool,
