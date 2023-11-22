@@ -757,20 +757,11 @@ class BuiltinVariable(VariableTracker):
             # otherwise return tensor
             else:
                 return result
-        elif isinstance(a, variables.ConstantVariable) and isinstance(
-            b, variables.ConstantVariable
-        ):
-            if self.fn is max:
-                return variables.ConstantVariable.create(max(a.value, b.value))
-            else:
-                return variables.ConstantVariable.create(min(a.value, b.value))
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
-        else:
-            unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
     call_max = _call_min_max
@@ -908,7 +899,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            items = set(arg.unpack_var_sequence(tx))
+            items = arg.unpack_var_sequence(tx)
             return SetVariable(items, mutable_local=MutableLocal())
         else:
             unimplemented(f"set(): {args} {kwargs}")
@@ -1066,6 +1057,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1174,6 +1166,10 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1470,9 +1466,6 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
-            return ConstantVariable.create(op(left.value, right.value))
-
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
@@ -1489,10 +1482,10 @@ class BuiltinVariable(VariableTracker):
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
 
-        _unimplemented()
-
-    # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
@@ -1506,8 +1499,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
-    # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
         if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
             b, (SymNodeVariable, ConstantVariable)
         ):
