@@ -74,13 +74,12 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", "module", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
 
-    def __init__(self, module_type: type, module_key: str, module, **kwargs):
+    def __init__(self, module_type: type, module_key: str, **kwargs):
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
-        self.module = module
         assert self.source
 
     def python_type(self):
@@ -91,7 +90,7 @@ class NNModuleVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         # implement list/iter/tuple/etc calls
-        base = self.module
+        base = tx.output.get_submodule(self.module_key)
         if isinstance(base, torch.nn.ModuleDict):
             result = []
             for name, submod in base.items():
@@ -122,7 +121,7 @@ class NNModuleVariable(VariableTracker):
         return result
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        mod = self.module
+        mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
             NNModuleSource(AttrSource(self.source, name)).make_guard(
@@ -132,12 +131,12 @@ class NNModuleVariable(VariableTracker):
         return variables.ConstantVariable.create(result)
 
     def is_training(self, tx):
-        mod = self.module
+        mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
     def convert_to_unspecialized(self, tx):
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
-        mod = self.module
+        mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
 
         # Mark the class dynamic unless its module initialization
@@ -169,7 +168,7 @@ class NNModuleVariable(VariableTracker):
         else:
             source = None
 
-        base = self.module
+        base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
         all_class_attribute_names = set()
@@ -242,7 +241,7 @@ class NNModuleVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        mod = self.module
+        mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(self.module_key, self.source, tx, mod):
             is_lazy = is_lazy_module(mod)
@@ -341,8 +340,9 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
+
         key = self.module_key
-        module = self.module
+        module = tx.output.get_submodule(key)
 
         def generic_call_method_helper(name):
             # Helper function to put a `call_method` node in FX graph,
