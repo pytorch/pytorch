@@ -35,6 +35,10 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#ifdef USE_KINETO
+#include <libkineto.h>
+#endif
+
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -129,6 +133,30 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   ParameterClass = PyObject_GetAttrString(parameter_module, "Parameter");
   if (!ParameterClass)
     return nullptr;
+
+#if defined(USE_KINETO) && defined(__linux__) && !defined(USE_ROCM)
+  // Initialize the Kineto profilers, if they have not already.
+  // DO NOT REMOVE, this is needed for on-demand profiling.
+  if (!libkineto::api().isProfilerRegistered()) {
+    libkineto_init(
+        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+        /*logOnError=*/true);
+    libkineto::api().suppressLogMessages();
+  }
+  libkineto::api().initProfilerIfRegistered();
+
+  // Used for unit test to check profiler was initialized.
+  m.def("_isProfilerInitialized", []() {
+    return libkineto::api().isProfilerInitialized();
+  });
+#endif
+
+  m.def("_is_use_kineto_defined", []() -> bool {
+#ifdef USE_KINETO
+    return true;
+#endif
+    return false;
+  });
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
@@ -315,18 +343,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<ActivityType> activities{ActivityType::CPU};
+    std::set<torch::profiler::impl::ActivityType> activities{
+        torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::getNumGPUs() > 0) {
-      activities.insert(ActivityType::CUDA);
+      activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
-      activities.insert(ActivityType::XPU);
+      activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
     if (at::hasMTIA()) {
-      activities.insert(ActivityType::MTIA);
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
 #endif
     return activities;
@@ -954,55 +983,40 @@ static PyObject* len_torch_function_stack(
 
 static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
-    PyObject* args) {
+    PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (args != Py_None) {
-    PyObject* arg = Py_None;
-    PyObject* is_pre_dispatch = Py_False;
-    if (!PyArg_ParseTuple(args, "O|O", &arg, &is_pre_dispatch)) {
-      return NULL;
+  if (arg != Py_None) {
+    using c10::impl::TorchDispatchModeKey;
+    // When we push a mode onto the mode stack, we need to
+    // check if it's an "infra" mode, by checking its _mode_key attribute.
+    c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    py::object maybe_mode_key_obj =
+        PyObject_FastGetAttrString(arg, "_mode_key");
+    if (maybe_mode_key_obj) {
+      mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+      c10::impl::TorchDispatchModeTLS::set_mode(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+          mode_key.value());
+    } else {
+      c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
     }
-
-    if (arg != Py_None) {
-      using c10::impl::TorchDispatchModeKey;
-      // When we push a mode onto the mode stack, we need to
-      // check if it's an "infra" mode, by checking its _mode_key attribute.
-      c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
-      py::object maybe_mode_key_obj =
-          PyObject_FastGetAttrString(arg, "_mode_key");
-
-      if (maybe_mode_key_obj) {
-        mode_key =
-            py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
-        c10::impl::TorchDispatchModeTLS::set_mode(
-            std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
-            mode_key.value(),
-            is_pre_dispatch == Py_True);
-      } else {
-        c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
-            std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-      }
-      Py_INCREF(arg);
-    }
+    Py_INCREF(arg);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* pop_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
+static PyObject* pop_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  PyObject* maybe_mode_key = Py_None;
-  PyObject* is_pre_dispatch = Py_False;
-  if (!PyArg_ParseTuple(args, "|OO", &maybe_mode_key, &is_pre_dispatch)) {
-    return NULL;
-  }
-
   c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
-    auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(
-        mode_key.value(), is_pre_dispatch == Py_True);
+    auto maybe_mode =
+        c10::impl::TorchDispatchModeTLS::unset_mode(mode_key.value());
     TORCH_CHECK(
         maybe_mode.has_value(),
         "Attempted to unset ",
@@ -1011,8 +1025,7 @@ static PyObject* pop_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
     auto mode = maybe_mode.value();
     r = mode->ptr(getPyInterpreter());
   } else {
-    auto mode =
-        c10::impl::TorchDispatchModeTLS::pop_stack(is_pre_dispatch == Py_True);
+    auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
     r = mode->ptr(getPyInterpreter());
   }
   Py_INCREF(r);
@@ -1025,31 +1038,22 @@ static PyObject* get_dispatch_stack_at(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"get_stack_at(int64_t level, bool is_pre_dispatch=False)"});
+  static PythonArgParser parser({"get_stack_at(int64_t level)"});
 
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<1> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
 
   auto idx = _r.toInt64(0);
-  auto is_pre_dispatch = _r.toBoolWithDefault(1, false);
-  const auto& mode =
-      c10::impl::TorchDispatchModeTLS::get_stack_at(idx, is_pre_dispatch);
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
   auto* r = mode->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* args) {
+static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(args != Py_None);
-
-  PyObject* mode = Py_None;
-  PyObject* is_pre_dispatch = Py_False;
-  if (!PyArg_ParseTuple(args, "O|O", &mode, &is_pre_dispatch)) {
-    return NULL;
-  }
+  TORCH_CHECK(mode != Py_None);
 
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
@@ -1059,28 +1063,18 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* args) {
 
   Py_INCREF(mode);
   c10::impl::TorchDispatchModeTLS::set_mode(
-      std::make_shared<c10::SafePyObject>(mode, getPyInterpreter()),
-      mode_key,
-      is_pre_dispatch == Py_True);
+      std::make_shared<c10::SafePyObject>(mode, getPyInterpreter()), mode_key);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* args) {
+static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(args != Py_None);
+  TORCH_CHECK(arg != Py_None);
+  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
-  PyObject* mode = NULL;
-  PyObject* is_pre_dispatch = Py_False;
-  if (!PyArg_ParseTuple(args, "O|O", &mode, &is_pre_dispatch)) {
-    return NULL;
-  }
-
-  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(mode);
-
-  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
-      mode_key, is_pre_dispatch == Py_True);
+  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
@@ -1090,20 +1084,12 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* args) {
+static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(args != Py_None);
+  TORCH_CHECK(arg != Py_None);
+  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
-  PyObject* mode = NULL;
-  PyObject* is_pre_dispatch = Py_False;
-  if (!PyArg_ParseTuple(args, "O|O", &mode, &is_pre_dispatch)) {
-    return NULL;
-  }
-
-  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(mode);
-
-  const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(
-      mode_key, is_pre_dispatch == Py_True);
+  const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
@@ -1115,13 +1101,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* args) {
 
 static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject* is_pre_dispatch = Py_False;
-  if (!PyArg_ParseTuple(args, "|O", &is_pre_dispatch)) {
-    return NULL;
-  }
-
-  const auto len =
-      c10::impl::TorchDispatchModeTLS::stack_len(is_pre_dispatch == Py_True);
+  const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
   return utils::wrap(static_cast<int64_t>(len));
   END_HANDLE_TH_ERRORS
 }
@@ -1223,26 +1203,26 @@ static PyMethodDef methods[] = { // NOLINT
      castPyCFunctionWithKeywords(get_function_stack_at),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_len_torch_function_stack", len_torch_function_stack, METH_NOARGS, nullptr},
+    {"_len_torch_function_stack",
+     len_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
-     METH_VARARGS,
+     METH_O,
      nullptr},
-    {"_pop_torch_dispatch_stack",
-     pop_torch_dispatch_stack,
-     METH_VARARGS,
-     nullptr},
+    {"_pop_torch_dispatch_stack", pop_torch_dispatch_stack, METH_O, nullptr},
     {"_get_dispatch_stack_at",
      castPyCFunctionWithKeywords(get_dispatch_stack_at),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_len_torch_dispatch_stack",
      len_torch_dispatch_stack,
-     METH_VARARGS,
+     METH_NOARGS,
      nullptr},
-    {"_set_dispatch_mode", set_dispatch_mode, METH_VARARGS, nullptr},
-    {"_get_dispatch_mode", get_dispatch_mode, METH_VARARGS, nullptr},
-    {"_unset_dispatch_mode", unset_dispatch_mode, METH_VARARGS, nullptr},
+    {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
+    {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
+    {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},
 
     {nullptr, nullptr, 0, nullptr}};
 
