@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Usage (run from root of project):
-#  RELEASE_VERSION=2.1 apply-release-changes.sh
+#  DRY_RUN=disabled RELEASE_VERSION=2.2 ./scripts/release/apply-release-changes.sh
 #
 # RELEASE_VERSION: Version of this current release
 
@@ -9,6 +9,9 @@ set -eou pipefail
 
 # Create and Check out to Release Branch
 # git checkout -b "${RELEASE_BRANCH}"
+
+DRY_RUN=${DRY_RUN:-enabled}
+python3 .github/scripts/tag_docker_images_for_release.py --version ${RELEASE_VERSION} --dry-run ${DRY_RUN}
 
 # Change all GitHub Actions to reference the test-infra release branch
 # as opposed to main.
@@ -22,8 +25,6 @@ echo "Applying to templates"
 for i in .github/templates/*.yml.j2; do
     sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
 done
-# Change conda token for test env for conda upload
-sed -i 's#CONDA_PYTORCHBOT_TOKEN#CONDA_PYTORCHBOT_TOKEN_TEST#' .github/templates/upload.yml.j2
 
 # Triton wheel
 echo "Triton Changes"
@@ -34,12 +35,8 @@ echo "XLA Changes"
 sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
 sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 
-# Binary tests
-echo "Binary tests"
-sed -i 's#/nightly/#/test/#' .circleci/scripts/binary_linux_test.sh
-sed -i 's#"\\${PYTORCH_CHANNEL}"#pytorch-test#' .circleci/scripts/binary_linux_test.sh
-
-# Regenerated templates
+# Regenerate templates
+export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh
 
 # Optional
