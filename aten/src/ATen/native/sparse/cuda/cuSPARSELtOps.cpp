@@ -35,7 +35,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
-    auto compression_factor = 9;
 
     switch(
         sparse_input.scalar_type()
@@ -43,7 +42,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     {
         case at::ScalarType::Char:
             type = CUDA_R_8I;
-            compression_factor = 10;
             break;
         case at::ScalarType::Half:
             type = CUDA_R_16F;
@@ -58,9 +56,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
             TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
             break;
     }
-
-    // create a new compressed tensor with the same dtype as
-    auto compressed_tensor = sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
 
     TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
         &handle,
@@ -82,6 +77,8 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         &compressed_size,
         &compressed_buffer_size));
 
+    // create a new compressed tensor with the same dtype as
+    auto compressed_tensor = sparse_input.new_empty(compressed_size / sparse_input.element_size());
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
     auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -101,6 +98,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 
 
 at::Tensor _cslt_sparse_mm(
+    const int64_t m,
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
@@ -123,7 +121,6 @@ at::Tensor _cslt_sparse_mm(
   cudaDataType input_type;
   cudaDataType output_type;
   cusparseComputeType compute_type;
-  auto compression_factor = 9;
 
 
   switch(compressed_A.scalar_type())
@@ -132,8 +129,6 @@ at::Tensor _cslt_sparse_mm(
         input_type = CUDA_R_8I;
         output_type = CUDA_R_8I;
         compute_type = CUSPARSE_COMPUTE_32I;
-        compression_factor = 10;
-
         break;
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
@@ -171,7 +166,6 @@ at::Tensor _cslt_sparse_mm(
 
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
-  int64_t m = (compressed_A.numel() * 16 / compression_factor  ) / k;
 
   //initialize sparse descriptor
   cusparseLtMatDescriptor_t sparse_input_descriptor;
@@ -295,6 +289,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input){
 }
 
 at::Tensor _cslt_sparse_mm(
+    const int64_t m,
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,

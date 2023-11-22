@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 from torch.sparse.semi_structured import (
-    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG,
+    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS,
     SparseSemiStructuredTensor,
     to_sparse_semi_structured,
 )
@@ -33,8 +33,8 @@ from torch.testing._internal.common_utils import (
 
 from torch.utils._triton import has_triton
 
-
-SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
+# for now CUTLASS and cuSPARSELt support the same dtypes, when we enable fp32 support we will need to make update this
+SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS.keys()
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
 _IS_SM8X = False
@@ -243,9 +243,10 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
-                    sparse_result = torch.mm(A_sparse, B.t())
+                if dense_input_shape == (1, 128):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
+                        sparse_result = torch.mm(A_sparse, B.t())
         elif dtype is torch.int8:
             # test transpose
             # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.
@@ -333,7 +334,7 @@ class TestSparseSemiStructured(TestCase):
             B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
 
             dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
-            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
+            sparse_result = torch._cslt_sparse_mm(A_sparse.shape[0], A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
