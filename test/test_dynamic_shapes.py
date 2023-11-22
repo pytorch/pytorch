@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode
+from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -136,8 +137,10 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims
+            ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
@@ -676,14 +679,7 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        if fn in sym_node.magic_methods_on_math:
-            lambda_apply = getattr(math, fn)
-        elif fn in sym_node.magic_methods_on_submodule:
-            lambda_apply = getattr(sym_node, fn)
-        elif fn in sym_node.magic_methods_on_operator_with_trailing_underscore:
-            lambda_apply = getattr(operator, f"{fn}_")
-        else:
-            lambda_apply = getattr(operator, fn)
+        lambda_apply = method_to_operator(fn)
 
         def guard_fn(v):
             if type(v) in (SymBool, bool):

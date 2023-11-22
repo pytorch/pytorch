@@ -1052,6 +1052,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1160,6 +1161,10 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1473,6 +1478,11 @@ class BuiltinVariable(VariableTracker):
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
+
+        if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
+            return ConstantVariable.create(op(left.fn, right.fn))
+
+        _unimplemented()
 
     def call_and_(self, tx, a, b):
         # Rely on constant_handler

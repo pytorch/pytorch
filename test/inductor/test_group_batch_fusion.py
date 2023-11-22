@@ -224,7 +224,7 @@ class MyModule7(torch.nn.Module):
 
 
 @requires_cuda()
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@torch._inductor.config.patch(post_grad_fusion_options={"group_linear": {}})
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):

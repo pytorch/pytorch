@@ -4309,6 +4309,19 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
 
 
+class _SparseDataset(torch.utils.data.Dataset):
+    # An utility class used in TestSparseAny.test_dataloader method.
+
+    def __init__(self, sparse_tensors):
+        self.sparse_tensors = sparse_tensors
+
+    def __len__(self):
+        return len(self.sparse_tensors)
+
+    def __getitem__(self, index):
+        return self.sparse_tensors[index]
+
+
 class TestSparseAny(TestCase):
 
     @onlyCPU
@@ -5129,6 +5142,19 @@ class TestSparseAny(TestCase):
                     x = x.coalesce()
 
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
+
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    @dtypes(torch.double)
+    def test_dataloader(self, device, layout, dtype):
+
+        data = list(self.generate_simple_inputs(layout, device=device, dtype=dtype))
+
+        dataset = _SparseDataset(data)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=None, num_workers=2)
+
+        loaded_data = list(loader)
+        self.assertEqual(data, loaded_data)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
