@@ -9149,13 +9149,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'zero',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-        has_no_out_of_place=True,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
+        supports_out=False,
     ),
     ForeachFuncInfo(
         'sign',
@@ -9354,15 +9348,9 @@ foreach_binary_op_db: List[OpInfo] = [
         "copy",
         foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-        has_no_out_of_place=True,
+        supports_out=False,
         supports_forward_ad=False,
         supports_autograd=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
     )
 ]
 
