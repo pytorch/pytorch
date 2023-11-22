@@ -203,14 +203,14 @@ class FunctionalTensorMode(TorchDispatchMode):
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
-        if (
-            torch._C._get_dispatch_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL, self.pre_dispatch
-            )
-            is None
-        ):
-            self.enter_stack.append(True)
+        def _get_prev_mode():
+            if self.pre_dispatch:
+                from torch._ops import _get_dispatch_mode_pre_dispatch
+                return _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+            return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
 
+        if _get_prev_mode() is None:
+            self.enter_stack.append(True)
             return super().__enter__()
         else:
             self.enter_stack.append(False)
@@ -272,47 +272,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
-        # Expectation: functionalization should not **already** be enabled above our mode.
-        # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
-        # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
-        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
-            torch._C.DispatchKey.Functionalize
-        )
-        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
-            torch._C.DispatchKey.Functionalize
-        )
-        assert is_excluded or not is_included
-        include_to_set = (
-            torch._C._dispatch_tls_local_include_set()
-            | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-        )
-        exclude_to_set = (
-            torch._C._dispatch_tls_local_exclude_set()
-            .remove(
-                torch._C.DispatchKey.Functionalize,
-            )
-            .remove(torch._C.DispatchKey.PreDispatch)
-            - FunctionalTensor._extra_dispatch_keys
-        )
-        # All we want to do here is re-use the existing C++ functionalization logic.
-        # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
-        with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
-            try:
-                # By default for python functionalization (for AOTAutograd), we reapply views.
-                old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
-                outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
-            finally:
-                torch._disable_functionalization()
-                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
-
-        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
-            torch._C.DispatchKey.Functionalize
-        )
-        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
-            torch._C.DispatchKey.Functionalize
-        )
-        assert is_excluded or not is_included
+        try:
+            # By default for python functionalization (for AOTAutograd), we reapply views.
+            old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+            print("DISPATCHING: ", func)
+            outs_unwrapped = func._op_dk(torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped)
+            print("DISPATCHED: ", func)
+            outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+        finally:
+            torch._disable_functionalization()
+            torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing

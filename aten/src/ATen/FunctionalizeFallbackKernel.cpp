@@ -7,7 +7,6 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -86,12 +85,7 @@ namespace {
     auto should_wrap_outputs = !any_tensor_inputs || any_functional_inputs;
     {
       at::AutoDispatchSkipFunctionalize guard;
-      if (c10::impl::TorchDispatchModeTLS::stack_len(true) > 0) {
-        c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKey::PreDispatch);
-        op.callBoxed(stack);
-      } else {
-        op.callBoxed(stack);
-      }
+      op.callBoxed(stack);
     }
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;

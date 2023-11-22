@@ -73,6 +73,7 @@ class TorchDispatchMode:
         return instance
 
 def _get_current_dispatch_mode(is_pre_dispatch=False):
+    print("HERERE")
     stack_len = _len_torch_dispatch_stack(is_pre_dispatch)
     # Return a user mode on the stack if there are any
     if stack_len > 0:
@@ -85,29 +86,34 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):
-    if k is not None and k != DispatchKey.PreDispatch:
-        from torch._ops import push_mode_for_key, get_cached_ops
-        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        # Clear the cache of every op that has been used so far, for this particular key.
-        ks = torch._C._functionality_to_backend_keys(k)
-        for op in get_cached_ops():
-            for key in ks:
-                op._uncache_dispatch(key)
-        push_mode_for_key(k, mode)
-    else:
-        if k is None:
-            _push_on_torch_dispatch_stack(mode, False)
-        else:
-            _push_on_torch_dispatch_stack(mode, True)
+    print("HEY", mode, k)
+    if k is None:
+        _push_on_torch_dispatch_stack(mode)
+        return
 
+    if k == DispatchKey.PreDispatch:
+        from torch._ops import _set_mode_pre_dispatch
+        _set_mode_pre_dispatch(mode)
+        return
+
+    from torch._ops import push_mode_for_key, get_cached_ops
+    # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+    # Clear the cache of every op that has been used so far, for this particular key.
+    ks = torch._C._functionality_to_backend_keys(k)
+    for op in get_cached_ops():
+        for key in ks:
+            op._uncache_dispatch(key)
+    push_mode_for_key(k, mode)
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
-    if k is None or isinstance(k, torch._C._TorchDispatchModeKey) or k == torch._C.DispatchKey.PreDispatch:
-        if k == torch._C.DispatchKey.PreDispatch:
-            return _pop_torch_dispatch_stack(None, True)
-        assert k is None or isinstance(k, torch._C._TorchDispatchModeKey)
+    if k == torch._C.DispatchKey.PreDispatch:
+        from torch._ops import _pop_mode_from_pre_dispatch
+        return _pop_mode_from_pre_dispatch()
+
+    if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
         return _pop_torch_dispatch_stack(k)
+
     from torch._ops import pop_mode_for_key
     # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
     # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode

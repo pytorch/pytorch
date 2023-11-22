@@ -8,8 +8,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 
-#include <c10/core/impl/TorchDispatchModeTLS.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
 #include <ATen/NativeFunctions.h>
