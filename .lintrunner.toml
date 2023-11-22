@@ -1681,6 +1681,7 @@ exclude_patterns = [
     'torch/_higher_order_ops/__init__.py',
     'torch/_higher_order_ops/out_dtype.py',
     'torch/_higher_order_ops/wrap.py',
+    'torch/_vendor/**',
     'torch/ao/__init__.py',
     'torch/ao/nn/__init__.py',
     'torch/ao/nn/intrinsic/__init__.py',
