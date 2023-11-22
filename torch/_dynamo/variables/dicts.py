@@ -326,6 +326,7 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.as_python_constant())
+
         unimplemented(f"Sets with {type(vt)} NYI")
 
     @property
