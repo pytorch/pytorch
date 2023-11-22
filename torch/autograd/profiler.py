@@ -471,7 +471,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 flops=kineto_event.flops(),
             )
-            max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
+            max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
                 if self.use_device:
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
