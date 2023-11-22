@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
-        _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
+    _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
