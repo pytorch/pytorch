@@ -771,7 +771,7 @@ def _register_quantization_maxpool2d():
         )
 
 
-def _is_valid_quantized_cat_optimization_pattern():
+def _is_input_output_same_scale_zp(check_node):
     def fn(match):
         # Ensure all the inputs and output has same scale and zero point
         # Step 1: Check inputs/output zero point
@@ -790,7 +790,7 @@ def _is_valid_quantized_cat_optimization_pattern():
         scales = [
             (
                 mul_node.args[1]
-                if mul_node.args[0].target is aten.cat.default
+                if mul_node.args[0].target is check_node
                 else 1.0 / mul_node.args[1]
             )
             for mul_node in mul_nodes
@@ -809,7 +809,7 @@ def _register_quantized_cat_lowering(
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_quantized_cat_optimization_pattern(),
+        extra_check=_is_input_output_same_scale_zp(aten.cat.default),
     )
     def qcat(match: Match, inputs, dim, **kwargs):
         # inputs is with format: [[x1, x1_dq_dtype, x1_zp, x1_scale], ...]
@@ -846,45 +846,13 @@ def _register_quantization_cat():
     )
 
 
-def _is_valid_quantized_reshape_optimization_pattern():
-    def fn(match):
-        # Ensure all the inputs and output has same scale and zero point
-        # Step 1: Check inputs/output zero point
-        sub_nodes = filter_nodes(match.nodes, aten.sub.Tensor)
-        zero_points = [node.args[1] for node in sub_nodes]
-        add_nodes = filter_nodes(match.nodes, aten.add.Tensor)
-        assert len(add_nodes) == 1, "expect only 1 add node at output quant pattern"
-        zero_points.append(add_nodes[0].args[1])
-        if not all(zero_point == zero_points[0] for zero_point in zero_points):
-            return False
-
-        # Step 2: Check inputs/output scale
-        mul_nodes = filter_nodes(match.nodes, aten.mul.Tensor)
-        # We need to find mul node at output since the scale value is reciprocal to input scale.
-        # Mul node at output should connect to cat node directly.
-        scales = [
-            (
-                mul_node.args[1]
-                if mul_node.args[0].target is aten.reshape.default
-                else 1.0 / mul_node.args[1]
-            )
-            for mul_node in mul_nodes
-        ]
-        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
-            return False
-
-        return True
-
-    return fn
-
-
 def _register_quantized_reshape_lowering(
     pattern,
     computation_op,
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_quantized_reshape_optimization_pattern(),
+        extra_check=_is_input_output_same_scale_zp(aten.reshape.default),
     )
     def qreshape(match: Match, *args, **kwargs):
         qx = kwargs["x"]
