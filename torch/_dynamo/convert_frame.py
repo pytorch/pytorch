@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 import torch
 import torch._logging
-from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._tracing_context import compile_context, CompileContext, CompileId, tracing
 from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,

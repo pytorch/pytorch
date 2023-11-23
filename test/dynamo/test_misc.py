@@ -6593,7 +6593,7 @@ def fn():
             yield
 
         with mock.patch(
-            "torch._guards.TracingContext.current_frame",
+            "torch._tracing_context.TracingContext.current_frame",
             side_effect=global_context_capture_fn,
         ):
             torch._dynamo.optimize("eager")(fn)(x, y, z)
@@ -6629,7 +6629,7 @@ def fn():
             yield
 
         with mock.patch(
-            "torch._guards.TracingContext.current_frame",
+            "torch._tracing_context.TracingContext.current_frame",
             side_effect=global_context_capture_fn,
         ):
             torch._dynamo.optimize("eager")(fn)(x, y, z)

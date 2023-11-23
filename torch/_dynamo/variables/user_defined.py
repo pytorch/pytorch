@@ -13,7 +13,7 @@ from typing import Dict, List
 import torch._dynamo.config
 
 import torch.nn
-from torch._guards import TracingContext
+from torch._tracing_context import TracingContext
 
 from .. import variables
 from ..allowed_functions import is_allowed

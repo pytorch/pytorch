@@ -62,7 +62,7 @@ PT2 pre-AOTAutograd usage (this is unusual, you probably don't want to do this):
 
 
     # Fake mode is not enabled!
-    from torch._guards import detect_fake_mode
+    from torch._tracing_context import detect_fake_mode
     fake_mode = detect_fake_mode(args)
     fake_args = [fake_mode.from_real_tensor(arg) for arg in args]
     with fake_mode:

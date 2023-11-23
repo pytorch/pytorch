@@ -324,7 +324,7 @@ def compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # Return the output strides to the caller via TracingContext
-    context = torch._guards.TracingContext.try_get()
+    context = torch._tracing_context.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
         assert len(context.output_strides) == 0
         context.output_strides.extend(compiled_graph.output_strides)
@@ -903,7 +903,7 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    tracing_context = torch._guards.TracingContext.try_get()
+    tracing_context = torch._tracing_context.TracingContext.try_get()
     if tracing_context is not None:
         params_flat = tracing_context.params_flat
         assert params_flat is not None
@@ -1052,7 +1052,7 @@ def compile_fx(
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
-            context = torch._guards.TracingContext.try_get()
+            context = torch._tracing_context.TracingContext.try_get()
             # See Note [User Outputs in the inductor graph]
             if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = (
@@ -1150,8 +1150,8 @@ def compile_fx(
         allow_non_fake_inputs=True
     )
     tracing_context = (
-        torch._guards.TracingContext.try_get()
-        or torch._guards.TracingContext(fake_mode)
+        torch._tracing_context.TracingContext.try_get()
+        or torch._tracing_context.TracingContext(fake_mode)
     )
 
     if V.aot_compilation is True:
@@ -1162,7 +1162,7 @@ def compile_fx(
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
-    with V.set_fake_mode(fake_mode), torch._guards.tracing(
+    with V.set_fake_mode(fake_mode), torch._tracing_context.tracing(
         tracing_context
     ), compiled_autograd.disable():
         return aot_autograd(

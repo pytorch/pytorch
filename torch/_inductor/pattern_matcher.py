@@ -24,7 +24,7 @@ from typing import (
 from typing_extensions import TypeGuard
 
 import torch
-import torch._guards
+import torch._tracing_context
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
@@ -1245,7 +1245,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    with torch._guards.tracing(None):
+    with torch._tracing_context.tracing(None):
         aot_function(
             fn,
             lambda g, i: make_boxed_func(g),
@@ -1312,7 +1312,7 @@ def init_once_fakemode(fn: Callable[..., Any]):
     def lazy_init():
         counters_ref = counters["inductor"].copy()
 
-        with torch._guards.tracing(
+        with torch._tracing_context.tracing(
             None
         ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
             result = fn()

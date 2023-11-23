@@ -6,7 +6,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
-from torch._guards import detect_fake_mode
+from torch._tracing_context import detect_fake_mode
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
