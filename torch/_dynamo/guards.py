@@ -208,6 +208,7 @@ class GuardBuilder(GuardBuilderBase):
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
+        self.scope["G"]["___stored_objs_by_id"] = {}
         for (
             name,
             package_module,
@@ -338,9 +339,9 @@ class GuardBuilder(GuardBuilderBase):
             # Increase the scope of ID_MATCH'd objects.
             if isinstance(val, torch.nn.Module):
                 local_name = guard.originating_source.local_name
-                weak_id = self.lookup_weakrefs(val)
-                if weak_id is not None:
-                    self.id_matched_objs[local_name] = weak_id
+                weak_obj = self.lookup_weakrefs(val)
+                if weak_obj is not None:
+                    self.id_matched_objs[local_name] = weak_obj
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -743,8 +744,10 @@ class GuardBuilder(GuardBuilderBase):
             ):
                 ctx = value.__tensor_flatten__()[1]
                 if ctx is not None:
-                    # Assume that the ctx has equality
-                    code.append(f"{tensor_name}.__tensor_flatten__()[1] == {ctx}")
+                    # Assume that the ctx obeys object equality
+                    obj_store = self.get("G['___stored_objs_by_id']")
+                    obj_store[id(ctx)] = ctx
+                    code.append(f"{tensor_name}.__tensor_flatten__()[1] == G['___stored_objs_by_id'][{id(ctx)}]")
 
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
