@@ -414,8 +414,8 @@ class TestIndexing(TestCase):
         arr = np.ones((5, 5))
 
         # A tuple subclass should also be an nd-index
-        class TupleSubclass(tuple):  # noqa: SLOT001
-            pass
+        class TupleSubclass(tuple):
+            __slots__ = ()
 
         index = ([1], [1])
         index = TupleSubclass(index)

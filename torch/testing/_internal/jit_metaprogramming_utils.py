@@ -30,8 +30,8 @@ def unpack_variables(args):
     else:
         return args
 
-class dont_convert(tuple):  # noqa: SLOT001
-    pass
+class dont_convert(tuple):
+    __slots__ = ()
 
 non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
