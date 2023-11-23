@@ -167,8 +167,14 @@ def transform_subclass(t, callback, outer_size):
     for attr in attrs:
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
     sub = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx, outer_size)
-    # TODO: nice error message for subclass implementors
-    assert sub.shape == outer_size
+
+    # NB: Purposefully guard here to simplify the inner / outer symbols.
+    # Using sym_eq() for symbolic comparison can result in an expression that's too
+    # difficult to guard on, so we use == here.
+    assert sub.shape == outer_size, \
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
+        f"shape equal to outer_size={outer_size}, but got: {sub.shape}"
+
     return sub
 
 def _correct_storage_aliasing(func, schema_info, args, outs):
