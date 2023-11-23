@@ -8,7 +8,7 @@ import torch
 from torch import distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh, Shard
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
