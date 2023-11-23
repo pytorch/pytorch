@@ -615,10 +615,6 @@ class ViewAndMutationMeta:
     grad_enabled_mutation: Optional[bool] = None
 
     def __post_init__(self):
-        mutated_inp_indices = [
-            i for i, m in enumerate(self.input_info)
-            if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-        ]
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
@@ -632,7 +628,10 @@ class ViewAndMutationMeta:
                 if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
             ]
         else:
-            mutated_inp_runtime_indices = mutated_inp_indices
+            mutated_inp_runtime_indices = [
+                i for i, m in enumerate(self.input_info)
+                if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+            ]
 
         mutated_graph_handled_indices = [
             i for i, m in enumerate(self.input_info)
@@ -650,17 +649,11 @@ class ViewAndMutationMeta:
             i for i, m in enumerate(self.output_info) if m.output_type is OutputType.unsafe_view_alias
         ]
 
-        self.mutated_inp_indices = mutated_inp_indices
         # This is pre-computed in post_init for perf.
         # It contains the index of every element
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
-
-        assert (
-            self.num_mutated_graph_handled_indices + self.num_mutated_inp_runtime_indices ==
-            len(mutated_inp_indices)
-        )
 
         # This is pre-computed for perf.
         # It contains the index of every element
@@ -4004,7 +3997,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # so that autograd.Function doesn't treat them as tensors
             if num_mutated_metadata_only_inputs > 0:
                 for i, idx in enumerate(
-                    CompiledFunction.metadata.mutated_inp_indices
+                    CompiledFunction.metadata.mutated_inp_runtime_indices
                 ):
                     # We could make this faster by only looping over inputs with metadata-only mutations
                     # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
@@ -4500,7 +4493,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         if aot_config.is_export:
             mutated_user_inp_locs = [
                 idx - aot_config.num_params_buffers
-                for idx in fw_metadata.mutated_inp_indices
+                for idx in fw_metadata.mutated_inp_runtime_indices
                 if idx >= aot_config.num_params_buffers
             ]
             if len(mutated_user_inp_locs) > 0:
