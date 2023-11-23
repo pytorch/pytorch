@@ -2367,3 +2367,7 @@ def deserialize_function_object_from_file(func_data):
         func_data['defaults'],
         closure,
     )
+
+def frame_code_to_unique_frame_id(f_code):
+    import hashlib
+    return hashlib.md5(str(attrs_code_object(f_code)).encode()).hexdigest()

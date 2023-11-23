@@ -83,6 +83,7 @@ from .utils import (
     troubleshooting_url,
     attrs_code_object,
     write_record_to_file,
+    frame_code_to_unique_frame_id,
 )
 
 log = logging.getLogger(__name__)
@@ -683,14 +684,18 @@ def _placeholder_remote_fetch(unique_frame_id, frame):
             breakpoint()
             frame.f_globals[alias] = eval(name, frame.f_globals)
 
+        breakpoint()
         check_fn = CheckFunctionManager.guard_fn_from_pycode(guard_code, frame.f_globals)
         code_obj = types.CodeType(*attributes)
         breakpoint()
-        check_fn(frame.f_locals)
-        breakpoint()
-        return code_obj, check_fn
+        if check_fn(frame.f_locals):
+            print("Guard passed")
+            return code_obj, check_fn
+        else:
+            print("Guard failed")
+            return None, None
     except Exception as e:
-        # breakpoint()
+        breakpoint()
         return None, None
 
 def _placeholder_remote_write(unique_frame_id, code_attrs, guard_code):
@@ -710,7 +715,9 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
         try:
             # breakpoint()
             # Cache miss, check remote
-            remote_code, remote_guards = _placeholder_remote_fetch("my_frame", frame)
+            unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
+            breakpoint()
+            remote_code, remote_guards = _placeholder_remote_fetch(unique_frame_id, frame)
             breakpoint()
             if remote_code and remote_guards:
                 # pickle.dumps((name, compiled_fn), "hack_comp.pkl")
@@ -729,7 +736,7 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
                 # func_attrs = attrs_function(result.check_fn)
                 guard_py_code = result.check_fn.pycode
                 # breakpoint()
-                _placeholder_remote_write("my_frame", code_attrs, guard_py_code)
+                _placeholder_remote_write(unique_frame_id, code_attrs, guard_py_code)
 
             counters["frames"]["ok"] += 1
             return result

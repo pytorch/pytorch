@@ -735,7 +735,7 @@ class GuardBuilder(GuardBuilderBase):
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
             code: List[str] = list()
-            if self.check_fn_manager.output_graph.export:
+            if self.check_fn_manager.output_graph.export or config.generate_interpreter_agnostic_code:
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
@@ -1136,7 +1136,8 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             # Do this manually, to un-stagger the guards in log message
-            code_parts.append(f"___check_tensors({tensor_check_args})")
+            if not config.generate_interpreter_agnostic_code:
+                code_parts.append(f"___check_tensors({tensor_check_args})")
             tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
@@ -1302,6 +1303,7 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     for i, expr in enumerate(code_parts):
         preface, expr = replace(expr)
         guard_body.writelines(preface)
+        guard_body.writeline(f"print('Expr about to run {i}')")
         guard_body.writeline(f"if not ({expr}):")
 
         with guard_body.indent():

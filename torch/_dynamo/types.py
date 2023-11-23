@@ -48,6 +48,9 @@ class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
 
+    def serialize():
+        pass
+
 
 class DynamoCallbackFn(Protocol):
     def __call__(
