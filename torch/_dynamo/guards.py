@@ -48,6 +48,9 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.nested._internal.nested_tensor import NestedTensor
+
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -733,6 +736,15 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
                 self.tensor_check_guards.append(guard)
+
+            # Nested Tensor ctx - "ragged_size" is symint placeholder, "requires_grad" is guarded upon
+            if is_traceable_wrapper_subclass(value) and not isinstance(
+                value, NestedTensor
+            ):
+                ctx = value.__tensor_flatten__()[1]
+                if ctx is not None:
+                    # Assume that the ctx has equality
+                    code.append(f"{tensor_name}.__tensor_flatten__()[1] == {ctx}")
 
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.

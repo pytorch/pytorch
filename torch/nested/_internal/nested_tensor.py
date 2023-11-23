@@ -111,9 +111,7 @@ class NestedTensor(torch.Tensor):
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
-        grad_fn_str = (
-            f", requires_grad={self.requires_grad}" if self.requires_grad else ""
-        )
+        grad_fn_str = ", requires_grad=True" if self.requires_grad else ""
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
