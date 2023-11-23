@@ -1,6 +1,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <c10/core/Allocator.h>
+#include <torch/library.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -59,6 +60,12 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
+}
+
+int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
+  return reinterpret_cast<int64_t>(data_ptr);
 }
 
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device) {
@@ -155,6 +162,12 @@ ideep::tensor itensor_from_tensor(const Tensor& tensor) {
 
 int set_verbose(int level) {
     return ideep::utils::set_verbose(level);
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
+      TORCH_FN(data_ptr_from_mkldnn));
 }
 
 }}

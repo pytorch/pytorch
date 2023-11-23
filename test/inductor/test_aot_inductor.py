@@ -1366,7 +1366,7 @@ copy_tests(
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        # "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
         # Need to support convolution
         "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
@@ -1430,7 +1430,6 @@ copy_tests(
         ),
         # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
     },
 )
 
@@ -1454,5 +1453,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if not TEST_WITH_ROCM:
         run_tests(needs="filelock")

@@ -79,6 +79,11 @@ DTYPE_TO_ATEN = {
     torch.complex64: "at::kComplexFloat",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",
+}
+
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",

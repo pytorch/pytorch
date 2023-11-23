@@ -69,6 +69,7 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_mkldnn_rnn_layer_weight(Tensor weight0, Tensor weight1, int hidden_size, bool reverse, bool has_biases, bool batch_first, int[]? input_size=None) -> Tensor[] Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
   m.def("_is_mkldnn_fp16_supported", &is_mkldnn_fp16_supported);
+  m.def("mkldnn::data_ptr(Tensor mkldnn_tensor) -> int");
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {

@@ -252,6 +252,7 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
       auto offset = this->constant_offset(i);
+      auto layout = this->constant_layout(i);
 
       auto device_type = aoti_torch_device_type_cuda();
       if (is_cpu) {
@@ -270,6 +271,7 @@ class AOTInductorModelBase {
           stride,
           offset,
           dtype,
+          layout,
           device_type,
           device_idx,
           &tensor_handle));
@@ -363,6 +365,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).dtype;
   }
 
+  int8_t constant_layout(int64_t idx) const {
+    return constants_info_.at(idx).layout;
+  }
+
   size_t constant_offset(int64_t idx) const {
     return constants_info_.at(idx).offset;
   }
@@ -440,6 +446,7 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
+    int8_t layout;
   };
 
   std::vector<ParamInfo> inputs_info_;
