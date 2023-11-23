@@ -1202,19 +1202,19 @@ struct AttentionBackwardKernel {
     if (p.bias_ptr) {
       TORCH_CHECK(
           p.num_batches <= 1 || p.bias_strideB % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideB).",
-          "bias.stride(0) = ", p.bias_strideB, ", and should be a "
-          "multiple of ", kMinimumAlignment);
+          "attn_bias is not correctly aligned (strideB). ",
+          "attn_bias.stride(0) = ", p.bias_strideB, ", and should be a "
+          "multiple of ", kMinimumAlignment, ".");
       TORCH_CHECK(
           p.num_heads <= 1 || p.bias_strideH % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideH)."
-          "bias.stride(1) = ", p.bias_strideH, ", and should be a "
-          "multiple of ", kMinimumAlignment);
+          "attn_bias is not correctly aligned (strideH) ."
+          "attn_bias.stride(1) = ", p.bias_strideH, ", and should be a "
+          "multiple of ", kMinimumAlignment, ".");
       TORCH_CHECK(
           p.num_queries <= 1 || p.bias_strideM % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideM)."
-          "bias.stride(2) = ", p.bias_strideM, ", and should be a ",
-          "multiple of ", kMinimumAlignment);
+          "attn_bias is not correctly aligned (strideM). "
+          "attn_bias.stride(2) = ", p.bias_strideM, ", and should be a ",
+          "multiple of ", kMinimumAlignment, ".");
     }
     if (p.grad_bias_ptr) {
       TORCH_CHECK(
