@@ -62,19 +62,19 @@ class ASGD(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
         eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["eta"]
         )
         if not eta_is_tensor:
             for s in state_values:
-                s["eta"] = torch.tensor(s["eta"])
+                s["eta"] = torch.tensor(s["eta"], dtype=torch.float32)
         mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["mu"]
         )
         if not mu_is_tensor:
             for s in state_values:
-                s["mu"] = torch.tensor(float(s["mu"]))
+                s["mu"] = torch.tensor(float(s["mu"]), dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
         has_complex = False
@@ -89,9 +89,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.zeros((), device=p.device)
-                    state["eta"] = torch.tensor(group["lr"], device=p.device)
-                    state["mu"] = torch.ones((), device=p.device)
+                    state["step"] = torch.zeros((), device=p.device, dtype=torch.float32)
+                    state["eta"] = torch.tensor(group["lr"], device=p.device, dtype=torch.float32)
+                    state["mu"] = torch.ones((), device=p.device, dtype=torch.float32)
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
