@@ -27,7 +27,6 @@ from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mo
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     CreateSymbolicPolicy,
-    DimConstraint,
     DimDynamic,
     FreshCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
@@ -676,6 +675,7 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
+            self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -692,12 +692,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
         elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
                 value,
@@ -705,14 +705,14 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
+            and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
+                skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
@@ -1137,6 +1137,7 @@ class VariableBuilder:
             ):
                 wrapped_value = shape_env.create_unbacked_symint()
                 _constrain_range_for_size(wrapped_value)
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
                 )
@@ -1195,6 +1196,7 @@ class VariableBuilder:
                     source=self.source,
                     dynamic_dim=dynamic_dim,
                 )
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1550,7 +1552,7 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
     # Is None when fake is SymInt
-    constraint_dims: Optional[DimList[DimConstraint]]
+    policy: Optional[CreateSymbolicPolicy]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1566,14 +1568,9 @@ class TrackedFake:
 def _automatic_dynamic(
     e, tx, name, static_shapes, recurse=True
 ) -> CreateSymbolicPolicy:
-    if recurse and is_traceable_wrapper_subclass(e):
+    is_subclass = is_traceable_wrapper_subclass(e)
+    if recurse and is_subclass:
         outer_policy = _automatic_dynamic(e, tx, name, static_shapes, recurse=False)
-
-        # Magic method allows a subclass to tune dynamic dim settings
-        # for inner tensors based on the outer policy
-        MARK_DYNAMIC_MAGIC_METHOD = "__tensor_mark_dynamic__"
-        if hasattr(e, MARK_DYNAMIC_MAGIC_METHOD):
-            getattr(e, MARK_DYNAMIC_MAGIC_METHOD)(outer_policy)
 
         # Get policies for inner tensors
         attrs, _ = type(e).__tensor_flatten__(e)
@@ -1710,7 +1707,18 @@ def _automatic_dynamic(
         # Precedence: export constraints > eager constraints
         constraint = dim2constraint.get(i)
         if constraint is None:
-            if marked_dynamic and not config.allow_ignore_mark_dynamic:
+            # NB: The "not is_subclass" hack maintains legacy behavior: constraints have
+            # historically not been enforced on the outer tensors of subclasses. Removing
+            # the check results in constraint violations for tensor subclasses that manually
+            # mark_dynamic(), possibly due to the guards introduced by the assert check
+            # against outer_size. Notable examples include NestedTensor and the test subclass
+            # DoubleSizeMaybeAddGeThreeTensor.
+            # TODO: Figure out a better solution for this.
+            if (
+                not is_subclass
+                and marked_dynamic
+                and not config.allow_ignore_mark_dynamic
+            ):
                 constraint_dim = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
                 constraint_dim = RelaxedUnspecConstraint(warn_only=True)
@@ -1767,11 +1775,10 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
 
         log.debug(
-            "wrap_to_fake %s %s %s %s",
+            "wrap_to_fake %s %s %s",
             source.name(),
             tuple(e.shape),
-            policy.dynamic_sizes if policy is not None else None,
-            policy.constraint_sizes if policy is not None else None,
+            policy,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
@@ -1780,14 +1787,7 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 policy=policy,
             )
         )
-        # TODO: just store the whole policy here
-        tx.output.tracked_fakes.append(
-            TrackedFake(
-                fake_e,
-                source,
-                policy.constraint_sizes if policy is not None else None,
-            )
-        )
+        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, policy))
         tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),

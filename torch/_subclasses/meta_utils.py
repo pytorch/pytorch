@@ -246,10 +246,6 @@ class MetaConverter:
                     return shape_env.create_symbolic_sizes_strides_storage_offset(
                         t,
                         src,
-                        # Assume that the set of dims that are dynamic are the same between
-                        # the wrapper tensor and any inner tensors.
-                        # We can revisit this if this assumption does not hold
-                        # for any important subclasses later.
                         policy=policy,
                     )
             else:
