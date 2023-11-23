@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/Config.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <oneapi/dnnl/dnnl_graph.hpp>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 
 namespace torch {
@@ -31,9 +31,9 @@ struct C10_EXPORT RegisterLlgaFuseGraph
     if (enabled) {
       registerPass(fuser::onednn::fuseGraph);
       // oneDNN graph constant cache was enabled by default.
-      // From oneDNN v3.3, it's now disabled by default to avoid potential OOM issues
-      // since there's no cap on its capacity.
-      // But, in practice, OOM issues do not manifest.
+      // From oneDNN v3.3, it's now disabled by default to avoid potential OOM
+      // issues since there's no cap on its capacity. But, in practice, OOM
+      // issues do not manifest.
       dnnl::graph::set_constant_tensor_cache(true);
     } else {
       clearPass();
