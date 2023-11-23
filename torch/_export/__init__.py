@@ -426,7 +426,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
     fake_params_buffers = pytree.tree_map_only(torch.Tensor,
-                                               fake_mode.from_tensor,
+                                               functools.partial(fake_mode.from_tensor, static_shapes=True),
                                                {**dict(gm.named_parameters(remove_duplicate=False)),
                                                 **dict(gm.named_buffers(remove_duplicate=False))})
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
