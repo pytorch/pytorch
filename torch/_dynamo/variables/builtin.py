@@ -899,12 +899,18 @@ class BuiltinVariable(VariableTracker):
             )
         unimplemented(f"dict(): {args} {kwargs}")
 
-    def call_zip(self, tx, *args):
+    def call_zip(self, tx, *args, **kwargs):
+        if kwargs:
+            assert len(kwargs) == 1 and "strict" in kwargs
         if all(x.has_unpack_var_sequence(tx) for x in args):
-            items = [
-                variables.TupleVariable(list(item))
-                for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
-            ]
+            unpacked = [arg.unpack_var_sequence(tx) for arg in args]
+            if kwargs.pop("strict", False) and len(unpacked) > 0:
+                if not all(len(u) == len(unpacked[0]) for u in unpacked):
+                    raise UserError(
+                        ValueError,
+                        "zip() has one argument of len differing from others",
+                    )
+            items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_enumerate(self, tx, *args):
@@ -1478,6 +1484,11 @@ class BuiltinVariable(VariableTracker):
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
                 return ConstantVariable.create(False)
+
+        if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
+            return ConstantVariable.create(op(left.fn, right.fn))
+
+        _unimplemented()
 
     def call_and_(self, tx, a, b):
         # Rely on constant_handler

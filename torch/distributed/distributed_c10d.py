@@ -42,17 +42,17 @@ DistStoreError = torch._C._DistStoreError
 
 __all__ = [
     'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
-    'all_gather_multigpu', 'all_gather_object', 'all_reduce',
-    'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
+    'all_gather_object', 'all_reduce',
+    'all_reduce_coalesced', 'all_to_all',
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
-    'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
+    'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
-    'new_subgroups_by_enumeration', 'recv', 'reduce', 'reduce_multigpu',
-    'reduce_scatter', 'reduce_scatter_multigpu', 'scatter',
+    'new_subgroups_by_enumeration', 'recv', 'reduce',
+    'reduce_scatter', 'scatter',
     'scatter_object_list', 'send', 'supports_complex',
     'AllreduceCoalescedOptions', 'AllreduceOptions', 'AllToAllOptions',
     'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
@@ -1852,66 +1852,6 @@ def batch_isend_irecv(p2p_op_list):
 
 
 @_exception_logger
-def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=0):
-    """
-    Broadcasts the tensor to the whole group with multiple GPU tensors per node.
-
-    ``tensor`` must have the same number of elements in all the GPUs from
-    all processes participating in the collective. each tensor in the list must
-    be on a different GPU
-
-    Only nccl and gloo backend are currently supported
-    tensors should only be GPU tensors
-
-    Args:
-        tensor_list (List[Tensor]): Tensors that participate in the collective
-            operation. If ``src`` is the rank, then the specified ``src_tensor``
-            element of ``tensor_list`` (``tensor_list[src_tensor]``) will be
-            broadcast to all other tensors (on different GPUs) in the src process
-            and all tensors in ``tensor_list`` of other non-src processes.
-            You also need to make sure that ``len(tensor_list)`` is the same
-            for all the distributed processes calling this function.
-
-        src (int): Source rank.
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-        src_tensor (int, optional): Source tensor rank within ``tensor_list``
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
-
-    """
-    warnings.warn(
-        "torch.distributed.broadcast_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
-    )
-
-    if _rank_not_in_group(group):
-        _warn_not_in_group("broadcast_multigpu")
-        return
-
-    opts = BroadcastOptions()
-    opts.rootRank = src
-    opts.rootTensor = src_tensor
-    opts.asyncOp = async_op
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.broadcast(tensor_list, opts)
-    else:
-        group_src_rank = get_group_rank(group, src)
-        opts.rootRank = group_src_rank
-        work = group.broadcast(tensor_list, opts)
-    if async_op:
-        return work
-    else:
-        work.wait()
-
-
-@_exception_logger
 def broadcast(tensor, src, group=None, async_op=False):
     """
     Broadcasts the tensor to the whole group.
@@ -1949,68 +1889,6 @@ def broadcast(tensor, src, group=None, async_op=False):
         group_src_rank = get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.broadcast([tensor], opts)
-    if async_op:
-        return work
-    else:
-        work.wait()
-
-@_exception_logger
-def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False):
-    r"""
-    Reduces the tensor data across all machines in a way that all get the final result.
-
-    This function reduces a number of tensors on every node,
-    while each tensor resides on different GPUs.
-    Therefore, the input tensor in the tensor list needs to be GPU tensors.
-    Also, each tensor in the tensor list needs to reside on a different GPU.
-
-    After the call, all ``tensor`` in ``tensor_list`` is going to be bitwise
-    identical in all processes.
-
-    Complex tensors are supported.
-
-    Only nccl and gloo backend is currently supported
-    tensors should only be GPU tensors
-
-    Args:
-        tensor_list (List[Tensor]): List of input and output tensors of
-            the collective. The function operates in-place and requires that
-            each tensor to be a GPU tensor on different GPUs.
-            You also need to make sure that ``len(tensor_list)`` is the same for
-            all the distributed processes calling this function.
-        op (optional): One of the values from
-            ``torch.distributed.ReduceOp``
-            enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on. If
-            ``None``, the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
-
-    """
-    warnings.warn(
-        "torch.distributed.all_reduce_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
-    )
-
-    if _rank_not_in_group(group):
-        return
-
-    tensor_list = [
-        t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list
-    ]
-
-    opts = AllreduceOptions()
-    opts.reduceOp = op
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg.allreduce(tensor_list, opts)
-    else:
-        work = group.allreduce(tensor_list, opts)
-
     if async_op:
         return work
     else:
@@ -2160,69 +2038,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 @_exception_logger
-def reduce_multigpu(
-    tensor_list, dst, op=ReduceOp.SUM, group=None, async_op=False, dst_tensor=0
-):
-    """
-    Reduces the tensor data on multiple GPUs across all machines.
-
-    Each tensor in ``tensor_list`` should reside on a separate GPU.
-
-    Only the GPU of ``tensor_list[dst_tensor]`` on the process with rank ``dst``
-    is going to receive the final result.
-
-    Only nccl backend is currently supported
-    tensors should only be GPU tensors
-
-    Args:
-        tensor_list (List[Tensor]): Input and output GPU tensors of the
-            collective. The function operates in-place.
-            You also need to make sure that ``len(tensor_list)`` is the same for
-            all the distributed processes calling this function.
-        dst (int): Destination rank
-        op (optional): One of the values from
-            ``torch.distributed.ReduceOp``
-            enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-        dst_tensor (int, optional): Destination tensor rank within
-                                    ``tensor_list``
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, otherwise
-
-    """
-    warnings.warn(
-        "torch.distributed.reduce_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
-    )
-
-    if _rank_not_in_group(group):
-        _warn_not_in_group("reduce_multigpu")
-        return
-
-    opts = ReduceOptions()
-    opts.reduceOp = op
-    opts.rootRank = dst
-    opts.rootTensor = dst_tensor
-
-    if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.reduce(tensor_list, opts)
-    else:
-        group_dst_rank = get_group_rank(group, dst)
-        opts.rootRank = group_dst_rank
-        work = group.reduce(tensor_list, opts)
-
-    if async_op:
-        return work
-    else:
-        work.wait()
-
-@_exception_logger
 def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines.
@@ -2266,83 +2081,6 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
         return work
     else:
         work.wait()
-
-@_exception_logger
-def all_gather_multigpu(
-    output_tensor_lists, input_tensor_list, group=None, async_op=False
-):
-    """
-    Gathers tensors from the whole group in a list.
-
-    Each tensor in ``tensor_list`` should reside on a separate GPU
-
-    Only nccl backend is currently supported
-    tensors should only be GPU tensors
-
-    Complex tensors are supported.
-
-    Args:
-        output_tensor_lists (List[List[Tensor]]): Output lists. It should
-            contain correctly-sized tensors on each GPU to be used for output
-            of the collective, e.g. ``output_tensor_lists[i]`` contains the
-            all_gather result that resides on the GPU of
-            ``input_tensor_list[i]``.
-
-            Note that each element of ``output_tensor_lists`` has the size of
-            ``world_size * len(input_tensor_list)``, since the function all
-            gathers the result from every single GPU in the group. To interpret
-            each element of ``output_tensor_lists[i]``, note that
-            ``input_tensor_list[j]`` of rank k will be appear in
-            ``output_tensor_lists[i][k * world_size + j]``
-
-            Also note that ``len(output_tensor_lists)``, and the size of each
-            element in ``output_tensor_lists`` (each element is a list,
-            therefore ``len(output_tensor_lists[i])``) need to be the same
-            for all the distributed processes calling this function.
-
-        input_tensor_list (List[Tensor]): List of tensors(on different GPUs) to
-            be broadcast from current process.
-            Note that ``len(input_tensor_list)`` needs to be the same for
-            all the distributed processes calling this function.
-
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
-
-    """
-    warnings.warn(
-        "torch.distributed.all_gather_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
-    )
-
-    if _rank_not_in_group(group):
-        _warn_not_in_group("all_gather_multigpu")
-        return
-
-    output_tensor_lists = [
-        [t if not t.is_complex() else torch.view_as_real(t) for t in l]
-        for l in output_tensor_lists
-    ]
-    input_tensor_list = [
-        t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
-    ]
-
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg.allgather(output_tensor_lists, input_tensor_list)
-    else:
-        work = group.allgather(output_tensor_lists, input_tensor_list)
-
-    if async_op:
-        return work
-    else:
-        work.wait()
-
 
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
@@ -3228,77 +2966,6 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         group_src_rank = get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.scatter(output_tensors, input_tensors, opts)
-
-    if async_op:
-        return work
-    else:
-        work.wait()
-
-
-@_exception_logger
-def reduce_scatter_multigpu(
-    output_tensor_list, input_tensor_lists, op=ReduceOp.SUM, group=None, async_op=False
-):
-    """
-    Reduce and scatter a list of tensors to the whole group.
-
-    Only nccl backend is currently supported.
-
-    Each tensor in ``output_tensor_list`` should reside on a separate GPU, as
-    should each list of tensors in ``input_tensor_lists``.
-
-    Args:
-        output_tensor_list (List[Tensor]): Output tensors (on different GPUs)
-            to receive the result of the operation.
-
-            Note that ``len(output_tensor_list)`` needs to be the same for all
-            the distributed processes calling this function.
-
-        input_tensor_lists (List[List[Tensor]]): Input lists.  It should
-            contain correctly-sized tensors on each GPU to be used for input of
-            the collective, e.g. ``input_tensor_lists[i]`` contains the
-            reduce_scatter input that resides on the GPU of
-            ``output_tensor_list[i]``.
-
-            Note that each element of ``input_tensor_lists`` has the size of
-            ``world_size * len(output_tensor_list)``, since the function
-            scatters the result from every single GPU in the group.  To
-            interpret each element of ``input_tensor_lists[i]``, note that
-            ``output_tensor_list[j]`` of rank k receives the reduce-scattered
-            result from ``input_tensor_lists[i][k * world_size + j]``
-
-            Also note that ``len(input_tensor_lists)``, and the size of each
-            element in ``input_tensor_lists`` (each element is a list,
-            therefore ``len(input_tensor_lists[i])``) need to be the same for
-            all the distributed processes calling this function.
-
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op.
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group.
-
-    """
-    warnings.warn(
-        "torch.distributed.reduce_scatter_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
-    )
-
-    if _rank_not_in_group(group):
-        _warn_not_in_group("reduce_scatter_multigpu")
-        return
-
-    opts = ReduceScatterOptions()
-    opts.reduceOp = op
-
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg.reduce_scatter(output_tensor_list, input_tensor_lists, opts)
-    else:
-        work = group.reduce_scatter(output_tensor_list, input_tensor_lists, opts)
 
     if async_op:
         return work
@@ -4299,7 +3966,6 @@ def _get_process_group_store(pg: ProcessGroup) -> Store:
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
 dynamo_unsupported_distributed_c10d_ops = [
-    all_reduce_multigpu,
     recv,
     all_gather_object,
     all_gather_coalesced,
@@ -4311,14 +3977,10 @@ dynamo_unsupported_distributed_c10d_ops = [
     gather,
     broadcast_object_list,
     barrier,
-    reduce_multigpu,
     scatter,
     scatter_object_list,
     reduce,
-    reduce_scatter_multigpu,
     all_gather,
-    broadcast_multigpu,
-    all_gather_multigpu,
     reduce_scatter,
     all_gather_into_tensor,
     broadcast,
