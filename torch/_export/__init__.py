@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import functools
 import io
 import json
 import pathlib
@@ -54,7 +55,7 @@ from torch.export.exported_program import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -376,7 +377,7 @@ def capture_pre_autograd_graph(
         def _eval(self, mode: bool = True):
             raise NotImplementedError("Calling eval() is not supported yet.")
 
-        _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
         m.meta["inline_constraints"] = {
             k: v
@@ -397,15 +398,11 @@ def capture_pre_autograd_graph(
 
 
 def _convert_input_to_fake(gm, args, kwargs):
-    fake_inps: List[torch.Tensor] = []
-    fake_mode = FakeTensorMode(
-        allow_fallback_kernels=False,
-        allow_non_fake_inputs=True,
-        shape_env=ShapeEnv(
-            assume_static_by_default=True,
-        ),
-    )
+    if len(args) == 0 and len(kwargs) == 0 and len(dict(gm.named_parameters())) == 0 and len(dict(gm.named_buffers())) == 0:
+        return [], {}, {}, None
 
+    fake_inps: List[torch.Tensor] = []
+    fake_mode = None
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -414,6 +411,8 @@ def _convert_input_to_fake(gm, args, kwargs):
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
+
+    assert fake_mode is not None, "Cannot find fake_mode attatched to the graph's placeholders."
 
     count = 0
 
@@ -426,7 +425,11 @@ def _convert_input_to_fake(gm, args, kwargs):
     fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
-    return fake_args, fake_kwargs, fake_mode
+    fake_params_buffers = pytree.tree_map_only(torch.Tensor,
+                                               fake_mode.from_tensor,
+                                               {**dict(gm.named_parameters(remove_duplicate=False)),
+                                                **dict(gm.named_buffers(remove_duplicate=False))})
+    return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -485,20 +488,12 @@ def _export_to_torch_ir(
     constraints: Optional[List[Constraint]] = None,
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    disable_constraint_solver: bool = False,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
-
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
 
     constraints = constraints or []
     kwargs = kwargs or {}
@@ -521,6 +516,7 @@ def _export_to_torch_ir(
                     constraints=constraints,
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
+                    disable_constraint_solver=disable_constraint_solver,
                 )(
                     *args,
                     **kwargs,
@@ -563,7 +559,17 @@ def export(
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
+def _disable_prexisiting_fake_mode(fn):
 
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with maybe_disable_fake_tensor_mode():
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@_disable_prexisiting_fake_mode
 def _export(
     f: Callable,
     args: Tuple[Any, ...],
@@ -600,7 +606,7 @@ def _export(
         args,
         kwargs,
         constraints,
-        preserve_module_call_signature=preserve_module_call_signature
+        preserve_module_call_signature=preserve_module_call_signature,
     )
 
     params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
@@ -610,7 +616,8 @@ def _export(
     for name, buffer in gm_torch_level.named_buffers(remove_duplicate=False):
         params_buffers[name] = buffer
 
-    fake_args, fake_kwargs, fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
+    # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
+    fake_args, fake_kwargs, fake_params_buffers, dynamo_fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
@@ -621,7 +628,10 @@ def _export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
-                node.meta["val"] = fake_mode.from_tensor(attr, static_shapes=True)
+                assert dynamo_fake_mode is not None, (
+                    "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                )
+                node.meta["val"] = dynamo_fake_mode.from_tensor(attr, static_shapes=True)
 
     # When aot_export lifts the params, we lose the nn_module_stack
     # and source_fn from the param nodes as they are treated as fresh inputs
@@ -695,11 +705,16 @@ def _export(
 
     # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
     # to follow the order in orig_args and correctly call gm_torch_level
-    gm, graph_signature = aot_export_module(
-        gm_torch_level,
-        (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
-        trace_joint=False
-    )
+
+    # This _reparametrize_module makes sure inputs and gm_torch_level.params/buffers have the same fake_mode,
+    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
+    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
+    with torch.nn.utils.stateless._reparametrize_module(gm_torch_level, fake_params_buffers):
+        gm, graph_signature = aot_export_module(
+            gm_torch_level,
+            (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
+            trace_joint=False
+        )
 
     def to_str_list(sig_component: List[Any]):
         return [str(v) for v in sig_component]
@@ -728,11 +743,14 @@ def _export(
 
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
-    }
+
+    # dynamo_fake_mode can be None if there's no placeholder in gm_torch_level
+    if dynamo_fake_mode:
+        gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -796,7 +814,7 @@ def _export(
         gm = res.graph_module
 
     assert orig_out_spec is not None
-    lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
+    tensor_constants = lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
     _replace_sym_size_ops_pass(gm)
     exported_program = ExportedProgram(
         gm,
@@ -809,6 +827,7 @@ def _export(
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         (args, kwargs),
+        tensor_constants=tensor_constants,
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
@@ -834,17 +853,20 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
-    from .serde.serialize import serialize
+    from .serde.serialize import serialize, SerializedArtifact
     from .serde.schema import SCHEMA_VERSION
-    serialized_program, serialized_state_dict = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version)
 
     if isinstance(f, (str, pathlib.Path)):
         f = str(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
-        # Save serialized_ep and serialized_state_dict to the zip file
-        zipf.writestr('serialized_exported_program.json', serialized_program)
-        zipf.writestr('serialized_state_dict.json', serialized_state_dict)
+        # Save every field the SerializedArtifact to a file
+        for field in dataclasses.fields(artifact):
+            field_name = field.name
+            serialized_field = getattr(artifact, field_name)
+            zipf.writestr(f"serialized_{field_name}.json", serialized_field)
+
         zipf.writestr('version', str(SCHEMA_VERSION))
 
         # Add extra files if provided
@@ -874,13 +896,18 @@ def load(
                 f"schema version {SCHEMA_VERSION}."
             )
 
+        from .serde.serialize import deserialize, SerializedArtifact
+
         # Load serialized_ep and serialized_state_dict from the zip file
-        serialized_ep = zipf.read('serialized_exported_program.json')
-        serialized_state_dict = zipf.read('serialized_state_dict.json')
+        artifact: SerializedArtifact = SerializedArtifact(
+            **{
+                field.name: zipf.read(f"serialized_{field.name}.json")
+                for field in dataclasses.fields(SerializedArtifact)
+            }
+        )
 
         # Deserialize ExportedProgram
-        from .serde.serialize import deserialize
-        ep = deserialize(serialized_ep, serialized_state_dict, expected_opset_version)
+        ep = deserialize(artifact)
 
         # Populate extra_files map
         if extra_files is not None:
@@ -899,6 +926,7 @@ def aot_compile(
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
+    disable_constraint_solver: bool = False,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -925,6 +953,8 @@ def aot_compile(
 
         options: A dictionary of options to control inductor
 
+        disable_constraint_solver: Whether the dim constraint solver must be disabled.
+
     Returns:
         Path to the generated shared library
     """
@@ -941,7 +971,13 @@ def aot_compile(
 
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
-    gm = _export_to_torch_ir(f, args, kwargs, constraints)
+    gm = _export_to_torch_ir(
+        f,
+        args,
+        kwargs,
+        constraints,
+        disable_constraint_solver=disable_constraint_solver
+    )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():

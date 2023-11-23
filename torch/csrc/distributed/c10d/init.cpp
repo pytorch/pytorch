@@ -596,6 +596,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_check_reducer_finalized",
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_force_bucket_rebuild",
+          [](::c10d::Reducer& reducer) {
+            return reducer.force_bucket_rebuild();
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_process_group",
+          [](::c10d::Reducer& reducer,
+             c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
+            return reducer.update_process_group(new_process_group);
+          },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -692,7 +705,7 @@ Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex ten
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+:func:`reduce`.
 
 This class does not support ``__members__`` property.)");
 
@@ -2278,9 +2291,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions)
-          .def_property_readonly(
-              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2492,7 +2503,7 @@ Example::
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
                 with PyTorch's current device streams to ensure we can have asynchronous CUDA
                 execution and it does not wait for the entire operation to complete on GPU. Note that
-                ``CUDAFuture``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                ``CUDAFuture``  does not support ``TORCH_NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
                 ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
                 stream and invoke the callback inline after running the callback on the callback stream.
@@ -2521,7 +2532,7 @@ Example::
 
               .. warning ::
                   This API only works for NCCL backend for now and must set
-                  NCCL_ENABLE_TIMING environment variable.
+                  TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
       .def(
           "boxed",

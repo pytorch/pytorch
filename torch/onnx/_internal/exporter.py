@@ -1,5 +1,6 @@
-# necessary to surface onnx.ModelProto through ONNXProgram:
-from __future__ import annotations
+from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
+    annotations,
+)
 
 import abc
 
@@ -52,6 +53,7 @@ from torch.onnx._internal.fx import (
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import onnx
+    import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
@@ -602,8 +604,53 @@ class LargeProtobufONNXProgramSerializer:
             )
 
 
+class ONNXRuntimeOptions:
+    """Options to influence the execution of the ONNX model through ONNX Runtime.
+
+    Attributes:
+        session_options: ONNX Runtime session options.
+        execution_providers: ONNX Runtime execution providers to use during model execution.
+        execution_provider_options: ONNX Runtime execution provider options.
+    """
+
+    session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
+    """ONNX Runtime session options."""
+
+    execution_providers: Optional[
+        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
+    ] = None
+    """ONNX Runtime execution providers to use during model execution."""
+
+    execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
+    """ONNX Runtime execution provider options."""
+
+    @_beartype.beartype
+    def __init__(
+        self,
+        *,
+        session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None,
+        execution_providers: Optional[
+            Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
+        ] = None,
+        execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None,
+    ):
+        self.session_options = session_options
+        self.execution_providers = execution_providers
+        self.execution_provider_options = execution_provider_options
+
+
 class ONNXProgram:
-    """An in-memory representation of a PyTorch model that has been exported to ONNX."""
+    """An in-memory representation of a PyTorch model that has been exported to ONNX.
+
+    Args:
+        model_proto: The exported ONNX model as an :py:obj:`onnx.ModelProto`.
+        input_adapter: The input adapter used to convert PyTorch inputs into ONNX inputs.
+        output_adapter: The output adapter used to convert PyTorch outputs into ONNX outputs.
+        diagnostic_context: Context object for the SARIF diagnostic system responsible for logging errors and metadata.
+        fake_context: The fake context used for symbolic tracing.
+        export_exception: The exception that occurred during export, if any.
+        model_signature: The model signature for the exported ONNX graph.
+    """
 
     _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
@@ -611,6 +658,7 @@ class ONNXProgram:
     _diagnostic_context: Final[diagnostics.DiagnosticContext]
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
+    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
 
     @_beartype.beartype
     def __init__(
@@ -622,13 +670,43 @@ class ONNXProgram:
         *,
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
+        model_signature: Optional[torch.export.ExportGraphSignature] = None,
     ):
         self._model_proto = model_proto
+        self._model_signature = model_signature
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
         self._fake_context = fake_context
         self._export_exception = export_exception
+
+    def __call__(
+        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+    ) -> Any:
+        """Runs the ONNX model using ONNX Runtime
+
+        Args:
+            args: The positional inputs to the model.
+            kwargs: The keyword inputs to the model.
+            options: The options to use for running the model with ONNX Runtime.
+
+        Returns:
+            The model output as computed by ONNX Runtime
+        """
+        import onnxruntime  # type: ignore[import]
+
+        onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
+        options = options or ONNXRuntimeOptions()
+        providers = options.execution_providers or onnxruntime.get_available_providers()
+        onnx_model = self.model_proto.SerializeToString()
+        ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+
+        onnxruntime_input = {
+            k.name: v.numpy(force=True)
+            for k, v in zip(ort_session.get_inputs(), onnx_input)
+        }
+
+        return ort_session.run(None, onnxruntime_input)
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -637,6 +715,78 @@ class ONNXProgram:
         if self._export_exception is not None:
             raise self._export_exception
         return self._model_proto
+
+    @property
+    def model_signature(self) -> Optional[torch.export.ExportGraphSignature]:
+        """The model signature for the exported ONNX graph.
+
+        This information is relevant because ONNX specification often differs from PyTorch's, resulting
+        in a ONNX graph with input and output schema different from the actual PyTorch model implementation.
+        By using the model signature, the users can understand the inputs and outputs differences
+        and properly execute the model in ONNX Runtime.
+
+        NOTE: Model signature is only available when the ONNX graph was exported from a
+        :class:`torch.export.ExportedProgram` object.
+
+        NOTE: Any transformation done to the model that changes the model signature must be accompanied
+        by updates to this model signature as well through :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`.
+
+        Example:
+
+            The following model produces different sets of inputs and outputs.
+            The first 4 inputs are model parameters (namely conv1.weight, conv2.weight, fc1.weight, fc2.weight),
+            and the next 2 inputs are registered buffers (namely my_buffer2, my_buffer1) and finally
+            the last 2 inputs are user inputs (namely x and b).
+            The first output is a buffer mutation (namely my_buffer2) and the last output is the actual model output.
+
+            >>> class CustomModule(torch.nn.Module):
+            ...     def __init__(self):
+            ...         super().__init__()
+            ...         self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+            ...         self.register_buffer("my_buffer1", torch.tensor(3.0))
+            ...         self.register_buffer("my_buffer2", torch.tensor(4.0))
+            ...         self.conv1 = torch.nn.Conv2d(1, 32, 3, 1, bias=False)
+            ...         self.conv2 = torch.nn.Conv2d(32, 64, 3, 1, bias=False)
+            ...         self.fc1 = torch.nn.Linear(9216, 128, bias=False)
+            ...         self.fc2 = torch.nn.Linear(128, 10, bias=False)
+            ...     def forward(self, x, b):
+            ...         tensor_x = self.conv1(x)
+            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
+            ...         tensor_x = self.conv2(tensor_x)
+            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
+            ...         tensor_x = torch.nn.functional.max_pool2d(tensor_x, 2)
+            ...         tensor_x = torch.flatten(tensor_x, 1)
+            ...         tensor_x = self.fc1(tensor_x)
+            ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
+            ...         tensor_x = self.fc2(tensor_x)
+            ...         output = torch.nn.functional.log_softmax(tensor_x, dim=1)
+            ...         (
+            ...         self.my_buffer2.add_(1.0) + self.my_buffer1
+            ...         )  # Mutate buffer through in-place addition
+            ...         return output
+            >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
+            >>> exported_program = torch.export.export(CustomModule(), args=inputs)
+            >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
+            >>> print(onnx_program.model_signature)
+            ExportGraphSignature(
+                input_specs=[
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='conv1.weight'),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'), target='conv2.weight'),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg2_1'), target='fc1.weight'),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg3_1'), target='fc2.weight'),
+                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg4_1'), target='my_buffer2'),
+                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'), target='my_buffer1'),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg6_1'), target=None),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg7_1'), target=None)
+                ],
+                output_specs=[
+                    OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='my_buffer2'),
+                    OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='_log_softmax'), target=None)
+                ]
+            )
+        """
+
+        return self._model_signature
 
     @property
     def diagnostic_context(self) -> diagnostics.DiagnosticContext:
@@ -953,7 +1103,7 @@ class Exporter:
     def __init__(
         self,
         options: ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
@@ -1017,6 +1167,9 @@ class Exporter:
                 self.options.fx_tracer.output_adapter,
                 self.options.diagnostic_context,
                 fake_context=self.options.fake_context,
+                model_signature=getattr(
+                    self.model, "graph_signature", None
+                ),  # Available for isinstance(self.model, ExportedProgram) only
             )
 
     def _assert_fake_tensor_mode(self):
@@ -1328,6 +1481,7 @@ __all__ = [
     "ExportOptions",
     "ONNXProgram",
     "ONNXProgramSerializer",
+    "ONNXRuntimeOptions",
     "InvalidExportOptionsError",
     "OnnxExporterError",
     "OnnxRegistry",
