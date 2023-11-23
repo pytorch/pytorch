@@ -2048,15 +2048,20 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         assert isinstance(arg, TensorBox)
-        unaligned_input_shape = isinstance(arg.data, ir.ExpandView) and not is_aligned(
-            arg
-        )
-        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
 
-        # input is padded, requiring_stride_order will unwrap the view and unpad.
-        # Would be nice to be able to require certain padding from inductor ir, nyi
-        if aligned_input_view:
-            return arg
+        # This correctly handles the forward case:
+        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
+            if not is_aligned(arg):
+                # input is padded, requiring_stride_order will unwrap the view and unpad.
+                # Would be nice to be able to require certain padding from inductor ir, nyi
+                if is_aligned(arg.unwrap_view()):
+                    return arg
+        # This is needed for the backward case:
+        # Hacky but not sure of a better way
+        if isinstance(arg.data, ir.StorageBox) and arg.data.is_input_buffer():
+            if "expand" in arg.data.get_name():
+                if (V.graph.sizevars.size_hint(arg.get_stride()[-2]) % ALIGNMENT) == 0:
+                    return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
