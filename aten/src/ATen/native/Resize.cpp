@@ -94,14 +94,13 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   if (size_bytes != 0) {
     new_data = storage->allocator()->allocate(size_bytes);
   }
-  const at::DataPtr& old_data = storage->data_ptr();
+  at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
   const auto old_capacity = storage->nbytes();
+  storage->set_nbytes(size_bytes);
   const auto copy_capacity = std::min(size_bytes, old_capacity);
   if (old_data != nullptr && copy_capacity > 0) {
-    memcpy(new_data.get(), old_data.get(), copy_capacity);
+    memcpy(storage->mutable_data(), old_data.get(), copy_capacity);
   }
-  storage->set_data_ptr_noswap(std::move(new_data));
-  storage->set_nbytes(size_bytes);
 }
 
 // Call the sparse implementation in SparseTensor.cpp directly.

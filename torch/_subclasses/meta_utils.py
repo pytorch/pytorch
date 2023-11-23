@@ -246,10 +246,10 @@ class MetaConverter:
                     return shape_env.create_symbolic_sizes_strides_storage_offset(
                         t,
                         src,
-                        policy=inner_policy,
+                        policy=policy,
                     )
             else:
-                assert inner_policy is None
+                assert policy is None
             return (t.size(), t.stride(), t.storage_offset())
 
         def empty_create(inner_t, inner_src, policy=policy):
@@ -329,7 +329,7 @@ class MetaConverter:
                         ) = sym_sizes_strides_storage_offset(
                             inner_t,
                             inner_src,
-                            inner_policy=inner_policy,
+                            policy=inner_policy,
                         )
 
                         transformed_tensors_dict[attr] = meta_base.as_strided(
@@ -346,7 +346,7 @@ class MetaConverter:
                     lambda: empty_create(
                         inner_t,
                         inner_src,
-                        inner_policy=inner_policy,
+                        inner=inner_policy,
                     )
                 )
 

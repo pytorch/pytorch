@@ -1,9 +1,18 @@
 import functools
 import importlib
+import types
+
+import torch
+
+from .allowed_functions import (
+    _disallowed_function_ids,
+    is_allowed,
+    is_user_defined_allowed,
+)
 
 from .utils import hashable
 
-from .variables import TorchCtxManagerClassVariable
+from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
 
 """
@@ -35,40 +44,155 @@ TODO: We would support explictly list objects treated as skip/inline after the s
 and trace_rules.lookup consolidation is done. Then the explicit listing of skip/inline objects have
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
-torch_name_rule_map = {
+manual_torch_name_rule_map = {
+    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
+    "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
+    "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
+    "torch.default_generator#get_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator#get_state": TorchInGraphFunctionVariable,
+    "torch.default_generator#set_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator#set_state": TorchInGraphFunctionVariable,
+    "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
+    "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
+    "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
+    "torch.jit.is_scripting": TorchInGraphFunctionVariable,
+    "torch.jit.is_tracing": TorchInGraphFunctionVariable,
+    "torch.jit.annotate": TorchInGraphFunctionVariable,
+    "torch.distributed.is_available": TorchInGraphFunctionVariable,
+    "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
+    "torch.distributed.get_rank": TorchInGraphFunctionVariable,
+    "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
+    "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch._utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
+    "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
+    "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
+}
+
+
+auto_torch_name_rule_map = {
+    # Dynamo implemented context managers
     "torch._C.DisableTorchFunctionSubclass": TorchCtxManagerClassVariable,
     "torch.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.autograd.grad_mode.enable_grad": TorchCtxManagerClassVariable,
     "torch.autograd.grad_mode.inference_mode": TorchCtxManagerClassVariable,
     "torch.autograd.grad_mode.no_grad": TorchCtxManagerClassVariable,
     "torch.autograd.grad_mode.set_grad_enabled": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
     "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
-    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
 }
+
+
+torch_name_rule_map = {**manual_torch_name_rule_map, **auto_torch_name_rule_map}
+
+"""
+Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
+"""
 
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
     d = dict()
     for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        assert obj not in d
-        d[obj] = v
+        try:
+            obj = load_object(k)
+            d[obj] = v
+        except (AttributeError, ModuleNotFoundError):
+            pass
     return d
 
 
+def _load_obj_from_str(fully_qualified_name):
+    module, obj_name = fully_qualified_name.rsplit(".", maxsplit=1)
+    return getattr(importlib.import_module(module), obj_name)
+
+
+"""
+Load string represented torch objects.
+"""
+
+
 def load_object(name):
-    mod_name, obj_name = name.rsplit(".", 1)
-    mod = importlib.import_module(mod_name)
-    obj = getattr(mod, obj_name)
-    return obj
+    x = name.split("#")
+    if len(x) == 2:
+        obj = _load_obj_from_str(x[0])
+        val = getattr(obj, x[1])
+    else:
+        assert len(x) == 1, f"Invalid obj name {name}"
+        val = _load_obj_from_str(x[0])
+    if hasattr(val, "__wrapped__"):
+        val = val.__wrapped__
+    return val
+
+
+"""
+Get all torch.Tensor methods which are allowed to be in graph functions.
+"""
+
+
+@functools.lru_cache(None)
+def get_tensor_method():
+    s = set()
+    for name in dir(torch.Tensor):
+        method = getattr(torch.Tensor, name)
+        if isinstance(
+            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        ):
+            s.add(method)
+    return frozenset(s)
+
+
+"""
+Return if a torch object is in graph function during Dynamo tracing.
+Note: This is a temporary function, we will have the dumped list of all in graph functions later.
+"""
+
+
+def is_in_graph_function(obj):
+    if obj in get_tensor_method() or isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
+    ):
+        return True
+    if isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    ):
+        return is_allowed(obj)
+    else:
+        return False
+
+
+"""
+Main entry point for looking up the trace rule (the Dynamo variable) for a given object.
+E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManagerClassVariable`.
+"""
 
 
 def lookup(obj):
     if not hashable(obj):
         return None
+    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
+    if id(obj) in _disallowed_function_ids:
+        return None
+    if is_user_defined_allowed(obj):
+        return TorchInGraphFunctionVariable
+    if hasattr(obj, "__wrapped__"):
+        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
+        if not (
+            hasattr(obj, "__qualname__")
+            and str(obj.__qualname__).startswith("_VariableFunctionsClass")
+        ):
+            obj = obj.__wrapped__
     rule = get_torch_obj_rule_map().get(obj, None)
-    return rule
+    if rule is None and is_in_graph_function(obj):
+        return TorchInGraphFunctionVariable
+    else:
+        return rule

@@ -50,10 +50,6 @@ class TestPatternMatcher(TestCase):
         if len(codes) == 1:
             codes = codes[0]
         torch.testing.assert_close(actual, expected)
-        if inductor_config.cpp_wrapper:
-            # CPP wrapper runs everything twice, so we'll match the pattern twice
-            expected_matches *= 2
-            expected_nodes *= 2
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -519,13 +515,6 @@ class TestPatternMatcher(TestCase):
         self.common(fn, args, 2, 5)
 
     def test_cat_slice_cat(self):
-        def check_counter(counter, expected):
-            if not inductor_config.cpp_wrapper:
-                self.assertEqual(counter, expected)
-            else:
-                # cpp_wrapper for the CUDA backend runs two passes
-                self.assertEqual(counter, 2 * expected)
-
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
@@ -548,8 +537,8 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         # We don't recompile for dynamic-shape cases.
         if dynamo_config.assume_static_by_default:
-            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
