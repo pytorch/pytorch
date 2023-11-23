@@ -690,24 +690,7 @@ class ViewAndMutationMeta:
         self.num_outputs_aliased = (
             self.num_outputs_aliased_to_inputs + self.num_outputs_aliased_to_intermediates
         )
-        self.num_mutated_data_inputs = len(
-            [x for x in self.input_info if x.mutates_data]
-        )
 
-        self.num_mutated_metadata_inputs = len(
-            [
-                x
-                for x in self.input_info
-                if x.mutates_metadata
-            ]
-        )
-        self.num_mutated_metadata_only_inputs = len(
-            [
-                x
-                for x in self.input_info
-                if not x.mutates_data and x.mutates_metadata
-            ]
-        )
         self.dynamic_outputs = any(
             o.dynamic_dims for o in self.output_info
         )
@@ -3173,7 +3156,6 @@ def create_runtime_wrapper(
                 )
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
-        num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
         if keep_input_mutations and trace_joint:
@@ -3509,7 +3491,7 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
 
     # output infos
     output_info = []
-    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[meta.num_mutated_data_inputs:]
+    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[meta.num_mutated_inp_runtime_indices:]
     if meta.num_intermediate_bases > 0:
         subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[:-meta.num_intermediate_bases]
     # sanity assert
@@ -3966,9 +3948,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
             num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
-            num_mutated_metadata_only_inputs = (
-                CompiledFunction.metadata.num_mutated_metadata_only_inputs
-            )
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
 
@@ -3992,7 +3971,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
-            if num_mutated_metadata_only_inputs > 0:
+            if num_mutated_runtime_inps > 0:
                 for i, idx in enumerate(
                     CompiledFunction.metadata.mutated_inp_runtime_indices
                 ):
