@@ -1288,7 +1288,7 @@ class TestOptim(TestCase):
             self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2, amsgrad=True))
 
     def test_adamw_serialization(self):
-        model = torch.nn.Linear(5,5)
+        model = torch.nn.Linear(5, 5)
         optim = torch.optim.AdamW(model.parameters())
 
         buffer = io.BytesIO()
