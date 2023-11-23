@@ -846,11 +846,74 @@ def _register_quantization_cat():
     )
 
 
+def _is_valid_quantized_reshape_optimization_pattern():
+    def fn(match):
+        # Ensure all the inputs and output has same scale and zero point
+        # Step 1: Check inputs/output zero point
+        sub_nodes = filter_nodes(match.nodes, aten.sub.Tensor)
+        zero_points = [node.args[1] for node in sub_nodes]
+        add_nodes = filter_nodes(match.nodes, aten.add.Tensor)
+        assert len(add_nodes) == 1, "expect only 1 add node at output quant pattern"
+        zero_points.append(add_nodes[0].args[1])
+        if not all(zero_point == zero_points[0] for zero_point in zero_points):
+            return False
+
+        # Step 2: Check inputs/output scale
+        mul_nodes = filter_nodes(match.nodes, aten.mul.Tensor)
+        # We need to find mul node at output since the scale value is reciprocal to input scale.
+        # Mul node at output should connect to cat node directly.
+        scales = [
+            (
+                mul_node.args[1]
+                if mul_node.args[0].target is aten.reshape.default
+                else 1.0 / mul_node.args[1]
+            )
+            for mul_node in mul_nodes
+        ]
+        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
+            return False
+
+        return True
+
+    return fn
+
+
+def _register_quantized_reshape_lowering(
+    pattern,
+    computation_op,
+):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_reshape_optimization_pattern(),
+    )
+    def qreshape(match: Match, *args, **kwargs):
+        qx = kwargs["x"]
+        shape = kwargs["shape"]
+        counters["inductor"]["qreshape_matcher_count"] += 1
+        counters["inductor"]["qreshape_matcher_nodes"] += len(match.nodes)
+        return L[computation_op](qx, shape)
+
+    return qreshape
+
+
+def _register_quantization_reshape():
+    dequantize_reshape_pattern = CallFunction(
+        torch.ops.aten.reshape.default,
+        dequantize_per_tensor_activation_pattern,
+        KeywordArg("shape"),
+    )
+    _register_quantized_reshape_lowering(
+        generate_pattern_with_output_quant(dequantize_reshape_pattern),
+        aten.reshape,
+    )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
+    _register_quantization_reshape()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):

@@ -451,7 +451,9 @@ if torch._C._has_mkldnn:
             )
             if not can_be_inplace:
                 return L[outplace_fusion_op](*computation_args)
-            return L[inplace_fusion_op](*computation_args)
+            # return L[inplace_fusion_op](*computation_args)
+            result = L[inplace_fusion_op](*computation_args)
+            return result.data.data.inputs[0]
 
         return fn
 
