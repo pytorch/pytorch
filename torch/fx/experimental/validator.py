@@ -364,6 +364,7 @@ try:
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
                 "minimum": self._ops.min,
+                "maximum": self._ops.max,
             }
 
             if name in REPLACEMENT:
