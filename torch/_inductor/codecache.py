@@ -1608,6 +1608,9 @@ class AotCodeCache:
                         # the raw data of the underlying structure.
                         import ctypes
 
+                        if t.numel() == 0:
+                            return b""
+
                         t_cpu = t.untyped_storage().cpu()
                         raw_array = ctypes.cast(
                             t_cpu.data_ptr(),

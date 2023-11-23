@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -28,23 +27,31 @@
 namespace c10d {
 // Environment variable which controls whether we perform a NCCL healt check
 // which ensures communicators are healthy at the beginning of init.
-static std::vector<std::string> ENABLE_NCCL_HEALTH_CHECK = {
+static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
+    "TORCH_ENABLE_NCCL_HEALTH_CHECK",
     "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
-static std::vector<std::string> NCCL_BLOCKING_WAIT = {"NCCL_BLOCKING_WAIT"};
+static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
+    "TORCH_NCCL_BLOCKING_WAIT",
+    "NCCL_BLOCKING_WAIT"};
 
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
-static std::vector<std::string> NCCL_ASYNC_ERROR_HANDLING = {
+static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
 
 // Environment Variable to control whether Desync Debug is enabled.
-// This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
-static std::vector<std::string> NCCL_DESYNC_DEBUG = {"NCCL_DESYNC_DEBUG"};
+// This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
+static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
+    "TORCH_NCCL_DESYNC_DEBUG",
+    "NCCL_DESYNC_DEBUG"};
 
-static std::vector<std::string> NCCL_ENABLE_TIMING = {"NCCL_ENABLE_TIMING"};
+static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
+    "TORCH_NCCL_ENABLE_TIMING",
+    "NCCL_ENABLE_TIMING"};
 
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
@@ -87,8 +94,9 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
 // can register/deregister the tensor on all available NCCL communicators.
-static std::vector<std::string> NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK = {
-    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
+static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
+    {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
+     "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -510,9 +518,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
 
-  // Tests if the UCC fallback path is available
-  bool isUCCAvailable() const;
-
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -879,11 +884,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The callback function to store NCCL debug info.
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
-#ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle and ProcessGroup pointer
-  static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<Backend> uccPG_;
-#endif
   size_t uid_;
 };
 

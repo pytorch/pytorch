@@ -193,7 +193,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith("i")}
+    return {s for s in free_symbols(x) if s.name.startswith(("i", "f"))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -2543,7 +2543,16 @@ class ShapeEnv:
                 else:
                     constraint_violated = False
                     if isinstance(constraint, StrictMinMaxConstraint):
-                        constraint_violated = True
+                        # try inferring the ranges of the expr s
+                        sym_vrs = {x: self.var_to_range.get(x, None) for x in s.free_symbols}
+                        if all(vr is not None for vr in sym_vrs.values()):
+                            expr_vr = bound_sympy(s, sym_vrs)
+                            if (expr_vr != constraint.vr):
+                                # the expr and constrain ranges don't match
+                                constraint_violated = True
+                        else:
+                            # some of the free symbols in s don't have ranges
+                            constraint_violated = True
                     elif isinstance(constraint, RelaxedUnspecConstraint):
                         if s.is_number:
                             i = int(s)
@@ -2947,7 +2956,8 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
+        expect_rational=True,
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3039,10 +3049,10 @@ class ShapeEnv:
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
-        _assert_bound_is_rational(new_expr, out)
-
-        if out.is_singleton():
-            return out.lower
+        if expect_rational:
+            _assert_bound_is_rational(new_expr, out)
+            if out.is_singleton():
+                return out.lower
 
         return new_expr if unbacked_only else None
 
@@ -3347,7 +3357,8 @@ class ShapeEnv:
         if self.log.isEnabledFor(logging.INFO):
             fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
-            is_debug = self.log.isEnabledFor(logging.DEBUG)
+            # TODO: make this an artifact
+            is_debug = False
             maybe_extra_debug = ""
             if is_debug and user_tb:
                 maybe_extra_debug = (
@@ -3367,7 +3378,8 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
+                      expect_rational=True):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -3427,7 +3439,8 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            static_expr = self._maybe_evaluate_static(expr)
+            static_expr = self._maybe_evaluate_static(expr,
+                                                      expect_rational=expect_rational)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
                 # NB: don't test float as there may be precision issues

@@ -637,7 +637,7 @@ class GraphModule(torch.nn.Module):
 
         def backend(gm, args):
             print(gm.code)
-            context = torch._guards.TracingContext.get()
+            context = torch._tracing_context.TracingContext.get()
             val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
             # Grab info on sources and guards from the shapeenv
@@ -989,7 +989,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # Check that no guards are incurred
             def backend(gm, args):
-                context = torch._guards.TracingContext.get()
+                context = torch._tracing_context.TracingContext.get()
                 val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
                 self.assertEqual(len(val_to_guards), 0)
                 return gm

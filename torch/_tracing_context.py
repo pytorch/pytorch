@@ -2,33 +2,15 @@ from __future__ import annotations
 
 import contextlib
 
-import dataclasses
-import enum
-import functools
 import logging
 import threading
 import traceback
 import unittest.mock
-import weakref
-from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, List, NamedTuple, Optional
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +33,8 @@ Note that you can end up with multiple TracingContext for a single compilation
 of a frame, as we reset the TracingContext whenever we restart analysis.
 CompileContext is a more overarching context that encompasses multiple restarts.
 """
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -208,7 +192,6 @@ class TracingContext:
         )
 
 
-
 class CompileId(NamedTuple):
     frame_id: int
     # This id is per-frame, and counts how many times we've compiled this
@@ -293,6 +276,7 @@ class CompileContext:
             return None
         return TraceId(self.compile_id, self.attempt)
 
+
 @contextmanager
 def compile_context(context: CompileContext):
     old_context = getattr(_TLS, "compile_context", None)
@@ -301,6 +285,7 @@ def compile_context(context: CompileContext):
         yield context
     finally:
         _TLS.compile_context = old_context
+
 
 def detect_fake_mode(inputs: Any = None):
     """

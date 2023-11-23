@@ -2241,6 +2241,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             reason=GraphCompileReason(
                 "return_value", [self.frame_summary()], graph_break=False
             ),
+            compile_return_value=True,
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
