@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Un
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy
 
@@ -342,6 +342,9 @@ class SizeVarAllocator:
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
+        if free_unbacked_symbols(left) or free_unbacked_symbols(right):
+            return sympy.Min(left, right)
+
         lv = self.size_hint(left)
         rv = self.size_hint(right)
         if lv <= rv:
