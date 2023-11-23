@@ -959,7 +959,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
-        breakpoint()
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[

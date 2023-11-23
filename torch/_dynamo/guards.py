@@ -420,7 +420,7 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, float) and math.isnan(val):
             code = list()
             if config.generate_interpreter_agnostic_code:
-                code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+                code.append(f"str(type({ref})) == \"{str(t)}\"")
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
@@ -445,7 +445,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
             if config.generate_interpreter_agnostic_code:
-                code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+                code.append(f"str(type({ref})) == \"{str(t)}\"")
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
@@ -523,7 +523,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+            code.append(f"str(type({ref})) == \"{str(t)}\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"len({ref}) == {len(value)}")
@@ -537,7 +537,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+            code.append(f"str(type({ref})) == \"{str(t)}\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
@@ -560,7 +560,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+            code.append(f"str(type({ref})) == \"{str(t)}\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
@@ -585,7 +585,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+            code.append(f"str(type({ref})) == \"{str(t)}\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
@@ -600,7 +600,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(type(t))})\"")
+            code.append(f"str(type({ref})) == \"{str(t)}\"")
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
@@ -1299,12 +1299,14 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
     guard_body = IndentedBuffer()
-    for expr in code_parts:
+    for i, expr in enumerate(code_parts):
         preface, expr = replace(expr)
         guard_body.writelines(preface)
         guard_body.writeline(f"if not ({expr}):")
+
         with guard_body.indent():
-            # guard_body.writeline("breakpoint()")
+            guard_body.writeline(f"print('Expr {i}')")
+            guard_body.writeline("breakpoint()")
             guard_body.writeline("return False")
 
     # Wrap the inner body into the actual guard function.
