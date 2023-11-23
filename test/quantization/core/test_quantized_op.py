@@ -22,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -2577,7 +2577,7 @@ class TestQuantizedOps(TestCase):
         # NB: Add just one test case to test overflow, but this case is too slow to run
         # internally in @fbcode//mode/dev, the long pole is the 4x calls to torch.sort
         # inside torch.unique current implementation
-        if not IS_FBCODE and not IS_SANDCASTLE:
+        if not IS_SANDCASTLE:
             test_cases.append([
                 [1, 4, 224, 224, 160],  # shape,
                 torch.qint8,  # torch_type
