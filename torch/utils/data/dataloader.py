@@ -13,7 +13,7 @@ import queue
 import threading
 import warnings
 
-from typing import Any, Callable, Iterable, TypeVar, Generic, List, Optional, Union
+from typing import Any, Callable, Iterable, Literal, TypeVar, Generic, List, Optional, Union, overload
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -46,12 +46,13 @@ __all__ = [
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
+U_co = TypeVar('U_co', covariant=True)
 _worker_init_fn_t = Callable[[int], None]
 
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[T]], Any]
+_collate_fn_t = Callable[[List[T]], U_co]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -223,16 +224,38 @@ class DataLoader(Generic[T_co]):
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
-    def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
+    @overload
+    def __init__(self: 'DataLoader[T_co]', dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
-                 num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
+                 num_workers: int = 0, collate_fn: Literal[None] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: Optional[int] = None,
                  persistent_workers: bool = False,
-                 pin_memory_device: str = ""):
+                 pin_memory_device: str = "") -> None: ...
+    @overload
+    def __init__(self: 'DataLoader[U_co]', dataset: Dataset[T], batch_size: Optional[int] = 1,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
+                 batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
+                 num_workers: int = 0, collate_fn: _collate_fn_t[T, U_co] = ...,
+                 pin_memory: bool = False, drop_last: bool = False,
+                 timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
+                 multiprocessing_context=None, generator=None,
+                 *, prefetch_factor: Optional[int] = None,
+                 persistent_workers: bool = False,
+                 pin_memory_device: str = "") -> None: ...
+    def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
+                 batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
+                 num_workers: int = 0, collate_fn: Optional[_collate_fn_t[T_co, U_co]] = None,
+                 pin_memory: bool = False, drop_last: bool = False,
+                 timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
+                 multiprocessing_context=None, generator=None,
+                 *, prefetch_factor: Optional[int] = None,
+                 persistent_workers: bool = False,
+                 pin_memory_device: str = "") -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
