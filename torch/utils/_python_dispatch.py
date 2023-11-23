@@ -73,12 +73,11 @@ class TorchDispatchMode:
         instance = cls(*args, **kwargs)
         return instance
 
-def _get_current_dispatch_mode(is_pre_dispatch=False):
-    print("HERERE")
-    stack_len = _len_torch_dispatch_stack(is_pre_dispatch)
+def _get_current_dispatch_mode():
+    stack_len = _len_torch_dispatch_stack()
     # Return a user mode on the stack if there are any
     if stack_len > 0:
-        return _get_dispatch_stack_at(stack_len - 1, is_pre_dispatch)
+        return _get_dispatch_stack_at(stack_len - 1)
     return None
 
 
@@ -87,12 +86,11 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):
-    print("HEY", mode, k)
     if k is None:
         _push_on_torch_dispatch_stack(mode)
         return
 
-    if k == DispatchKey.PreDispatch:
+    if k == DispatchKey.PreDispatch:  # type: ignore[attr-defined]
         from torch._ops import _set_mode_pre_dispatch
         _set_mode_pre_dispatch(mode)
         return
@@ -108,7 +106,7 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
-    if k == torch._C.DispatchKey.PreDispatch:
+    if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
         from torch._ops import _pop_mode_from_pre_dispatch
         return _pop_mode_from_pre_dispatch()
 
