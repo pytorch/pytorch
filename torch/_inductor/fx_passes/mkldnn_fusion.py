@@ -451,7 +451,10 @@ if torch._C._has_mkldnn:
             )
             if not can_be_inplace:
                 return L[outplace_fusion_op](*computation_args)
-            return L[inplace_fusion_op](*computation_args)
+            # This op mutates in place which means that the result is not the
+            # target but rather the input that is being mutated
+            result = L[inplace_fusion_op](*computation_args)
+            return result.data.data.inputs[0]
 
         return fn
 
