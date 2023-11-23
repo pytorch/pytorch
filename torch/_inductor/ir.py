@@ -5155,7 +5155,9 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args=constant_args,
         )
         mark_node_as_mutating(packed, inputs[1])
-        return packed
+        # This op mutates in place which means that the result is not the
+        # target but rather the input that is being mutated
+        return inputs[1]
 
 
 class MKLPackedLinear(ExternKernelAlloc):
