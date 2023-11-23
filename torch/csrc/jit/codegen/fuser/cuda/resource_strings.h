@@ -16,6 +16,7 @@ cases*/
 #if defined(USE_ROCM)
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
 ${RuntimeHeader}
+${DataTypedef}
 ${HalfHeader}
 ${BFloat16Header}
 ${RandHeader}
@@ -38,11 +39,7 @@ struct TensorInfo<T, 0> {
 )");
 #else
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
-typedef unsigned char uint8_t;
-typedef signed char int8_t;
-typedef short int  int16_t;
-typedef long long int int64_t;
-typedef unsigned long long int uint64_t;
+${DataTypedef}
 ${HalfHeader}
 ${BFloat16Header}
 ${RandHeader}

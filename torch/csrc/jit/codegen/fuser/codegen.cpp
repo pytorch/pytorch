@@ -677,6 +677,23 @@ std::string generateKernel(
   // Still need the key defined, but empty.
   env.s("RuntimeHeader", R"()");
 #endif
+
+#if ROCM_VERSION >= 60000
+  env.s("DataTypedef", R"(
+typedef long long int int64_t;
+)");
+#else
+  env.s("DataTypedef", R"()");
+#endif
+
+#else // else case of defined(USE_ROCM)
+  env.s("DataTypedef", R"(
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int  int16_t;
+typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
+)");
 #endif
   // clang-format on
 
