@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import copy
 import dataclasses
 import enum
 import functools
@@ -746,7 +747,7 @@ class GuardBuilder(GuardBuilderBase):
                 if ctx is not None:
                     # Assume that the ctx obeys object equality
                     obj_store = self.get("G['___stored_objs_by_id']")
-                    obj_store[id(ctx)] = ctx
+                    obj_store[id(ctx)] = copy.deepcopy(ctx)
                     code.append(
                         f"{tensor_name}.__tensor_flatten__()[1] == G['___stored_objs_by_id'][{id(ctx)}]"
                     )
