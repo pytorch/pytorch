@@ -156,7 +156,7 @@ class llist(isin, list):
 
 
 class ltuple(isin, tuple):
-    pass
+    __slots__ = ()
 
 
 empty_dict = {}

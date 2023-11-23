@@ -13,7 +13,7 @@ def _validate_dtypes(*dtypes):
     return dtypes
 
 # class for tuples corresponding to a PyTorch dispatch macro
-class _dispatch_dtypes(tuple):
+class _dispatch_dtypes(tuple):  # noqa: SLOT001
     def __add__(self, other):
         assert isinstance(other, tuple)
         return _dispatch_dtypes(tuple.__add__(self, other))
