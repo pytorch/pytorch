@@ -41,8 +41,13 @@ namespace {
 }
 
 size_t getDefaultNumThreads() {
-  CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
-  int numThreads = cpuinfo_get_processors_count();
+  auto numThreads = 1U;
+  if (cpuinfo_initialize()) {
+    numThreads = std::max(cpuinfo_get_processors_count(), 1U);
+  } else {
+    LOG(WARNING) << "cpuinfo initialization failed";
+    numThreads = std::max(std::thread::hardware_concurrency(), 1U);
+  }
 
   bool applyCap = false;
 #if defined(C10_ANDROID)
@@ -109,7 +114,7 @@ size_t getDefaultNumThreads() {
    * detect if we are running under tsan, for now capping the default
    * threadcount to the tsan limit unconditionally.
    */
-  int tsanThreadLimit = 63;
+  auto tsanThreadLimit = 63U;
   numThreads = std::min(numThreads, tsanThreadLimit);
 
   return numThreads;
