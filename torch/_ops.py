@@ -1,10 +1,10 @@
 import contextlib
 import ctypes
+import enum
 import importlib
 import inspect
 import sys
 import types
-import enum
 from typing import Any, Callable, Dict, List, Type, Union
 
 import torch._C
@@ -419,35 +419,50 @@ def key_extractor(tensors, key_mask):
 # the mode constructor.
 _mode_stack_per_key: Dict[torch._C.DispatchKey, List] = {}
 
+
 class ModeSlot(enum.IntEnum):
     PROXY_MODE_SLOT = 0
     FUNCTIONAL_MODE_SLOT = 1
 
+
 _mode_stack_per_key[torch._C.DispatchKey.PreDispatch] = [None, None]
 
+
 def _get_pre_dispatch_slot(mode_key):
-    assert mode_key in (torch._C._TorchDispatchModeKey.PROXY, torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    assert mode_key in (
+        torch._C._TorchDispatchModeKey.PROXY,
+        torch._C._TorchDispatchModeKey.FUNCTIONAL,
+    )
     if mode_key == torch._C._TorchDispatchModeKey.PROXY:
         return ModeSlot.PROXY_MODE_SLOT
     return ModeSlot.FUNCTIONAL_MODE_SLOT
 
 
 def unset_mode_pre_dispatch(mode_key):
-    current_mode_stack_pre_dispatch = mode_stack_per_key()[torch._C.DispatchKey.PreDispatch]
-    assert mode_key in (torch._C._TorchDispatchModeKey.PROXY, torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    current_mode_stack_pre_dispatch = mode_stack_per_key()[
+        torch._C.DispatchKey.PreDispatch
+    ]
+    assert mode_key in (
+        torch._C._TorchDispatchModeKey.PROXY,
+        torch._C._TorchDispatchModeKey.FUNCTIONAL,
+    )
     slot = _get_pre_dispatch_slot(mode_key)
-    current_mode = current_mode_stack_pre_dispatch[ModeSlot.PROXY_MODE_SLOT]
-    mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][ModeSlot.PROXY_MODE_SLOT] = None
+    current_mode = current_mode_stack_pre_dispatch[slot]
+    mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][slot] = None
     return current_mode
 
 
 def _set_mode_pre_dispatch(mode):
-    assert hasattr(mode, "_mode_key") and mode._mode_key in (torch._C._TorchDispatchModeKey.PROXY, torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    assert hasattr(mode, "_mode_key") and mode._mode_key in (
+        torch._C._TorchDispatchModeKey.PROXY,
+        torch._C._TorchDispatchModeKey.FUNCTIONAL,
+    )
     mode_key = mode._mode_key
     slot = _get_pre_dispatch_slot(mode_key)
     current_mode = mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][slot]
-    assert (current_mode is None)
+    assert current_mode is None
     mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][slot] = mode
+
 
 def _pop_mode_from_pre_dispatch():
     for i in range(1, -1, -1):
@@ -455,7 +470,8 @@ def _pop_mode_from_pre_dispatch():
         if current_mode is not None:
             mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][i] = None
             return current_mode
-    assert False, "Trying to pop empty mode stack"
+    raise AssertionError("Trying to pop empty mode stack")
+
 
 def _len_torch_dispatch_stack_pre_dispatch():
     count = 0
@@ -464,10 +480,32 @@ def _len_torch_dispatch_stack_pre_dispatch():
             count += 1
     return count
 
+
 def _get_dispatch_mode_pre_dispatch(mode_key):
-    assert mode_key in (torch._C._TorchDispatchModeKey.PROXY, torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    assert mode_key in (
+        torch._C._TorchDispatchModeKey.PROXY,
+        torch._C._TorchDispatchModeKey.FUNCTIONAL,
+    )
     slot = _get_pre_dispatch_slot(mode_key)
     return mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][slot]
+
+
+def _get_current_dispatch_mode_pre_dispatch():
+    stack_len = _len_torch_dispatch_stack_pre_dispatch()
+    # Return a user mode on the stack if there are any
+    if stack_len > 0:
+        return _get_pre_dispatch_stack_at(stack_len - 1)
+    return None
+
+
+def _get_pre_dispatch_stack_at(idx):
+    cur = idx
+    for i in range(2):
+        if mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][i] is not None:
+            if cur == 0:
+                return mode_stack_per_key()[torch._C.DispatchKey.PreDispatch][i]
+            cur -= 1
+
 
 # Per-dispatch-key mode variant.
 # Temporarily pops the top of a given mode stack.
@@ -490,6 +528,7 @@ def mode_stack_per_key():
 def push_mode_for_key(key, mode):
     assert isinstance(key, torch._C.DispatchKey)
     assert isinstance(mode, torch.utils._python_dispatch.TorchDispatchMode)
+    assert key != torch._C.DispatchKey.PreDispatch
     if key not in mode_stack_per_key():
         mode_stack_per_key()[key] = []
     mode_stack_per_key()[key].append(mode)
@@ -498,6 +537,7 @@ def push_mode_for_key(key, mode):
 # Per-dispatch-key mode variant of pop_mode().
 def pop_mode_for_key(key):
     assert isinstance(key, torch._C.DispatchKey)
+    assert key != torch._C.DispatchKey.PreDispatch
     assert key in mode_stack_per_key()
     curr_mode_stack = mode_stack_per_key()[key]
     assert len(curr_mode_stack) > 0
@@ -651,7 +691,6 @@ class OpOverload(OperatorBase):
         cache_result = True
         functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
         if functionality_key == torch._C.DispatchKey.PreDispatch:
-            print("HERERE", self)
             curr_stack_len = _len_torch_dispatch_stack_pre_dispatch()
             # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
             # calls inside of a mode.

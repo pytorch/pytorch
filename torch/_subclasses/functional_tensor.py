@@ -199,15 +199,20 @@ class FunctionalTensorMode(TorchDispatchMode):
         # This will be turned off later for pre-dispatch functionalization
         self.decompose_composite_implicit_ops = True
         self.pre_dispatch = pre_dispatch
-        self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
+        self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
             if self.pre_dispatch:
                 from torch._ops import _get_dispatch_mode_pre_dispatch
-                return _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-            return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+
+                return _get_dispatch_mode_pre_dispatch(
+                    torch._C._TorchDispatchModeKey.FUNCTIONAL
+                )
+            return torch._C._get_dispatch_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
 
         if _get_prev_mode() is None:
             self.enter_stack.append(True)
@@ -275,9 +280,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         try:
             # By default for python functionalization (for AOTAutograd), we reapply views.
             old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
-            print("DISPATCHING: ", func)
-            outs_unwrapped = func._op_dk(torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped)
-            print("DISPATCHED: ", func)
+            outs_unwrapped = func._op_dk(
+                torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
+            )
             outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
         finally:
             torch._disable_functionalization()

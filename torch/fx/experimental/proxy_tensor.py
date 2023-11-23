@@ -25,8 +25,6 @@ from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
-    _pop_mode,
-    _push_mode,
 )
 
 from .sym_node import SymNode
@@ -493,7 +491,10 @@ def _pop_proxy_mode_temporarily(dk):
     from torch._ops import unset_mode_pre_dispatch
     from torch._ops import _set_mode_pre_dispatch
 
-    old = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY) if dk is not None else torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    old = (
+        unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY) if dk is not None
+        else torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    )
     try:
         yield old
     finally:
