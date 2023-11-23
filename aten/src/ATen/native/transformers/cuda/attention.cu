@@ -50,7 +50,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
-
+#include <ATen/ops/narrow_native.h>
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>

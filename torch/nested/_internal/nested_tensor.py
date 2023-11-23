@@ -96,6 +96,10 @@ class NestedTensor(torch.Tensor):
         self._offsets = offsets
         self._lengths = lengths
 
+        # collapsed ragged dim must always be dynamic
+        torch._dynamo.mark_dynamic(self, 0)
+        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+
     def values(self):
         return DifferentiableValues.apply(self)
 
@@ -160,10 +164,6 @@ class NestedTensor(torch.Tensor):
             lengths=lengths,
             requires_grad=meta["requires_grad"],
         )
-
-    def __tensor_mark_dynamic__(self, outer_policy):
-        # collapsed ragged dim must always be dynamic
-        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
