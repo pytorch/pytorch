@@ -708,7 +708,6 @@ class ViewAndMutationMeta:
                 if not x.mutates_data and x.mutates_metadata
             ]
         )
-        self.num_mutated_inputs = self.num_mutated_data_inputs + self.num_mutated_metadata_only_inputs
         self.dynamic_outputs = any(
             o.dynamic_dims for o in self.output_info
         )
@@ -1605,9 +1604,9 @@ class GraphSignature:
                 buffer_name = state_names[idx]
                 mutated_buffers.append(buffer_name)
 
-        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inputs
+        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inp_runtime_indices
 
-        start, stop = 0, view_mutation_metadata.num_mutated_inputs
+        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
         buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
 
         start, stop = stop, stop + num_user_outputs
@@ -3173,7 +3172,6 @@ def create_runtime_wrapper(
                     disable_amp=disable_amp,
                 )
 
-        num_mutated_inps = runtime_metadata.num_mutated_inputs
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
@@ -3967,7 +3965,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
-            num_mutated_inputs = CompiledFunction.metadata.num_mutated_inputs
             num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
             num_mutated_metadata_only_inputs = (
                 CompiledFunction.metadata.num_mutated_metadata_only_inputs
@@ -4006,7 +4003,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         raw_returns[i] = TensorAlias(raw_returns[i])
 
                 if config.debug_assert:
-                    user_mutated_inputs_raw = raw_returns[0:num_mutated_inputs]
+                    user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
                     mut_inp_infos = [
                         x for x in CompiledFunction.metadata.input_info if x.mutates_data or x.mutates_metadata
                     ]
@@ -4064,7 +4061,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # - updated inputs due to metadata-only mutations.
             # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
-            num_mutated_inps = CompiledFunction.metadata.num_mutated_inputs
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = CompiledFunction.metadata.num_mutated_graph_handled_indices
             num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
@@ -4077,12 +4073,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             assert len(flat_args) == expected_grad_outs
             out_info = CompiledFunction.metadata.output_info
 
-            num_mutated_inps_returned = CompiledFunction.metadata.num_mutated_inp_runtime_indices
-
             inp_tangents, out_tangents, intermediate_base_tangents = (
-                flat_args[0:num_mutated_inps_returned],
-                flat_args[num_mutated_inps_returned:num_mutated_inps_returned + CompiledFunction.metadata.num_outputs],
-                flat_args[num_mutated_inps_returned + CompiledFunction.metadata.num_outputs:],
+                flat_args[0:num_mutated_runtime_inps],
+                flat_args[num_mutated_runtime_inps:num_mutated_runtime_inps + CompiledFunction.metadata.num_outputs],
+                flat_args[num_mutated_runtime_inps + CompiledFunction.metadata.num_outputs:],
             )
             # input_info contains info on *every* input,
             # But in the backward(), we are only given grad outputs for every mutated input
@@ -4643,7 +4637,7 @@ def create_graph_signature(
 
     if trace_joint:
         assert num_user_fw_outs is not None
-        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inputs
+        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
         backward_output_names = graph_output_names[num_fw_outs:]
 
         grad_index = itertools.count(0)
@@ -4671,7 +4665,7 @@ def create_graph_signature(
         )
     else:
         backward_signature = None
-        num_user_fw_outs = len(graph_output_names) - fw_metadata.num_mutated_inputs
+        num_user_fw_outs = len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
 
     return GraphSignature.from_tracing_metadata(
         in_spec=in_spec,
@@ -5110,7 +5104,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             #     and there are therefore no tangents that are needed to run the joint graph.
             # This function "fixes" both of the above by removing any tangent inputs,
             # and removing pytrees from the original FX graph.
-            fake_tangents = [None for _ in range(metadata.num_outputs + metadata.num_mutated_inputs)]
+            fake_tangents = [None for _ in range(metadata.num_outputs + metadata.num_mutated_inp_runtime_indices)]
             fw_outs, gradients = fx_g(args, fake_tangents)
             assert len(gradients) == len(args)
             output_gradients = []
