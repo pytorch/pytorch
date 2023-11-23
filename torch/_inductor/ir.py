@@ -3810,19 +3810,6 @@ class ExternKernelAlloc(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def _remove_constexpr_args(self, args):
-        from triton.runtime.jit import JITFunction
-        from triton.runtime.autotuner import Autotuner
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-
-        kernel = kernel_side_table.get_kernel(self.kernel_idx)
-        if isinstance(kernel, Autotuner):
-            kernel = kernel.fn
-        assert isinstance(kernel, JITFunction), str(kernel)
-        args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-
-        return args
-
     def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
 
@@ -3848,7 +3835,13 @@ class UserDefinedTritonKernel(ExternKernel):
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
-            args = self._remove_constexpr_args(args)
+            from triton.runtime.jit import JITFunction
+            from triton.runtime.autotuner import Autotuner
+
+            if isinstance(kernel, Autotuner):
+                kernel = kernel.fn
+            assert isinstance(kernel, JITFunction), str(kernel)
+            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
 
         # Call to kernel
         self.codegen_comment(wrapper)
