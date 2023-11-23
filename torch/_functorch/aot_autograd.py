@@ -639,9 +639,9 @@ class ViewAndMutationMeta:
             ]
         else:
             mutated_inp_runtime_indices = [
-            i for i, m in enumerate(self.input_info)
-            if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-        ]
+                i for i, m in enumerate(self.input_info)
+                if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+            ]
 
         mutated_graph_handled_indices = [
             i for i, m in enumerate(self.input_info)
