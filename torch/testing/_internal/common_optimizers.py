@@ -1,4 +1,5 @@
 import functools
+import itertools
 import math
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
@@ -116,12 +117,12 @@ class OptimizerInfo:
         )
         self.optim_error_inputs_func = optim_error_inputs_func
 
-    def get_decorators(self, test_class, test_name, device, param_kwargs):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         result = [set_single_threaded_if_parallel_tbb]
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
-                    test_class, test_name, device, None, param_kwargs
+                    test_class, test_name, device, dtype, param_kwargs
                 ):
                     result.extend(decorator.decorators)
             else:
@@ -136,8 +137,13 @@ class OptimizerInfo:
 class optims(_TestParametrizer):
     """Decorator for specifying a list of optimizers over which to run a test."""
 
-    def __init__(self, optim_info_iterable, allowed_dtypes=None):
+    def __init__(self, optim_info_iterable, dtypes=None):
         self.optim_info_list = list(optim_info_iterable)
+
+        # optimizers aren't limited to be one dtype as parameters can have different dtypes
+        # We default to torch.float32, but dtypes should be specified through passed in
+        # parameters.
+        self.dtypes = dtypes if dtypes is not None else [torch.float32]
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         if device_cls is None:
@@ -147,15 +153,13 @@ class optims(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
-        for optim_info in self.optim_info_list:
+        for optim_info, dtype in itertools.product(self.optim_info_list, self.dtypes):
             # Construct the test name; device / dtype parts are handled outside.
-            # Actually, we don't have dtypes because optimizers should be able to handle differing
-            # dtypes among params--though maybe "mixed" could just be an option or something.
             # See [Note: device and dtype suffix placement]
             test_name = optim_info.name
 
             # Construct parameter kwargs to pass to the test.
-            param_kwargs = {"optim_info": optim_info, "dtype": torch.float32}
+            param_kwargs = {"optim_info": optim_info, "dtype": dtype}
 
             try:
 
@@ -168,6 +172,7 @@ class optims(_TestParametrizer):
                     generic_cls.__name__,
                     test.__name__,
                     device_cls.device_type,
+                    dtype,
                 )
 
                 yield (test_wrapper, test_name, param_kwargs, decorator_fn)
@@ -830,6 +835,15 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             ),
             error_type=ValueError,
             error_regex="SparseAdam requires dense parameter tensors",
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
+                kwargs={},
+                desc="invalid param type",
+            ),
+            error_type=TypeError,
+            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
         ),
     ]
 
