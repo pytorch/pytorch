@@ -747,7 +747,9 @@ class GuardBuilder(GuardBuilderBase):
                     # Assume that the ctx obeys object equality
                     obj_store = self.get("G['___stored_objs_by_id']")
                     obj_store[id(ctx)] = ctx
-                    code.append(f"{tensor_name}.__tensor_flatten__()[1] == G['___stored_objs_by_id'][{id(ctx)}]")
+                    code.append(
+                        f"{tensor_name}.__tensor_flatten__()[1] == G['___stored_objs_by_id'][{id(ctx)}]"
+                    )
 
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.

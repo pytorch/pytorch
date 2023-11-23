@@ -6,9 +6,9 @@ import functools
 
 import torch
 import torch._dynamo
-from torch._dynamo.testing import CompileCounter
 import torch.distributed as dist
 import torch.nn as nn
+from torch._dynamo.testing import CompileCounter
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -140,8 +140,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(fn(x3), opt_fn(x3))
         self.assertEqual(cnt.frame_count, 2)
-
-
 
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
