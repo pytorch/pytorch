@@ -403,14 +403,14 @@ def meta_sparse_structured_linear(
     _activation_opt: Optional[str] = None,
 ):
     output_sizes = list(input.shape)
-    if bias:
+    if bias is not None:
         assert weight.size(0) == bias.size(0), "output size mismatch"
     assert weight.size(1) == input.size(-1) / 2
     output_sizes[-1] = weight.size(0)
     return input.new_empty(
-        output_sizes,
-        dtype=input.dtype if input.dtype != torch.int8 else torch.int32
+        output_sizes, dtype=input.dtype if input.dtype != torch.int8 else torch.int32
     )
+
 
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
