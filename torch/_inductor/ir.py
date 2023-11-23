@@ -3835,7 +3835,7 @@ class UserDefinedTritonKernel(ExternKernel):
             from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
             # in C++ wrapper, we don't pass constexpr args, as they don't
-            # get added asparameters to the PTX code compiled from the
+            # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
             kernel = kernel_side_table.get_kernel(self.kernel_idx)
             args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
