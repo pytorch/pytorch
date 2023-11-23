@@ -229,6 +229,8 @@ def serialize_torch_artifact(artifact) -> bytes:
     def _tensor_to_cpu(t: torch.Tensor):
         if t.is_meta:
             return t
+        elif isinstance(t, torch.nn.Parameter):
+            return torch.nn.Parameter(t.cpu())
         else:
             return t.cpu()
     artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
