@@ -2088,8 +2088,12 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(start, end)
+        if free_unbacked_symbols(start) or free_unbacked_symbols(end):
+            end = sympy.Min(end, new_size[dim])
+            start = sympy.Min(start, end)
+        else:
+            end = sizevars.evaluate_min(end, new_size[dim])
+            start = sizevars.evaluate_min(start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
