@@ -925,7 +925,7 @@ class CommonTemplate:
         test(
             constant_propagation,
             (a,),
-            has_assert=ifdynstaticdefault(False, True),
+            has_assert=False,
             has_wrapping=False,
         )
 
@@ -936,7 +936,7 @@ class CommonTemplate:
         test(
             constant_propagation_neg,
             (a,),
-            has_assert=ifdynstaticdefault(False, True),
+            has_assert=False,
             has_wrapping=False,
         )
 

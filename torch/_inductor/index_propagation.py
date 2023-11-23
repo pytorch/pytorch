@@ -33,6 +33,8 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert, sympy_subs
 
+from .virtualized import V
+
 
 @dataclass
 class TypedExpr:
@@ -304,11 +306,17 @@ class IndexPropagation:
                         "index {expr} is out of bounds for dimension with size {size}"
                     )
             else:
-                # dynamic shapes
+                # Dynamic shapes case
 
-                # FIXME If the indexing does not depend on any size, e.g. x[torch.tensor(4)] or
-                # x[torch.arange(4)], we could install guards on size and perform this optimisation
-                # Alas, it seems that we cannot install guards at this stage of the computation
+                # If we note when are bounds tight, we could take this path whenever
+                # the bounds are tight, for example, x[torch.arange(4)] even if x has dynamic shapes
+                if bounds.is_singleton():
+                    # expr \in [-size, size)
+                    if expr > 1:
+                        V.graph.sizevars.guard_lt(expr, size)
+                    elif expr < 0:
+                        V.graph.sizevars.guard_lt(-size - 1, expr)
+                    return wrap_expr(expr)
 
                 # We try to handle symbolically cases like s0 - x0 - 1 < s0 whenever 0 <= x0 < s0
                 # The value range analysis is not good enough to prove these systems of inequalities
