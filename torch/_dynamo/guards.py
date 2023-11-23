@@ -743,7 +743,7 @@ class GuardBuilder(GuardBuilderBase):
             if is_traceable_wrapper_subclass(value) and not isinstance(
                 value, NestedTensor
             ):
-                ctx = value.__tensor_flatten__()[1]
+                ctx = value.__tensor_flatten__()[1]  # type: ignore[attr-defined]
                 if ctx is not None:
                     # Assume that the ctx obeys object equality
                     obj_store = self.get("G['___stored_objs_by_id']")
