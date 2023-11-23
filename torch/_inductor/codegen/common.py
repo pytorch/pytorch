@@ -29,9 +29,11 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
 from ..utils import (
+    cache_on_self,
     DeferredLineBase,
     do_bench,
     free_symbol_startswith,
+    generate_assert,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
@@ -827,11 +829,10 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, assert_fn, var, mask, size_map):
+    def __init__(self, line, var, mask, size_map):
+        super().__init__(line)
         self.var = var
         self.mask = mask
-        self.line = line
-        self.assert_fn = assert_fn
         self.size_map = size_map
 
     def __call__(self):
@@ -839,7 +840,10 @@ class IndirectAssertLine(DeferredLineBase):
 
         # We assert if we've not been able to prove the bound
         assert_min = (self.var.bounds.lower >= 0) != sympy.true
-        assert_max = (self.var.bounds.upper < size) != sympy.true
+        assert_max = (
+            not isinstance(size, sympy.Number)
+            or (self.var.bounds.upper < size) != sympy.true
+        )
 
         # FooBar interview question
         if not (assert_min or assert_max):
@@ -859,14 +863,10 @@ class IndirectAssertLine(DeferredLineBase):
 
         if self.mask:
             cond = f"({cond}) | ~{self.mask}"
-        return self.line.format(
-            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
-        )
+        return self.line.format(cond=cond, cond_print=cond_print)
 
     def _new_line(self, line):
-        return IndirectAssertLine(
-            line, self.assert_fn, self.var, self.mask, self.size_map
-        )
+        return IndirectAssertLine(line, self.var, self.mask, self.size_map)
 
 
 class CodeGen:
@@ -905,7 +905,9 @@ class Kernel(CodeGen):
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
         # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
+        self.indirect_max_sizes: Dict[
+            Tuple[CSEVariable, str], Tuple[sympy.Expr, str]
+        ] = {}
 
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
@@ -969,6 +971,9 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
+    def var_ranges(self):
+        raise NotImplementedError()
+
     def bucketize(
         self,
         values,
@@ -1009,7 +1014,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(var, size, check=True):
+            def indirect_indexing(
+                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+            ):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:
@@ -1032,12 +1039,12 @@ class Kernel(CodeGen):
                     if var.bounds.upper >= 0:
                         lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
-                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
-                    new_var.update_on_args("index_wrap", (var,), {})
-                    var = new_var
+                    var = stm.value
+                    # We should propagate automatically the bounds when calling ops we know how to
+                    var.bounds = new_bounds
 
-                if self.generate_assert(check):
+                if generate_assert(check):
                     mask = self.load_mask(var)
 
                     # An assertion line may have been written already, if so just
@@ -1050,12 +1057,12 @@ class Kernel(CodeGen):
                         size = sympy.Min(size, existing_size)
                     else:
                         line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                            self.assert_function  # type: ignore[attr-defined]
+                            + '({cond}, "index out of bounds: {cond_print}")'
                         )
                         self.compute.writeline(
                             IndirectAssertLine(
                                 line,
-                                self.assert_function,  # type: ignore[attr-defined]
                                 var,
                                 mask,
                                 self.indirect_max_sizes,
@@ -1146,8 +1153,15 @@ class Kernel(CodeGen):
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
-    def generate_assert(self, check):
-        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+    @cache_on_self
+    def get_ranges(self):
+        ranges = {}
+        for symbol, range_ in self.var_ranges().items():
+            r = ValueRanges.unknown()
+            if isinstance(range_, int) or range_.is_number:
+                r = ValueRanges(0, range_ - 1)
+            ranges[symbol] = r
+        return ranges
 
     def load_mask(self, var):
         # only the triton kernel requires mask

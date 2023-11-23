@@ -34,6 +34,7 @@ from torch._dynamo.testing import (
     rand_strided,
     same,
 )
+from torch._dynamo.utils import ifdynstaticdefault
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -849,22 +850,16 @@ class CommonTemplate:
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
-            for dynamic in (True, False):
-                fn_opt = torch.compile(dynamic=dynamic)(fn)
-                if self.device == "cpu":
-                    _, code = run_and_get_cpp_code(fn_opt, *inps)
-                    found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
-                        found = True
-                    self.assertTrue(found is has_wrapping)
-                    self.assertTrue(("TORCH_CHECK" in code) is has_assert)
-                else:
-                    code = run_and_get_triton_code(fn_opt, *inps)
-                    self.assertTrue(("tl.where" in code) is has_wrapping)
-                    self.assertTrue(("device_assert" in code) is has_assert)
-                self.assertEqual(fn(*inps), fn_opt(*inps))
+            fn_opt = torch.compile(fn)
+            if self.device == "cpu":
+                _, code = run_and_get_cpp_code(fn_opt, *inps)
+                self.assertTrue(("?" in code) is has_wrapping)
+                self.assertTrue(("TORCH_CHECK" in code) is has_assert)
+            else:
+                code = run_and_get_triton_code(fn_opt, *inps)
+                self.assertTrue(("tl.where" in code) is has_wrapping)
+                self.assertTrue(("device_assert" in code) is has_assert)
+            self.assertEqual(fn(*inps), fn_opt(*inps))
 
         def indirect(a, b):
             return a[b - 1]
@@ -888,7 +883,7 @@ class CommonTemplate:
 
         # Constant propagate a constant that's negative
         def flip_with_index_constant(a):
-            b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=self.device)
+            b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=a.device)
             return a[b]
 
         # Wrapping is constant-folded
@@ -896,7 +891,7 @@ class CommonTemplate:
 
         # Operation where we can't prove that the index is always positive or negative
         def pos_and_neg(a):
-            b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device=self.device)
+            b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device=a.device)
             return a[b]
 
         # It has wrapping but no assert
@@ -905,18 +900,45 @@ class CommonTemplate:
         # We currently don't do constant propagation with float constants
         def flip_with_index(a):
             b = 1.0 * torch.arange(
-                start=-1, end=-a.numel() - 1, step=-1, device=self.device
+                start=-1, end=-a.numel() - 1, step=-1, device=a.device
             )
             b = b.int()
             return a[b]
 
         # Constant is propagated as we can prove that the result is always negative.
-        test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+        test(
+            flip_with_index,
+            (a,),
+            has_assert=ifdynstaticdefault(False, True),
+            has_wrapping=False,
+        )
 
         def unsafe_index(a, b):
             return aten._unsafe_index(a, (b,))
 
         test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
+
+        def constant_propagation(a):
+            b = torch.tensor([2], device=a.device)
+            return a[b]
+
+        test(
+            constant_propagation,
+            (a,),
+            has_assert=False,
+            has_wrapping=False,
+        )
+
+        def constant_propagation_neg(a):
+            b = torch.tensor([-2], device=a.device)
+            return a[b]
+
+        test(
+            constant_propagation_neg,
+            (a,),
+            has_assert=False,
+            has_wrapping=False,
+        )
 
     def test_computed_buffer_inlining(self):
         def flip(x):
@@ -8268,7 +8290,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
             fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
 
-            for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
+            def test(fn, ndims, dyn_shape, one_size=False):
                 proc = subprocess.Popen(
                     [
                         sys.executable,
@@ -8276,7 +8298,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         fn,
                         str(ndims),
                         str(dyn_shape),
-                        "False",
+                        str(one_size),
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -8285,26 +8307,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 stderr = proc.communicate()[1]
                 self.assertTrue(
                     any(
-                        "index out of bounds" in err.decode("utf-8")
+                        "out of bounds" in err.decode("utf-8")
                         for err in stderr.splitlines()
                     ),
-                    f"{fn}, {ndims}, {dyn_shape}, False",
+                    f"{fn}, {ndims}, {dyn_shape}, {one_size}",
                 )
-            proc = subprocess.Popen(
-                [sys.executable, test_path, "first_arg", "2", "False", "True"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
-            )
-            stderr = proc.communicate()[1]
 
-            self.assertTrue(
-                any(
-                    "index out of bounds" in err.decode("utf-8")
-                    for err in stderr.splitlines()
-                ),
-                "first_arg 2 False True",
-            )
+            for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
+                test(fn, ndims, dyn_shape)
+
+            test("first_arg", 2, False, True)
+
+            for fn, dyn_shape in itertools.product(
+                ("upper1", "upper2", "lower1", "lower2"), (True, False)
+            ):
+                test(fn, 2, dyn_shape)
 
         @patch("torch._inductor.config.comment_origin", True)
         def test_inductor_sequence_nr(self):

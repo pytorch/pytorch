@@ -30,6 +30,10 @@ from typing_extensions import TypeAlias
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from .utils import generate_assert, sympy_subs
+
+from .virtualized import V
 
 
 @dataclass
@@ -157,8 +161,16 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any):
+    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
         self._inner = inner
+
+        def upper_bound(v):
+            return bound_sympy(v).upper if isinstance(v, sympy.Expr) else v
+
+        self.iter_ranges = iter_ranges
+        self.var_ranges = {
+            k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
+        }
 
     def materialize_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
         # Construct a new constant/index_expr from the SymPy expression
@@ -251,12 +263,73 @@ class IndexPropagation:
     def indirect_indexing(
         self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
-        # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
-        #     for SymPy expressions, so we don't want to repeat idx too much
-
-        # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
-            # If we are turning a indirect indexing into direct, we need to wrap it.
-            index = index.value.expr
-            return index + Where(index >= 0, 0, size)
+            # FIXME(Lezcano) Here we are trying to fit a square peg in a round hole
+            # We need the bounds to implement a fine analysis, but the bounds have
+            # not been computed yet. We should either push this transformation down
+            # the stack, or move the computation of the bounds before this pass
+
+            # If we are turning a indirect indexing into direct, we need to wrap it
+            # and perhaps generate asserts
+            expr = index.value.expr
+            bounds = bound_sympy(expr, self.var_ranges)
+
+            if bounds.is_singleton():
+                expr = bounds.lower
+
+            def wrap_expr(expr):
+                if bounds.lower < 0:
+                    stm = expr + size
+                    if bounds.upper >= 0:
+                        stm = Where(expr < 0, stm, expr)
+                    expr = stm
+                return expr
+
+            # To continue through this path, we need to prove that the bounds are correct
+            # We do our best effort, otherwise we fallback.
+            # We considered adding a `check_bounds` function that lazily adds the asserts
+            # while keeping this optimisation on. This has the issue that loads without indirect
+            # indexing are lifted to the top of the kernel, so we would need to either lift the asserts
+            # or mark these loads not to be lifted
+
+            # Trivial case
+            if not generate_assert(check):
+                return wrap_expr(expr)
+
+            if isinstance(size, int):
+                if bounds.issubset(ValueRanges(-size, size - 1)):
+                    return wrap_expr(expr)
+
+                # direct indexing in disguise and it's out of range
+                if bounds.is_singleton():
+                    raise IndexError(
+                        "index {expr} is out of bounds for dimension with size {size}"
+                    )
+            else:
+                # Dynamic shapes case
+
+                # If we note when are bounds tight, we could take this path whenever
+                # the bounds are tight, for example, x[torch.arange(4)] even if x has dynamic shapes
+                if bounds.is_singleton():
+                    # expr \in [-size, size)
+                    if expr > 1:
+                        V.graph.sizevars.guard_lt(expr, size)
+                    elif expr < 0:
+                        V.graph.sizevars.guard_lt(-size - 1, expr)
+                    return wrap_expr(expr)
+
+                # We try to handle symbolically cases like s0 - x0 - 1 < s0 whenever 0 <= x0 < s0
+                # The value range analysis is not good enough to prove these systems of inequalities
+
+                # If they don't have the same symbols, you could have something like 4 < s0 and we
+                # would not be able to use the upper bound of s0 just on the LHS.
+                expr_upper = sympy_subs(expr, self.iter_ranges)
+                if (
+                    isinstance(expr_upper, sympy.Expr)
+                    and expr_upper.free_symbols == size.free_symbols
+                ):
+                    # nb(lezcano) I think this transformation is not entirely sound
+                    bound_size = bound_sympy(size).upper
+                    if bounds.issubset(ValueRanges(-bound_size, bound_size - 1)):
+                        return wrap_expr(expr)
         return self.fallback("indirect_indexing", (index, size, check), {}).value
