@@ -3830,13 +3830,23 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel, configs, self.kwargs
         )
 
+        args = self.codegen_kwargs()
+        if V.graph.cpp_wrapper:
+            from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+            # in C++ wrapper, we don't pass constexpr args, as they don't
+            # get added asparameters to the PTX code compiled from the
+            # user-defined Triton kernel (only non-constexpr args do)
+            kernel = kernel_side_table.get_kernel(self.kernel_idx)
+            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
             configs,
-            self.codegen_kwargs(),
+            args,
         )
 
     def should_allocate(self):
