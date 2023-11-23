@@ -134,14 +134,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
 
     if m * n != 0 and use_cutlass_template(layout):
-        cutlass_template = CUTLASSGemmTemplate([mat1, mat2], layout, alpha=1, beta=0)
-        ops = cutlass_template.gen_ops()
-        for op in ops:
-            cutlass_template.maybe_append_choice(
-                choices,
-                op=op,
-            )
-        log.debug("Added %d cutlass gemm configs.", len(ops))
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
 
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
@@ -242,20 +237,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if use_cutlass_template(layout):
-        cutlass_template = CUTLASSGemmTemplate(
-            [mat1, mat2, inp_expanded],
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices,
             layout,
+            [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
+            fuseable=False,
         )
-        ops = cutlass_template.gen_ops()
-        for op in ops:
-            cutlass_template.maybe_append_choice(
-                choices,
-                op=op,
-            )
-        log.debug("Added %d cutlass gemm configs.", len(ops))
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
@@ -308,8 +298,8 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
-            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
+            **dict(mm_options(config, k, layout), ACC_TYPE="tl.int32"),
             suffix_args=1,
-            epilogue_fn=lambda acc, mat3: V.ops.mul(acc, mat3),
+            epilogue_fn=V.ops.mul,
         )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)

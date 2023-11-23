@@ -381,7 +381,7 @@ class TestArgmax(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -389,7 +389,7 @@ class TestArgmax(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -505,7 +505,7 @@ class TestArgmin(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -513,7 +513,7 @@ class TestArgmin(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(

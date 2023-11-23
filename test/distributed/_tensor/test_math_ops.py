@@ -1,11 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import itertools
 
 import torch
 
-from torch.distributed._tensor import DeviceMesh, distribute_tensor
+from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -16,27 +17,43 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistMathOpsTest(DTensorTestBase):
-    @with_comms
-    def test_sum(self):
+    def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
-
         shard_spec = [Shard(0)]
 
-        tensor_to_sum = torch.randn(12, 8, 8)
+        tensor = torch.randn(12, 8, 8)
+        dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
-        mat1 = distribute_tensor(tensor_to_sum, device_mesh, shard_spec)
+        op = getattr(tensor, op_str)
+        op_dt = getattr(dtensor, op_str)
 
         keep_dim_or_not = [True, False, None]
-        for dim in range(tensor_to_sum.ndim):
+        for dim in range(tensor.ndim):
             for keep_dim in keep_dim_or_not:
-                sum_args = (dim, keep_dim) if keep_dim is not None else (dim,)
-                dim_sumed_tensor = tensor_to_sum.sum(*sum_args)
-                dt_dim_sumed_tensor = mat1.sum(*sum_args).full_tensor()
-                self.assertEqual(dt_dim_sumed_tensor, dim_sumed_tensor)
+                args = (dim, keep_dim) if keep_dim is not None else (dim,)
+                if op_str in ("max", "min"):
+                    # min and max return a tuple when dim specified
+                    dim_reduced_tensor, _ = op(*args)
+                    dt_reduced, _ = op_dt(*args)
+                else:
+                    dim_reduced_tensor = op(*args)
+                    dt_reduced = op_dt(*args)
+                dt_dim_reduced_tensor = dt_reduced.full_tensor()
+                self.assertEqual(dt_dim_reduced_tensor, dim_reduced_tensor)
 
-        full_sumed_tensor = tensor_to_sum.sum()
-        dt_sum = mat1.sum().full_tensor()
-        self.assertEqual(dt_sum, full_sumed_tensor)
+        full_reduced_tensor = op()
+        dt_full_reduced = op_dt().full_tensor()
+        self.assertEqual(dt_full_reduced, full_reduced_tensor)
+
+    @with_comms
+    def test_linear_op_reductions(self):
+        for op_str in ("all", "sum", "prod", "max", "min"):
+            self.linear_op_reductions(op_str)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_mean(self):
+        self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
@@ -133,6 +150,44 @@ class DistMathOpsTest(DTensorTestBase):
             )
             actual_local_res = actual_rs.to_local()
             self.assertEqual(actual_local_res, expect_rs)
+
+    @with_comms
+    def test_layer_norm(self):
+        device_mesh = self.build_device_mesh()
+
+        # NLP example from pytorch docs
+        # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
+        batch, sentence_length, embedding_dim = 20, 5, 10
+        x = torch.rand(batch, sentence_length, embedding_dim, device=self.device_type)
+        norm_shape_idx_list = list(range(x.ndim))
+        shard_dims = [-1, 0, 1, 2]
+        test_config_list = list(itertools.product(shard_dims, norm_shape_idx_list))
+
+        # normalized shape is a torch.Size object
+        for shard_dim, norm_idx in test_config_list:
+            normalized_shape = x.shape[norm_idx:]
+            layer_norm = torch.nn.LayerNorm(normalized_shape)
+            layer_norm_local = copy.deepcopy(layer_norm).to(self.device_type)
+
+            def _replicate_fn(name, module, device_mesh):
+                for name, param in module.named_parameters():
+                    if name in ["weight", "bias"]:
+                        param_dist = torch.nn.Parameter(
+                            distribute_tensor(param, device_mesh, [Replicate()])
+                        )
+                        module.register_parameter(name, param_dist)
+
+            layer_norm_dist = distribute_module(layer_norm, device_mesh, _replicate_fn)
+
+            x_local = x
+            x_dist = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+
+            y_local = layer_norm_local(x_local)
+            y_dist = layer_norm_dist(x_dist).redistribute(
+                device_mesh, placements=[Replicate()]
+            )
+
+            self.assertEqual(y_local, y_dist.to_local())
 
 
 if __name__ == "__main__":

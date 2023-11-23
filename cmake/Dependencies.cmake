@@ -432,9 +432,9 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   # ---[ Caffe2 uses cpuinfo library in the thread pool
-  # ---[ But it doesn't support s390x and thus not used on s390x
+  # ---[ But it doesn't support s390x/powerpc and thus not used on s390x/powerpc
   if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
     add_library(cpuinfo SHARED IMPORTED)
     find_library(CPUINFO_LIBRARY cpuinfo)
@@ -633,14 +633,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Revert to whatever it was before
     set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
-
-    # Workaround for https://github.com/pytorch/pytorch/issues/47292
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
-      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
-      # Fails with internal compiler error
-      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
-      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
-    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})

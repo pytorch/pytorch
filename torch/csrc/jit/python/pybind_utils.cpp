@@ -111,6 +111,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StorageType:
       return py::cast<at::Storage>(obj);
     case TypeKind::FloatType:
+      if (torch::is_symfloat(py::handle(obj))) {
+        return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -138,6 +141,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (THPMemoryFormat_Check(obj.ptr())) {
         auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
         return static_cast<int8_t>(memory_format->memory_format);
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
@@ -186,6 +192,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       return {};
     case TypeKind::BoolType:
+      if (torch::is_symbool(obj.ptr())) {
+        return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
+      }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);

@@ -39,8 +39,11 @@ except (FileNotFoundError, PermissionError, NotADirectoryError):
     pass
 
 rocm_version = (0, 0, 0)
-rocm_version_h = f"{rocm_path}/include/rocm_version.h"
-# The file could be missing due to 1) ROCm version < 5.0, or 2) no ROCm install.
+rocm_version_h = f"{rocm_path}/include/rocm-core/rocm_version.h"
+if not os.path.isfile(rocm_version_h):
+    rocm_version_h = f"{rocm_path}/include/rocm_version.h"
+
+# The file could be missing due to 1) ROCm version < 5.2, or 2) no ROCm install.
 if os.path.isfile(rocm_version_h):
     RE_MAJOR = re.compile(r"#define\s+ROCM_VERSION_MAJOR\s+(\d+)")
     RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
@@ -628,11 +631,11 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("curand_poisson.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("cusparse.h", ("hipsparse.h" if rocm_version < (5, 2, 0) else "hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
-        ("cufft.h", ("hipfft.h" if rocm_version < (5, 2, 0) else "hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
-        ("cufftXt.h", ("hipfftXt.h" if rocm_version < (5, 2, 0) else "hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
+        ("cusparse.h", ("hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
+        ("cufft.h", ("hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
+        ("cufftXt.h", ("hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
-        ("<nccl.h>", ("<rccl.h>" if rocm_version < (5, 2, 0) else "<rccl/rccl.h>", CONV_INCLUDE, API_RUNTIME)),
+        ("<nccl.h>", ("<rccl/rccl.h>", CONV_INCLUDE, API_RUNTIME)),
         ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
         ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
         ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),

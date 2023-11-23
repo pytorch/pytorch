@@ -891,6 +891,7 @@ class TestDistributions(DistributionsTestCase):
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
         torch_samples = torch_dist.sample((num_samples,)).squeeze()
+        torch_samples = torch_samples.float() if torch_samples.dtype == torch.bfloat16 else torch_samples
         torch_samples = torch_samples.cpu().numpy()
         unique, counts = np.unique(torch_samples, return_counts=True)
         pmf = ref_dist.pmf(unique)
@@ -1463,11 +1464,15 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
-        for rate in [0.1, 1.0, 5.0]:
-            self._check_sampler_discrete(Poisson(rate),
-                                         scipy.stats.poisson(rate),
-                                         f'Poisson(lambda={rate})',
-                                         failure_rate=1e-3)
+        saved_dtype = torch.get_default_dtype()
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.half]:
+            torch.set_default_dtype(dtype)
+            for rate in [0.1, 1.0, 5.0]:
+                self._check_sampler_discrete(Poisson(rate),
+                                             scipy.stats.poisson(rate),
+                                             f'Poisson(lambda={rate})',
+                                             failure_rate=1e-3)
+        torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")

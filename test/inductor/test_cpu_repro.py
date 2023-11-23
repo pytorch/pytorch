@@ -423,7 +423,7 @@ class CPUReproTests(TestCase):
                         inps.append((h, c))
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
 
                     # Check that _flat_weights are not functional_tensor, otherwise
                     # deepcopy will fail during recompilation.
@@ -517,7 +517,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             inps = [embeds, (hidden_0, hidden_1)]
             fn_opt = torch._dynamo.optimize("inductor")(mod)
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
             self.assertFalse("torch.ops.mkldnn._lstm" in code)
             self.assertEqual(fn_opt(*inps), mod(*inps))
@@ -1299,6 +1299,7 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "constant",
             "index_expr",
             "signbit",
             "isinf",
@@ -1382,7 +1383,7 @@ class CPUReproTests(TestCase):
 
         fn_opt = torch.compile()(fn)
         with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             FileCheck().check("atomic_add").run(code)
 
             self.assertEqual(
@@ -1565,7 +1566,7 @@ class CPUReproTests(TestCase):
 
             f_opt = torch.compile()(f)
 
-            code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
+            _, code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
             FileCheck().check_not("void kernel").run(code)
 
             self.assertEqual(
@@ -1578,7 +1579,7 @@ class CPUReproTests(TestCase):
                 return x[torch.tensor(1) :] * 2
 
             f_opt = torch.compile()(f)
-            code = run_and_get_cpp_code(f_opt, inps[0])
+            _, code = run_and_get_cpp_code(f_opt, inps[0])
             FileCheck().check_not("void kernel").run(code)
             self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
@@ -2267,7 +2268,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(opt_fn, x)
+        _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # def and use
         FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
@@ -2418,7 +2419,7 @@ class CPUReproTests(TestCase):
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
+            _, code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -2430,7 +2431,7 @@ class CPUReproTests(TestCase):
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
+        _, code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -2579,6 +2580,55 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x, y, mode))
                 # TODO: support vectorization for int div
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint8_add(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.add(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_uint8_sub(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.sub(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
+
+    def test_embedding_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx) + x
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":

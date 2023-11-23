@@ -1,5 +1,4 @@
 import copy
-import warnings
 from typing import Any, cast, List, Optional, Tuple
 
 import torch
@@ -20,7 +19,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as D
 from torch.distributed._tensor.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
-from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions, FSDPExtensions
+from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
 from torch.distributed.tensor.parallel._data_parallel_utils import (
@@ -28,7 +27,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
     _unflatten_tensor,
 )
 
-__all__ = ["enable_2d_with_fsdp", "DTensorExtensions"]
+__all__ = ["DTensorExtensions"]
 
 
 def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
@@ -227,8 +226,9 @@ def _chunk_dtensor(
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    Shard a tensor to chunks along the first dimension. The local rank will gets its
-    corresponding chunk as the local tensor to create a DTensor.
+    Shard a tensor to chunks along the first dimension.
+
+    The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh is None:
@@ -299,9 +299,7 @@ def _all_gather_dtensor(
     tensor: DTensor,
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
-    """
-    All gather a DTensor in its FSDP dimension and return the local tensor.
-    """
+    """All gather a DTensor in its FSDP dimension and return the local tensor."""
     assert parent_mesh == tensor.device_mesh
 
     placements = list(copy.deepcopy(tensor.placements))
@@ -318,6 +316,7 @@ def _all_gather_dtensor(
 class DTensorExtensions(FSDPExtensions):
     """
     DTensorExtension is the TensorFlattener extension needed for 2D FSDP + TP.
+
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
@@ -366,32 +365,3 @@ class DTensorExtensions(FSDPExtensions):
         parent_mesh: Optional[DeviceMesh],
     ) -> torch.Tensor:
         return _all_gather_dtensor(tensor, parent_mesh)
-
-
-# TODO: remove enable_2d_with_fsdp() once we roll out the new 2D flow.
-def enable_2d_with_fsdp() -> bool:
-    """
-    The API registers the extension which is needed for Tensor Parallelism (TP)
-    to work with FullyShardedDataParallel (FSDP). We first parallelize parameters
-    within one module or sub_modules based on a parallelize_plan and will let FSDP
-    reshard the local tensor of distributed parameter which is essentially a DTensor.
-
-    Return:
-        A `bool` indicated whether extension registration succeeds or not.
-    """
-
-    torch._C._log_api_usage_once(
-        "torch.distributed.tensor.parallel.enable_2d_with_fsdp"
-    )
-
-    try:
-        _set_fsdp_extensions(DTensorExtensions())
-        return True
-
-    except BaseException as e:
-        warnings.warn(
-            "PyTorch doesn't have TensorFlattener extension point available"
-            "2D parallelism won't work with FSDP"
-            f"exception: {e}"
-        )
-        return False

@@ -1225,7 +1225,7 @@ def split_with_sizes(
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
-        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+        lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
     num_splits = len(split_sizes)
     splits = []
@@ -2331,6 +2331,7 @@ def uniform(
     x: Tensor,
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
+    generator: Optional[torch.Generator] = None,
 ):
     return prims._uniform_helper(
         x.shape,
@@ -2338,13 +2339,13 @@ def uniform(
         high=sym_float(high),
         dtype=x.dtype,
         device=x.device,
+        generator=generator,
     )
 
 
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
-    assert generator is None
-    return self.copy_(uniform(self, low, high))
+    return self.copy_(uniform(self, low, high, generator))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2389,7 +2390,17 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale = get_scale_value(scale_factors, 0)
 
-    return upsample_nearest1d(input, osize, scale)
+    return aten.upsample_nearest1d.default(input, osize, scale)
+
+
+@register_decomposition(aten._upsample_nearest_exact1d.vec)
+@aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_nearest_exact1d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_nearest_exact1d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale = get_scale_value(scale_factors, 0)
+
+    return aten._upsample_nearest_exact1d.default(input, osize, scale)
 
 
 @register_decomposition(aten.upsample_nearest2d.vec)
@@ -2400,7 +2411,18 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    return upsample_nearest2d(input, osize, scale_h, scale_w)
+    return aten.upsample_nearest2d.default(input, osize, scale_h, scale_w)
+
+
+@register_decomposition(aten._upsample_nearest_exact2d.vec)
+@aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_nearest_exact2d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_nearest_exact2d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+
+    return aten._upsample_nearest_exact2d.default(input, osize, scale_h, scale_w)
 
 
 @register_decomposition(aten.upsample_nearest3d.vec)
@@ -2412,26 +2434,49 @@ def upsample_nearest3d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
 
-    return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
+    return aten.upsample_nearest3d.default(input, osize, scale_d, scale_h, scale_w)
 
 
-def _compute_upsample_nearest_indices(input, output_size, scales):
+@register_decomposition(aten._upsample_nearest_exact3d.vec)
+@aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_nearest_exact3d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_d = get_scale_value(scale_factors, 0)
+    scale_h = get_scale_value(scale_factors, 1)
+    scale_w = get_scale_value(scale_factors, 2)
+
+    return aten._upsample_nearest_exact3d.default(
+        input, osize, scale_d, scale_h, scale_w
+    )
+
+
+def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
     # For each dim in output_size, compute the set of input indices used
     # to produce the upsampled output.
     indices = []
     num_spatial_dims = len(output_size)
-    input_dtype = torch.float if input.dtype == torch.uint8 else input.dtype
+    offset = 0.5 if exact else 0.0
+
     for d in range(num_spatial_dims):
         # Math matches aten/src/ATen/native/cpu/UpSampleKernel.cpp
+        #
         # Indices are computed as following:
         # scale = isize / osize
+        # Case: exact=False
         # input_index = floor(output_index * scale)
         # Same as OpenCV INTER_NEAREST
+        #
+        # Case: exact=False
+        # index_f32 = (output_index + 0.5) * scale - 0.5
+        # input_index = round(index_f32)
+        # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
-        output_indices = torch.arange(osize, dtype=input_dtype, device=input.device)
         isize = input.shape[-num_spatial_dims + d]
         scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
-        input_indices = (output_indices * scale).to(torch.int64)
+
+        output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
+        input_indices = ((output_indices + offset) * scale).to(torch.int64)
         for _ in range(num_spatial_dims - 1 - d):
             input_indices = input_indices.unsqueeze(-1)
         indices.append(input_indices)
@@ -2450,6 +2495,35 @@ def upsample_nearest1d(
     return aten._unsafe_index(input, (None, None, l_indices))
 
 
+@register_decomposition(aten._upsample_nearest_exact1d.default)
+@aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def _upsample_nearest_exact1d(
+    input: Tensor,
+    output_size: List[int],
+    scales: Optional[float] = None,
+) -> Tensor:
+    (l_indices,) = _compute_upsample_nearest_indices(
+        input, output_size, (scales,), exact=True
+    )
+    return aten._unsafe_index(input, (None, None, l_indices))
+
+
+def _upsample_nearest2d_common(input, h_indices, w_indices):
+    result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    _, n_channels, _, _ = input.shape
+    if input.device.type == "cuda" and n_channels < 4:
+        memory_format = torch.contiguous_format
+
+    result = result.contiguous(memory_format=memory_format)
+    return result
+
+
 @register_decomposition(aten.upsample_nearest2d.default)
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
@@ -2462,19 +2536,22 @@ def upsample_nearest2d(
     h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_h, scales_w)
     )
-    result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
+    return _upsample_nearest2d_common(input, h_indices, w_indices)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
 
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    _, n_channels, _, _ = input.shape
-    if input.device.type == "cuda" and n_channels < 4:
-        memory_format = torch.contiguous_format
-
-    result = result.contiguous(memory_format=memory_format)
-
-    return result
+@register_decomposition(aten._upsample_nearest_exact2d.default)
+@aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def _upsample_nearest_exact2d(
+    input: Tensor,
+    output_size: List[int],
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    h_indices, w_indices = _compute_upsample_nearest_indices(
+        input, output_size, (scales_h, scales_w), exact=True
+    )
+    return _upsample_nearest2d_common(input, h_indices, w_indices)
 
 
 @register_decomposition(aten.upsample_nearest3d.default)
@@ -2489,6 +2566,24 @@ def upsample_nearest3d(
 ) -> Tensor:
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_d, scales_h, scales_w)
+    )
+    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
+
+    return result
+
+
+@register_decomposition(aten._upsample_nearest_exact3d.default)
+@aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def _upsample_nearest_exact3d(
+    input: Tensor,
+    output_size: List[int],
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
+        input, output_size, (scales_d, scales_h, scales_w), exact=True
     )
     result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
 
@@ -4091,7 +4186,6 @@ def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -4112,9 +4206,11 @@ def scaled_dot_product_flash_attention(
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
-        lambda: "q, k, v must be a 4 dimensional tensor",
+        lambda: f"q, k, v must be a 4 dimensional tensor, got {query.dim()}, {key.dim()}, {value.dim()}",
     )
-    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        dropout_p == 0.0, lambda: f"dropout probability must be zero, got {dropout_p}"
+    )
     torch._check(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
@@ -4138,7 +4234,7 @@ def scaled_dot_product_flash_attention(
         requires_grad=query.requires_grad,
     )
     output, _ = aten._scaled_dot_product_attention_math.default(
-        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+        query, key, value, None, dropout_p, is_causal, None, scale=scale
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
@@ -4238,6 +4334,14 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:
         return aten.squeeze.dims(self, [dim])
+
+
+@register_decomposition(torch.ops.aten._weight_norm_interface)
+def _weight_norm_interface(x, y, dim):
+    # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
+    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
+    norm = x.norm(2, keep_dim, keepdim=True)
+    return x * (y / norm), norm
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

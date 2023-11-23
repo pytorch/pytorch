@@ -126,7 +126,6 @@ BUILTIN_SKIPLIST = (
 THIRDPARTY_SKIPLIST = (
     "functorch",
     "fx2trt_oss",
-    "intel_extension_for_pytorch",
     "networkx",
     "numpy",
     "omegaconf",
@@ -159,6 +158,7 @@ def _module_dir(m: types.ModuleType):
 FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
+    "torch._tensor._convert",
 }
 
 
@@ -183,6 +183,7 @@ if torch.distributed.is_available():
     LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
         "torch.distributed._tensor.device_mesh",
+        "torch.distributed._device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
         "torch.distributed.tensor.parallel._utils",
@@ -256,7 +257,7 @@ SKIP_DIRS = [
     "<__array_function__ internals>",
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
-SKIP_DIRS_RE = None
+SKIP_DIRS_RE = re.compile(r"match nothing^")
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
@@ -278,7 +279,9 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    from importlib.util import find_spec
+
+    module_spec = find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -295,7 +298,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check_file(filename, allow_torch=False):
+def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -304,7 +307,7 @@ def check_file(filename, allow_torch=False):
             False,
             "inlined according skipfiles.LEGACY_MOD_INLINELIST",
         )
-    if allow_torch and is_torch_inline_allowed(filename):
+    if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
             "inlined according skipfiles.MOD_INLINELIST",
@@ -318,6 +321,14 @@ def check_file(filename, allow_torch=False):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
+
+
+@dataclasses.dataclass
+class FunctionInfo:
+    py_obj: Optional[object]
+    name: Optional[str]
+    filename: str
+    code: Optional[types.CodeType]
 
 
 """
@@ -346,34 +357,49 @@ There are mainly three call sites of check/check_verbose:
       and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
 
-allow_torch is used to indicate whether we are checking the MOD_INLINELIST (torch modules), we only do this check when
-f2 is not skipped.
+`is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
+or not (f3 is not inlined call if f2 is skipped). Inside of the `check_verbose` function, there are more rules
+to be checked if this `is_inlined_call`.
+The reason to have this flag is that if the upper level function call (e.g, f2) is skipped,
+we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
 
-def check_verbose(obj, allow_torch=False):
+def check_verbose(obj, is_inlined_call=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
-        filename = obj.get_filename()
-        obj = obj.get_code()
+        try:
+            py_obj = obj.get_function()
+        except NotImplementedError:
+            py_obj = None
+        fi = FunctionInfo(py_obj, obj.get_name(), obj.get_filename(), obj.get_code())
     elif isinstance(obj, types.CodeType):
-        filename = obj.co_filename
+        fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
-        filename = getfile(obj)
-        obj = obj.__code__
+        fi = FunctionInfo(
+            obj, obj.__name__, getfile(obj), obj.__code__  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
+        )
     else:
-        filename = getfile(obj)
-    if obj in get_func_inlinelist():
+        fi = FunctionInfo(obj, None, getfile(obj), None)
+    # Go through function based skip/inline rules.
+    if fi.code in get_func_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
-    return check_file(filename, allow_torch)
+    if is_inlined_call:
+        if fi.name == "patched_init":
+            return SkipResult(True, "patched init cannot be inlined.")
+        elif fi.name == "__torch_function__":
+            return SkipResult(False, "allow inlining __torch_function__")
+
+    # Go through file based skip/inline rules.
+    return check_file(fi.filename, is_inlined_call)
 
 
-def check(obj, allow_torch=False):
-    return check_verbose(obj, allow_torch).skipped
+def check(obj, is_inlined_call=False):
+    return check_verbose(obj, is_inlined_call).skipped
 
 
 # skip common third party libs

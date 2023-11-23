@@ -22,6 +22,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -947,6 +948,7 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
       .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
       .add_owned_input(a)

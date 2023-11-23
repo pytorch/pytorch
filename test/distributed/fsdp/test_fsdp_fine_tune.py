@@ -36,7 +36,7 @@ class TestFSDPFineTune(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
     def _init_seq_module(self) -> nn.Module:
         torch.manual_seed(42)
@@ -181,7 +181,7 @@ class TestFSDPFineTune(FSDPTest):
     def test_hooks_multi_traversal(self):
         """
         Tests that the hooks do reshard / unshard correctly in the case of same
-        parameters being used mutliple times during forward pass.
+        parameters being used multiple times during forward pass.
         """
         self.run_subtests(
             {
