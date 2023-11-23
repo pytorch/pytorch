@@ -394,6 +394,24 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten._sparse_semi_structured_linear)
+def meta_sparse_structured_linear(
+    input: Tensor,
+    weight: Tensor,
+    _meta: Tensor,
+    bias: Optional[Tensor] = None,
+    _activation_opt: Optional[str] = None,
+):
+    output_sizes = list(input.shape)
+    if bias:
+        assert weight.size(0) == bias.size(0), "output size mismatch"
+    assert weight.size(1) == input.size(-1) / 2
+    output_sizes[-1] = weight.size(0)
+    return input.new_empty(
+        output_sizes,
+        dtype=input.dtype if input.dtype != torch.int8 else torch.int32
+    )
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
