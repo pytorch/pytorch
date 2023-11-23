@@ -682,7 +682,7 @@ class FxGraphCache:
         """
         Helper to get the shape env from the tracing context.
         """
-        return torch._tracing_context.TracingContext.get().fake_mode.shape_env
+        return torch._guards.TracingContext.get().fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -1607,6 +1607,9 @@ class AotCodeCache:
                         # This serializes the tensor's untyped_storage to bytes by accessing
                         # the raw data of the underlying structure.
                         import ctypes
+
+                        if t.numel() == 0:
+                            return b""
 
                         t_cpu = t.untyped_storage().cpu()
                         raw_array = ctypes.cast(

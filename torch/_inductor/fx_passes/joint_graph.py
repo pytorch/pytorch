@@ -4,7 +4,7 @@ from collections import Counter
 from typing import Dict, Set
 
 import torch
-import torch._tracing_context
+import torch._guards
 from torch._inductor.constant_folding import ConstantFolder
 from torch.multiprocessing.reductions import StorageWeakRef
 

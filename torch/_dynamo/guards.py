@@ -110,6 +110,7 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
+    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -609,6 +610,13 @@ class GuardBuilder(GuardBuilderBase):
         assert guard.source is GuardSource.GLOBAL
         code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
         self.config_hash = config_hash
+        self._produce_guard_code(guard, code)
+
+    def HAS_GRAPH_BREAK(self, guard: Guard):
+        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
+        # if the compiled object needs nopython. We only need to install this guard if
+        # there is a graph break.
+        code = ["not ___needs_nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1426,7 +1434,7 @@ def install_guard(*guards, skip=0):
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    from torch._tracing_context import TracingContext
+    from torch._guards import TracingContext
 
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:

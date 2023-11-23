@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -393,7 +393,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: List[Expr],
+        exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
     ) -> Tuple[int, ...]:

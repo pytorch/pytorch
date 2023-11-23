@@ -20,11 +20,10 @@ except ModuleNotFoundError:
 import torch
 
 from torch import SymInt
-from torch._guards import GuardSource
+from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch._tracing_context import TracingContext
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     CreateSymbolicPolicy,
@@ -676,6 +675,7 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
+            self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -1137,6 +1137,7 @@ class VariableBuilder:
             ):
                 wrapped_value = shape_env.create_unbacked_symint()
                 _constrain_range_for_size(wrapped_value)
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
                 )
@@ -1195,6 +1196,7 @@ class VariableBuilder:
                     source=self.source,
                     dynamic_dim=dynamic_dim,
                 )
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
