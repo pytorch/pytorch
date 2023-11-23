@@ -380,7 +380,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     fake_inp = fake_mode.from_tensor(
                         inp,
                         policy=FreshCreateSymbolicPolicy(
-                            [dim_dynamic for i in range(x.dim())]
+                            dynamic_dims=[dim_dynamic for i in range(x.dim())],
+                            constraint_dims=[None] * x.dim(),
+                            dynamic_offset=DimDynamic.DYNAMIC,
+                            constraint_offset=None,
                         ),
                     )
                     opt_f(fake_inp)

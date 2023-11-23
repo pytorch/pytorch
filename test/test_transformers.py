@@ -1899,6 +1899,24 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_non_contig_mask_bug(self, device):
+        dtype = torch.float32
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim = 1, 16, 128
+        seq_len_q, seq_len_kv = 1, 16
+        query = make_tensor(batch, seq_len_q, num_heads * head_dim).view(batch, seq_len_q, num_heads, head_dim).transpose(1, 2)
+        kv_shape = (batch, seq_len_kv, head_dim)
+        key, value = make_tensor(kv_shape).unsqueeze(1), make_tensor(kv_shape).unsqueeze(1)
+        key = key.expand(-1, num_heads, -1, -1)
+        value = value.expand(-1, num_heads, -1, -1)
+        mask = torch.ones((1, 1, seq_len_q, seq_len_kv), device=device, dtype=torch.bool)
+        with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, mask)
+            out_no_mask = F.scaled_dot_product_attention(query, key, value, None)
+        max_diff = (out - out_no_mask).abs().mean()
+        assert max_diff.item() < 1e-9
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, device, type: str, is_contiguous: bool):

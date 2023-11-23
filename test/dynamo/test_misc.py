@@ -1235,6 +1235,49 @@ utils_device.CURRENT_DEVICE == None""".split(
             self, fn=fn1, nargs=1, expected_ops=3
         )
 
+    def test_storage_offset_guards(self):
+        guard_failures = []
+
+        def guard_fail_fn(failure):
+            nonlocal guard_failures
+            guard_failures.append(failure)
+
+        def fn(x, y):
+            return x + y
+
+        fn_opt = torch._dynamo.optimize("eager", nopython=True, guard_fail_fn=guard_fail_fn)(fn)
+
+        x1, y1 = (torch.rand((4, 4)) for _ in range(2))
+        fn_opt(x1, y1)
+
+        x2, y2 = (torch.rand(20).as_strided((4, 4), (4, 1), 3) for _ in range(2))
+        fn_opt(x2, y2)
+
+        self.assertEqual(len(guard_failures), 1)
+        self.assertExpectedInline(
+            guard_failures[0].reason,
+            """tensor 'L['x']' storage offset mismatch. expected 0, actual 3""",
+        )
+
+    def test_dynamic_storage_offset(self):
+        def fn(x, y):
+            return torch.add(x, y)
+
+        def get_inputs(offset):
+            dim = 1024
+            return [
+                torch.rand(dim * (dim + 1)).as_strided((dim, dim), (dim, 1), offset)
+                for _ in range(2)
+            ]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True, dynamic=True)(fn)
+
+        opt_fn(*get_inputs(3))
+        self.assertEqual(cnt.frame_count, 1)
+        opt_fn(*get_inputs(5))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_range_with_shape(self):
         def fn(a):
             for i in range(1, a.shape[0]):
@@ -6366,11 +6409,14 @@ def fn():
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     def test_anomaly_aot_autograd(self):
+        def fail():
+            raise AssertionError("fail")
+
         @allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
-            r.register_hook(lambda x: x + x.item())
+            r.register_hook(lambda x: fail())
             return r
 
         @torch.compile(backend="aot_eager")
@@ -6382,8 +6428,8 @@ def fn():
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        self.assertEqual(len(w), 1)
-        self.assertIn("forward call that caused the error", str(w[0].message))
+        # Suppress unrelated pkg_resources warnings
+        self.assertIn("forward call that caused the error", str(w[-1].message))
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
@@ -8289,24 +8335,27 @@ ShapeEnv not equal: field values don't match:
         with set_default_dtype(torch.double):
             foo()
 
-    def test_dynamic_storage_offset(self):
-        def fn(x, y):
-            return torch.add(x, y)
+    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+        for super_class in (
+            collections.OrderedDict,
+            dict,
+        ):
 
-        def get_inputs(offset):
-            dim = 1024
-            return [
-                torch.rand(dim * (dim + 1)).as_strided((dim, dim), (dim, 1), offset)
-                for _ in range(2)
-            ]
+            class CustomDict(super_class):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt, nopython=True, dynamic=True)(fn)
+            def fn(x):
+                c = CustomDict()
+                c["key"] = x
+                assert "key" in c
+                return c["key"] + 1
 
-        opt_fn(*get_inputs(3))
-        self.assertEqual(cnt.frame_count, 1)
-        opt_fn(*get_inputs(5))
-        self.assertEqual(cnt.frame_count, 1)
+            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
+            ):
+                print(fn_opt(torch.zeros(1)))
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
