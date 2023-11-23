@@ -1657,9 +1657,9 @@ class TestSDPA(NNTestCase):
         if type == "nested" \
                 or dropout > 0.0 \
                 or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH.value
         else:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
@@ -1899,6 +1899,24 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_non_contig_mask_bug(self, device):
+        dtype = torch.float32
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim = 1, 16, 128
+        seq_len_q, seq_len_kv = 1, 16
+        query = make_tensor(batch, seq_len_q, num_heads * head_dim).view(batch, seq_len_q, num_heads, head_dim).transpose(1, 2)
+        kv_shape = (batch, seq_len_kv, head_dim)
+        key, value = make_tensor(kv_shape).unsqueeze(1), make_tensor(kv_shape).unsqueeze(1)
+        key = key.expand(-1, num_heads, -1, -1)
+        value = value.expand(-1, num_heads, -1, -1)
+        mask = torch.ones((1, 1, seq_len_q, seq_len_kv), device=device, dtype=torch.bool)
+        with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(query, key, value, mask)
+            out_no_mask = F.scaled_dot_product_attention(query, key, value, None)
+        max_diff = (out - out_no_mask).abs().mean()
+        assert max_diff.item() < 1e-9
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, device, type: str, is_contiguous: bool):
@@ -2109,9 +2127,9 @@ class TestSDPACudaOnly(NNTestCase):
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
         if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
         else:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
         # Change dtype to float32 so that efficient attention should get chosen
         make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
@@ -2123,7 +2141,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
@@ -2135,7 +2153,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=True):
-                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])

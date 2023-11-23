@@ -31,7 +31,8 @@ class TensorCheck {
       PyTypeObject* pt,
       const at::Tensor& v,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      std::optional<c10::SymInt> dynamic_storage_offset)
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
@@ -39,6 +40,7 @@ class TensorCheck {
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
         strides_(std::move(dynamic_dims_strides)),
+        storage_offset_(std::move(dynamic_storage_offset)),
         dim_(static_cast<int64_t>(sizes_.size())) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
@@ -59,6 +61,7 @@ class TensorCheck {
     }
     const auto& sizes = v.sym_sizes();
     const auto& strides = v.sym_strides();
+    const auto& storage_offset = v.sym_storage_offset();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -72,6 +75,10 @@ class TensorCheck {
           return false;
         }
       }
+    }
+    if (storage_offset_.has_value() &&
+        storage_offset_.value() != storage_offset) {
+      return false;
     }
     return true;
   }
@@ -132,6 +139,13 @@ class TensorCheck {
         return fail_reason.str();
       }
     }
+    const auto& storage_offset = v.sym_storage_offset();
+    if (storage_offset_.has_value() &&
+        storage_offset_.value() != storage_offset) {
+      fail_reason << "storage offset mismatch. expected "
+                  << storage_offset_.value() << ", actual " << storage_offset;
+      return fail_reason.str();
+    }
     return "";
   }
 
@@ -148,6 +162,7 @@ class TensorCheck {
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
   std::vector<std::optional<c10::SymInt>> strides_;
+  std::optional<c10::SymInt> storage_offset_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
@@ -189,27 +204,30 @@ static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
   return optVec;
 }
 
+static std::optional<c10::SymInt> pyObjToOptSymInt(PyObject* item) {
+  auto handle = py::handle(item);
+  if (item == Py_None) {
+    return std::nullopt;
+  } else if (torch::is_symint(handle)) {
+    return py::cast<c10::SymInt>(handle);
+  } else {
+    int64_t value = PyLong_AsLongLong(item);
+    if (value == -1 && PyErr_Occurred()) {
+      PyErr_SetString(
+          PyExc_TypeError, "Size or stride list item is not a valid integer.");
+      TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
+    }
+    return value;
+  }
+}
+
 static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
     PyObject* pyList) {
   std::vector<std::optional<c10::SymInt>> vec;
   Py_ssize_t size = PyList_Size(pyList);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
-    auto handle = py::handle(item);
-    if (item == Py_None) {
-      vec.emplace_back(std::nullopt);
-    } else if (torch::is_symint(handle)) {
-      vec.emplace_back(py::cast<c10::SymInt>(handle));
-    } else {
-      int64_t value = PyLong_AsLongLong(item);
-      if (value == -1 && PyErr_Occurred()) {
-        PyErr_SetString(
-            PyExc_TypeError,
-            "Size or stride list item is not a valid integer.");
-        TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
-      }
-      vec.emplace_back(c10::SymInt(value));
-    }
+    vec.push_back(pyObjToOptSymInt(item));
   }
   return vec;
 }
@@ -226,6 +244,21 @@ static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
     }
   }
   return per_tensor_dynamic_dims;
+}
+
+static std::vector<std::optional<c10::SymInt>> get_storage_offsets(
+    PyObject* offsets_py) {
+  std::vector<std::optional<c10::SymInt>> per_tensor_dynamic_storage_offsets;
+  if (offsets_py != Py_None) {
+    Py_ssize_t size = PyList_Size(offsets_py);
+    per_tensor_dynamic_storage_offsets.reserve(size);
+    for (Py_ssize_t i = 0; i < size; i++) {
+      PyObject* offset_py = PyList_GetItem(offsets_py, i);
+      std::optional<c10::SymInt> offset = pyObjToOptSymInt(offset_py);
+      per_tensor_dynamic_storage_offsets.push_back(std::move(offset));
+    }
+  }
+  return per_tensor_dynamic_storage_offsets;
 }
 
 static int TensorGuards_init(
@@ -250,6 +283,13 @@ static int TensorGuards_init(
     return -1;
   }
 
+  PyObject* dynamic_storage_offsets_py =
+      PyDict_GetItemString(kwds, "dynamic_storage_offsets");
+  if (dynamic_storage_offsets_py == nullptr) {
+    PyErr_SetString(PyExc_TypeError, "missing dynamic_storage_offsets=...");
+    return -1;
+  }
+
   // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
   // an optimization to avoid invoking .size()/.stride() in python needlessly
   std::vector<std::vector<std::optional<c10::SymInt>>>
@@ -257,6 +297,8 @@ static int TensorGuards_init(
   std::vector<std::vector<std::optional<c10::SymInt>>>
       per_tensor_dynamic_dims_strides =
           get_dynamic_dims(dynamic_dims_strides_py);
+  std::vector<std::optional<c10::SymInt>> per_tensor_dynamic_storage_offsets =
+      get_storage_offsets(dynamic_storage_offsets_py);
 
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
@@ -278,13 +320,18 @@ static int TensorGuards_init(
         per_tensor_dynamic_dims_strides.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : per_tensor_dynamic_dims_strides[i];
+    std::optional<c10::SymInt> tensor_storage_offset =
+        per_tensor_dynamic_storage_offsets.empty()
+        ? tensor.sym_storage_offset()
+        : per_tensor_dynamic_storage_offsets[i];
 
     checks.emplace_back(
         state,
         Py_TYPE(item),
         std::move(tensor),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        std::move(tensor_storage_offset));
   }
   return 0;
 }
