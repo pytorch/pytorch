@@ -1260,6 +1260,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
         self.assertEqual(opt_fn(x, 2), fn(x, 2))
 
+    def test_linalg_lstsq(self):
+        def fn(x, y):
+            return torch.linalg.lstsq(x, y)
+
+        A = torch.eye(16, 16)
+        B = torch.randn(16, 1)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(A, B), fn(A, B))
+
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
             index = x.shape[-1]

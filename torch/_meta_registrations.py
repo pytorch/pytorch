@@ -1171,6 +1171,64 @@ def _linalg_svd_meta(
     return U, S, V
 
 
+@register_meta(aten.linalg_lstsq.default)
+def linalg_lstsq_meta(
+    A: Tensor, B: Tensor, rcond: Optional[float] = None, *, driver: Optional[str] = None
+):
+    checkIsMatrix(A, "linalg.lstsq")
+    torch._check(
+        B.dim() >= 1,
+        lambda: (f"B must have one or more dimensions. Got {B.dim()}."),
+    )
+    dim_diff = A.dim() - B.dim()
+    torch._check(
+        dim_diff >= 0 and dim_diff <= 1,
+        lambda: ("A must have the same number (or one additional) of dimensions as B."
+                 f"Got {A.dim()} and {B.dim()}."),
+    )
+    torch._check(
+        A.dtype == B.dtype,
+        lambda: (f"A and B must have the same dtypes. Got {A.dtype} and {B.dtype}"),
+    )
+
+    batch_dims = list(A.shape[:-2])
+    m = A.shape[-2]
+    n = A.shape[-1]
+
+    if B.dim() == A.dim():
+        k = B.shape[-1]
+        torch._check(
+            B.shape[-2] == m,
+            lambda: (f"A and B have incompatible shapes. Got {B.shape[-2]} and {m}."),
+        )
+    else:
+        k = 1
+        torch._check(
+            B.shape[-1] == m,
+            lambda: (f"A and B have incompatible shapes. Got {B.shape[-1]} and {m}."),
+        )
+
+    solution = A.new_empty(batch_dims + [max(m, n), k])
+    solution = solution[..., :n, :]
+    solution.as_strided_(solution.shape, list(solution.stride()[:-2]) + [1, max(m, n)])
+
+    residuals = A.new_empty(batch_dims or [0])
+
+    if driver in ("gelsy", "gelsd", "gelss"):
+        rank = A.new_empty(batch_dims, dtype=torch.int64)
+    else:
+        rank = A.new_empty([0], dtype=torch.int64)
+
+    real_dtype = toRealValueType(A.dtype)
+
+    if driver in ("gelsd", "gelss"):
+        singular_values = A.new_empty(batch_dims + [min(m, n)], dtype=real_dtype)
+    else:
+        singular_values = A.new_empty([0], dtype=real_dtype)
+
+    return solution, residuals, rank, singular_values
+
+
 def _linalg_broadcast_batch_dims(
     arg1: Tensor, arg2: Tensor
 ) -> Tuple[List[int], List[int]]:
