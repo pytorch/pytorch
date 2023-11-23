@@ -5110,10 +5110,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
 
     def get_mutation_names(self):
-        return [self.inputs[1].get_name()]
-
-    def get_unbacked_symbol_defs(self):
-        return {}
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
 
     @classmethod
     def create(
@@ -5149,13 +5147,11 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
+        return ConvolutionBinaryInplace(
+            kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
             constant_args=constant_args,
         )
-        mark_node_as_mutating(packed, inputs[1])
-        return packed
 
 
 class MKLPackedLinear(ExternKernelAlloc):
