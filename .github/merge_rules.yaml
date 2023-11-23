@@ -85,6 +85,7 @@
   - EasyCLA
   - Lint
   - pull
+  - inductor
 
 - name: OSS CI /pytorchbot / Executorch
   patterns:
