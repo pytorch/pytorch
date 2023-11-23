@@ -564,7 +564,7 @@ class ViewAndMutationMeta:
     num_intermediate_bases: int
 
     # For inference only: instructs us to keep data-only input mutations directly in the graph
-    keep_input_mutations: int
+    keep_input_mutations: bool
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
