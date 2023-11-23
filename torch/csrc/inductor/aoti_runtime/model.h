@@ -385,7 +385,8 @@ class AOTInductorModelBase {
       return;
     }
     if (!constants_) {
-      constants_ = std::make_shared<std::vector<AtenTensorHandle>>(constants_info_.size());
+      constants_ = std::make_shared<std::vector<AtenTensorHandle>>(
+          constants_info_.size());
     } else {
       constants_->resize(constants_info_.size());
     }
