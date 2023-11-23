@@ -341,6 +341,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
+
+    // Optional "parent" backend and color to create communicators from
+    // via `ncclCommSplit`
+    std::shared_ptr<ProcessGroupNCCL> split_from;
+    int64_t split_color{0};
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -508,6 +513,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
+
+  // Return the total number of splits the communicators held by this process
+  // group have performed.
+  uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
