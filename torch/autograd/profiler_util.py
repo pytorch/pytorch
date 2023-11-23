@@ -253,7 +253,7 @@ class EventList(list):
                         '"pid": "CPU functions", '
                         f'"id": {next_id}, '
                         f'"cat": "cpu_to_{device_name}", '
-                        '"args": {{}}}}, '
+                        '"args": {}}, '
                     )
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
