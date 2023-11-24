@@ -41,7 +41,7 @@ dead_code_elimination = True
 cache_size_limit = 8
 
 # [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
-accumulated_cache_size_limit = 64
+accumulated_cache_size_limit = 512
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
