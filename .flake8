@@ -26,6 +26,9 @@ ignore =
     # TorchFix codes that don't make sense for PyTorch itself:
     # removed and deprecated PyTorch functions.
     TOR001,TOR101,
+    # TODO(kit1980): fix all TOR102 issues
+    # `torch.load` without `weights_only` parameter is unsafe
+    TOR102,
 per-file-ignores =
     __init__.py: F401
     torch/utils/cpp_extension.py: B950
