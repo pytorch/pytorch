@@ -48,7 +48,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.10.0',
     'pyflakes==3.0.1',
-    'torchfix==0.1.1',
+    'torchfix==0.2.0',
 ]
 
 
@@ -162,7 +162,8 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.0',
+    'numpy==1.24.3 ; python_version == "3.8"',
+    'numpy==1.26.0 ; python_version >= "3.9"',
     'expecttest==0.1.6',
     'mypy==1.6.0',
     'types-requests==2.27.25',
@@ -1680,6 +1681,7 @@ exclude_patterns = [
     'torch/_higher_order_ops/__init__.py',
     'torch/_higher_order_ops/out_dtype.py',
     'torch/_higher_order_ops/wrap.py',
+    'torch/_vendor/**',
     'torch/ao/__init__.py',
     'torch/ao/nn/__init__.py',
     'torch/ao/nn/intrinsic/__init__.py',
@@ -2646,7 +2648,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.5',
+    'ruff==0.1.6',
 ]
 is_formatter = true
 
