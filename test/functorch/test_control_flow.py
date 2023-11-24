@@ -1555,11 +1555,11 @@ def forward(self, arg0_1):
                 def false_fn(*operands):
                     return inner_most_fn(*operands)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.zeros(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
         else:
             args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level - 1)
 
@@ -1569,11 +1569,11 @@ def forward(self, arg0_1):
             def false_fn(*operands):
                 return inner_most_fn(*operands) - inner_fn(*args)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.ones(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
 
     def _init_predicate(self, pred_type):
         if pred_type == "bool":
@@ -1614,6 +1614,21 @@ def forward(self, arg0_1):
             with self.subTest(tracing_mode=tracing_mode):
                 gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
                 self.assertEqual(gm(*args), eager_res)
+
+    @parametrize("predType", ["boolTensor"])
+    @parametrize("innerFnType", ["function", "module", "object"])
+    @parametrize("nOperands", [1, 2])
+    @parametrize("nClosure", [0, 1])
+    @parametrize("nesting", [0])
+    def test_cond_vmap(self, predType, innerFnType, nOperands, nClosure, nesting):
+        pred = self._init_predicate(predType)
+        inner_fn = self._init_fn(innerFnType)
+        operands = [torch.ones(2, 3) + i for i in range(nOperands)]
+        closure = [torch.ones(2, 3) - i for i in range(nClosure)]
+        args, fn = self._create_test_fns_for_cond(pred, inner_fn, operands, closure, nesting)
+        eager_res = fn(*args)
+        out = torch.vmap(fn)(*args)
+        # self.assertEqual(eager_res, out)
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 

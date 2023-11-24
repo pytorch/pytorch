@@ -8,6 +8,12 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
 from torch._functorch.utils import exposed_in
 
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -404,3 +410,40 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return ctx.wrap_tensors(cond_return)
+
+
+@cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
+    assert isinstance(
+        inputs, (list, tuple)
+    ), "Cond inputs must be a list or tuple of tensors"
+    assert all(
+        isinstance(i, torch.Tensor) for i in inputs
+    ), "Cond inputs must be a list of tensors"
+
+    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+    tensors = tuple([get_unwrapped(t) for t in inputs if is_batchedtensor(t)])
+    # TODO: correctly place closures in the list of args
+    closures = tuple([t for t in inputs if not is_batchedtensor(t)])
+    in_dims = tuple([maybe_get_bdim(t) for t in inputs if is_batchedtensor(t)])
+
+    if is_batchedtensor(pred):
+        tensors = (pred_,) + tensors
+        in_dims = (0,) + in_dims
+
+        def fn(p, *args):
+            t = true_fn(*args + closures)
+            f = false_fn(*args + closures)
+            return torch.where(p, t, f)
+
+    else:
+
+        def fn(*args):  # type: ignore[misc]
+            t = true_fn(*args + closures)
+            f = false_fn(*args + closures)
+            return torch.where(pred, t, f)
+
+    with interpreter.lower():
+        result = torch.vmap(fn, in_dims=in_dims)(*tensors)
+
+    return _add_batch_dim(result, 0, interpreter.level())

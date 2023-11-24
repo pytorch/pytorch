@@ -128,7 +128,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn:
+        if t.is_sparse or t.is_mkldnn or torch._C._functorch.is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -308,6 +308,18 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
+                elif torch._C._functorch.is_batchedtensor(t):
+                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
+                        t, source
+                    )
+                    r = callback(
+                        lambda: torch.empty_strided(
+                            sizes,
+                            strides,
+                            dtype=t.dtype,
+                            device="meta",
+                        )
+                    )
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -552,10 +564,6 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
-
-                    # Graph-Break for wrapped tensors
-                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
-                        return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
