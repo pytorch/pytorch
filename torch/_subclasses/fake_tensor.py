@@ -1867,7 +1867,6 @@ class FakeTensorMode(TorchDispatchMode):
         # seen before.
         memoized_only=False,
     ):
-
         shape_env = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes
