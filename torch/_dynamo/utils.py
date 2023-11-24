@@ -1270,14 +1270,11 @@ def format_func_info(code):
 def disable_cache_limit():
     prior = config.cache_size_limit
     config.cache_size_limit = sys.maxsize
-    prior_acc_limit = config.accumulated_cache_size_limit
-    config.accumulated_cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         config.cache_size_limit = prior
-        config.accumulated_cache_size_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code
