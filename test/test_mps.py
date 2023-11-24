@@ -6227,7 +6227,7 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(inputCPU.grad, inputMPS.grad)
 
         # 1D interpolation
-        for mode in ['nearest', 'nearest-exact']:
+        for mode in ['nearest', 'nearest-exact', 'linear']:
             helper([2, 3, 4], [3], None, mode)  # downsample with size
             helper([2, 3, 4], [6], None, mode)  # upsample with size
             helper([2, 3, 4], None, [0.6], mode)  # downsample with scale factor
