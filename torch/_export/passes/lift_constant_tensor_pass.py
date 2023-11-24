@@ -50,7 +50,7 @@ def lift_constant_tensor_pass(
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
                 const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                    constant_tensor, static_shapes=True
+                    constant_tensor
                 )
                 const_placeholder_node.meta["val"].constant = constant_tensor
                 node.replace_all_uses_with(const_placeholder_node)

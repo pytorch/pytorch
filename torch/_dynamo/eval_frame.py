@@ -1284,9 +1284,7 @@ def export(
                     fake_params_buffers = dict()
 
                     for name, value in params_and_buffers.items():
-                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(
-                            value, static_shapes=True
-                        )
+                        fake_params_buffers[name] = ambient_fake_mode.from_tensor(value)
 
                     fake_graph_inputs = pytree.tree_map(
                         ambient_fake_mode.from_tensor, graph_inputs
