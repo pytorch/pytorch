@@ -1,4 +1,3 @@
-import functools
 import warnings
 from typing import Callable, Union
 
@@ -105,7 +104,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                 with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
-                        functools.partial(fake_mode.from_tensor, static_shapes=True),
+                        fake_mode.from_tensor,
                         (args, kwargs),
                     )
                     with warnings.catch_warnings():
