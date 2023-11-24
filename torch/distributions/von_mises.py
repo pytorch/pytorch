@@ -149,7 +149,7 @@ class VonMises(Distribution):
             - math.log(2 * math.pi)
             - _log_modified_bessel_fn(self.concentration, order=0)
         )
-        return log_prob
+        return log_prob.to(self.dtype)
 
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
