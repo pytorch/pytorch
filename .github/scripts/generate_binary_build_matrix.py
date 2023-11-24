@@ -10,8 +10,8 @@ architectures:
     * Latest ROCM
 """
 
+import os
 from typing import Dict, List, Optional, Tuple
-
 
 CUDA_ARCHES = ["11.8", "12.1"]
 
@@ -95,7 +95,7 @@ def arch_type(arch_version: str) -> str:
 
 
 # This can be updated to the release version when cutting release branch, i.e. 2.1
-DEFAULT_TAG = "main"
+DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
