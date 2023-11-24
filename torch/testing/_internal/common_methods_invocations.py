@@ -3911,6 +3911,18 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
+    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+
+    # error inputs for different dtypes of input tensor and bias
+    yield ErrorInput(
+        SampleInput(make_int_arg((2, 4, 4)), args=(make_int_arg((3, 2, 3, 3)), make_arg((3,)))),
+        error_regex="should be the same")
+
+    # error inputs for different dtypes of input tensor and bias
+    yield ErrorInput(
+        SampleInput(make_arg((2, 4, 4)), args=(make_arg((3, 2, 3, 3)), make_complex_arg((3,)))),
+        error_regex="should be the same")
 
     # error inputs for negative strides
     yield ErrorInput(

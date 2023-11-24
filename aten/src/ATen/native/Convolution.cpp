@@ -981,6 +981,7 @@ static Tensor convolution_same(
     SymIntArrayRef stride, SymIntArrayRef dilation, c10::SymInt groups) {
 
   auto k = weight.dim();
+  TORCH_CHECK(k > 2, "weight should have at least three dimensions");
   TORCH_CHECK(groups > 0, "non-positive groups is not supported");
   auto dim = static_cast<size_t>(k - 2);
   auto weight_sizes = weight.sym_sizes();
