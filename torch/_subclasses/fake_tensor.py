@@ -1465,11 +1465,14 @@ class FakeTensorMode(TorchDispatchMode):
                 return t
 
         # To constant propagate through these functions:
-        # 1, If this is a lift, the input tensor is guaranteed to be a
+        # 1, If this is a lift due to a torch.tensor call,
+        #    the input tensor is guaranteed to be a
         #    constant, so we keep a copy of the original argument along so
-        #    we can query it if we're asked to item() it at some later point
+        #    we can query it if we're asked to item() it at some later point.
+        #    (Note that you can always call a lift fn manually, so we do
+        #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if func in self.lift_fns or (
+        if (func in self.lift_fns and not flat_arg_fake_tensors) or (
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
@@ -1509,11 +1512,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if func in self.lift_fns:
-            assert (
-                len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
-            ), f"{args} {kwargs}"
+            assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
-            return converter(self, args[0])
+            if type(args[0]) is torch.Tensor:
+                return converter(self, args[0])
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors

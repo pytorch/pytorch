@@ -4958,7 +4958,7 @@ Note:
 
     There are currently three supported implementations of scaled dot product attention:
 
-        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
         - `Memory-Efficient Attention`_
         - A PyTorch implementation defined in C++ matching the above formulation
 
@@ -5022,8 +5022,8 @@ Examples::
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
 
-.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
-    https://arxiv.org/abs/2205.14135
+.. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
+    https://arxiv.org/abs/2307.08691
 .. _Memory-Efficient Attention:
     https://github.com/facebookresearch/xformers
 
