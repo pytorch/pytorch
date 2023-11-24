@@ -146,6 +146,9 @@ API Reference
 .. autoclass:: torch.onnx.ONNXProgramSerializer
     :members:
 
+.. autoclass:: torch.onnx.ONNXRuntimeOptions
+    :members:
+
 .. autoclass:: torch.onnx.InvalidExportOptionsError
     :members:
 
