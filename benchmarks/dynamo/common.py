@@ -1855,7 +1855,6 @@ class BenchmarkRunner:
     def skip_models_due_to_control_flow(self):
         return set()
 
-    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
