@@ -28,6 +28,7 @@
 #include <ATen/ops/upsample_nearest2d_backward.h>
 #include <ATen/ops/upsample_nearest2d_backward_native.h>
 #include <ATen/ops/upsample_nearest2d_native.h>
+#include <ATen/ops/ResizeLinear.h>
 #endif
 namespace at::native {
 namespace mps {
@@ -69,7 +70,11 @@ static void upsample_out_template(const Tensor& input,
   } else if (resize_mode_str == "nearest-exact") {
     centerResults = true;
     nearestRoundingMode = MPSGraphResizeNearestRoundingModeRoundPreferCeil;
-  } else {
+  } 
+  else if (resize_mode_str == "linear"){
+    resizeMode = LinearResize;
+  }
+  else {
     AT_ERROR("Unsupported resize mode ", resize_mode_str);
   }
 
@@ -358,6 +363,39 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
   } else {
     grad_input.copy_(
         at::_upsample_nearest_exact2d_backward(grad_output.to("cpu"), output_size, input_size, scales_h, scales_w));
+  }
+}
+
+TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
+(const Tensor& input,
+IntArrayRef output_size,
+bool align_corners,
+c10::optional<double> scale,
+c10::optional<double> placeholder,
+const Tensor& output
+){
+  if(check_mps_compatibility("linear", scale)){
+    mps::upsample_out_template(input, output_size, c10::nullopt, scale, placeholder, output, align_corners, "linear")
+  }
+  else{
+    output.copy(at::upsample_linear1d(input.to("cpu"), output_size, align_corners, scale, placeholder));
+  }
+}
+
+TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
+(const Tensor& grad_output,
+IntArrayRef output_size,
+IntArrayRef input_size,
+bool align_corners,
+c10::optional<double> scale,
+c10::optional<double> placeholder,
+const Tensor& grad_input
+){
+  if(check_mps_compatibility("linear", scale)){
+    mps::upsample_out_template(grad_output, output_size, input_size, scale, placeholder, grad_input, align_corners, "linear")
+  }
+  else {
+    grad_input.copy(at::upsample_linear1d_backward(grad_output.to("cpu"), output_size, input_size, align_corners, scale, placeholder))
   }
 }
 
