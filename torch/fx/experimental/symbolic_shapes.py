@@ -138,6 +138,46 @@ def is_concrete_int(a: Union[int, SymInt]):
 
     return False
 
+def rel_canonical(expr: sympy.Expr):
+    # Canonicalise an inequality by transforming it into a lt / le
+    # inequality and moving all the non-constant terms to the rhs
+    # nb. Relational.canonical in sympy is broken
+    # https://github.com/sympy/sympy/issues/25924
+
+    if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
+        expr = sympy.logic.boolalg.to_cnf(expr)
+    return _rel_canonical_impl(expr)
+
+def _rel_canonical_impl(expr: sympy.Expr):
+    if isinstance(expr, (sympy.And, sympy.Or)):
+        return type(expr)(*map(rel_canonical, expr.args))
+
+    assert isinstance(expr, sympy.core.relational.Relational), (type(expr), expr)
+    # We don't canonicalise these yet, albeit we cou ld
+    if isinstance(expr, (sympy.Eq, sympy.Ne)):
+        return expr
+    opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
+    if isinstance(expr, tuple(opposite.keys())):
+        lhs = expr.rhs - expr.lhs
+        t = opposite[type(expr)]
+    else:
+        assert isinstance(expr, (sympy.Lt, sympy.Le))
+        lhs = expr.lhs - expr.rhs
+        t = type(expr)
+    rhs = 0
+    if isinstance(lhs, sympy.Add):
+        cts = []
+        variables = []
+        for term in lhs.args:
+            if term.is_number:
+                cts.append(term)
+            else:
+                variables.append(term)
+        lhs = sympy.Add(*variables)
+        rhs = -sympy.Add(*cts)
+    return t(lhs, rhs)
+
+
 def is_concrete_bool(a: Union[bool, SymBool]):
     r""" Utility to check if underlying object
     in SymBool is concrete value. Also returns
@@ -1091,6 +1131,7 @@ class DimConstraints:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
+
         if len(free_symbols) > 1:
             # multivariate: record and move on
             self._multivariate_inequalities.add(expr)
@@ -2975,6 +3016,9 @@ class ShapeEnv:
         if compute_hint:
             expr = expr.xreplace(self.var_to_val)
 
+        if isinstance(expr, (sympy.Rel, sympy.And, sympy.Or)):
+            expr = rel_canonical(expr)
+
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -2990,7 +3034,7 @@ class ShapeEnv:
                     else:
                         e = ra.expr
                     subst[e] = sympy.true
-                    subst[sympy.Not(e)] = sympy.false
+                    subst[rel_canonical(sympy.Not(e))] = sympy.false
                     # NB: this doesn't match relations if they're flipped; e.g.,
                     # if you have x < 5, we won't get 5 > x.  Holler if this is
                     # a problem
@@ -3554,6 +3598,9 @@ class ShapeEnv:
             self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
+            # canonicalise to remove equations that are trivially equal
+            if isinstance(expr, (sympy.Rel, sympy.And, sympy.Or)):
+                expr = rel_canonical(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
