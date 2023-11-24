@@ -1178,6 +1178,42 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfRocm
+    def test_qflatten(self):
+        r"""
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 64, 7, bias=True, stride=2, padding=3, dilation=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                return torch.flatten(
+                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                )
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["qreshape_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfRocm
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:

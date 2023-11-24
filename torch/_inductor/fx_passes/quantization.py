@@ -771,7 +771,7 @@ def _register_quantization_maxpool2d():
         )
 
 
-def _is_valid_quantized_cat_optimization_pattern():
+def _is_input_output_same_scale_zp(check_node):
     def fn(match):
         # Ensure all the inputs and output has same scale and zero point
         # Step 1: Check inputs/output zero point
@@ -790,7 +790,7 @@ def _is_valid_quantized_cat_optimization_pattern():
         scales = [
             (
                 mul_node.args[1]
-                if mul_node.args[0].target is aten.cat.default
+                if mul_node.args[0].target is check_node
                 else 1.0 / mul_node.args[1]
             )
             for mul_node in mul_nodes
@@ -809,7 +809,7 @@ def _register_quantized_cat_lowering(
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_quantized_cat_optimization_pattern(),
+        extra_check=_is_input_output_same_scale_zp(aten.cat.default),
     )
     def qcat(match: Match, inputs, dim, **kwargs):
         # inputs is with format: [[x1, x1_dq_dtype, x1_zp, x1_scale], ...]
@@ -846,11 +846,42 @@ def _register_quantization_cat():
     )
 
 
+def _register_quantized_reshape_lowering(
+    pattern,
+    computation_op,
+):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_input_output_same_scale_zp(aten.reshape.default),
+    )
+    def qreshape(match: Match, *args, **kwargs):
+        qx = kwargs["x"]
+        shape = kwargs["shape"]
+        counters["inductor"]["qreshape_matcher_count"] += 1
+        counters["inductor"]["qreshape_matcher_nodes"] += len(match.nodes)
+        return L[computation_op](qx, shape)
+
+    return qreshape
+
+
+def _register_quantization_reshape():
+    dequantize_reshape_pattern = CallFunction(
+        torch.ops.aten.reshape.default,
+        dequantize_per_tensor_activation_pattern,
+        KeywordArg("shape"),
+    )
+    _register_quantized_reshape_lowering(
+        generate_pattern_with_output_quant(dequantize_reshape_pattern),
+        aten.reshape,
+    )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
+    _register_quantization_reshape()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
