@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    skipIfTorchDynamo
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -284,6 +285,7 @@ class TestUnaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, tensors)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/114453")
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_large(self, device, dtype, op):
