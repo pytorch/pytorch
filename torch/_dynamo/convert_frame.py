@@ -697,9 +697,7 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:
             unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
-            breakpoint()
             guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
-            breakpoint()
             if guarded_code:
                 result = guarded_code
             else:

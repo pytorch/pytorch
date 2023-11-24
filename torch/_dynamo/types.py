@@ -92,7 +92,6 @@ class GuardedCode:
             else:
                 return None
         except Exception as e:
-            breakpoint()
             return None
 
 
