@@ -7,6 +7,7 @@ from . import config
 
 log = logging.getLogger(__name__)
 
+
 @dataclass
 class CacheSizeRelevantForFrame:
     """
@@ -25,9 +26,7 @@ class CacheSizeRelevantForFrame:
     num_cache_entries_in_bucket: int = 0
 
     def will_compilation_exceed(self, limit: int) -> bool:
-        return (
-            self.will_compilation_exceed_bucket(limit)
-        )
+        return self.will_compilation_exceed_bucket(limit)
 
     def will_compilation_exceed_bucket(self, limit: int) -> bool:
         return self.num_cache_entries_in_bucket >= limit

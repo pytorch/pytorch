@@ -66,7 +66,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "verify_correctness",  # will not affect model, will raise RuntimeError
             # (no silent change to compilation behaviour)
             "cache_size_limit",
-            "accumulated_cache_size_limit",
             "replay_record_enabled",
             "cprofile",  # only wraps _compile, not graph
             "repro_after",
@@ -316,9 +315,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         try:
             torch._dynamo.config._allowed_keys.add(key)
             torch._dynamo.config._ConfigTests___test_cache_size_limit_key = -1
-            with torch._dynamo.config.patch(
-                {"cache_size_limit": 1, "accumulated_cache_size_limit": 10}
-            ):
+            with torch._dynamo.config.patch({"cache_size_limit": 1}):
 
                 def g(x):
                     return x + 1
