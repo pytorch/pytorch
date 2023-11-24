@@ -3832,12 +3832,6 @@ class UserDefinedTritonKernel(ExternKernel):
 
         args = self.codegen_kwargs()
         if V.graph.cpp_wrapper:
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
-
-            if isinstance(kernel, Autotuner):
-                kernel = kernel.fn
-            assert isinstance(kernel, JITFunction), str(kernel)
             # in C++ wrapper, we don't pass constexpr args, as they don't
             # get added as parameters to the PTX code compiled from the
             # user-defined Triton kernel (only non-constexpr args do)
