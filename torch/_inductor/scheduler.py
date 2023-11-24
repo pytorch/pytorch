@@ -2194,6 +2194,11 @@ class Scheduler:
 
             self.available_buffer_names.update(node.get_names())
 
+            if not isinstance(node, NopKernelSchedulerNode):
+                device = node.get_device()
+                if self.get_backend(device).ready_to_flush():
+                    self.flush()
+
         self.flush()
 
     def is_unaligned_buffer(self, buf_name):
@@ -2249,6 +2254,13 @@ class BaseScheduling:
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
         raise NotImplementedError()
+
+    def ready_to_flush(self) -> bool:
+        """
+        Check whether the backend is requesting the scheduler to flush the generated kernel.
+        If not supported, please return False.
+        """
+        return False
 
     def flush(self):
         """
