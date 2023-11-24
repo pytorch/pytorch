@@ -44,7 +44,7 @@ GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
-_foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
+_foreach_supported_types = set([torch.Tensor, torch.nn.parameter.Parameter])
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
