@@ -2859,6 +2859,9 @@ class TritonScheduling(BaseScheduling):
     def flush(self):
         pass
 
+    def ready_to_flush(self) -> bool:
+        return False
+
     def benchmark_fused_nodes(self, nodes):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
