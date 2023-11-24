@@ -263,7 +263,7 @@ def _parse_legacy_records(thread_records):
                 if not is_async and start.has_cuda():
                     duration = start.cuda_elapsed_us(record)
                     if duration > 0:
-                        fe.append_kernel(start.name(), start.device(), duration)
+                        fe.append_kernel(start.name(), f"cuda:{start.device()}", duration)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
