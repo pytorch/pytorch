@@ -313,10 +313,13 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
+        memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
+        if memoized_only:
+            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -381,6 +384,7 @@ class FakeTensorConverter:
         shape_env=None,
         source=None,
         symbolic_context=None,
+        memoized_only=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -388,7 +392,8 @@ class FakeTensorConverter:
             make_constant,
             shape_env=shape_env,
             source=source,
-            symbolic_context=policy,
+            symbolic_context=symbolic_context,
+            memoized_only=memoized_only,
         )
 
 
@@ -1848,11 +1853,17 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         tensor,
         *,
+        static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
+        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
+        # seen before.
+        memoized_only=False,
     ):
         shape_env = self.shape_env
-        if self.static_shapes:
+        if static_shapes is None:
+            static_shapes = self.static_shapes
+        if static_shapes:
             assert (
                 symbolic_context is None
             ), "cannot set both static_shapes and symbolic_context"
@@ -1863,6 +1874,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
+            memoized_only=memoized_only,
         )
 
 
@@ -1939,7 +1951,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C.TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args
@@ -1947,7 +1961,7 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            out = self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor, static_shapes=True)
             memo[id(tensor)] = out
             return out
         else:

@@ -101,7 +101,7 @@ class _ExportPassBase(PassBase):
                         # for param/buffer values
                         if isinstance(x, torch.nn.Parameter):
                             fake_tensor = self.fake_tensor_mode.from_tensor(
-                                x
+                                x, static_shapes=True
                             )
                         else:
                             fake_tensor = self.fake_tensor_mode.from_tensor(x)
