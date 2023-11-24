@@ -275,6 +275,7 @@ class TestUnaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, tensors)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/114453")
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_small(self, device, dtype, op):
