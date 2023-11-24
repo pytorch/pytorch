@@ -629,7 +629,7 @@ def _export(
                 assert dynamo_fake_mode is not None, (
                     "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
                 )
-                node.meta["val"] = dynamo_fake_mode.from_tensor(attr, static_shapes=True)
+                node.meta["val"] = dynamo_fake_mode.from_tensor(attr)
 
     # When aot_export lifts the params, we lose the nn_module_stack
     # and source_fn from the param nodes as they are treated as fresh inputs
