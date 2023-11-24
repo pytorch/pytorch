@@ -1,7 +1,7 @@
 import collections
 import logging
 import operator
-from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, DefaultDict, Deque, Iterator, List, Optional, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
@@ -40,49 +40,12 @@ MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
 SEARCH_EXCLUSIONS = {operator.getitem}
 
 
-default_graph_search_options = {
-    "min_fuse_set_size": MIN_FUSE_SET_SIZE,
-    "max_fuse_set_size": MAX_FUSE_SET_SIZE,
-    "max_fuse_search_depth": MAX_FUSE_SEARCH_DEPTH,
-    "max_fuse_tensor_size_group_linear": MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR,
-}
-
-graph_search_options = default_graph_search_options
-
-
 class GroupBatchFusionBase:
-    def __init__(self, **kwargs):
-        self.graph_search_options = kwargs.pop(
-            "graph_search_options", default_graph_search_options
-        )
-
     def match(self, node):
         raise NotImplementedError("match called on base")
 
     def fuse(self, graph, subset):
         raise NotImplementedError("fuse called on base")
-
-
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
-
-
-def register_fusion(name: str, pre_grad=True):
-    def decorator(fusion_cls: GroupBatchFusionBase):
-        if pre_grad:
-            PRE_GRAD_FUSIONS[name] = fusion_cls
-        else:
-            POST_GRAD_FUSIONS[name] = fusion_cls
-        return fusion_cls
-
-    return decorator
-
-
-def list_group_batch_fusions(pre_grad=True) -> List[str]:
-    if pre_grad:
-        return list(PRE_GRAD_FUSIONS.keys())
-    else:
-        return list(POST_GRAD_FUSIONS.keys())
 
 
 class GroupFusion(GroupBatchFusionBase):
@@ -101,7 +64,6 @@ class BatchFusion(GroupBatchFusionBase):
     pass
 
 
-@register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
         input_shape = node.args[1].meta["tensor_meta"].shape
@@ -113,7 +75,7 @@ class GroupLinearFusion(GroupFusion):
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
             and all(
-                shape <= self.graph_search_options["max_fuse_tensor_size_group_linear"]
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
                 for shape in input_shape + weight_shape
             )
         )
@@ -126,7 +88,7 @@ class GroupLinearFusion(GroupFusion):
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
             and all(
-                shape <= self.graph_search_options["max_fuse_tensor_size_group_linear"]
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
                 for shape in input_shape + weight_shape
             )
         )
@@ -181,7 +143,6 @@ class GroupLinearFusion(GroupFusion):
             graph.erase_node(original_mm)
 
 
-@register_fusion("batch_linear_lhs")
 class BatchLinearLHSFusion(BatchFusion):
     """
     Batch linear left-hand side fusion. This pass tries to fuse the following patterns:
@@ -277,7 +238,6 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
     )
 
 
-@register_fusion("batch_linear")
 class BatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
@@ -356,7 +316,6 @@ class BatchLinearFusion(BatchFusion):
                 graph.erase_node(linear)
 
 
-@register_fusion("batch_tanh")
 class BatchTanhFusion(BatchFusion):
     """
     Batch tanh fusion in pre grad pass.
@@ -416,7 +375,6 @@ class BatchTanhFusion(BatchFusion):
                 graph.erase_node(node)
 
 
-@register_fusion("batch_layernorm")
 class BatchLayernormFusion(BatchFusion):
     """
     Batch layer norm fusion in pre grad pass
@@ -528,7 +486,6 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
-@register_fusion("batch_relu")
 class BatchReLUFusion(BatchFusion):
     """
     Batch relu fusion in pre grad pass.
@@ -593,7 +550,6 @@ class BatchReLUFusion(BatchFusion):
 
 def find_independent_subset_greedy(
     node_list: List[torch.fx.Node],
-    graph_search_options: Dict[str, Any],
 ) -> Iterator[List[torch.fx.Node]]:
     """
     Return a list of subset from node_list, all nodes in each subset are independent with each other and can be fused together.
@@ -616,7 +572,7 @@ def find_independent_subset_greedy(
         subset_deps: Set[torch.fx.Node] = set()
 
         for node in node_list:
-            if len(subset) >= graph_search_options["max_fuse_set_size"]:
+            if len(subset) >= MAX_FUSE_SET_SIZE:
                 break
 
             visited_node_set.clear()
@@ -627,7 +583,7 @@ def find_independent_subset_greedy(
                 subset.append(node)
                 subset_deps.update(dep_set)
 
-        if len(subset) >= graph_search_options["min_fuse_set_size"]:
+        if len(subset) >= MIN_FUSE_SET_SIZE:
             yield subset
 
         next_round_node_list = [node for node in node_list if node not in subset]
@@ -639,7 +595,7 @@ def get_fusion_candidates(
 ) -> DefaultDict[Any, List[torch.fx.Node]]:
     """
     Search fusion candidates for a specific rule using BFS starting from the root node.
-    We only search the subgraph within graph_search_options["max_fuse_search_depth"].
+    We only search the subgraph within MAX_FUSE_SEARCH_DEPTH.
     """
     q: Deque[Tuple[int, torch.fx.Node]] = collections.deque()
 
@@ -668,7 +624,7 @@ def get_fusion_candidates(
             if node not in candidate_nodes:
                 candidate_nodes.append(node)
         else:
-            if depth < rule.graph_search_options["max_fuse_search_depth"]:
+            if depth < MAX_FUSE_SEARCH_DEPTH:
                 for next_node in node.all_input_nodes:
                     if next_node not in visited_set:
                         visited_set.add(next_node)
@@ -688,9 +644,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             if len(candidate_nodes) < MIN_FUSE_SET_SIZE:
                 continue
 
-            for subset in find_independent_subset_greedy(
-                candidate_nodes, rule.graph_search_options
-            ):
+            for subset in find_independent_subset_greedy(candidate_nodes):
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
                 if isinstance(rule, GroupFusion):
@@ -708,29 +662,29 @@ def print_graph(graph: torch.fx.Graph, msg: str):
         log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
 
 
-def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
-    fusions: List[GroupBatchFusionBase] = []
-    for name, options in config_options.items():
-        fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
-        _options = graph_search_options.copy()
-        _options.update(options)
-        fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
-    return fusions
-
-
-def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
+def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
     print_graph(graph, "Before group_batch fusion in post grads pass.")
     fusions: List[GroupBatchFusionBase] = []
 
-    if pre_grad:
-        fusions = generate_fusion_from_config(
-            config.pre_grad_fusion_options, pre_grad=True
-        )
-    elif has_fbgemm:  # Only group fusion (which needs fbgemm) in post grad.
-        fusions = generate_fusion_from_config(
-            config.post_grad_fusion_options, pre_grad=False
-        )
+    if config.group_fusion and has_fbgemm:
+        fusions += [GroupLinearFusion()]
 
+    for rule in fusions:
+        apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
+
+
+def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in pre grads pass.")
+    fusions: List[GroupBatchFusionBase] = []
+    if config.batch_fusion:
+        fusions += [
+            BatchLinearFusion(),
+            BatchLinearLHSFusion(),
+            BatchLayernormFusion(),
+            BatchTanhFusion(),
+            BatchReLUFusion(),
+        ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
         print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
