@@ -1693,6 +1693,34 @@ def forward(self, arg0_1):
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
 
+    def test_export_then_compile_tensor_ctor(self):
+        class M(torch.nn.Module):
+            def __init__(self,):
+                super().__init__()
+
+            def forward(self, scores, mask):
+                scores = scores.masked_fill(
+                    mask, torch.tensor(torch.finfo(scores.dtype).min)
+                )  # (bs, n_heads, q_length, k_length)
+                return scores
+
+        tensor_cpu = torch.randn(2, 4)
+        mask_cpu = torch.BoolTensor(
+            [[False,  True, False, False],
+            [False, False, False, False]]
+        )
+
+        m = M().eval()
+        # res_ref = m(tensor_cpu, mask_cpu)
+        # print("res_ref is: {}".format(res_ref), flush=True)
+
+        exported_model = capture_pre_autograd_graph(
+            m,
+            (tensor_cpu, mask_cpu),
+        )
+        optimized_model = torch.compile(exported_model)
+        optimized_model(tensor_cpu, mask_cpu)
+
 
 if __name__ == '__main__':
     run_tests()
