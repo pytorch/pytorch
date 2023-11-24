@@ -989,7 +989,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama  # type: ignore[import]
+        import colorama
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -1179,9 +1179,9 @@ class Placeholder(enum.Enum):
 def aot_inductor_launcher(so_path: str, device: str):
     if device == "cuda":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
+            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
 
-            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
+            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
 
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
@@ -1193,9 +1193,9 @@ def aot_inductor_launcher(so_path: str, device: str):
         """
     elif device == "cpu":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_runner.h>
+            #include <torch/csrc/inductor/aoti_model_container_runner.h>
 
-            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
+            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
 
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);

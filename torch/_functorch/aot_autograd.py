@@ -11,7 +11,7 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
 
-from functorch import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -564,7 +564,7 @@ class ViewAndMutationMeta:
     num_intermediate_bases: int
 
     # For inference only: instructs us to keep data-only input mutations directly in the graph
-    keep_input_mutations: int
+    keep_input_mutations: bool
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -615,10 +615,6 @@ class ViewAndMutationMeta:
     grad_enabled_mutation: Optional[bool] = None
 
     def __post_init__(self):
-        mutated_inp_indices = [
-            i for i, m in enumerate(self.input_info)
-            if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-        ]
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
@@ -632,7 +628,10 @@ class ViewAndMutationMeta:
                 if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
             ]
         else:
-            mutated_inp_runtime_indices = mutated_inp_indices
+            mutated_inp_runtime_indices = [
+                i for i, m in enumerate(self.input_info)
+                if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+            ]
 
         mutated_graph_handled_indices = [
             i for i, m in enumerate(self.input_info)
@@ -650,17 +649,11 @@ class ViewAndMutationMeta:
             i for i, m in enumerate(self.output_info) if m.output_type is OutputType.unsafe_view_alias
         ]
 
-        self.mutated_inp_indices = mutated_inp_indices
         # This is pre-computed in post_init for perf.
         # It contains the index of every element
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
-
-        assert (
-            self.num_mutated_graph_handled_indices + self.num_mutated_inp_runtime_indices ==
-            len(mutated_inp_indices)
-        )
 
         # This is pre-computed for perf.
         # It contains the index of every element
@@ -697,25 +690,7 @@ class ViewAndMutationMeta:
         self.num_outputs_aliased = (
             self.num_outputs_aliased_to_inputs + self.num_outputs_aliased_to_intermediates
         )
-        self.num_mutated_data_inputs = len(
-            [x for x in self.input_info if x.mutates_data]
-        )
 
-        self.num_mutated_metadata_inputs = len(
-            [
-                x
-                for x in self.input_info
-                if x.mutates_metadata
-            ]
-        )
-        self.num_mutated_metadata_only_inputs = len(
-            [
-                x
-                for x in self.input_info
-                if not x.mutates_data and x.mutates_metadata
-            ]
-        )
-        self.num_mutated_inputs = self.num_mutated_data_inputs + self.num_mutated_metadata_only_inputs
         self.dynamic_outputs = any(
             o.dynamic_dims for o in self.output_info
         )
@@ -1156,7 +1131,13 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 requires_grad=requires_grad,
-                mutation_type=_get_mutation_type(keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
+                mutation_type=_get_mutation_type(
+                    keep_input_mutations,
+                    mutates_data,
+                    mutates_metadata,
+                    mutations_hidden_from_autograd,
+                    requires_grad
+                )
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
@@ -1426,6 +1407,7 @@ from a multi-output view call")
                 keep_input_mutations,
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
+                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -1605,9 +1587,9 @@ class GraphSignature:
                 buffer_name = state_names[idx]
                 mutated_buffers.append(buffer_name)
 
-        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inputs
+        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inp_runtime_indices
 
-        start, stop = 0, view_mutation_metadata.num_mutated_inputs
+        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
         buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
 
         start, stop = stop, stop + num_user_outputs
@@ -2295,17 +2277,35 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
+def _check_if_mutation_can_be_in_graph(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    requires_grad
+):
     if keep_input_mutations:
-        return mutates_data and not mutates_metadata and not requires_grad
+        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
     return False
 
 
-def _get_mutation_type(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
+def _get_mutation_type(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    requires_grad
+):
     if (not mutates_data) and (not mutates_metadata):
         return MutationType.NOT_MUTATED
 
-    if _check_if_mutation_can_be_in_graph(keep_input_mutations, mutates_data, mutates_metadata, requires_grad):
+    if _check_if_mutation_can_be_in_graph(
+        keep_input_mutations,
+        mutates_data,
+        mutates_metadata,
+        mutations_hidden_from_autograd,
+        requires_grad
+    ):
         return MutationType.MUTATED_IN_GRAPH
 
     return MutationType.MUTATED_OUT_GRAPH
@@ -2619,6 +2619,14 @@ def create_synthetic_base_metadata(
         mutates_data = True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
+        mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
+        mutation_type = _get_mutation_type(
+            m.keep_input_mutations,
+            mutates_data,
+            mutates_metadata,
+            mutations_hidden_from_autograd,
+            requires_grad
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -2627,10 +2635,10 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
-            mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
+            mutations_hidden_from_autograd=mutations_hidden_from_autograd,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=_get_mutation_type(m.keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
+            mutation_type=mutation_type,
         )
         input_infos.append(inpt_info)
 
@@ -3147,9 +3155,7 @@ def create_runtime_wrapper(
                     disable_amp=disable_amp,
                 )
 
-        num_mutated_inps = runtime_metadata.num_mutated_inputs
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
-        num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
         if keep_input_mutations and trace_joint:
@@ -3485,7 +3491,7 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
 
     # output infos
     output_info = []
-    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[meta.num_mutated_data_inputs:]
+    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[meta.num_mutated_inp_runtime_indices:]
     if meta.num_intermediate_bases > 0:
         subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[:-meta.num_intermediate_bases]
     # sanity assert
@@ -3941,11 +3947,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
-            num_mutated_inputs = CompiledFunction.metadata.num_mutated_inputs
             num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
-            num_mutated_metadata_only_inputs = (
-                CompiledFunction.metadata.num_mutated_metadata_only_inputs
-            )
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
 
@@ -3969,9 +3971,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
-            if num_mutated_metadata_only_inputs > 0:
+            if num_mutated_runtime_inps > 0:
                 for i, idx in enumerate(
-                    CompiledFunction.metadata.mutated_inp_indices
+                    CompiledFunction.metadata.mutated_inp_runtime_indices
                 ):
                     # We could make this faster by only looping over inputs with metadata-only mutations
                     # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
@@ -3980,7 +3982,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         raw_returns[i] = TensorAlias(raw_returns[i])
 
                 if config.debug_assert:
-                    user_mutated_inputs_raw = raw_returns[0:num_mutated_inputs]
+                    user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
                     mut_inp_infos = [
                         x for x in CompiledFunction.metadata.input_info if x.mutates_data or x.mutates_metadata
                     ]
@@ -4038,7 +4040,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # - updated inputs due to metadata-only mutations.
             # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
-            num_mutated_inps = CompiledFunction.metadata.num_mutated_inputs
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = CompiledFunction.metadata.num_mutated_graph_handled_indices
             num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
@@ -4051,12 +4052,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             assert len(flat_args) == expected_grad_outs
             out_info = CompiledFunction.metadata.output_info
 
-            num_mutated_inps_returned = CompiledFunction.metadata.num_mutated_inp_runtime_indices
-
             inp_tangents, out_tangents, intermediate_base_tangents = (
-                flat_args[0:num_mutated_inps_returned],
-                flat_args[num_mutated_inps_returned:num_mutated_inps_returned + CompiledFunction.metadata.num_outputs],
-                flat_args[num_mutated_inps_returned + CompiledFunction.metadata.num_outputs:],
+                flat_args[0:num_mutated_runtime_inps],
+                flat_args[num_mutated_runtime_inps:num_mutated_runtime_inps + CompiledFunction.metadata.num_outputs],
+                flat_args[num_mutated_runtime_inps + CompiledFunction.metadata.num_outputs:],
             )
             # input_info contains info on *every* input,
             # But in the backward(), we are only given grad outputs for every mutated input
@@ -4467,7 +4466,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         if aot_config.is_export:
             mutated_user_inp_locs = [
                 idx - aot_config.num_params_buffers
-                for idx in fw_metadata.mutated_inp_indices
+                for idx in fw_metadata.mutated_inp_runtime_indices
                 if idx >= aot_config.num_params_buffers
             ]
             if len(mutated_user_inp_locs) > 0:
@@ -4617,7 +4616,7 @@ def create_graph_signature(
 
     if trace_joint:
         assert num_user_fw_outs is not None
-        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inputs
+        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
         backward_output_names = graph_output_names[num_fw_outs:]
 
         grad_index = itertools.count(0)
@@ -4645,7 +4644,7 @@ def create_graph_signature(
         )
     else:
         backward_signature = None
-        num_user_fw_outs = len(graph_output_names) - fw_metadata.num_mutated_inputs
+        num_user_fw_outs = len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
 
     return GraphSignature.from_tracing_metadata(
         in_spec=in_spec,
@@ -5084,7 +5083,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             #     and there are therefore no tangents that are needed to run the joint graph.
             # This function "fixes" both of the above by removing any tangent inputs,
             # and removing pytrees from the original FX graph.
-            fake_tangents = [None for _ in range(metadata.num_outputs + metadata.num_mutated_inputs)]
+            fake_tangents = [None for _ in range(metadata.num_outputs + metadata.num_mutated_inp_runtime_indices)]
             fw_outs, gradients = fx_g(args, fake_tangents)
             assert len(gradients) == len(args)
             output_gradients = []

@@ -15,7 +15,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     UnsupportedOperatorException,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, FreshCreateSymbolicPolicy
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
@@ -539,7 +539,13 @@ class FakeTensorTest(TestCase):
     def test_same_shape_env_preserved(self):
         shape_env = ShapeEnv()
         mode1 = FakeTensorMode(shape_env=shape_env)
-        t1 = mode1.from_tensor(torch.randn(10), dynamic_dims=[DimDynamic.DYNAMIC])
+        t1 = mode1.from_tensor(
+            torch.randn(10),
+            policy=FreshCreateSymbolicPolicy(
+                dynamic_sizes=[DimDynamic.DYNAMIC],
+                constraint_sizes=[None]
+            )
+        )
         mode2 = FakeTensorMode(shape_env=shape_env)
         t2 = mode2.from_tensor(t1)
         # t2.size(0) is still dynamic, even though we didn't pass DYNAMIC here

@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
 
@@ -102,6 +102,7 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.upsample_nearest2d,
+        aten._upsample_nearest_exact2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
     ]
@@ -810,6 +811,8 @@ def repeat(x, repeats):
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
+
+    x_loader: Callable[[Any], Any]
 
     def inner_fn(index):
         assert len(index) == len(repeats)
@@ -2333,7 +2336,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(end - start + (step - 1), step)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -2877,7 +2880,9 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index.Tensor)(x, indices)
+        return fallback_handler(aten.index.Tensor, add_to_fallback_set=False)(
+            x, indices
+        )
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -2912,10 +2917,18 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    if is_triton(values) and (
-        accumulate is True or torch.are_deterministic_algorithms_enabled()
-    ):
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    if is_triton(values) and (accumulate or deterministic):
         V.graph.disable_cudagraphs = True
+        msg = (
+            "index put with accumulate."
+            if not deterministic
+            else "deterministic index put."
+        )
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -3246,7 +3259,11 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
 
 def upsample_nearestnd(
-    x, output_size, scales_x: Tuple[Optional[float], ...], n: int = 2
+    x,
+    output_size,
+    scales_x: Tuple[Optional[float], ...],
+    n: int = 2,
+    exact: bool = False,
 ):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
@@ -3258,12 +3275,17 @@ def upsample_nearestnd(
     o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
-    for i, scale in enumerate(scales):
+    for i, scale in enumerate(scales_x):
         if scale:
             scales[i] = scale
 
     def scale_fn(x, scale, size):
+        # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
+        #                            = floor(scale * (output_index + 0.5))
+        # Nearest: input_index = floor(scale * output_index)
         x = ops.index_expr(x, torch.float32)
+        if exact:
+            x = ops.add(x, ops.constant(0.5, torch.float32))
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
         return ops.indirect_indexing(x, size, check=False)
@@ -3288,11 +3310,23 @@ def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
     return upsample_nearestnd(x, output_size, (scales,), n=1)
 
 
+@register_lowering(aten._upsample_nearest_exact1d.default)
+def _upsample_nearest_exact1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1, exact=True)
+
+
 @register_lowering(aten.upsample_nearest2d.default)
 def upsample_nearest2d(
     x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
 ):
     return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten._upsample_nearest_exact2d.default)
+def _upsample_nearest_exact2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2, exact=True)
 
 
 @register_lowering(aten.upsample_nearest3d.default)
@@ -3304,6 +3338,19 @@ def upsample_nearest3d(
     scales_w: Optional[float] = None,
 ):
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
+
+
+@register_lowering(aten._upsample_nearest_exact3d.default)
+def _upsample_nearest_exact3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(
+        x, output_size, (scales_d, scales_h, scales_w), n=3, exact=True
+    )
 
 
 def _create_constants(*args, dtype):
@@ -3568,7 +3615,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
-    bounds_precomp = []
+    bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
@@ -3683,7 +3730,8 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
 
 fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default
+    aten.max_pool2d_with_indices.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3769,7 +3817,8 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward.default
+    aten.max_pool2d_with_indices_backward.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3990,7 +4039,9 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
+fallback_adaptive_avg_pool2d = fallback_handler(
+    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -4112,7 +4163,9 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4209,7 +4262,9 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
+fallback_avg_pool2d_backward = fallback_handler(
+    aten.avg_pool2d_backward.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4612,9 +4667,13 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
-fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
-fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
+fallback_pow_tensor_tensor = fallback_handler(
+    aten.pow.Tensor_Tensor, add_to_fallback_set=False
+)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar, add_to_fallback_set=False)
+fallback_pow_tensor_scalar = fallback_handler(
+    aten.pow.Tensor_Scalar, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.pow, broadcast=True)
