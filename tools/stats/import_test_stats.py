@@ -66,7 +66,7 @@ def fetch_and_cache(
 def get_slow_tests(
     dirpath: str, filename: str = SLOW_TESTS_FILE
 ) -> Optional[Dict[str, float]]:
-    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
+    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json?versionId=iWAOsEqlVH1mfs7w5A3KlyTalvubE4Ru"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
