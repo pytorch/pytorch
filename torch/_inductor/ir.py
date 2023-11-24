@@ -2088,11 +2088,12 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(start, end)
-        if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
-            sizevars.guard_equals(end, new_size[dim])
-            return x
+        if free_unbacked_symbols(start) or free_unbacked_symbols(end):
+            end = sympy.Min(end, new_size[dim])
+            start = sympy.Min(start, end)
+        else:
+            end = sizevars.evaluate_min(end, new_size[dim])
+            start = sizevars.evaluate_min(start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -3830,13 +3831,20 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel, configs, self.kwargs
         )
 
+        args = self.codegen_kwargs()
+        if V.graph.cpp_wrapper:
+            # in C++ wrapper, we don't pass constexpr args, as they don't
+            # get added as parameters to the PTX code compiled from the
+            # user-defined Triton kernel (only non-constexpr args do)
+            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
             configs,
-            self.codegen_kwargs(),
+            args,
         )
 
     def should_allocate(self):
@@ -4175,16 +4183,34 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
+    # TODO: handle bools carefully
     def __init__(self, sym, data):
         super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
-        self.sym = sym
+        if isinstance(sym, sympy.Symbol):
+            self.sym = sym
+            self.is_bool = False
+        else:
+            # Special case for boolean.  For Reasons(TM), we don't represent
+            # boolean variables directly in sympy; instead, we generate an
+            # indicator integer variable which we then convert to a boolean by
+            # testing i0 == 1.  We have to identify the underlying indicator
+            # variable, and then bind i0 to the appropriate integer value
+            # based on the runtime boolean.
+            assert isinstance(sym, sympy.Eq), sym
+            assert isinstance(sym.args[0], sympy.Symbol), sym
+            assert sym.args[1] == 1, sym
+            self.sym = sym.args[0]
+            self.is_bool = True
 
     def get_unbacked_symbol_defs(self):
         return {self.sym}
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.sym} = {data}.item()")
+        if self.is_bool:
+            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
+        else:
+            wrapper.writeline(f"{self.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
@@ -5137,7 +5163,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args=constant_args,
         )
         mark_node_as_mutating(packed, inputs[1])
-        return packed
+        # This op mutates in place which means that the result is not the
+        # target but rather the input that is being mutated
+        # init reorders the inputs, so inputs[1] becomes packed.inputs[0]
+        return packed.inputs[0]
 
 
 class MKLPackedLinear(ExternKernelAlloc):

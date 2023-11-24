@@ -675,6 +675,7 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
+            self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -704,14 +705,14 @@ class VariableBuilder:
             )
         elif (
             istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
+            and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
+                skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
@@ -1136,6 +1137,7 @@ class VariableBuilder:
             ):
                 wrapped_value = shape_env.create_unbacked_symint()
                 _constrain_range_for_size(wrapped_value)
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
                 )
@@ -1194,6 +1196,7 @@ class VariableBuilder:
                     source=self.source,
                     dynamic_dim=dynamic_dim,
                 )
+                self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
