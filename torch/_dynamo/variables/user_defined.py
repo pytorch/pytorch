@@ -363,7 +363,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             if self.source:
                 install_guard(
-                    AttrSource(self.source, "func").make_guard(GuardBuilder.CLOSURE_MATCH),
+                    AttrSource(self.source, "func").make_guard(
+                        GuardBuilder.CLOSURE_MATCH
+                    ),
                     AttrSource(self.source, "args").make_guard(
                         GuardBuilder.CONSTANT_MATCH
                     ),

@@ -591,7 +591,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
     global_alias_table = {}
-    _to_serialize = {}
 
     def mark_inconsistent_side_effects(self):
         """
@@ -2119,9 +2118,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.one_graph
             and self.generic_context_manager_depth == 0
         )
-
-    def register_for_serialization(name, value):
-        self._to_serialize[name] = value
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None

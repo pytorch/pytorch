@@ -327,6 +327,7 @@ class _TorchDynamoContext:
 
     def __call__(self, fn):
         print("CALL ENTER - ", fn)
+
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config
@@ -634,7 +635,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-    remote=False
+    remote=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call

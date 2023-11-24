@@ -349,6 +349,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
 
+        self.to_serialize = {}
+
     # This gets its own helper function so guards DEBUG logs are more
     # informative
     def init_ambient_guards(self):
@@ -1025,15 +1027,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
-        # breakpoint()
-        self.install_global(name, compiled_fn)
-        import pickle
-        with open("hack_comp.pkl", 'wb') as file:
-            pickle.dump((name, compiled_fn), file)
 
-        with open("hack_remap.pkl", 'wb') as file:
-            breakpoint()
-            pickle.dump(tx.global_alias_table, file)
+        self.install_global(name, compiled_fn)
+
+        self.to_serialize["compiled_fn_name"] = name
+        self.to_serialize["compiled_fn"] = compiled_fn
+        self.to_serialize["global_alias_table"] = tx.global_alias_table
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

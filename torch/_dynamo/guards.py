@@ -57,6 +57,7 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
+    check_module_str,
     dict_keys_getitem,
     dict_keys_repr,
     guard_failures,
@@ -67,7 +68,6 @@ from .utils import (
     tensor_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    check_module_str,
 )
 
 log = logging.getLogger(__name__)
@@ -95,6 +95,7 @@ def uninteresting_files():
 def _check_type(a, b):
     breakpoint()
     return str(type(a)) == str(type(b))
+
 
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
@@ -283,7 +284,7 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t)
         if config.generate_interpreter_agnostic_code:
             obj_name = str(t)
-            code = f"str(type({self.arg_ref(guard)})) == \"{obj_name}\""
+            code = f'str(type({self.arg_ref(guard)})) == "{obj_name}"'
         else:
             code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
@@ -420,7 +421,7 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, float) and math.isnan(val):
             code = list()
             if config.generate_interpreter_agnostic_code:
-                code.append(f"str(type({ref})) == \"{str(t)}\"")
+                code.append(f'str(type({ref})) == "{str(t)}"')
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
@@ -437,15 +438,15 @@ class GuardBuilder(GuardBuilderBase):
 
             for idx, elem in enumerate(val):
                 if config.generate_interpreter_agnostic_code:
-                    code.append(f"str(type({ref}[{idx}])) == \"{str(type(elem))})\"")
+                    code.append(f'str(type({ref}[{idx}])) == "{str(type(elem))})"')
                 else:
                     code.append(
-                    f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
-                )
+                        f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
+                    )
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
             if config.generate_interpreter_agnostic_code:
-                code.append(f"str(type({ref})) == \"{str(t)}\"")
+                code.append(f'str(type({ref})) == "{str(t)}"')
             else:
                 code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
@@ -460,7 +461,10 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))) and not config.generate_interpreter_agnostic_code:
+        if (
+            istype(val, (bool, type(None)))
+            and not config.generate_interpreter_agnostic_code
+        ):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -471,7 +475,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         if config.generate_interpreter_agnostic_code:
             self.TYPE_MATCH(guard)
-            code.append(f"__check_module_str(\"\"\"{str(val)}\"\"\", str({ref}))")
+            code.append(f'__check_module_str("""{str(val)}""", str({ref}))')
         else:
             self.ID_MATCH(guard)
 
@@ -523,7 +527,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(t)}\"")
+            code.append(f'str(type({ref})) == "{str(t)}"')
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"len({ref}) == {len(value)}")
@@ -537,7 +541,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(t)}\"")
+            code.append(f'str(type({ref})) == "{str(t)}"')
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
@@ -560,7 +564,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(t)}\"")
+            code.append(f'str(type({ref})) == "{str(t)}"')
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
@@ -585,7 +589,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(t)}\"")
+            code.append(f'str(type({ref})) == "{str(t)}"')
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
@@ -600,7 +604,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         if config.generate_interpreter_agnostic_code:
-            code.append(f"str(type({ref})) == \"{str(t)}\"")
+            code.append(f'str(type({ref})) == "{str(t)}"')
         else:
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
@@ -735,7 +739,10 @@ class GuardBuilder(GuardBuilderBase):
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
             code: List[str] = list()
-            if self.check_fn_manager.output_graph.export or config.generate_interpreter_agnostic_code:
+            if (
+                self.check_fn_manager.output_graph.export
+                or config.generate_interpreter_agnostic_code
+            ):
                 self.TYPE_MATCH(guard)
                 terms = [
                     "dtype",
@@ -1242,7 +1249,6 @@ class CheckFunctionManager:
             return self._weakrefs[id(obj)]
         return None
 
-
     @staticmethod
     def guard_fn_from_pycode(pycode, global_scope):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1266,7 +1272,6 @@ class CheckFunctionManager:
             **CLOSURE_VARS,
         }
 
-
         out: Dict[str, Any] = dict()
         global_scope = {
             "G": global_scope,
@@ -1281,6 +1286,7 @@ class CheckFunctionManager:
         guard_fn.pycode = pycode
         # guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
+
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer

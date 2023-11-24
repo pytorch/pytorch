@@ -8,7 +8,6 @@ import types
 import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
-import pickle
 
 try:
     import numpy as np
@@ -71,6 +70,7 @@ from .utils import (
     cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
+    frame_code_to_unique_frame_id,
     frame_phase_timing,
     gen_record_file_name,
     increment_frame,
@@ -81,9 +81,7 @@ from .utils import (
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
-    attrs_code_object,
     write_record_to_file,
-    frame_code_to_unique_frame_id,
 )
 
 log = logging.getLogger(__name__)
@@ -580,7 +578,15 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        serialize_table = output.to_serialize
+        guarded_code = GuardedCode(
+            code=out_code,
+            check_fn=check_fn.check_fn,
+            name=serialize_table["compiled_fn_name"],
+            compiled_fn=serialize_table["compiled_fn"],
+            global_alias_table=serialize_table["global_alias_table"],
+            frame=frame,
+        )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -665,45 +671,22 @@ def _compile(
             log_compilation_event(metrics)
 
 
+def _placeholder_remote_write(unique_frame_id, guarded_code):
+    file_path = f"{unique_frame_id}.pkl"
+    with open(file_path, "wb") as file:
+        guarded_code.serialize(file)
+
+    print("Wrote to!", file_path)
+
+
 def _placeholder_remote_fetch(unique_frame_id, frame):
     try:
         file_path = f"{unique_frame_id}.pkl"
-        with open(file_path, 'rb') as file:
-            serialized = file.read()
-
-        attributes, guard_code = pickle.loads(serialized)
+        with open(file_path, "rb") as file:
+            return GuardedCode.deserialize(file, frame)
+    except:
         breakpoint()
-        with open("hack_remap.pkl", 'rb') as file:
-            breakpoint()
-            global_alias_table_serialized = file.read()
-
-        breakpoint()
-        global_alias_table = pickle.loads(global_alias_table_serialized)
-        breakpoint()
-        for alias, name in global_alias_table.items():
-            breakpoint()
-            frame.f_globals[alias] = eval(name, frame.f_globals)
-
-        breakpoint()
-        check_fn = CheckFunctionManager.guard_fn_from_pycode(guard_code, frame.f_globals)
-        code_obj = types.CodeType(*attributes)
-        breakpoint()
-        if check_fn(frame.f_locals):
-            print("Guard passed")
-            return code_obj, check_fn
-        else:
-            print("Guard failed")
-            return None, None
-    except Exception as e:
-        breakpoint()
-        return None, None
-
-def _placeholder_remote_write(unique_frame_id, code_attrs, guard_code):
-    file_path = f"{unique_frame_id}.pkl"
-    code_and_guards = (code_attrs, guard_code)
-    # breakpoint()
-    with open(file_path, 'wb') as file:
-        pickle.dump(code_and_guards, file)
+        return None
 
 
 def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
@@ -713,30 +696,15 @@ def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
     def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            # breakpoint()
-            # Cache miss, check remote
             unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
             breakpoint()
-            remote_code, remote_guards = _placeholder_remote_fetch(unique_frame_id, frame)
+            guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
             breakpoint()
-            if remote_code and remote_guards:
-                # pickle.dumps((name, compiled_fn), "hack_comp.pkl")
-                breakpoint()
-                with open("hack_comp.pkl", 'rb') as file:
-                    serialized = file.read()
-
-                name, compiled_fn = pickle.loads(serialized)
-                # breakpoint()
-                frame.f_globals[name] = compiled_fn
-                result = GuardedCode(remote_code, remote_guards)
+            if guarded_code:
+                result = guarded_code
             else:
                 result = inner_convert(frame, cache_entry, hooks, frame_state)
-                breakpoint()
-                code_attrs = attrs_code_object(result.code)
-                # func_attrs = attrs_function(result.check_fn)
-                guard_py_code = result.check_fn.pycode
-                # breakpoint()
-                _placeholder_remote_write(unique_frame_id, code_attrs, guard_py_code)
+                _placeholder_remote_write(unique_frame_id, guarded_code=result)
 
             counters["frames"]["ok"] += 1
             return result
