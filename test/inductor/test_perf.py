@@ -824,7 +824,7 @@ class InplacingTests(TestCase):
 
 
 # Test cases where we don't do the right thing yet.
-# NOTE: These tests do not get run!
+# NOTE: These tests do not get run (and that's intentional)!
 class WouldBeNiceIfItWorked:
     def test_horizontal(self):
         def f(a):
