@@ -312,9 +312,7 @@ class CachingAutotuner(KernelInterface):
             for i, arg in enumerate(self.fn.arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = list(self.fn.arg_names)
-        while def_args and def_args[-1] in cfg.kwargs:
-            def_args.pop()
+        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
         scope = {
             "grid_meta": cfg.kwargs,
@@ -608,7 +606,7 @@ class DebugAutotuner(CachingAutotuner):
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
             return
         super().run(*args, grid=grid, stream=stream)
@@ -1078,7 +1076,7 @@ def reduction(
         contiguous_config = triton_config_reduction(
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8)
+        outer_config = triton_config_reduction(size_hints, 64, 8)
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
