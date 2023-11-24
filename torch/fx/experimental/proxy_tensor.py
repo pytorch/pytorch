@@ -307,7 +307,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
         # incorrectly burn in constants by allowing this access.  Raise
         # an error in this case
-        if pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
+        if proxy_mode._error_on_data_dependent_ops and pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
             raise RuntimeError(
                 f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
                 "It's likely that this is caused by data-dependent control flow or similar.  "
@@ -568,7 +568,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False):
+    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False, _error_on_data_dependent_ops=True):
         dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
         self.tracer = tracer
@@ -576,6 +576,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
         self._allow_fake_constant = _allow_fake_constant
+        self._error_on_data_dependent_ops = _error_on_data_dependent_ops
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
@@ -760,7 +761,8 @@ def make_fx(f,
             _allow_non_fake_inputs=False,
             *,
             pre_dispatch=False,
-            _allow_fake_constant=False):
+            _allow_fake_constant=False,
+            _error_on_data_dependent_ops=True):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -818,7 +820,8 @@ def make_fx(f,
         proxy_mode = ProxyTorchDispatchMode(fx_tracer,
                                             tracing_mode,
                                             pre_dispatch=pre_dispatch,
-                                            _allow_fake_constant=_allow_fake_constant)
+                                            _allow_fake_constant=_allow_fake_constant,
+                                            _error_on_data_dependent_ops=_error_on_data_dependent_ops)
 
         arg_count = 0
 
