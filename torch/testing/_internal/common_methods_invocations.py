@@ -3848,10 +3848,6 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 4, 5), (3, 4, 3), None, {}),
     )
 
-    # TODO: (@krshrimali), add error_inputs_func once https://github.com/pytorch/pytorch/pull/67354 is merged
-    # Should replace test_conv_modules_raise_error_on_incorrect_input_size and test_conv_shapecheck
-    # in test/test_nn.py
-
     for input_shape, weight, bias, kwargs in cases:
         # Batched
         yield SampleInput(make_arg(input_shape), args=(
@@ -3879,10 +3875,11 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
                     kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
 
     # error inputs for negative dilation
-    # yield ErrorInput(
-    #     SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 2)), make_arg((1,))),
-    #                 kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 2)), make_arg((1,))),
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
+    # FIXME: https://github.com/pytorch/pytorch/issues/85656
     # error inputs for bias shape not equal to the output channels
     # yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
     #                  error_regex="expected bias to be 1-dimensional with 1 elements")
@@ -3907,9 +3904,9 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
                     kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
     # error inputs for invalid groups
-    # yield ErrorInput(
-    #     SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
-    #                 kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
@@ -3926,10 +3923,11 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
                     kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
 
     # error inputs for negative dilation
-    # yield ErrorInput(
-    #     SampleInput(make_arg((1, 1, 4, 2)), args=(make_arg((1, 1, 2, 5)), make_arg((1,))),
-    #                 kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 2)), args=(make_arg((1, 1, 2, 5)), make_arg((1,))),
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
+    # FIXME: https://github.com/pytorch/pytorch/issues/85656
     # error inputs for bias shape not equal to the output channels
     # yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
     #                  error_regex="expected bias to be 1-dimensional with 1 elements")
@@ -3955,9 +3953,9 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
                     kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
     # error inputs for invalid groups
-    # yield ErrorInput(
-    #     SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 4, 3)), make_arg((2,))),
-    #                 kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 4, 3)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
@@ -4054,6 +4052,7 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
         SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
                     kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
+    # FIXME: https://github.com/pytorch/pytorch/issues/85656
     # error inputs for bias shape not equal to the output channels
     # yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
     #                  error_regex="expected bias to be 1-dimensional with 1 elements")
@@ -4076,10 +4075,10 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
         error_regex="expected weight to be at least 3 at dimension 0")
 
     # error inputs for invalid groups
-    # yield ErrorInput(
-    #     SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
-    #                 make_arg((2,))), kwargs={'padding': 'same', 'groups': 0}),
-    #     error_regex="non-positive groups is not supported")
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
+                    make_arg((2,))), kwargs={'padding': 'same', 'groups': 0}),
+        error_regex="non-positive groups is not supported")
 
     # error inputs for padding='same' not supported by strided convolutions
     yield ErrorInput(
