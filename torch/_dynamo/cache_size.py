@@ -6,62 +6,6 @@ from dataclasses import dataclass
 from . import config
 
 log = logging.getLogger(__name__)
-"""
-[Note on cache size limit]
-
-Background - TorchDynamo cache is a linked list. Each cache entry is a
-(check_fn, out_code, next pointer). These are stored on the f_code's co_extra
-scratch space. When a frame is invoked, we walk this linked list and run
-check_fn in each cache_entry to decide if the frame needs recompilation. If none
-of the check_fn's returns True, we recompile and add a new entry. To ensure we
-don't end up recompiling infinitely, we put limits on the cache size.
-
-There are two limits
-1) cache_size_limit
-2) accumulated_cache_size_limit
-
-
-Earlier we used to have only limit - maximum number of entries in 1 cache line
-(which is now represented by (2) above). So, why do we need two limits? Lets try
-to understand that.
-
-In general, we want our cache limit value to be a small number (e.g. 8 or even
-lower). This ensures that for frames that cause too many recompilation fall to
-eager quickly. However, there is another problem that prevents us from lowering
-the value of cache_size_limit. This is due to ID_MATCH'd guards. Today, we put
-ID_MATCH guards on nn module if there is a graph break. This means we will have
-many recompilations for the same code object because the ID_MATCH guard fails
-for different instances of the nn module. This is a common pattern in how models
-are authored. Therefore, this requires us to keep the cache_size_limit high.
-
-We resolve this by introducing these two limits. The first limit (1) limits the
-number of cache entries that have an ID_MATCH'd guard for an nn module instance.
-And, (2)nd limit becomes a safeguard mechanism to have a maximum compilations
-for a code object. One important question is - what is the limit for the code
-object that does not have any ID_MATCH guard? For such code objects, we choose
-(1) as the cache size limit.
-
-Lets take an example to understand how these limits help. Suppose, we have 16
-instances of a nn module and we ID_MATCH on the self object. Further, suppose
-the inputs to these functions have varying batch size, leading to one
-recompilation. In total, there will be 32 recompilations, and therefore 32 cache
-entries on the forward code object. In the older case when we had only 1 limit,
-our cache size limit must be >= 32 to capture all these recompilations. Now,
-suppose there is a separate function in the same program which is very dynamic
-and unsuitable for compilation. Such a function will need to undergo 32
-compilations to burst the cache and fallback to eager. These 32 recompilations
-are too many and we want to fallback for these compilation-unfriendly functions
-sooner.
-
-In the new scenario, we can have (1) cache_size_limit = 2, (2)
-accumulated_cache_size_limit = 32. This means that each ID_MATCH'd object can
-have maximum of two cache entries, and the maximum number of cache entries
-(irrespective of ID_MATCH obj) is 32. This covers the case of forward code
-object which has 32 recompilations. For the other function, the one unsuitable
-for recompilation, our limit is 2. So, we will burst the cache in just 2
-recompilations. In this manner, these 2 limits help us resolve the tension
-mentioned earlier.
-"""
 
 
 @dataclass
@@ -82,13 +26,7 @@ class CacheSizeRelevantForFrame:
     num_cache_entries_in_bucket: int = 0
 
     def will_compilation_exceed(self, limit: int) -> bool:
-        return (
-            self.will_compilation_exceed_bucket(limit)
-            or self.will_compilation_exceed_total()
-        )
-
-    def will_compilation_exceed_total(self) -> bool:
-        return self.num_cache_entries >= config.accumulated_cache_size_limit
+        return self.will_compilation_exceed_bucket(limit)
 
     def will_compilation_exceed_bucket(self, limit: int) -> bool:
         return self.num_cache_entries_in_bucket >= limit

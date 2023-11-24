@@ -40,9 +40,6 @@ dead_code_elimination = True
 # [@compile_ignored: runtime_behaviour]
 cache_size_limit = 8
 
-# [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
-accumulated_cache_size_limit = 64
-
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
 # inputs.  Note that assume_static_by_default will also cause ints to get
