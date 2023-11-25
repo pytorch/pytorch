@@ -1032,7 +1032,7 @@ SeqNr|OrigAten|SrcFn
         opt_res.sum().backward()
 
         self.assertEqual(x, x_opt)
-        self.assertEqual(x.grad, x_opt.grad)
+        self.assertEqual(z.grad, z_opt.grad)
 
     # We don't know how to catch multiple mutations to the same memory location
     @unittest.expectedFailure
