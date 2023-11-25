@@ -1006,6 +1006,34 @@ SeqNr|OrigAten|SrcFn
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
+    def test_aot_autograd_expand_mutation_backwards(self):
+        def fn(x, z):
+            y = x.expand(3, *x.shape)
+            y[1, 1].mul_(5)
+            ret = y * z
+            return ret
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6, dtype=torch.float)
+        z = x.clone().detach()
+        x_opt = x.clone().detach()
+        z_opt = x.clone().detach()
+
+        z.requires_grad = True
+        z_opt.requires_grad = True
+
+        res = fn(x, z)
+        opt_res = opt_fn(x_opt, z_opt)
+
+        self.assertEqual(res, opt_res)
+
+        res.sum().backward()
+        opt_res.sum().backward()
+
+        self.assertEqual(x, x_opt)
+        self.assertEqual(x.grad, x_opt.grad)
+
     # We don't know how to catch multiple mutations to the same memory location
     @unittest.expectedFailure
     def test_aot_autograd_expand_mutation_error(self):
