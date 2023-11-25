@@ -4,7 +4,6 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils import _pytree as pytree
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
 
 import operator
 
@@ -46,6 +45,7 @@ def partition_cudagraphs(gm, inputs):
     CUDA graphs.  For a subgraph to be runnable under CUDA, all of the operations
     must involve CUDA tensors only/
     """
+    from torch._subclasses.fake_tensor import maybe_get_fake_mode
 
     flat_inputs = pytree.tree_leaves(inputs)
     fake_mode = next(
