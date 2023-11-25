@@ -378,6 +378,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"max({', '.join(map(self._print, expr.args))})"
 
+    def _print_Min(self, expr):
+        assert len(expr.args) >= 2
+        return f"min({', '.join(map(self._print, expr.args))})"
+
 
 class OpOverrides:
     def __init__(self, parent):
