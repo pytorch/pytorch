@@ -1,5 +1,6 @@
 import torch
 
+from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.move_constructors import ConstructorMoverPass, ZeroOrMultipleDevicesError
@@ -59,8 +60,8 @@ class TestConstructorMoverPass(TestCase):
         # Since the pass is executed with allow_outputs=True, we consider the
         # only constructor in the function as movable.
         #
-        # Assertion fails, because there's no CUDA device being used inside
-        # the function.
+        # ZeroOrMultipleDevicesError is raised because there's no CUDA device
+        # being used inside the function.
         def foo():
             return torch.arange(5)
 
@@ -68,6 +69,22 @@ class TestConstructorMoverPass(TestCase):
 
         with self.assertRaises(ZeroOrMultipleDevicesError):
             self._run_pass(gm, allow_outputs=True)
+
+    @skipIf(torch.cuda.device_count() < 2, "requires 2 cuda devices")
+    def test_multiple_target_devices(self):
+        # ZeroOrMultipleDevicesError is raised because there are 2 CUDA tensors
+        # each with a different CUDA device in the same program.
+        # TODO: can be supported if the CPU constructor is not used together
+        # with each of them.
+        def foo(x, y):
+            return x[torch.arange(5)], y
+
+        x0 = torch.rand(5, device="cuda:0")
+        x1 = torch.rand(5, device="cuda:1")
+        gm = self._get_graph_module(foo, (x0, x1))
+
+        with self.assertRaises(ZeroOrMultipleDevicesError):
+            self._run_pass(gm)
 
     def test_index_single_cpu_constructor(self):
         # The indice constructor is moved, since:
