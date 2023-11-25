@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import re
+import unittest
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -991,6 +992,36 @@ SeqNr|OrigAten|SrcFn
                     if x is not None
                 ),
             )
+
+    def test_aot_autograd_expand_mutation_functionalizes(self):
+        def fn(x):
+            y = x.expand(3, *x.shape)
+            y[0, 0].add_(5)
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6)
+        x_opt = x.clone().detach()
+        self.assertEqual(fn(x), opt_fn(x_opt))
+        self.assertEqual(x, x_opt)
+
+    # We don't know how to catch multiple mutations to the same memory location
+    @unittest.expectedFailure
+    def test_aot_autograd_expand_mutation_error(self):
+        def fn(x):
+            y = x.expand(3, *x.shape)
+            y[0:3, 0].add_(5)
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6)
+        x_opt = x.clone().detach()
+        with self.assertRaises(Exception):
+            fn(x)
+        with self.assertRaises(Exception):
+            opt_fn(x_opt)
 
 
 if __name__ == "__main__":
