@@ -2,14 +2,13 @@ import functools
 import itertools
 import logging
 import operator
-from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from collections import defaultdict, namedtuple
+from typing import Any, Dict, List, Optional, Union
 
 from sympy import Expr
 
 import torch
 import torch._inductor as inductor
-import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 
@@ -17,7 +16,10 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
-from torch.fx.passes.move_constructors import ConstructorMoverPass, ZeroOrMultipleDevicesError
+from torch.fx.passes.move_constructors import (
+    ConstructorMoverPass,
+    ZeroOrMultipleDevicesError,
+)
 
 from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -961,6 +963,7 @@ def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
 def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
+
 class CUDAConstructorMoverPass(ConstructorMoverPass):
     def __init__(self):
         super().__init__("cuda", inplace=True)
@@ -975,6 +978,7 @@ class CUDAConstructorMoverPass(ConstructorMoverPass):
             node.target not in torch._inductor.lowering.lowerings
             or node.target in torch._inductor.lowering.fallbacks
         )
+
 
 def move_constructors_to_cuda(graph_module):
     try:

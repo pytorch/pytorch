@@ -2,12 +2,13 @@ from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
-import torch.fx
-import torch.utils._pytree as pytree
 import torch._ops
 import torch._subclasses.fake_tensor
+import torch.fx
+import torch.utils._pytree as pytree
 
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
+
 
 class ZeroOrMultipleDevicesError(RuntimeError):
     def __init__(self, target: str, devices: Iterable[torch.device]):
@@ -19,8 +20,11 @@ class ZeroOrMultipleDevicesError(RuntimeError):
             f"in the whole graph. Got: {self.devices}."
         )
 
+
 class ConstructorMoverPass(PassBase):
-    def __init__(self, target: str, inplace: bool = False, allow_outputs: bool = False) -> None:
+    def __init__(
+        self, target: str, inplace: bool = False, allow_outputs: bool = False
+    ) -> None:
         """
         Move constructors from cpu to the target_device.
 
@@ -77,7 +81,6 @@ class ConstructorMoverPass(PassBase):
 
         return False
 
-
     def get_node_device(self, node: torch.fx.Node) -> Optional[torch.device]:
         """
         Get the device of a node.
@@ -106,7 +109,9 @@ class ConstructorMoverPass(PassBase):
 
         return cpu_indeg
 
-    def gather_constructors_and_target_devices(self, graph: torch.fx.Graph) -> Tuple[List[torch.fx.Node], Set[torch.device]]:
+    def gather_constructors_and_target_devices(
+        self, graph: torch.fx.Graph
+    ) -> Tuple[List[torch.fx.Node], Set[torch.device]]:
         target_devices = set()
         constructors = []
 
@@ -135,7 +140,9 @@ class ConstructorMoverPass(PassBase):
 
         return constructors, target_devices
 
-    def find_movable_constructors(self, graph: torch.fx.Graph, constructors: List[torch.fx.Node]) -> Set[torch.fx.Node]:
+    def find_movable_constructors(
+        self, graph: torch.fx.Graph, constructors: List[torch.fx.Node]
+    ) -> List[torch.fx.Node]:
         """
         Starting from the cpu constructors, iterate through the graph and test that all of their
         downstream uses can safely be moved to cpu.
@@ -146,12 +153,16 @@ class ConstructorMoverPass(PassBase):
         cannot_move: Set[torch.fx.Node] = set()
 
         # For any node in the graph, which constructors does it have a dependency on
-        constructor_dependencies: Dict[torch.fx.Node, Set[torch.fx.Node]] = defaultdict(set)
+        constructor_dependencies: Dict[torch.fx.Node, Set[torch.fx.Node]] = defaultdict(
+            set
+        )
 
         # if a cpu node has a dependency on two different cpu constructors,
         # then if either constructor cannot be moved to cuda, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
-        equal_constructor_sets: Dict[torch.fx.Node, Set[torch.fx.Node]] = {c: {c} for c in constructors}
+        equal_constructor_sets: Dict[torch.fx.Node, Set[torch.fx.Node]] = {
+            c: {c} for c in constructors
+        }
 
         def make_dependencies_equivalent(
             set1: Set[torch.fx.Node], set2: Set[torch.fx.Node]
@@ -210,9 +221,11 @@ class ConstructorMoverPass(PassBase):
         for constructor in cannot_move:
             all_cannot_move.update(equal_constructor_sets[constructor])
 
-        return set(constructors) - all_cannot_move
+        return list(set(constructors) - all_cannot_move)
 
-    def move_constructors_to_device(self, constructors: Iterable[torch.fx.Node], device: torch.device) -> None:
+    def move_constructors_to_device(
+        self, constructors: Iterable[torch.fx.Node], device: torch.device
+    ) -> None:
         """
         Replaces the device keyword-argument of each of the constructors by the
         provided device.
@@ -224,7 +237,9 @@ class ConstructorMoverPass(PassBase):
 
     def call(self, graph_module: torch.fx.GraphModule) -> Optional[PassResult]:
         graph = graph_module.graph
-        constructors, target_devices = self.gather_constructors_and_target_devices(graph)
+        constructors, target_devices = self.gather_constructors_and_target_devices(
+            graph
+        )
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
         if len(movable_constructors) == 0:
@@ -236,7 +251,7 @@ class ConstructorMoverPass(PassBase):
         target_device = next(iter(target_devices))
 
         if not self.inplace:
-            env = {}
+            env: Dict[torch.fx.Node, torch.fx.Node] = {}
 
             new_graph = torch.fx.Graph()
             new_graph.graph_copy(graph, val_map=env)

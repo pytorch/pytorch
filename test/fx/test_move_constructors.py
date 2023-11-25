@@ -1,13 +1,20 @@
+# Owner(s): ["oncall: fx"]
+
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.move_constructors import (
+    ConstructorMoverPass,
+    ZeroOrMultipleDevicesError,
+)
 
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.move_constructors import ConstructorMoverPass, ZeroOrMultipleDevicesError
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 DEVICE_KEY = "device"
 CUDA = "cuda"
 CPU = "cpu"
+
 
 class TestConstructorMoverPass(TestCase):
     # Check whether the type of the device keyword-argument of the
@@ -20,12 +27,15 @@ class TestConstructorMoverPass(TestCase):
 
     # Actually runs the pass and checks whether we returned the
     # expected value based on inplace argument.
-    def _run_pass(self, gm, inplace=False, allow_outputs=False):
-        r = ConstructorMoverPass(CUDA, inplace=inplace, allow_outputs=allow_outputs)(gm)
-        self.assertIsNotNone(r)
+    def _run_pass(self, gm, inplace=False, allow_outputs=False) -> PassResult:
+        r_ = ConstructorMoverPass(CUDA, inplace=inplace, allow_outputs=allow_outputs)(
+            gm
+        )
+        self.assertIsNotNone(r_)
 
+        r: PassResult = r_  # type: ignore[arg-type]
         if inplace:
-            self.assertEqual(id(gm), id(r.graph_module))  # type: ignore
+            self.assertEqual(id(gm), id(r.graph_module))
 
         return r
 
@@ -33,7 +43,7 @@ class TestConstructorMoverPass(TestCase):
     # moved_targets actually were moved.
     def _move_and_check(self, gm, moved_targets, inplace=False, modified=True):
         r = self._run_pass(gm, inplace)
-        r_gm, r_modified = r  # type: ignore
+        r_gm, r_modified = r
         self.assertEqual(modified, r_modified)
         self._check_device_for_targets(r_gm, CUDA, moved_targets)
 
@@ -122,6 +132,7 @@ class TestConstructorMoverPass(TestCase):
 
         x = torch.ones((4, 4, 4), device=CUDA)
         self._check(foo, (x,), {}, modified=False)
+
 
 if __name__ == "__main__":
     if torch.cuda.is_available():
