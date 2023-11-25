@@ -499,6 +499,8 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+        output.to_serialize["instructions"] = instructions
+
     @dynamo_timed(phase_name="entire_frame_compile")
     def compile_inner(
         code: types.CodeType,
@@ -593,7 +595,11 @@ def _compile(
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
+            instructions=serialize_table["instructions"],
+            resume_fn_name=serialize_table.get("resume_fn_name", None),
+            resume_fn_code=serialize_table.get("resume_fn_code", None),
             frame=frame,
+            unique_id=torch._dynamo.bytecode_transformation._unique_id_counter
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -679,8 +685,10 @@ def _compile(
             log_compilation_event(metrics)
 
 
+# TODO(voz): A better location for the util
 def _placeholder_remote_write(unique_frame_id, guarded_code):
-    file_path = f"{unique_frame_id}.pkl"
+    # TODO(voz): A better location for the file
+    file_path = f"/tmp/{unique_frame_id}.pkl"
     with open(file_path, "wb") as file:
         guarded_code.serialize(file)
 
@@ -689,7 +697,7 @@ def _placeholder_remote_write(unique_frame_id, guarded_code):
 
 def _placeholder_remote_fetch(unique_frame_id, frame):
     try:
-        file_path = f"{unique_frame_id}.pkl"
+        file_path = f"/tmp/{unique_frame_id}.pkl"
         with open(file_path, "rb") as file:
             return GuardedCode.deserialize(file, frame)
     except Exception as e:

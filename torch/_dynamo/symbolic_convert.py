@@ -2183,12 +2183,15 @@ class InstructionTranslator(InstructionTranslatorBase):
             ] = orig_graphmodule_maybe
 
         if new_code.co_freevars:
+            # TODO(voz): Support this for serialization
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
+            self.output.to_serialize["resume_fn_name"] = name
+            self.output.to_serialize["resume_fn_code"] = new_code
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))

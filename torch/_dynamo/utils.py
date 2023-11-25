@@ -596,7 +596,7 @@ class CleanupHook:
 
     @staticmethod
     def create(scope, name, val):
-        assert name not in scope
+        assert name not in scope, breakpoint()
         CleanupManager.count += 1
         scope[name] = val
         return CleanupHook(scope, name)
