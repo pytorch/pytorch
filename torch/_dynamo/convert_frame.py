@@ -581,17 +581,24 @@ def _compile(
             interpreter_agnostic=False,
         )
 
-        interpreter_agnostic_check_fn = CheckFunctionManager(
-            output,
-            hooks.guard_fail_fn if hooks else None,
-            interpreter_agnostic=True,
-        )
+        can_serialize = True
+        try:
+            interpreter_agnostic_check_fn = CheckFunctionManager(
+                output,
+                hooks.guard_fail_fn if hooks else None,
+                interpreter_agnostic=True,
+            )
+        except RuntimeError as e:
+            # Failed to produce interpreter agnostic guards!
+            interpreter_agnostic_check_fn = None
+            can_serialize = False
+
 
         serialize_table = output.to_serialize
         guarded_code = GuardedCode(
             code=out_code,
             check_fn=check_fn.check_fn,
-            interpreter_agnostic_check_fn=interpreter_agnostic_check_fn.check_fn,
+            interpreter_agnostic_check_fn=interpreter_agnostic_check_fn.check_fn if interpreter_agnostic_check_fn else None,
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
@@ -600,6 +607,7 @@ def _compile(
             resume_fn_code=serialize_table.get("resume_fn_code", None),
             frame=frame,
             unique_id=torch._dynamo.bytecode_transformation._unique_id_counter
+            can_serialize=can_serialize,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -720,6 +728,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, serialize=False):
             if not result:
                 result = inner_convert(frame, cache_entry, hooks, frame_state)
                 if serialize:
+                    # Will raise if it cannot serialize
                     _placeholder_remote_write(unique_frame_id, guarded_code=result)
 
             counters["frames"]["ok"] += 1
