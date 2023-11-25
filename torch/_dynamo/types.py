@@ -47,6 +47,7 @@ class GuardFn(Protocol):
 class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
+    interpreter_agnostic_check_fn: GuardFn
     frame: types.FrameType
     name: str
     compiled_fn: Any
@@ -54,7 +55,7 @@ class GuardedCode:
 
     def serialize(self, file):
         code_attrs = torch._dynamo.utils.attrs_code_object(self.code)
-        guard_py_code = self.check_fn.pycode
+        guard_py_code = self.interpreter_agnostic_check_fn.pycode
         guarded_code_struct = (
             code_attrs,
             guard_py_code,
@@ -87,7 +88,13 @@ class GuardedCode:
             code_obj = types.CodeType(*attributes)
             if check_fn(frame.f_locals):
                 return GuardedCode(
-                    code_obj, check_fn, frame, fn_name, compiled_fn, global_alias_table
+                    code_obj,
+                    check_fn,
+                    check_fn,
+                    frame,
+                    fn_name,
+                    compiled_fn,
+                    global_alias_table,
                 )
             else:
                 return None

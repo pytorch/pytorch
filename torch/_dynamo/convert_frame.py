@@ -576,12 +576,20 @@ def _compile(
         check_fn = CheckFunctionManager(
             output,
             hooks.guard_fail_fn if hooks else None,
+            interpreter_agnostic=False,
+        )
+
+        interpreter_agnostic_check_fn = CheckFunctionManager(
+            output,
+            hooks.guard_fail_fn if hooks else None,
+            interpreter_agnostic=True,
         )
 
         serialize_table = output.to_serialize
         guarded_code = GuardedCode(
             code=out_code,
             check_fn=check_fn.check_fn,
+            interpreter_agnostic_check_fn=interpreter_agnostic_check_fn.check_fn,
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
@@ -684,76 +692,28 @@ def _placeholder_remote_fetch(unique_frame_id, frame):
         file_path = f"{unique_frame_id}.pkl"
         with open(file_path, "rb") as file:
             return GuardedCode.deserialize(file, frame)
-    except:
-        breakpoint()
+    except Exception as e:
         return None
 
 
-def convert_frame_remote(compiler_fn: CompilerFn, hooks: Hooks):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, serialize=False):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
-            guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
-            if guarded_code:
-                result = guarded_code
-            else:
+            result = None
+            if serialize:
+                unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
+                guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
+                if guarded_code:
+                    result = guarded_code
+            if not result:
                 result = inner_convert(frame, cache_entry, hooks, frame_state)
-                _placeholder_remote_write(unique_frame_id, guarded_code=result)
+                if serialize:
+                    _placeholder_remote_write(unique_frame_id, guarded_code=result)
 
-            counters["frames"]["ok"] += 1
-            return result
-        except Exception as e:
-            # These two exception types are "soft" failure, in the sense that
-            # we know this is due to something we didn't implement all the
-            # way, scare the user less about it.  That being said, if you
-            # are trying to understand why a graph break happened, it's still
-            # important to have this information, so offer it.
-            #
-            # NB: NotImplementedError used to be on this list, but actually
-            # it is impossible for it to reach here, as it is converted into
-            # InternalTorchDynamoError.  This behavior seemed reasonable
-            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
-            # someone wanted these to also get suppressed.  If so, you'll
-            # need to make these exceptions not get wrapped
-
-            # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
-                raise
-
-            soft_fail = isinstance(e, Unsupported)
-            if not config.suppress_errors and not soft_fail:
-                raise
-
-            # Suppress the error.  NB: It's very important to do the
-            # suppression logging HERE, where the actual suppression
-            # happens. Previously it was somewhere else and so it was
-            # possible to accidentally not log at all.
-            record_filename = getattr(e, "record_filename", None)
-            code = frame.f_code
-            error_msg = format_error_msg(e, code, record_filename, frame)
-
-            if soft_fail:
-                log.info(error_msg, exc_info=True)
-            else:
-                log.warning(error_msg, exc_info=True)
-        return None
-
-    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    return _convert_frame
-
-
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
-    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
-
-    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
-        counters["frames"]["total"] += 1
-        try:
-            result = inner_convert(frame, cache_entry, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:

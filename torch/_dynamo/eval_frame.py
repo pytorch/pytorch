@@ -635,7 +635,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-    remote=False,
+    serialize=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -686,10 +686,7 @@ def optimize(
             hooks=hooks,
         )
 
-    if remote:
-        callback = convert_frame.convert_frame_remote(backend, hooks=hooks)
-    else:
-        callback = convert_frame.convert_frame(backend, hooks=hooks)
+    callback = convert_frame.convert_frame(backend, hooks=hooks, serialize=serialize)
     return _optimize_catch_errors(
         callback,
         hooks,
