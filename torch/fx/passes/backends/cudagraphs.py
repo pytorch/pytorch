@@ -4,6 +4,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils import _pytree as pytree
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 
 import operator
 
@@ -46,7 +47,13 @@ def partition_cudagraphs(gm, inputs):
     must involve CUDA tensors only/
     """
 
-    FakeTensorProp(gm).propagate(*inputs)
+    flat_inputs = pytree.tree_leaves(inputs)
+    fake_mode = next(
+        (mode for mode in map(lambda x: maybe_get_fake_mode(x), flat_inputs) if mode is not None), 
+        None
+    )
+
+    FakeTensorProp(gm, fake_mode).propagate(*inputs)
     supported_ops = CudaGraphsSupport()
     # TODO: single node partition may be wrong due to the pessimization
     # from copying in and out the data.  Check in benchmarks, perhaps
