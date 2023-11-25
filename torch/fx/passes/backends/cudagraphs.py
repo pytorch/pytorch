@@ -49,7 +49,7 @@ def partition_cudagraphs(gm, inputs):
 
     flat_inputs = pytree.tree_leaves(inputs)
     fake_mode = next(
-        (mode for mode in map(lambda x: maybe_get_fake_mode(x), flat_inputs) if mode is not None), 
+        (mode for mode in map(lambda x: maybe_get_fake_mode(x), flat_inputs) if mode is not None),
         None
     )
 
