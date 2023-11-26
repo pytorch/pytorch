@@ -2898,6 +2898,9 @@ coverage_ignore_classes = [
     "ArgsKwargsPair",
     # torch.fx.passes.backends.cudagraphs
     "CudaGraphsSupport",
+    # torch.fx.passes.constructor_mover_pass
+    "ZeroOrMultipleDevicesError",
+    "ConstructorMoverPass",
     # torch.fx.passes.dialect.common.cse_pass
     "CSEPass",
     # torch.fx.passes.fake_tensor_prop
