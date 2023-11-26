@@ -1620,11 +1620,40 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     int deviceIndex = devices[i].index();
 
     gpuGuard.set_index(deviceIndex);
-#ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
-#else
-    ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
+#ifdef NCCL_HAS_COMM_SPLIT
+    if (options_->split_from) {
+      TORCH_CHECK(
+          options_->split_color != 0,
+          "Must specify a non-zero color when splitting");
+      // Find a valid, healthy communicator to split from if possible.
+      std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
+      auto& other_comms = options_->split_from->devNCCLCommMap_;
+      auto dit = other_comms.find(devicesKey);
+      if (dit != other_comms.end() && !dit->second.empty()) {
+        TORCH_INTERNAL_ASSERT(
+            dit->second.size() == ncclComms.size(),
+            "split_from->devNCCLCommMap_ should be empty or the same size as ncclComms!");
+        if (dit->second[i] && !dit->second[i]->isAborted()) {
+          ncclComms[i] = NCCLComm::split(
+              dit->second[i].get(),
+              options_->split_color,
+              rank,
+              options_->config);
+        }
+      }
+    }
 #endif
+
+    // To simplify conditioonal nesting, just create the ncclComms[i]
+    // entry if it hasn't been yet rather than untangling the
+    // conditions that might have resulted in a split above.
+    if (!ncclComms[i]) {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+#else
+      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
+#endif
+    }
 
     // Creates the NCCL streams
     streamVal.push_back(
@@ -1670,9 +1699,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
       std::make_tuple(devicesKey),
       std::make_tuple(devices.size()));
 
-  // Hold the lock before modifying the cache.
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // Record the communicators based on ncclUniqueId.
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComms);
 
@@ -1716,7 +1742,18 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   it = devNCCLCommMap_.find(devicesKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
+
   return it->second;
+}
+
+uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
+  uint64_t ret = 0;
+  for (const auto& i : ncclIdToCommMap_) {
+    for (const auto& j : i.second) {
+      ret += j->getCommSplitCounter();
+    }
+  }
+  return ret;
 }
 
 namespace {
