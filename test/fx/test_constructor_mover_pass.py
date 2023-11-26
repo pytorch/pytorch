@@ -1,14 +1,15 @@
 # Owner(s): ["oncall: fx"]
 
+import unittest
+
 import torch
+
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.constructor_mover_pass import (
     ConstructorMoverPass,
     ZeroOrMultipleDevicesError,
 )
 from torch.fx.passes.infra.pass_base import PassResult
-
-from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 DEVICE_KEY = "device"
@@ -16,6 +17,7 @@ CUDA = "cuda"
 CPU = "cpu"
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
 class TestConstructorMoverPass(TestCase):
     # Check whether the type of the device keyword-argument of the
     # module nodes whose targets are listed in moved_targets is
@@ -80,7 +82,7 @@ class TestConstructorMoverPass(TestCase):
         with self.assertRaises(ZeroOrMultipleDevicesError):
             self._run_pass(gm, allow_outputs=True)
 
-    @skipIf(torch.cuda.device_count() < 2, "requires 2 cuda devices")
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 cuda devices")
     def test_multiple_target_devices(self):
         # ZeroOrMultipleDevicesError is raised because there are 2 CUDA tensors
         # each with a different CUDA device in the same program.
@@ -135,5 +137,4 @@ class TestConstructorMoverPass(TestCase):
 
 
 if __name__ == "__main__":
-    if torch.cuda.is_available():
-        run_tests()
+    run_tests()
