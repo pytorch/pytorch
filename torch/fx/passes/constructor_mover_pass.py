@@ -10,6 +10,12 @@ import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
+__all__ = [
+    "ZeroOrMultipleDevicesError",
+    "ConstructorMoverPass",
+]
+
+
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 class ZeroOrMultipleDevicesError(RuntimeError):
     def __init__(self, target: str, devices: Iterable[torch.device]):
@@ -94,7 +100,7 @@ class ConstructorMoverPass(PassBase):
         """
         Get the number of cpu inputs to a node
         """
-        cpu_indeg: Dict[torch.fx.Node, int] = defaultdict(lambda: 0)
+        cpu_indeg: Dict[torch.fx.Node, int] = defaultdict(int)
 
         for node in graph.nodes:
             cpu_count = 0
