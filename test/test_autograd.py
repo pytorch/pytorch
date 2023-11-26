@@ -8743,6 +8743,16 @@ get_out().sum().backward()
         self.assertEqual(y, y2)
         self.assertEqual(y_expected, y2_expected)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_gradcheck_rng_generator_device_placement(self):
+        with torch.device('cuda'):
+            x = torch.randn(3, dtype=torch.double, requires_grad=True)
+
+            def func(inp):
+                return inp ** 2.0
+
+            assert gradcheck(func, x, fast_mode=True)
+
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
