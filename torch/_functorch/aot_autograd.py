@@ -45,7 +45,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     strict_zip, _get_symint_hints, create_tree_flattened_fn,
     KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
     _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
-    make_boxed_compiler,
+    make_boxed_compiler, maybe_to_fresh_input,
 )
 
 zip = strict_zip
@@ -1580,35 +1580,6 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
-
-# This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
-# When tracing the joint forward + backward, for any inputs in the graph that are mutated,
-# we need to clone them first (and similarly for metadata-only mutations, we need to view them first).
-# The idea is that when we trace the backward, we need to pass in the *original* primals
-# to autograd.grad(), before they were mutated.
-# Note: when we have synthetic base inputs, we need to clone them *before* creating views off of them.
-# This means that "idx" here represents the index of the (potentially) synthetic base.
-# What we need to do is:
-# (1) map the current (post-synthetic-base calling convention) input argument index
-#     to int index pre-synthetic-base-calling-convention.
-# (2) There could be multiple, if this index corresponds to a synthetic base
-#     that has multiple input aliases.
-# (3) If any of those corresponding inputs get metadata mutations, then we clone the base.
-def maybe_to_fresh_input(idx, t, meta):
-    if not isinstance(t, Tensor):
-        return t
-    if idx in meta.mutated_inp_runtime_indices:
-        # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
-        if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the mutation
-            return t.clone()
-        if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the metadata mutation
-            return t.view(t.shape)
-    return t
 
 # This function returns a new function that returns mutated inputs as outputs.
 # if keep_data_input_mutations is set, then we assume that data-only mutations
