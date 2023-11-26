@@ -343,6 +343,14 @@ struct ConvParams {
     return is_non_neg;
   }
 
+  bool is_dilation_neg() const {
+    bool is_non_neg = false;
+    for (const auto& p : dilation) {
+      is_non_neg |= (p < 0);
+    }
+    return is_non_neg;
+  }
+
   bool is_stride_nonpos() const {
     bool is_nonpos = false;
     for (auto s : stride) {
@@ -652,6 +660,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
+  TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -973,6 +982,7 @@ static Tensor convolution_same(
 
   auto k = weight.dim();
   TORCH_CHECK(k > 2, "weight should have at least three dimensions");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
   auto dim = static_cast<size_t>(k - 2);
   auto weight_sizes = weight.sym_sizes();
   auto input_sizes = input.sym_sizes();
