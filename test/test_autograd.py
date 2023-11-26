@@ -8751,7 +8751,7 @@ get_out().sum().backward()
             def func(inp):
                 return inp ** 2.0
 
-            assert gradcheck(func, x, fast_mode=True)
+            self.assertTrue(gradcheck(func, x, fast_mode=True))
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
