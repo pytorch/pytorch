@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+from torch._functorch.aot_autograd import AOTConfig, create_joint, from_functional
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
@@ -70,7 +70,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     with suspend_functionalization(), unset_functional_temporarily():
         with disable_proxy_modes_tracing():
 
-            def _from_fun(t):
+            def _from_functional(t):
                 if isinstance(t, torch.Tensor):
                     if t.dtype != torch.bool:
                         return torch.empty_strided(
@@ -85,7 +85,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                         maybe_unfunc_t = t
                         if isinstance(t, FunctionalTensor):
                             torch._sync(t)
-                            maybe_unfunc_t = from_fun(t)
+                            maybe_unfunc_t = from_functional(t)
                         elif torch._is_functional_tensor(t):
                             # need to handle both types of functionalization here:
                             # these are the tensors that came from the user,
@@ -95,14 +95,14 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                         return maybe_unfunc_t.clone()
                 return t
 
-            example_xs = [_from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+            example_xs = [_from_functional(xs) for xs in _unstack_pytree(mapped_xs)[0]]
 
             example_pos_args = [
-                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                _from_functional(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
             ]
             example_flat_out = pytree.tree_map(
-                _from_fun, f(*example_xs, *example_pos_args)
+                _from_functional, f(*example_xs, *example_pos_args)
             )
             if any(
                 not isinstance(out, torch.Tensor)
@@ -113,7 +113,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     "Expect outputs of map only contains tensors or None. "
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
-            example_grad = [_from_fun(out) for out in example_flat_out]
+            example_grad = [_from_functional(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
 
