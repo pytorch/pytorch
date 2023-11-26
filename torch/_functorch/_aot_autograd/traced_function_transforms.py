@@ -222,7 +222,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
     return inner_fn_with_anomaly
 
 
-def _create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
+def _create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
     # Functionalization of rng ops changes the calling convention of the joint graph.
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
     # At runtime, we pass on the current seed and offset. This is hidden from
@@ -311,7 +311,7 @@ def create_functionalized_fn(
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
     trace_joint: bool,
-) -> Tuple[Union[Callable, function], List[Any]]:
+) -> Any:
     def _functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_functional, args)
