@@ -1830,7 +1830,7 @@ class CPUReproTests(TestCase):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
-            # The moset inner loop variable is used in the index_expr
+            # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -1843,7 +1843,7 @@ class CPUReproTests(TestCase):
                 vec_checker.ranges = ranges[:2]
                 submodules = {"get_index": get_index}
                 InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
             # Most inner loop variable irrevalant
             with CppVecKernelChecker(
@@ -2629,6 +2629,16 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(m, (idx, x))
             assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_concat_inner_vec(self):
+        def fn(x, y):
+            return F.relu(torch.cat([x, y], dim=1))
+
+        x = torch.randn(32, 35)
+        y = torch.randn(32, 120)
+        metrics.reset()
+        self.common(fn, (x, y))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":
