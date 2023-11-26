@@ -45,7 +45,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     strict_zip, _get_symint_hints, create_tree_flattened_fn,
     KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
     _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
-    make_boxed_compiler,
+    make_boxed_compiler, maybe_to_fresh_input,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     setup_stacktrace_preservation_hooks,
@@ -53,6 +53,8 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     get_graph_being_compiled,
     get_aot_compilation_context,
     track_graph_compiling,
+    describe_input,
+    format_guard_bug_msg
 )
 from ._aot_autograd.functional_utils import (
     is_functional,
@@ -65,6 +67,7 @@ from ._aot_autograd.functional_utils import (
     has_same_metadata,
     was_tensor_updated,
     was_tensor_metadata_updated,
+    assert_functional_graph,
 )
 
 zip = strict_zip
@@ -1348,35 +1351,6 @@ class AOTConfig:
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
 
-# This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
-# When tracing the joint forward + backward, for any inputs in the graph that are mutated,
-# we need to clone them first (and similarly for metadata-only mutations, we need to view them first).
-# The idea is that when we trace the backward, we need to pass in the *original* primals
-# to autograd.grad(), before they were mutated.
-# Note: when we have synthetic base inputs, we need to clone them *before* creating views off of them.
-# This means that "idx" here represents the index of the (potentially) synthetic base.
-# What we need to do is:
-# (1) map the current (post-synthetic-base calling convention) input argument index
-#     to int index pre-synthetic-base-calling-convention.
-# (2) There could be multiple, if this index corresponds to a synthetic base
-#     that has multiple input aliases.
-# (3) If any of those corresponding inputs get metadata mutations, then we clone the base.
-def maybe_to_fresh_input(idx, t, meta):
-    if not isinstance(t, Tensor):
-        return t
-    if idx in meta.mutated_inp_runtime_indices:
-        # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
-        if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the mutation
-            return t.clone()
-        if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the metadata mutation
-            return t.view(t.shape)
-    return t
-
 # This function returns a new function that returns mutated inputs as outputs.
 # if keep_data_input_mutations is set, then we assume that data-only mutations
 # will be left in the graph, and we only return metadata-mutated inputs as outputs.
@@ -1776,29 +1750,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     return compiled_fn
 
 
-# Returns the number of detected copy_
-def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False) -> int:
-    placeholders = set()
-    copy_count = 0
-    # NB: It would also be nice to verify that the mutations all happen at the
-    # end, but we also do some administrative views after mutations so this
-    # isn't actually true.  (TODO: Could this cause problems for Inductor?)
-    for n in fx_g.nodes:
-        if n.op == "placeholder":
-            placeholders.add(n)
-        if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is aten.copy_.default and allow_input_mutations:
-                suffix = True
-                # Can only copy_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
-                copy_count += 1
-            else:
-                assert not n.target._schema.is_mutable, \
-                    f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
-    return copy_count
-
-
 def are_differentiable_views(view1, view2):
     if view1 is view2:
         return True
@@ -2149,14 +2100,6 @@ def merge_view_inputs(
         for x in post_processed_calling_convention_meta:
             assert x != -1
         return args_to_functionalization, post_processed_calling_convention_meta
-
-
-def format_guard_bug_msg(aot_config, expected):
-    return (
-        f"At compilation time, graph {aot_config.aot_id} was compiled under the "
-        f"assumption that {expected}, but at runtime this was not the case.  "
-        "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
-    )
 
 
 def remove_dupe_metadata(
@@ -2726,12 +2669,6 @@ fw_metadata={str(fw_metadata)}
 
     return wrapped_compiled_fn
 
-
-def describe_input(i, aot_config):
-    if i < aot_config.num_params_buffers:
-        return f"parameter/buffer {i}"
-    else:
-        return f"input {i - aot_config.num_params_buffers}"
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
 # that needs to run after the compiled function.
