@@ -234,7 +234,11 @@ class AOTInductorModelBase {
 
     std::vector<size_t> constants_internal_offset(num_constants);
     if (!is_cpu) {
-      make_cuda_constant_blob(constants_internal_offset);
+      size_t blob_size = 0;
+      compute_cuda_constant_blob(blob_size, constants_internal_offset);
+#ifdef USE_CUDA
+      constant_blob_ = RAII_cudaMalloc(blob_size);
+#endif
     }
 
     size_t bytes_read = 0;
@@ -275,7 +279,9 @@ class AOTInductorModelBase {
           &tensor_handle));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
-    this->update_constants_map(constants_map_);
+    if (constants_map_) {
+      this->update_constants_array_from_map();
+    }
   }
 
 #ifdef USE_CUDA
@@ -283,6 +289,10 @@ class AOTInductorModelBase {
     return std::move(constant_blob_);
   }
 #endif
+
+  std::shared_ptr<std::vector<AtenTensorHandle>> get_constants_array() {
+    return constants_;
+  }
 
   uint8_t* constant_ptr(
       size_t constant_offset,
@@ -305,21 +315,22 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
-  void make_cuda_constant_blob(std::vector<size_t>& constants_internal_offset) {
+  void compute_cuda_constant_blob(
+      size_t& blob_size,
+      std::vector<size_t>& constants_internal_offset) {
 #ifdef USE_CUDA
     size_t num_constants = this->num_constants();
     // Compute required blob size with 64-alignment if on GPU.
-    size_t max_blob = 0;
+    blob_size = 0;
     for (size_t i = 0; i < num_constants; i++) {
       size_t data_size = this->constant_data_size(i);
       if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
         data_size = AOTI_CONST_GPU_ALIGNMENT +
             (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
       }
-      constants_internal_offset[i] = max_blob;
-      max_blob += data_size;
+      constants_internal_offset[i] = blob_size;
+      blob_size += data_size;
     }
-    constant_blob_ = RAII_cudaMalloc(max_blob);
 #endif // USE_CUDA
   }
 
@@ -379,10 +390,10 @@ class AOTInductorModelBase {
     return out_spec_.c_str();
   }
 
-  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
-    constants_map_ = std::move(constants_map);
+  void update_constants_array_from_map() {
     if (!constants_map_) {
-      return;
+      throw std::runtime_error{
+          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
     }
     if (!constants_) {
       constants_ = std::make_shared<std::vector<AtenTensorHandle>>(
@@ -398,6 +409,17 @@ class AOTInductorModelBase {
       }
       idx++;
     }
+  }
+
+  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
+    constants_map_ = std::move(constants_map);
+  }
+
+  // This function allows us to update the constants_ that is used to look up
+  // the corresponding constant tensor during runtime.
+  void update_constants_array(
+      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array) {
+    constants_ = std::move(constants_array);
   }
 
   /// Returns true if the model is complete.
@@ -484,7 +506,10 @@ class AOTInductorModelKernelsBase {
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
-  AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
+  AOTInductorModel(
+      std::shared_ptr<ConstantMap>,
+      std::shared_ptr<std::vector<AtenTensorHandle>>,
+      std::optional<std::string>);
 
   void run_impl(
       AtenTensorHandle*
@@ -498,9 +523,11 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       AOTIProxyExecutorHandle proxy_executor);
 
   static std::unique_ptr<AOTInductorModel> Create(
-      std::shared_ptr<ConstantMap> constants,
+      std::shared_ptr<ConstantMap> constants_map,
+      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
       std::optional<std::string> cubin_dir) {
-    return std::make_unique<AOTInductorModel>(std::move(constants), cubin_dir);
+    return std::make_unique<AOTInductorModel>(
+        std::move(constants_map), std::move(constants_array), cubin_dir);
   }
 
  private:

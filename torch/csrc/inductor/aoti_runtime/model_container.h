@@ -21,11 +21,13 @@ class AOTInductorModelContainer {
       size_t num_models,
       bool is_cpu = false,
       std::optional<std::string> cubin_dir = std::nullopt) {
-    constants_ = std::make_shared<ConstantMap>();
+    constants_map_ = std::make_shared<ConstantMap>();
+    constants_array_ = std::make_shared<std::vector<AtenTensorHandle>>();
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create(constants_, cubin_dir));
+      models_.push_back(AOTInductorModel::Create(
+          constants_map_, constants_array_, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -53,10 +55,12 @@ class AOTInductorModelContainer {
     model->load_constants(is_cpu);
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
+    model->compute_cuda_constant_blob(blob_size_, constants_internal_offset_);
 #endif
 
     for (auto& model : models_) {
-      model->update_constants_map(constants_);
+      model->update_constants_map(constants_map_);
+      model->update_constants_array(constants_array_);
     }
 
     in_spec_ = model->get_in_spec();
@@ -126,12 +130,20 @@ class AOTInductorModelContainer {
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
+
+  // Let's place this within USE_CUDA at the moment before we fully support
+  // update for CPU cases.
+  size_t blob_size_;
+  std::vector<size_t> constants_internal_offset_;
 #endif // USE_CUDA
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
   // or _binary_constants_bin_start (for CPU).
-  std::shared_ptr<ConstantMap> constants_;
+  std::shared_ptr<ConstantMap> constants_map_;
+
+  // Holds the indexed array of constant for faster lookup during runtime.
+  std::shared_ptr<std::vector<AtenTensorHandle>> constants_array_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;
