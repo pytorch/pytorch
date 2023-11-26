@@ -4,7 +4,6 @@ import logging
 import warnings
 import pprint
 from contextlib import nullcontext
-from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
 from unittest.mock import patch
@@ -37,7 +36,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transfor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs, Source
+from torch._guards import TracingContext, DuplicateInputs
 
 from ._aot_autograd.utils import (  # noqa: F401
     strict_zip, _get_symint_hints, create_tree_flattened_fn,
@@ -73,6 +72,9 @@ from ._aot_autograd.schemas import (
     OutputAliasInfo,
     MutationType,
     OutputType,
+    GraphSignature,
+    BackwardSignature,
+    AOTConfig,
 )
 
 zip = strict_zip
@@ -817,160 +819,6 @@ from a multi-output view call")
         return metadata
 
     return inner
-
-
-@dataclass
-class BackwardSignature:
-    """
-    Provides information about the backward section of an exported
-    joint forward-backward graph.
-    For a particular fx GraphModule, this class contains information on:
-    (1) A mapping from each gradient (backwards output) to the parameter
-        it corresponds to (forward input)
-    (2) A mapping from each gradient (backwards output) to the user input
-        it corresponds to (forward input)
-    (3) Which of the forward outputs corresponds to the loss, that we backprop on.
-
-    Each string name is the `node.name` of the corresponding node in the fx graph.
-    """
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
-
-GraphOutputName = NewType('GraphOutputName', str)
-GraphInputName = NewType('GraphInputName', str)
-FQN = NewType('FQN', str)
-
-@dataclass
-class GraphSignature:
-    """
-    Provides information about an exported module.
-    For a particular fx GraphModule, this class contains information on:
-    (1) Which graph inputs are parameters, buffers, or user inputs
-    (2) (for params/buffers) a mapping from the name of each graph argument
-        to its parameter/buffer FQN in the original nn.Module.
-    (3) If there are input mutations, these are represented as extra outputs
-        in the fx GraphModule. We provide a mapping from these
-        extra output names to the names of the actual inputs.
-    (4) The pytree metadata on how to flatten/unflatten inputs and outputs.
-        The corresponding FX GraphModule only accepts and returns
-        pytree-flattened inputs/outputs.
-    (5) (Optionally) if the FX is a joint forward-backward graph, we provide
-        a signature on the backward section of the joint graph.
-    """
-
-    parameters: List[FQN]
-    buffers: List[FQN]
-
-    user_inputs: List[GraphInputName]
-    user_outputs: List[GraphOutputName]
-    inputs_to_parameters: Dict[GraphInputName, FQN]
-    inputs_to_buffers: Dict[GraphInputName, FQN]
-
-    # If the user's module mutates a buffer,
-    # it's represented in the graph as an extra graph output.
-    # This dict is a mapping from
-    # "graph outputs that correspond to updated buffers"
-    # to the FQN names of those mutated buffers.
-    buffers_to_mutate: Dict[GraphOutputName, FQN]
-
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
-
-    backward_signature: Optional[BackwardSignature]
-
-    @classmethod
-    def from_tracing_metadata(
-        cls,
-        *,
-        in_spec: pytree.TreeSpec,
-        out_spec: pytree.TreeSpec,
-        graph_input_names: List[str],
-        graph_output_names: List[str],
-        view_mutation_metadata: ViewAndMutationMeta,
-        named_parameters: List[str],
-        named_buffers: List[str],
-        num_user_inputs: int,
-        num_user_outputs: int,
-        loss_index: Optional[int],
-        backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
-        graph_inputs = graph_input_names
-        graph_outputs = graph_output_names
-        parameters = list(named_parameters)
-        buffers = list(named_buffers)
-
-        # Calling convention assumptions:
-        # (1) graph inputs = (params, buffers, user_inputs)
-        # (2) graph outputs = (mutated_inputs, user_outs, param_gradients)
-        # (If we are capturing an inference graph, this convention is identical
-        #  except that param_gradients is empty)
-        user_inputs = graph_inputs[len(parameters) + len(buffers) :]
-        assert num_user_inputs == len(user_inputs)
-        assert len(graph_inputs) == (len(parameters) + len(buffers) + len(user_inputs))
-
-        inputs_to_parameters = dict(zip(graph_inputs[: len(parameters)], parameters))
-        inputs_to_buffers = dict(zip(
-            graph_inputs[len(parameters) : len(parameters) + len(buffers)],
-            buffers,
-        ))
-
-        state_names = [*parameters, *buffers]
-        mutated_buffers = []
-        for idx, input_info in enumerate(view_mutation_metadata.input_info):
-            if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
-                buffer_name = state_names[idx]
-                mutated_buffers.append(buffer_name)
-
-        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inp_runtime_indices
-
-        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
-        buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
-
-        start, stop = stop, stop + num_user_outputs
-        user_outputs = graph_outputs[start:stop]
-
-        unused_outputs = len(graph_outputs) - stop
-        if backward_signature is not None:
-            unused_outputs -= len(backward_signature.gradients_to_parameters) + len(
-                backward_signature.gradients_to_user_inputs
-            )
-        assert unused_outputs == 0
-
-        return GraphSignature(
-            parameters=parameters,
-            buffers=buffers,
-            user_inputs=user_inputs,
-            user_outputs=user_outputs,
-            inputs_to_buffers=inputs_to_buffers,
-            inputs_to_parameters=inputs_to_parameters,
-            buffers_to_mutate=buffers_to_mutate,
-            in_spec=in_spec,
-            out_spec=out_spec,
-            backward_signature=backward_signature,
-        )
-
-@dataclass
-class AOTConfig:
-    """
-    Configuration for AOTDispatcher
-    """
-
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
-    num_params_buffers: int
-    aot_id: int
-    keep_inference_input_mutations: bool
-    is_export: bool = False
-    no_tangents: bool = False
-    dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
-    inference_compiler: Optional[Callable] = None
-    enable_log: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
