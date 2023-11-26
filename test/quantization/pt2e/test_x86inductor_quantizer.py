@@ -304,13 +304,11 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # QAT Model failed to deepcopy
         export_model = m if is_qat else copy.deepcopy(m)
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
-
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m, fold_quantize=True)
         convert_model = copy.deepcopy(m)
-
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -451,7 +449,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test Pattern:
             tmp = conv2d_1(x)
             tmp2 = conv2d_2(tmp)
-            return tmp+tmp2
+            return tmp + tmp2
         Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
         """
         example_inputs = (torch.randn(2, 3, 6, 6),)
@@ -463,10 +461,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             for inplace_add in inplace_add_list:
                 m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add).eval()
                 node_occurrence = {
-                    # one for input of the conv
-                    # one for input of another conv
-                    # 2 conv will share same input quant/dequant
-                    # one for extra input node of add
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                     # quantize_per_channel for weights are const propagated
@@ -1082,7 +1076,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test qat Pattern:
             tmp = bn1(conv2d_1(x))
             tmp2 = bn2(conv2d_2(tmp))
-            return tmp+tmp2
+            return tmp + tmp2
         Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
         """
         example_inputs = (torch.randn(2, 3, 6, 6),)
@@ -1094,10 +1088,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             for inplace_add in inplace_add_list:
                 m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add)
                 node_occurrence = {
-                    # one for input of the conv
-                    # one for input of another conv
-                    # 2 conv will share same input quant/dequant
-                    # one for extra input node of add
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
                     # quantize_per_channel for weights are const propagated

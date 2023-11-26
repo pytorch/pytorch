@@ -446,6 +446,7 @@ class X86InductorQuantizer(Quantizer):
                 [conv_partition, bn_partition, binary_partition, unary_partition]
             )
             if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
                 continue
             (
                 bn_output_node_idx,
@@ -504,6 +505,7 @@ class X86InductorQuantizer(Quantizer):
                 [conv_partition, bn_partition, binary_partition]
             )
             if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
                 continue
             (
                 bn_output_node_idx,
@@ -637,6 +639,7 @@ class X86InductorQuantizer(Quantizer):
                 [conv_partition, binary_partition, unary_partition]
             )
             if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
                 continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
@@ -681,6 +684,7 @@ class X86InductorQuantizer(Quantizer):
                 [conv_partition, binary_partition]
             )
             if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
                 continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
