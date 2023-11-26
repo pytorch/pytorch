@@ -1,5 +1,4 @@
 import collections
-import dataclasses
 import itertools
 import logging
 import warnings
@@ -29,8 +28,8 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
-from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx import Interpreter
+from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
 )
@@ -42,19 +41,12 @@ from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
 
-
-original_zip = zip
-
-def strict_zip(*iterables, strict=True, **kwargs):
-    if not strict:
-        return original_zip(*iterables, **kwargs)
-
-    shortest_length = min(len(it) for it in iterables)
-    for iterable in iterables:
-        if len(iterable) != shortest_length:
-            raise ValueError("The iterables have different lengths and strict mode is enabled.")
-
-    return original_zip(*iterables, **kwargs)
+from ._aot_autograd.utils import (  # noqa: F401
+    strict_zip, _get_symint_hints, create_tree_flattened_fn,
+    KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
+    _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
+    make_boxed_compiler,
+)
 
 zip = strict_zip
 
@@ -95,29 +87,6 @@ OutputType = Enum(
     )
 )
 
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
-)
-
-def partial_asdict(obj: Any) -> Any:
-    if dataclasses.is_dataclass(obj):
-        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
-    elif isinstance(obj, (list, tuple)):
-        return obj.__class__([partial_asdict(item) for item in obj])
-    elif isinstance(obj, dict):
-        return {k: partial_asdict(v) for k, v in obj.items()}
-    else:
-        return obj
-
 aten = torch.ops.aten
 
 # This global counter increments every time we compile a graph with
@@ -132,10 +101,6 @@ aten = torch.ops.aten
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
 AOT_COUNTER = itertools.count()
-
-KNOWN_TYPES = tuple(
-    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
-)
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
 callback_set = False
@@ -494,7 +459,7 @@ class InputAliasInfo:
     mutation_type: MutationType
 
 
-@dataclasses.dataclass
+@dataclass
 class SubclassCreationMeta:
     """
     Used for AOTDispatch.
@@ -984,17 +949,6 @@ def was_metadata_updated(arg, new_arg):
     else:
         return arg is not new_arg and StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage())
 
-def _get_hints(exprs):
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
-
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(is_traceable_wrapper_subclass(x) for x in args_flattened if isinstance(x, Tensor))
@@ -1027,14 +981,6 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
         idx += cnt
     return infos
 
-def _get_autocast_states():
-    return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
-        torch.is_autocast_cache_enabled(),
-    ]
 
 
 # This is a version of functionalization that is specifically designed
@@ -1615,7 +1561,7 @@ class GraphSignature:
             backward_signature=backward_signature,
         )
 
-@dataclasses.dataclass
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1945,14 +1891,6 @@ def create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     return fx_g
 
 
-def normalize_as_list(x):
-    if isinstance(x, tuple):
-        return list(x)
-    elif isinstance(x, list):
-        return x
-    return [x]
-
-
 aot_autograd_decompositions = {}
 
 
@@ -2000,43 +1938,6 @@ def track_graph_compiling(aot_config, graph_name):
         graph_being_compiled = []
 
 
-def make_boxed_func(f):
-    def g(args):
-        return f(*args)
-
-    g._boxed_call = True
-    return g
-
-
-def make_boxed_compiler(compiler):
-    @wraps(compiler)
-    def f(fx_g, inps):
-        out_f = compiler(fx_g, inps)
-        fx_g = make_boxed_func(out_f)
-        return fx_g
-
-    return f
-
-
-def call_func_with_args(f, args, steal_args=False, disable_amp=False):
-    if not steal_args:
-        args = list(args)
-    assert isinstance(args, list)
-
-    context = torch._C._DisableAutocast if disable_amp else nullcontext
-    with context():
-        if hasattr(f, "_boxed_call"):
-            out = normalize_as_list(f(args))
-        else:
-            # TODO: Please remove soon
-            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-            warnings.warn(
-                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
-                "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
-            )
-            out = normalize_as_list(f(*args))
-    return out
 
 def aot_dispatch_base_graph(
     flat_fn,
@@ -3067,8 +2968,8 @@ fw_metadata={str(fw_metadata)}
             is_train=fw_metadata.is_train,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
-            f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
-            f'\nactual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+            f'ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, '
+            f'\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}'
         )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
@@ -3138,7 +3039,7 @@ def create_runtime_wrapper(
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
-                all_outs = call_func_with_args(
+                all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args_,
                     disable_amp=disable_amp,
@@ -3149,7 +3050,7 @@ def create_runtime_wrapper(
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
             with torch.no_grad():
-                all_outs = call_func_with_args(
+                all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
@@ -3874,7 +3775,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
                 # value. Using the hints to avoid that.
-                if _get_hints(ph_arg.stride()) != real_stride:
+                if _get_symint_hints(ph_arg.stride()) != real_stride:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -3937,7 +3838,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
-            fw_outs = call_func_with_args(
+            fw_outs = call_func_at_runtime_with_args(
                 CompiledFunction.compiled_fw,
                 args,
                 disable_amp=disable_amp,
@@ -4177,7 +4078,7 @@ Got grad_output types: {str(grad_output_types)}"""
                             bw_module, placeholder_list
                         )
 
-                out = call_func_with_args(
+                out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
                     all_args,
                     steal_args=True,
@@ -4487,32 +4388,6 @@ fw_metadata={str(fw_metadata)}""")
         return compiled_fn
 
 
-# Inspired by autodidax (thanks!)
-class PytreeThunk:
-    spec = None
-    # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
-
-    def set(self, spec):
-        assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
-        ):
-            self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
-            self.is_really_simple = True
-
-    def unflatten(self, x):
-        if self.is_really_simple:
-            return x[0]
-        if self.is_simple:
-            return x
-        return pytree.tree_unflatten(x, self.spec)
-
 
 def create_functional_call(mod, params_spec, params_len):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
@@ -4541,42 +4416,6 @@ def create_functional_call(mod, params_spec, params_len):
         return out
     return functional_call
 
-# Creates a function that returns flattened inputs and outputs
-# Also returns the output tree spec, which is needed to recover the "unflattened"
-# output tree structure later.
-def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThunk]:
-    if kwargs is None:
-        kwargs = {}
-    # Save the args_spec for flat_tensor_args to unflatten while tracing
-    _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
-    out_spec = PytreeThunk()
-
-    def flat_fn(*flat_args):
-        # The input are flattened tensor args. Prepare the args in the
-        # order that original function expects. Add static args as well.
-        # They will appear as tensor constants in the traced graph.
-        nonlocal out_spec
-        args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
-        tree_out = fn(*args, **kwargs)
-        flat_out, spec = pytree.tree_flatten(tree_out)
-        for i in flat_out:
-            is_known_type = False
-            for j in KNOWN_TYPES:
-                if isinstance(i, j):
-                    is_known_type = True
-                    break
-            if not is_known_type:
-                raise RuntimeError(
-                    f"Found {type(i)} in output, which is not a known type. "
-                    "If this type holds tensors, you need to register a pytree for it. "
-                    "See https://github.com/pytorch/functorch/issues/475 for a brief "
-                    "explanation why. If you don't need to register a pytree, please "
-                    "leave a comment explaining your use case and we'll make this more "
-                    "ergonomic to deal with"
-                )
-        out_spec.set(spec)
-        return flat_out
-    return flat_fn, out_spec
 
 def _graph_input_names(gm):
     return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
