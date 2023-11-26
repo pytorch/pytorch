@@ -445,7 +445,8 @@ class X86InductorQuantizer(Quantizer):
             ) = self._get_output_nodes_of_partitions(
                 [conv_partition, bn_partition, binary_partition, unary_partition]
             )
-
+            if len(bn_output_node.users) != 1:
+                continue
             (
                 bn_output_node_idx,
                 extra_input_node_idx,
@@ -502,7 +503,8 @@ class X86InductorQuantizer(Quantizer):
             ) = self._get_output_nodes_of_partitions(
                 [conv_partition, bn_partition, binary_partition]
             )
-
+            if len(bn_output_node.users) != 1:
+                continue
             (
                 bn_output_node_idx,
                 extra_input_node_idx,
@@ -634,6 +636,8 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node, unary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition, unary_partition]
             )
+            if len(conv_node.users) != 1:
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )
@@ -676,6 +680,8 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition]
             )
+            if len(conv_node.users) != 1:
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )

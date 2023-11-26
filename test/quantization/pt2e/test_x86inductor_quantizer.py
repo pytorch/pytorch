@@ -258,6 +258,30 @@ class TestHelperModules:
         def forward(self, x):
             return self.postop(self.linear(x))
 
+    class Conv2dAddModule2(torch.nn.Module):
+        def __init__(self,
+                     inplace_add: bool = False,
+                     ) -> None:
+            super().__init__()
+            self.conv = torch.nn.Conv2d(
+                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1
+            )
+            self.conv2 = torch.nn.Conv2d(
+                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1
+            )
+            self.inplace_add = inplace_add
+            self.bn = torch.nn.BatchNorm2d(3)
+            self.bn2 = torch.nn.BatchNorm2d(3)
+
+        def forward(self, x):
+            if self.inplace_add:
+                tmp = self.bn(self.conv(x))
+                tmp += self.bn2(self.conv2(tmp))
+                return tmp
+            else:
+                tmp = self.bn(self.conv(x))
+                return tmp + self.bn2(self.conv2(tmp))
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -280,11 +304,13 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # QAT Model failed to deepcopy
         export_model = m if is_qat else copy.deepcopy(m)
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
+
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m, fold_quantize=True)
         convert_model = copy.deepcopy(m)
+
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -409,6 +435,50 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+
+    @skipIfNoX86
+    def test_conv2d_binary2(self):
+        """
+        Test Pattern:
+            tmp = conv2d_1(x)
+            tmp2 = conv2d_2(tmp)
+            return tmp+tmp2
+        Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        inplace_add_list = [True, False]
+        with override_quantized_engine("x86"), torch.no_grad():
+            for inplace_add in inplace_add_list:
+                m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add).eval()
+                node_occurrence = {
+                    # one for input of the conv
+                    # one for input of another conv
+                    # 2 conv will share same input quant/dequant
+                    # one for extra input node of add
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
                 ]
                 self._test_quantizer(
                     m,
@@ -996,6 +1066,52 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                    is_qat=True,
+                )
+
+    @skipIfNoX86
+    def test_qat_conv2d_binary2(self):
+        """
+        Test qat Pattern:
+            tmp = bn1(conv2d_1(x))
+            tmp2 = bn2(conv2d_2(tmp))
+            return tmp+tmp2
+        Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+        )
+        inplace_add_list = [True, False]
+        with override_quantized_engine("x86"), torch.no_grad():
+            for inplace_add in inplace_add_list:
+                m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add)
+                node_occurrence = {
+                    # one for input of the conv
+                    # one for input of another conv
+                    # 2 conv will share same input quant/dequant
+                    # one for extra input node of add
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                    # BN should be folded into Conv
+                    torch.ops.aten._native_batch_norm_legit.default: 0,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
                 ]
                 self._test_quantizer(
                     m,
