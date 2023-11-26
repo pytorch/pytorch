@@ -4,7 +4,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_functional
+from torch._functorch.aot_autograd import (
+    AOTConfig,
+    create_joint_function,
+    from_functional,
+)
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
@@ -133,7 +137,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     for ret in fw_out
                 ]
 
-            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            joint = create_joint_function(fw_with_masks, aot_config=dummy_aot_config)
             _, grads = joint(
                 list(mapped_input) + list(args),
                 [

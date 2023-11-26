@@ -163,7 +163,7 @@ def fn_prepped_for_autograd(
 # (2) fn() cannot mutate any inputs that require gradient.
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
-def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
+def create_joint_function(fn: Callable, *, aot_config: AOTConfig) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
         assert len(tangent_mask) == len(outs)
