@@ -649,11 +649,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qconv2d_add_2(self):
         r"""
-        This testcase prevents this pattern be matched as a conv_binary fusion by mistake.              
+        This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
                 Conv(X)  3
                     \   /
                      Add
-        We see this pattern in Mobilenet v3 large which add is decomposed from torch.nn.Hardswish or torch.nn.Hardsigmoid. 
+        We see this pattern in Mobilenet v3 large which add is decomposed from torch.nn.Hardswish or torch.nn.Hardsigmoid.
         """
 
         class M(torch.nn.Module):
@@ -668,7 +668,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x):
                 return self.post_op(self.conv(x))
 
-        for post_op in [torch.nn.Hardswish(inplace=True), torch.nn.Hardsigmoid(inplace=True)]:
+        for post_op in [
+            torch.nn.Hardswish(inplace=True),
+            torch.nn.Hardsigmoid(inplace=True),
+        ]:
             mod = M(post_op).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1

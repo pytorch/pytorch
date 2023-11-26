@@ -62,11 +62,6 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
 
-    print("gm.graph before weight prepack fusion is: {}".format(gm.graph), flush=True)
-    from torch.fx.passes.graph_drawer import FxGraphDrawer
-    g = FxGraphDrawer(gm, "shuffnetv2")
-    g.get_dot_graph().write_svg("/home/jianan/leslie/torch_inductor_lz/before_weight_prepack.svg")
-
     for pattern in pass_patterns:
         pattern.apply(gm.graph)
 

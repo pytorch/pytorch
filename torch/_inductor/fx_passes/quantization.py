@@ -405,11 +405,14 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
                     extra_input_node = arg
                     break
             assert extra_input_node is not None
-            if (not isinstance(extra_input_node, torch.fx.Node)) or (extra_input_node.target != aten.mul.Tensor):
+            if (not isinstance(extra_input_node, torch.fx.Node)) or (
+                extra_input_node.target != aten.mul.Tensor
+            ):
                 return False
         return True
 
     return fn
+
 
 def _register_quantized_conv_binary_lowering(
     pattern,

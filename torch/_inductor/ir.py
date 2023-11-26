@@ -5879,8 +5879,6 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             output_padding,
         )
 
-        print("accum is: {}".format(accum), flush=True)
-
         accum = cls.require_stride_order(accum, req_stride_order)
         inputs.append(accum)
 
