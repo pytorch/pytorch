@@ -54,7 +54,8 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     get_aot_compilation_context,
     track_graph_compiling,
     describe_input,
-    format_guard_bug_msg
+    format_guard_bug_msg,
+    set_model_name,
 )
 
 zip = strict_zip
