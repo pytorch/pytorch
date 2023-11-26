@@ -1,3 +1,4 @@
+import collections
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
@@ -595,3 +596,9 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+
+
+SubclassTracingInfo = collections.namedtuple(
+    "SubclassTracingInfo",
+    ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
+)
