@@ -3,7 +3,7 @@
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.fx.passes.move_constructors import (
+from torch.fx.passes.move_constructors_pass import (
     ConstructorMoverPass,
     ZeroOrMultipleDevicesError,
 )

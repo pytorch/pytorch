@@ -16,7 +16,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
-from torch.fx.passes.move_constructors import (
+from torch.fx.passes.move_constructors_pass import (
     ConstructorMoverPass,
     ZeroOrMultipleDevicesError,
 )
