@@ -114,3 +114,18 @@ def setup_stacktrace_preservation_hooks(roots: List):
             "Gradient addition node due to multiple use of tensor around:"
         )
         node.register_hook(get_posthook(special_stack, node._sequence_nr()))
+
+
+def describe_input(i, aot_config):
+    if i < aot_config.num_params_buffers:
+        return f"parameter/buffer {i}"
+    else:
+        return f"input {i - aot_config.num_params_buffers}"
+
+
+def format_guard_bug_msg(aot_config, expected):
+    return (
+        f"At compilation time, graph {aot_config.aot_id} was compiled under the "
+        f"assumption that {expected}, but at runtime this was not the case.  "
+        "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
+    )
