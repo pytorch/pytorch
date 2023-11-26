@@ -1670,7 +1670,9 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
                 .view(x_values.shape)
             )
             values /= values.norm()
-            vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
+            vec = torch.sparse_coo_tensor(
+                x._indices(), values, x.size(), device=x.device
+            )
         elif _is_sparse_compressed_tensor(x):
             if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
                 compressed_indices, plain_indices = x.crow_indices(), x.col_indices()
@@ -1685,7 +1687,12 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
             )
             values /= values.norm()
             vec = torch.sparse_compressed_tensor(
-                compressed_indices, plain_indices, values, x.size(), layout=x.layout
+                compressed_indices,
+                plain_indices,
+                values,
+                x.size(),
+                layout=x.layout,
+                device=x.device,
             )
         else:
             dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
