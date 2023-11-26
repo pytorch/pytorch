@@ -10,6 +10,7 @@ import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
+@torch.fx._compatibility.compatibility(is_backward_compatible=False)
 class ZeroOrMultipleDevicesError(RuntimeError):
     def __init__(self, target: str, devices: Iterable[torch.device]):
         self.target = target
@@ -21,6 +22,7 @@ class ZeroOrMultipleDevicesError(RuntimeError):
         )
 
 
+@torch.fx._compatibility.compatibility(is_backward_compatible=False)
 class ConstructorMoverPass(PassBase):
     def __init__(
         self, target: str, inplace: bool = False, allow_outputs: bool = False
@@ -124,11 +126,13 @@ class ConstructorMoverPass(PassBase):
             if node.target == "output":
                 continue
 
-            # ensure this node is, in fact, a constructor.
+            # ensure this node is, in fact, a constructor with
+            # a device keyword-argument.
             if not (
                 isinstance(node.target, torch._ops.OpOverload)
                 and node.target.namespace in ("prims", "aten")
                 and torch._subclasses.fake_tensor._is_tensor_constructor(node.target)
+                and "device" in node.kwargs
             ):
                 continue
 
