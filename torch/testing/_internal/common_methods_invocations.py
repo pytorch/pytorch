@@ -13259,6 +13259,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: Conv3D is not supported on MPS
+               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
