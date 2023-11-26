@@ -2,11 +2,11 @@
 
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.constructor_mover_pass import (
     ConstructorMoverPass,
     ZeroOrMultipleDevicesError,
 )
+from torch.fx.passes.infra.pass_base import PassResult
 
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import run_tests, TestCase
