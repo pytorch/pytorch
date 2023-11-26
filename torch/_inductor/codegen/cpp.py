@@ -479,7 +479,7 @@ class CppCSEVariable(CSEVariable):
         # at the beginning of the codegen. It is possible that some ops are invoked
         # during the codegen of the current op and take different dtypes from the
         # current op.
-        # TODO(jgong5): A more accurate way of deciding the dtype the the variables is to
+        # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
         # propagate the dtypes here inside `update_on_args`.
         if (
             hasattr(V.interpreter, "current_node")
@@ -1294,13 +1294,9 @@ class CppVecOverrides(CppOverrides):
         if not V.kernel.index_depends_on(index, tiling_var):
             # if index doesn't depend on tiling_var, it is fine to use a scalar index
             return CppOverrides.index_expr(expr, dtype)
-        # TODO: it is also fine if indirect variable is a scalar and doesn't depend on tiling_var
-        if stride_at(tiling_var, index).is_number and all(
-            not V.kernel.cse.varname_map[s.name].depends_on(tiling_var)
-            and not V.kernel.cse.varname_map[s.name].is_vec
-            for s in index.free_symbols
-            if s.name.startswith("tmp")
-        ):
+        if stride_at(
+            tiling_var, index
+        ).is_number and not V.kernel.index_indirect_depends_on(index, tiling_var):
             stride = stride_at(tiling_var, index)
             value = ops.to_dtype(cexpr(index), dtype)
             if isinstance(value, OpsValue):
@@ -1343,7 +1339,7 @@ class CppKernel(Kernel):
                 mask = mask.value
                 assert isinstance(mask, CppCSEVariable)
                 # see NOTE [dtype of CppCSEVariable]
-                # force dtype to be bool
+                # mask's dtype should be bool
                 mask.dtype = torch.bool
 
         self._load_mask = mask
@@ -1367,15 +1363,20 @@ class CppKernel(Kernel):
         """
         return cexpr(self.rename_indexing(index))
 
-    def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
+    def index_indirect_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
         """
-        Check if an index expr depends on an itervar, i.e. it either has the `itervar` as
-        a free symbol or it has a free symbol CppCSEVariable that depends on `itervar`.
+        Check if an index has free symbol CppCSEVariable that depends on `itervar`.
         """
-        return itervar in index.free_symbols or any(
-            s.depends_on(itervar)
+        return any(
+            self.cse.varname_map[s.name].depends_on(itervar)
             for s in index.free_symbols
-            if isinstance(s, CppCSEVariable)
+            if s.name in self.cse.varname_map
+            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)
+        )
+
+    def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
+        return itervar in index.free_symbols or self.index_indirect_depends_on(
+            index, itervar
         )
 
     def load(self, name: str, index: sympy.Expr):
@@ -1697,7 +1698,7 @@ class CppVecKernel(CppKernel):
                       The `index` could contain indirect indexing or the tiling itervar. When used in
                       the inner loop, the index is transformed as follows:
                       1. the index is linearized along the tiling dim.
-                      2. the indirect indexing vector variables are transformed into arrays over the tiling factor.
+                      2. the indirect indexing vector variables are transformed into arrays over the tiling dim.
         :param dtype: data type of `var` or `index` if `var` is None.
         :param buffer: the code buffer to write the generated code to. If None, we write to `self.loads`.
         :return: a CppCSEVariable that represents the loaded vector.
@@ -1794,18 +1795,12 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        is_broadcast = not self.index_depends_on(
-            index, tiling_var
-        )  # not index.has(tiling_var)
-        if is_broadcast:
+        if not self.index_depends_on(index, tiling_var):
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
-        non_contiguous = stride_at(tiling_var, index) != 1 or any(
-            self.cse.varname_map[s.name].depends_on(tiling_var)
-            or self.cse.varname_map[s.name].is_vec
-            for s in index.free_symbols
-            if s.name.startswith("tmp")
-        )
+        non_contiguous = stride_at(
+            tiling_var, index
+        ) != 1 or self.index_indirect_depends_on(index, tiling_var)
         if non_contiguous:
             csevar = self.load_non_contiguous(var, index, dtype)
         else:
