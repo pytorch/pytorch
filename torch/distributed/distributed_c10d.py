@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import pickle
+import sys
 import time
 import warnings
 from collections import namedtuple
@@ -1314,7 +1315,29 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
             pg_options._timeout = timeout
 
-            backend_class = ProcessGroupNCCL(backend_prefix_store, group_rank, group_size, pg_options)
+            # If our new group includes all ranks, we can reduce
+            # overhead by splitting the communicator (`nccCommSplit`).
+
+            # TODO: support this in the general case by calling
+            # `nccCommSplit` with `NCCL_SPLIT_NOCOLOR` for the ranks
+            # not in the communicator.
+            split_from = None
+            if (
+                is_initialized()
+                and _world.default_pg._get_backend_name() == Backend.NCCL
+                and len(global_ranks_in_group) == _world.default_pg.size()
+            ):
+                # If possible, find a backend to split from by peeling
+                # process group wrappers from the world's default pg.
+                split_from = _world.default_pg._get_backend(_get_pg_default_device())
+                while isinstance(split_from, _ProcessGroupWrapper):
+                    split_from = split_from.wrapped_pg
+
+                if split_from:
+                    pg_options.split_from = split_from
+                    pg_options.split_color = _process_group_color(global_ranks_in_group)
+            backend_class = ProcessGroupNCCL(
+                backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
@@ -3514,11 +3537,19 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
+# helper function for deterministically hashing a list of ranks
+def _hash_ranks(ranks: List[int]):
+    return hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+
+# Takes a list of ranks and computes an integer color
+def _process_group_color(ranks: List[int]) -> int:
+    # Convert our hash to an int, but avoid negative numbers by shifting a bit.
+    return int(_hash_ranks(ranks), 16) % (sys.maxsize >> 1)
 
 def _process_group_name(ranks, use_hashed_name):
     global _world
     if use_hashed_name:
-        pg_name = hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+        pg_name = _hash_ranks(ranks)
         while pg_name in _world.pg_names.values():
             pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
     else:
