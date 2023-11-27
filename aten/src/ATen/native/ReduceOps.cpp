@@ -1343,12 +1343,12 @@ TORCH_IMPL_FUNC(mean_out)
       case kBFloat16:
         // For accuracy reasons, BF16 mean should be computed by following
         // this approach (FP16 would also use a similar approach):
-        //  cast_fp32->sum ->div-> cast_bf16
+        //  cast_fp32 -> sum -> div -> cast_bf16
         //
         // This approach results in one extra pass over all the
         // elements of the output tensor, but that overhead is amortized by
         // vectorization. Such an approach is necessary because
-        // cast_fp32->sum-> cast_bf16->cast_fp32->div-> cast_bf16
+        // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16
         // does not produce as precise results.
         result_mut = result_mut.to(ScalarType::Float,
                                    result_mut.layout(),
@@ -1357,16 +1357,20 @@ TORCH_IMPL_FUNC(mean_out)
                                    /*non_blocking=*/false,
                                    /*copy=*/false,
                                    /*memory_format=*/at::MemoryFormat::Preserve);
-        // a copy of self (input tensor) will be implicitly cast to FP32.
+
+        // self (input tensor) will initially be casted to FP32 in sum_out.
         // This results in an extra pass over the input tensor but maybe in the
         // future, temporal locality could be leveraged such that for computing
-        // sum, the BF16/FP16 input tensor would be read only once.
+        // sum, the BF16/FP16 input tensor would have to be read only once.
         // That would probably require some templatization/special-casing in
         // binary_kernel_reduce_vec(), TensorIteratorBase::for_each(), and
-        // TensorIteratorBase::serial_for_each()
+        // TensorIteratorBase::serial_for_each().
         at::sum_out(
             result_mut, self, opt_dim, keepdim, ScalarType::Float).div_(dim_prod);
-        // cast result_mut back to BF16 or FP16
+
+        // Cast result_mut back to BF16 or FP16.
+        // A digression - the copy argument to at::native::to would be ignored,
+        // so it might as well have been true in both the at::native::to calls here.
         result_mut = result_mut.to(dtype,
                                    self.layout(),
                                    self.device(),
