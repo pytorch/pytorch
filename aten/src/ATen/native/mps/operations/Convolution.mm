@@ -7,12 +7,10 @@
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
-
 namespace at::native {
 
 #if MAC_OS_VERSION_13_2
-//Create 3D convolution descriptor
+// Create 3D convolution descriptor
 static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
                       NSUInteger strideInX,
                       NSUInteger strideInY,
@@ -139,7 +137,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     bias_defined = bias_opt->defined();
 
   auto memory_format = input_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
+  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
                                         : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
@@ -347,7 +345,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
   auto memory_format = grad_output_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
+  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
   auto grad_input_t = at::empty(input_size, grad_output_t.options(), c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
@@ -501,7 +499,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
   auto memory_format = grad_output_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
+  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
 
   MPSShape* gradOutputShape = mps::getMPSShape(grad_output_t, memory_format);
 
