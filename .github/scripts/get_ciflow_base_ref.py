@@ -2,13 +2,12 @@
 
 import json
 import os
-import re
 import sys
 import time
 import urllib
 import urllib.parse
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 from urllib.request import Request, urlopen
 
 def parse_json(conn: Any) -> Any:
@@ -49,10 +48,10 @@ def fetch_base_ref(url: str, headers: Dict[str, str]) -> Any:
     return response["base"]["ref"]
 
 
-def find_base_branch() -> str:
+def find_base_branch() -> Any:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     GITHUB_REF_NAME = os.environ.get("GITHUB_REF_NAME", "")
-    pull = 0
+    pull = ""
     if GITHUB_REF_NAME != "" and "ciflow" in GITHUB_REF_NAME:
         pull = GITHUB_REF_NAME.rsplit('/', 1)[-1]
     else:
