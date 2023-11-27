@@ -238,7 +238,22 @@ class MetaConverter:
             t, src, policy=policy
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                if isinstance(t, FakeTensor) and t.fake_mode.shape_env is shape_env:
+                # Returns the ShapeEnv from the FakeMode associated with this tensor, or None.
+                def get_fake_mode_shape_env(t):
+                    if isinstance(t, FakeTensor):
+                        return t.fake_mode.shape_env
+
+                    # subclass case: try to pull fake mode from inner tensors
+                    if is_traceable_wrapper_subclass(t):
+                        attrs, _ = t.__tensor_flatten__()
+                        for attr in attrs:
+                            inner = getattr(t, attr)
+                            if isinstance(inner, FakeTensor):
+                                return inner.fake_mode.shape_env
+
+                    return None
+
+                if get_fake_mode_shape_env(t) is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size(), t.stride(), t.storage_offset())
