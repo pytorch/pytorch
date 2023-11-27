@@ -302,9 +302,10 @@ class TestFSDPIgnoredModules(FSDPTest):
             ignored_states=ignored_states,
         )
         ref_model = Model()
-        expected_layer1_unsharded_numel = sum(
-            p.numel() for p in ref_model.layer1.parameters()
-        ) - ref_model.layer1[1].weight.numel()
+        expected_layer1_unsharded_numel = (
+            sum(p.numel() for p in ref_model.layer1.parameters())
+            - ref_model.layer1[1].weight.numel()
+        )
         if ignore_bias:
             expected_layer1_unsharded_numel -= ref_model.layer1[1].bias.numel()
         expected_model_unsharded_numel = sum(
