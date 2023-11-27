@@ -33,7 +33,7 @@ retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packa
 
 pip_install -i https://test.pypi.org/simple/ onnx==1.15.0rc2
 # pip_install onnxscript==0.1.0.dev20231114 --no-deps
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@00ea75e36466ed71a2703b2d9ee56b8e64711632" --no-deps
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@28676f3fe159d3c493e51c489fa71fcb845f0f0e" --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
