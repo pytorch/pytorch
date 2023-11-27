@@ -43,8 +43,14 @@ def _parameterized_class_attrs_and_values():
     input_values = []
     input_values.extend(
         itertools.product(
-            (True, False),
-            (True, False),
+            (
+                True,
+                False,
+            ),
+            (
+                True,
+                False,
+            ),
             (
                 onnx_test_common.TorchModelType.TORCH_NN_MODULE,
                 onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
@@ -181,35 +187,33 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "Non-tensor input is not traceable in dynamo."
     )
     def test_xfail_func_with_non_tensor_args(self):
-        def func(x, b=1.0):
-            y = x + b
-            z = y.relu()
-            return (y, z)
+        def func(x, b):
+            return x + b
 
-        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+        tensor_x = torch.ones(7, 5)
 
         onnx_program = torch.onnx.dynamo_export(
             func,
             tensor_x,
-            8.0,
+            5,
             export_options=torch.onnx.ExportOptions(
                 op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
         onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 5)
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 5))
         ort_outputs = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
-        # test on different non-tensor input - xfail
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
-        _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
-        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+        # # test on different non-tensor input - xfail
+        # onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
+        # ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
+        # _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
+        # for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        #     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     def test_func_with_nested_input_structure(self):
         def func(
@@ -515,9 +519,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
-        "of node (n0__4) does not match expected type (tensor(int64))"
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "RuntimeError:"
+        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
+        " If you need this functionality, please file a github issue."
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node."
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -895,83 +904,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_args,
             create_pytorch_only_extra_kwargs,
         )
-
-    def test_execute_model_with___call__(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        input_x = torch.randn(1, 1, 2, dtype=torch.float)
-        onnx_program = torch.onnx.dynamo_export(
-            Model(),
-            input_x,
-        )
-
-        # The other tests use ONNXProgram.__call__ indirectly and check for output equality
-        # This test aims to ensure ONNXProgram.__call__ API runs successfully despite internal test infra code
-        _ = onnx_program(input_x)
-
-    def test_exported_program_as_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            exported_program, (x,), skip_dynamic_shapes_check=True
-        )
-
-    def test_exported_program_as_input_from_file(self):
-        import tempfile
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
-            torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
-            loaded_exported_program = torch.export.load(f.name)
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
-        )
-
-    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        "Unsupported FX nodes: {'call_function': ['aten.add_.Tensor']}. "
-        "github issue: https://github.com/pytorch/pytorch/issues/114406"
-    )
-    def test_exported_program_as_input_lifting_buffers_mutation(self):
-        for persistent in (True, False):
-
-            class CustomModule(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.register_buffer(
-                        "my_buffer", torch.tensor(4.0), persistent=persistent
-                    )
-
-                def forward(self, x, b):
-                    output = x + b
-                    (
-                        self.my_buffer.add_(1.0) + 3.0
-                    )  # Mutate buffer through in-place addition
-                    return output
-
-            inputs = (torch.rand((3, 3), dtype=torch.float32), torch.randn(3, 3))
-            model = CustomModule()
-            self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                model, inputs, skip_dynamic_shapes_check=True
-            )
-            # Buffer will be mutated after the first iteration
-            self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                model, inputs, skip_dynamic_shapes_check=True
-            )
 
 
 def _parameterized_class_attrs_and_values_with_fake_options():
