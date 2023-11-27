@@ -1356,7 +1356,7 @@ TORCH_IMPL_FUNC(mean_out)
                                    /*copy=*/false,
                                    /*memory_format=*/at::MemoryFormat::Preserve);
 
-        // self (input tensor) will initially be casted to FP32 in sum_out.
+        // self (input tensor) will initially be cast to FP32 in sum_out.
         // This results in having to read that FP32 tensor again, but maybe in
         // the future, we could revise the implementation to not materialize
         // that intermediate FP32 tensor. That approach would probably require
