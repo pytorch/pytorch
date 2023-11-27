@@ -29,8 +29,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
-    FreshCreateSymbolicPolicy,
     ShapeEnv,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -3311,7 +3311,7 @@ def forward(self, x):
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
                     x,
-                    policy=FreshCreateSymbolicPolicy(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
                     ),
                 )
