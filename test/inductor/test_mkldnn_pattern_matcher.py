@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import itertools
 import unittest
 
@@ -495,7 +496,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         self._qconv2d_cpu_test_helper(int8_mixed_bf16=True)
 
-    def _qconv2d_unary_cpu_test_helper(self, int8_mixed_bf16=False):
+    def _qconv2d_unary_cpu_test_helper(
+        self,
+        int8_mixed_bf16=False,
+        unary_op=torch.nn.ReLU(),
+    ):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -503,9 +508,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             ):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
-                self.unary_fn = torch.nn.ReLU()
+                self.unary_fn = copy.deepcopy(unary_op)
                 self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
-                self.unary_fn2 = torch.nn.ReLU()
+                self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
                 tmp = self.unary_fn(self.conv(x))
@@ -548,6 +553,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize Conv2d->ReLU pattern with int8_mixed_bf16 quantization.
         """
         self._qconv2d_unary_cpu_test_helper(int8_mixed_bf16=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_relu6_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU6 pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.ReLU6())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_hardtanh_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardtanh pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
 
     def _qconv2d_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
         r"""
@@ -735,26 +758,26 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qat_qconv2d_relu(self):
-        r"""
-        This testcase will quantize Conv2d->ReLU pattern with qat flow.
-        """
-
+    def _qat_qconv2d_unary_cpu_test_helper(
+        self,
+        unary_op=torch.nn.ReLU(),
+    ):
         class M(torch.nn.Module):
             def __init__(
                 self,
                 **kwargs,
             ):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
-                self.unary_fn = torch.nn.ReLU()
-                self.bn = torch.nn.BatchNorm2d(128)
+                self.conv = torch.nn.Conv2d(3, 3, kernel_size=3, stride=1)
+                self.unary_fn = copy.deepcopy(unary_op)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.conv2 = torch.nn.Conv2d(3, 3, kernel_size=3, stride=1)
+                self.unary_fn2 = copy.deepcopy(unary_op)
+                self.bn2 = torch.nn.BatchNorm2d(3)
 
             def forward(self, x):
-                return self.unary_fn(self.bn(self.conv(x)))
+                tmp = self.unary_fn(self.bn(self.conv(x)))
+                return self.unary_fn2(self.bn2(self.conv2(tmp)))
 
         mod = M()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
@@ -763,15 +786,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Dequant-conv pattern matched in quantization weight prepack * 1
             #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
-            )
-            self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 1
             #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 8)
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
 
         self._test_common(
             mod,
@@ -780,6 +799,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_qat=True,
             matcher_check_fn=matcher_check_fn,
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_relu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern with qat flow.
+        """
+
+        self._qat_qconv2d_unary_cpu_test_helper()
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_relu6(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU6 pattern with qat flow.
+        """
+
+        self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.ReLU6())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_hardtanh(self):
+        r"""
+        This testcase will quantize Conv2d->Hardtanh pattern with qat flow.
+        """
+
+        self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
