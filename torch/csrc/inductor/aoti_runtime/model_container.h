@@ -55,6 +55,7 @@ class AOTInductorModelContainer {
     model->load_constants(is_cpu);
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
+    constants_internal_offset_.resize(model->num_constants());
     model->compute_cuda_constant_blob(blob_size_, constants_internal_offset_);
 #endif
 
