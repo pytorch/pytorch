@@ -6,7 +6,7 @@
 {%- set timeout_minutes = 240 -%}
 
 # NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
-#       the binary builds will check out
+#       the binary builds will check out. For release builder_branch must be set to release/version branch
 {%- set builder_repo = "pytorch/builder" -%}
 {%- set builder_branch = "main" -%}
 

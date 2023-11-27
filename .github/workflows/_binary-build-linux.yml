@@ -148,6 +148,8 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -187,10 +189,19 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: ${{ env.REPO_BRANCH }}
           submodules: recursive
           repository: pytorch/builder
           path: builder
+          quiet-checkout: true
+
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
           quiet-checkout: true
 
       - name: Clean pytorch/builder checkout
@@ -213,7 +224,7 @@ jobs:
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: ./test-infra/.github/actions/pull-docker-image
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
@@ -270,7 +281,7 @@ jobs:
 
       - name: Teardown Linux
         if: always()
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: ./test-infra/.github/actions/teardown-linux
 
       - name: Chown workspace
         if: always()
