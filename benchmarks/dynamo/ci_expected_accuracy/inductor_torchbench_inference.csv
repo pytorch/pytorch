@@ -10,6 +10,10 @@ Background_Matting,pass_due_to_skip,0
 
 
 
+DALLE2_pytorch,fail_to_run,31
+
+
+
 LearningToPaint,pass,0
 
 
@@ -38,15 +42,19 @@ basic_gnn_sage,pass,0
 
 
 
-clip,pass_due_to_skip,0
-
-
-
-cm3leon_generate,pass,5
+cm3leon_generate,pass,4
 
 
 
 dcgan,pass,0
+
+
+
+densenet121,pass,0
+
+
+
+detectron2_fcos_r_50_fpn,pass,42
 
 
 
@@ -86,6 +94,10 @@ hf_Bart,pass,0
 
 
 
+hf_BigBird,fail_accuracy,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -94,11 +106,19 @@ hf_GPT2,pass,0
 
 
 
+hf_GPT2_large,pass_due_to_skip,0
+
+
+
 hf_Reformer,pass,5
 
 
 
-hf_T5_generate,pass,21
+hf_T5,pass,0
+
+
+
+hf_T5_generate,pass,20
 
 
 
@@ -158,7 +178,15 @@ phlippe_resnet,pass,0
 
 
 
+pyhpc_equation_of_state,pass,0
+
+
+
 pyhpc_isoneutral_mixing,pass,0
+
+
+
+pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
@@ -247,6 +275,10 @@ tts_angular,pass,2
 
 
 vgg16,pass,0
+
+
+
+vision_maskrcnn,pass,17
 
 
 

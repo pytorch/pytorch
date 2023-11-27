@@ -293,7 +293,7 @@ def _replace_pattern(
         assert user_nodes, "The returning_nodes should have at least one user node"
 
         if len(user_nodes) == 1:
-            first_user_node = list(user_nodes)[0]
+            first_user_node = next(iter(user_nodes))
         else:
             # If there are multiple user nodes, we need to find the first user node
             # in the current execution order of the `original_graph`

@@ -577,3 +577,6 @@ API Reference
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
 .. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses

@@ -257,7 +257,7 @@ def _share_state_and_init_handle_attrs(
         # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
         if hasattr(root_state, "_device_mesh"):
             fsdp_state._device_mesh = root_state._device_mesh
-            fsdp_state._enable_extension = root_state._enable_extension
+            fsdp_state._fsdp_extension = root_state._fsdp_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -834,10 +834,15 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
     )
     if state._comm_hook is None:  # default path
         _div_if_needed(padded_unsharded_grad, state._gradient_predivide_factor)
+        pg = (
+            handle._fake_process_group
+            if handle._use_fake_reduce
+            else state.process_group
+        )
         dist.reduce_scatter_tensor(
             new_sharded_grad,
             padded_unsharded_grad,
-            group=state.process_group,
+            group=pg,
         )
         if uses_hybrid_sharded_strategy:
             state._all_reduce_stream.wait_stream(state._post_backward_stream)

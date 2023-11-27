@@ -10,8 +10,8 @@ architectures:
     * Latest ROCM
 """
 
+import os
 from typing import Dict, List, Optional, Tuple
-
 
 CUDA_ARCHES = ["11.8", "12.1"]
 
@@ -94,23 +94,29 @@ def arch_type(arch_version: str) -> str:
         return "cpu"
 
 
+# This can be updated to the release version when cutting release branch, i.e. 2.1
+DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
+
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}"
+        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "cpu": "pytorch/manylinux-builder:cpu",
-    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
+    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
+    "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
 }
 
 CONDA_CONTAINER_IMAGES = {
-    **{gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
-    "cpu": "pytorch/conda-builder:cpu",
+    **{
+        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    "cpu": f"pytorch/conda-builder:cpu-{DEFAULT_TAG}",
 }
 
 PRE_CXX11_ABI = "pre-cxx11"
@@ -120,23 +126,35 @@ DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:cuda{gpu_arch}"
+        (
+            gpu_arch,
+            PRE_CXX11_ABI,
+        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
+        (
+            gpu_arch,
+            CXX11_ABI,
+        ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        (
+            gpu_arch,
+            PRE_CXX11_ABI,
+        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}"
+        (
+            gpu_arch,
+            CXX11_ABI,
+        ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
-    ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
+    ("cpu", PRE_CXX11_ABI): f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
@@ -246,7 +264,6 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[List[str]] = None,
     python_versions: Optional[List[str]] = None,
-    gen_special_an_non_special_wheel: bool = True,
 ) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64":
@@ -254,7 +271,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS
+        python_versions = FULL_PYTHON_VERSIONS + ["3.12"]
 
     if arches is None:
         # Define default compute archivectures
@@ -280,8 +297,7 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # special 12.1 wheels package without dependencies
-            # dependency downloaded via pip install
+            # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
             if arch_version == "12.1" and os == "linux":
                 ret.append(
                     {
@@ -295,35 +311,33 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS,
-                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn".replace(  # noqa: B950
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
                             ".", "_"
                         ),
                     }
                 )
-                if not gen_special_an_non_special_wheel:
-                    continue
-
-            ret.append(
-                {
-                    "python_version": python_version,
-                    "gpu_arch_type": gpu_arch_type,
-                    "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
-                    "devtoolset": "cxx11-abi"
-                    if arch_version == "cpu-cxx11-abi"
-                    else "",
-                    "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                    "package_type": package_type,
-                    "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
-                    ),
-                    "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS
-                    if os != "linux"
-                    else "",
-                }
-            )
+            else:
+                ret.append(
+                    {
+                        "python_version": python_version,
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
+                        "devtoolset": "cxx11-abi"
+                        if arch_version == "cpu-cxx11-abi"
+                        else "",
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "package_type": package_type,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                            ".", "_"
+                        ),
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+                        if os != "linux"
+                        else "",
+                    }
+                )
     return ret
 
 
