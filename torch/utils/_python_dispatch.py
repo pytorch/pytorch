@@ -153,7 +153,9 @@ def is_traceable_wrapper_subclass(t):
             inner_tensors: dict mapping attribute name -> tensor for each inner tensor
             ctx: dict with subclass metadata in the form that __tensor_flatten__() produces
             outer_size: expected (possibly symbolic) size that the returned subclass
-                instance should have
+                instance should have. Note that this arg is useful for certain subclasses
+                that require the shape info to be constructed. In most cases, this arg can be
+                safely ignored.
     """
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
