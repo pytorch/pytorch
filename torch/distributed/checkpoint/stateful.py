@@ -8,10 +8,10 @@ __all__ = ["Stateful", "StatefulT"]
 
 @runtime_checkable
 class Stateful(Protocol):
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self, **kwargs) -> Dict[str, Any]:
         ...
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: Dict[str, Any], **kwargs) -> None:
         ...
 
 

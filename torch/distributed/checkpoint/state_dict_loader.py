@@ -38,6 +38,8 @@ def load(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
+    state_dict_kwargs: Dict = None,
+    load_state_dict_kwargs: Dict = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -107,6 +109,9 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
+    state_dict_kwargs = state_dict_kwargs or {}
+    load_state_dict_kwargs = load_state_dict_kwargs or {}
+
     keys = _all_gather_keys(state_dict)
 
     statetful_sd = {}
@@ -114,7 +119,7 @@ def load(
         if key not in state_dict:
             continue
         elem = state_dict[key]
-        statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+        statetful_sd[key] = elem.state_dict(**state_dict_kwargs) if isinstance(elem, Stateful) else elem
 
     _load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
     for key in keys:
@@ -122,7 +127,7 @@ def load(
             continue
         elem = state_dict[key]
         if isinstance(elem, Stateful):
-            elem.load_state_dict(statetful_sd[key])
+            elem.load_state_dict(statetful_sd[key], **load_state_dict_kwargs)
         state_dict[key] = elem
 
 def _load_state_dict(

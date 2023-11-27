@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict
 import warnings
 
 import torch
@@ -42,6 +42,7 @@ def save(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
+    state_dict_kwargs: Dict = None,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -106,11 +107,11 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+    state_dict_kwargs = state_dict_kwargs or {}
 
     dumpable_state_dict = {}
     for key, elem in state_dict.items():
-        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+        dumpable_state_dict[key] = elem.state_dict(**state_dict_kwargs) if isinstance(elem, Stateful) else elem
 
     return _save_state_dict(
         dumpable_state_dict,
