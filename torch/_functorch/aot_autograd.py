@@ -42,10 +42,17 @@ from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
 
 from ._aot_autograd.utils import (  # noqa: F401
-    strict_zip, _get_symint_hints, create_tree_flattened_fn,
-    KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
-    _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
-    make_boxed_compiler, maybe_to_fresh_input,
+    strict_zip,
+    _get_symint_hints,
+    KNOWN_TYPES,
+    partial_flatten_asdict,
+    normalize_as_list,
+    _get_autocast_states,
+    make_boxed_func,
+    make_boxed_compiler,
+    call_func_at_runtime_with_args,
+    create_tree_flattened_fn,
+    maybe_to_fresh_input,
 )
 
 zip = strict_zip
@@ -4219,14 +4226,27 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
+                # see note [Tensor Fakification and Symbol Caching]
+                symbolic_context = None
+                source = None
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if x in tracing_context.tensor_to_context:
+                        symbolic_context = tracing_context.tensor_to_context[x]
+                        source = symbolic_context.tensor_source
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
+                    and not symbolic_context
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return fake_mode.from_tensor(
+                    x, static_shapes=False, symbolic_context=symbolic_context, source=source
+                )
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
