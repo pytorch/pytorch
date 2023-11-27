@@ -1172,6 +1172,7 @@ API Reference
 .. py:module:: torch.fx.operator_schemas
 .. py:module:: torch.fx.passes.annotate_getitem_nodes
 .. py:module:: torch.fx.passes.backends.cudagraphs
+.. py:module:: torch.fx.passes.constructor_mover_pass
 .. py:module:: torch.fx.passes.dialect.common.cse_pass
 .. py:module:: torch.fx.passes.fake_tensor_prop
 .. py:module:: torch.fx.passes.graph_drawer
