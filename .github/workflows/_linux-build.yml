@@ -96,12 +96,11 @@ jobs:
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
         env:
-          DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*:}
-          echo "docker pull ghcr.io/pytorch/ci-image:${DOCKER_IMAGE_NAME}-${tag}"
+          tag=${${ECR_DOCKER_IMAGE##*/}/:/-}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag}"
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
