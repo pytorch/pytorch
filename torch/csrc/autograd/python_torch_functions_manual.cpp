@@ -535,6 +535,27 @@ static PyObject* THPVariable__functionalize_enable_reapply_views(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_is_multi_output_view(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_is_multi_output_view(Tensor t)"},
+      /*traceable=*/true);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto t = r.tensor(0);
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(t));
+  auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+  if (t_impl->is_multi_output_view()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__disable_functionalization(
     PyObject* self,
     PyObject* args,
@@ -713,6 +734,11 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_are_all_mutations_hidden_from_autograd",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_is_multi_output_view",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_is_multi_output_view),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",

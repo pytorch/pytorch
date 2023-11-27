@@ -200,9 +200,12 @@ aten::_foreach_div.Scalar
 aten::_foreach_div.ScalarList
 aten::_foreach_div.ScalarList_out
 aten::_foreach_div.Scalar_out
+aten::_foreach_div.Tensor
+aten::_foreach_div.Tensor_out
 aten::_foreach_div_.List
 aten::_foreach_div_.Scalar
 aten::_foreach_div_.ScalarList
+aten::_foreach_div_.Tensor
 aten::_foreach_erf
 aten::_foreach_erf.out
 aten::_foreach_erf_
@@ -573,15 +576,12 @@ aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input
-aten::_upsample_nearest_exact1d
 aten::_upsample_nearest_exact1d.out
 aten::_upsample_nearest_exact1d_backward
 aten::_upsample_nearest_exact1d_backward.grad_input
-aten::_upsample_nearest_exact2d
 aten::_upsample_nearest_exact2d.out
 aten::_upsample_nearest_exact2d_backward
 aten::_upsample_nearest_exact2d_backward.grad_input
-aten::_upsample_nearest_exact3d
 aten::_upsample_nearest_exact3d.out
 aten::_upsample_nearest_exact3d_backward
 aten::_upsample_nearest_exact3d_backward.grad_input
@@ -592,8 +592,6 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
-aten::_weight_norm_interface
-aten::_weight_norm_interface.out
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out
@@ -885,6 +883,7 @@ aten::lu_unpack.out
 aten::masked_scatter
 aten::masked_scatter.out
 aten::masked_scatter_
+aten::masked_scatter_backward
 aten::masked_select
 aten::masked_select.out
 aten::matmul_backward

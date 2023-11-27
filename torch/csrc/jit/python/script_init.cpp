@@ -2073,6 +2073,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "check_source_highlighted",
           &testing::FileCheck::check_source_highlighted)
+      .def("check_regex", &testing::FileCheck::check_regex)
       .def(
           "check_count",
           [](testing::FileCheck& f,

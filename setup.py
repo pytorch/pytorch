@@ -1110,7 +1110,7 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
-        "typing-extensions",
+        "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
         "jinja2",
@@ -1296,6 +1296,7 @@ def main():
         "include/torch/csrc/lazy/ts_backend/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
+        "include/pybind11/eigen/*.h",
         "include/TH/*.h*",
         "include/TH/generic/*.h*",
         "include/THC/*.cuh",

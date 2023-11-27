@@ -31,25 +31,44 @@ class NCCLTestBase {
     pg_ = std::move(other.pg_);
   }
 
-  ::c10d::ProcessGroupNCCL& getProcessGroup() {
-    return *pg_;
+  std::shared_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
+    return pg_;
   }
 
-  void initialize(int rank, int size) {
-    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
+  ::c10::intrusive_ptr<::c10d::Store>& getProcessGroupStore() {
+    return store_;
+  }
+
+  void initialize(
+      int rank,
+      int size,
+      c10::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
+          c10::nullopt) {
+    store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =
         c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
-    setenv("ENABLE_NCCL_HEALTH_CHECK", "1", /* overwrite */ 1);
+    setenv(
+        c10d::TORCH_ENABLE_NCCL_HEALTH_CHECK[0].c_str(),
+        "1",
+        /* overwrite */ 1);
+#ifdef NCCL_HAS_COMM_SPLIT
+    if (split_from) {
+      opts->split_from = *split_from;
+      opts->split_color = ++color_;
+    }
+#endif
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
-        new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
+        new ::c10d::ProcessGroupNCCL(store_, rank, size, std::move(opts)));
   }
 
  protected:
   std::string path_;
-  std::unique_ptr<::c10d::ProcessGroupNCCL> pg_;
+  std::shared_ptr<::c10d::ProcessGroupNCCL> pg_;
   std::chrono::milliseconds pgTimeout_;
+  ::c10::intrusive_ptr<::c10d::Store> store_;
+  int color_{1};
 };
 
 class NCCLTest : public NCCLTestBase {
@@ -715,9 +734,9 @@ void testSequenceNumInit(
   auto runTest = [&](int i) {
     NCCLTest test(path, worldSize);
     test.initialize(i, worldSize);
-    test.getProcessGroup().setSequenceNumberForGroup();
+    test.getProcessGroup()->setSequenceNumberForGroup();
     std::lock_guard<std::mutex> lock(m);
-    auto seqNum = test.getProcessGroup().getSequenceNumberForGroup();
+    auto seqNum = test.getProcessGroup()->getSequenceNumberForGroup();
     nums.insert(seqNum);
   };
   std::vector<std::thread> threads;
@@ -734,6 +753,7 @@ void testSequenceNumInit(
 class ProcessGroupNCCLTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    c10::initLogging();
     // Use WORLD_SIZE and RANK environmental variables to do multi-node
     // distributed testing
     auto sizeEnv = std::getenv("WORLD_SIZE");
@@ -748,7 +768,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
 
   void TearDown() override {
     // Reset NCCL_BLOCKING_WAIT environment variable after each run.
-    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "0", 1) == 0);
+    ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
   }
 
   bool skipTest() {
@@ -873,9 +893,53 @@ TEST_F(ProcessGroupNCCLTest, testBackendName) {
     auto test = NCCLTestBase(file.path);
     test.initialize(rank_, size_);
     EXPECT_EQ(
-        test.getProcessGroup().getBackendName(),
+        test.getProcessGroup()->getBackendName(),
         std::string(c10d::NCCL_BACKEND_NAME));
   }
+}
+
+TEST_F(ProcessGroupNCCLTest, testSplittingCommunicator) {
+  if (skipTest()) {
+    return;
+  }
+  TemporaryFile file;
+  auto test1 = BroadcastNCCLTest(file.path, size_);
+  test1.initialize(rank_, size_);
+
+  auto test2 = BroadcastNCCLTest(file.path, size_);
+  test2.initialize(rank_, size_, test1.getProcessGroup());
+
+  // Steal the broadcast test and issue it for both of our groups.
+  // This ensures consistent full collective communication.  TODO:
+  // maybe refactor the guts rather than copy-pasta, but it may not be
+  // worth it.
+  for (auto test : {&test1, &test2}) {
+    const int numDevices = test->numDevices();
+    // try every permutation of root rank and root tensor
+    for (const auto rootRank : c10::irange(size_)) {
+      for (const auto rootTensor : c10::irange(numDevices)) {
+        auto work = test->run(rootRank, rootTensor);
+        test->wait(work);
+
+        // Check results
+        const auto expected = (rootRank * numDevices + rootTensor);
+        const auto tensors = test->getTensors();
+        for (const auto& tensor : tensors) {
+          const auto* const data = tensor.data_ptr<float>();
+          for (const auto k : c10::irange(tensor.numel())) {
+            EXPECT_EQ(data[k], expected)
+                << "Broadcast outputs do not match expected outputs";
+          }
+        }
+      }
+    }
+  }
+
+  // Now that we've run full operations on both the original and split process
+  // group, ensure we saw exactly as many splits as we expected: 0 in the
+  // original process group, and one per device in the second.
+  EXPECT_EQ(test2.getProcessGroup()->getCommSplitCounter(), 0);
+  EXPECT_EQ(test1.getProcessGroup()->getCommSplitCounter(), test1.numDevices());
 }
 
 #ifdef IS_NCCL_EXP

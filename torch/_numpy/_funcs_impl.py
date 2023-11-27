@@ -585,6 +585,7 @@ def _conv_corr_impl(a, v, mode):
     v = _util.cast_if_needed(v, dt)
 
     padding = v.shape[0] - 1 if mode == "full" else mode
+
     if padding == "same" and v.shape[0] % 2 == 0:
         # UserWarning: Using padding='same' with even kernel lengths and odd
         # dilation may require a zero-padded copy of the input be created
@@ -1881,6 +1882,9 @@ def histogram(
 ):
     if normed is not None:
         raise ValueError("normed argument is deprecated, use density= instead")
+
+    if weights is not None and weights.dtype.is_complex:
+        raise NotImplementedError("complex weights histogram.")
 
     is_a_int = not (a.dtype.is_floating_point or a.dtype.is_complex)
     is_w_int = weights is None or not weights.dtype.is_floating_point

@@ -661,24 +661,12 @@ def validate_namespace(ns: str) -> None:
         )
 
 def validate_schema(schema: FunctionSchema) -> None:
-    # Coming in the future. Requires us to have correct logic for
-    # the ADInplaceOrView key
-    if schema.kind() != SchemaKind.functional:
+    if not torch._library.utils.is_functional_schema(schema):
         raise ValueError(
-            f"custom_op does not support non-functional function schema. Got: {schema}"
-        )
-
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
-    )
-    if is_non_mutating_view:
-        raise ValueError(f"custom_op does not support view functions. Got: {schema}")
-
-    # Just seems weird so banning for now
-    if not schema.returns:
-        raise ValueError(
-            f"custom_op does not support function schema with no outputs. Got: {schema}"
+            f"custom_op only supports functional operators "
+            f"(ops that do not mutate any inputs, do not return "
+            f"views of the inputs, and has at least one return). "
+            f"Got the following non-functional schema: {schema}"
         )
 
     # For simplicity: don't allow self arguments

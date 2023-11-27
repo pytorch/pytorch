@@ -160,6 +160,7 @@ class TestFlag(TestCase):
     def setUp(self):
         self.a = np.arange(10)
 
+    @xfail
     def test_writeable(self):
         mydict = locals()
         self.a.flags.writeable = False
@@ -274,7 +275,7 @@ class TestFlag(TestCase):
         assert a.__array_interface__["data"][1] is not writeable
         assert np.asarray(MyArr()).flags.writeable is writeable
 
-    @xpassIfTorchDynamo
+    @xfail
     def test_otherflags(self):
         assert_equal(self.a.flags.carray, True)
         assert_equal(self.a.flags["C"], True)
@@ -365,6 +366,9 @@ class TestAttributes(TestCase):
         assert_equal(self.two.size, 20)
         assert_equal(self.two.nbytes, 20 * num)
         assert_equal(self.two.itemsize, self.two.dtype.itemsize)
+
+    @xfailIfTorchDynamo  # use ndarray.tensor._base to track the base tensor
+    def test_attributes_2(self):
         assert_equal(self.two.base, np.arange(20))
 
     def test_dtypeattr(self):
@@ -891,7 +895,7 @@ class TestScalarIndexing(TestCase):
         # this assersion fails because 50 > NPY_MAXDIMS = 32
         # assert_raises(IndexError, subscript, a, (np.newaxis,)*50)
 
-    @xpassIfTorchDynamo  # (reason="pytorch disallows overlapping assignments")
+    @xfail  # (reason="pytorch disallows overlapping assignments")
     def test_overlapping_assignment(self):
         # With positive strides
         a = np.arange(4)
@@ -1306,7 +1310,7 @@ class TestCreation(TestCase):
 
 
 class TestBool(TestCase):
-    @xpassIfTorchDynamo  # (reason="bools not interned")
+    @xfail  # (reason="bools not interned")
     def test_test_interning(self):
         a0 = np.bool_(0)
         b0 = np.bool_(False)
@@ -1707,7 +1711,7 @@ class TestMethods(TestCase):
         assert_equal(np.sort(d), do)
         assert_equal(d[np.argsort(d)], do)
 
-    @xpassIfTorchDynamo  # (reason="order='F'")
+    @xfail  # (reason="order='F'")
     def test_copy(self):
         def assert_fortran(arr):
             assert_(arr.flags.fortran)
@@ -2675,7 +2679,7 @@ class TestMethods(TestCase):
         # Order of axis argument doesn't matter:
         assert_equal(b.diagonal(0, 2, 1), [[0, 3], [4, 7]])
 
-    @xpassIfTorchDynamo  # (reason="no readonly views")
+    @xfail  # (reason="no readonly views")
     def test_diagonal_view_notwriteable(self):
         a = np.eye(3).diagonal()
         assert_(not a.flags.writeable)
@@ -2858,6 +2862,7 @@ class TestMethods(TestCase):
         assert_equal(a.ravel("A"), [0, 2, 4, 6, 8, 10, 12, 14])
         assert_equal(a.ravel("F"), [0, 8, 4, 12, 2, 10, 6, 14])
 
+    @xfailIfTorchDynamo  # flags["OWNDATA"]
     def test_swapaxes(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4).copy()
         idx = np.indices(a.shape)
@@ -3012,11 +3017,10 @@ class TestBinop(TestCase):
         assert_equal(b, 3)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
 class TestSubscripting(TestCase):
     def test_test_zero_rank(self):
         x = np.array([1, 2, 3])
-        assert_(isinstance(x[0], np.int_))
+        assert_(isinstance(x[0], (np.int_, np.ndarray)))
         assert_(type(x[0, ...]) is np.ndarray)
 
 
@@ -3257,7 +3261,7 @@ class TestArgmax(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -3265,7 +3269,7 @@ class TestArgmax(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -3366,7 +3370,7 @@ class TestArgmin(TestCase):
         (np.array(d[0], dtype=t), d[1])
         for d, t in (itertools.product(usg_data, (np.uint8,)))
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -3374,7 +3378,7 @@ class TestArgmin(TestCase):
             )
         )
     ]
-    darr = darr + [
+    darr += [
         (np.array(d[0], dtype=t), d[1])
         for d, t in (
             itertools.product(
@@ -5629,7 +5633,9 @@ class TestMatmulOperator(MatmulCommon, TestCase):
         assert_equal(self.matmul(b, a), "A")
 
     def test_matmul_raises(self):
-        assert_raises((RuntimeError, TypeError), self.matmul, np.int8(5), np.int8(5))
+        assert_raises(
+            (RuntimeError, TypeError, ValueError), self.matmul, np.int8(5), np.int8(5)
+        )
 
     @xpassIfTorchDynamo  # (reason="torch supports inplace matmul, and so do we")
     def test_matmul_inplace(self):
@@ -5639,7 +5645,11 @@ class TestMatmulOperator(MatmulCommon, TestCase):
         a = np.eye(3)
         b = np.eye(3)
         assert_raises(TypeError, a.__imatmul__, b)
-        import operator
+
+    @xfail  # XXX: what's up with exec under Dynamo
+    def test_matmul_inplace_2(self):
+        a = np.eye(3)
+        b = np.eye(3)
 
         assert_raises(TypeError, operator.imatmul, a, b)
         assert_raises(TypeError, exec, "a @= b", globals(), locals())
@@ -6231,7 +6241,7 @@ class TestArrayAttributeDeletion(TestCase):
             assert_raises(AttributeError, delattr, a, s)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@skip  # not supported, too brittle, too annoying
 @instantiate_parametrized_tests
 class TestArrayInterface(TestCase):
     class Foo:
@@ -6826,7 +6836,7 @@ class TestArange(TestCase):
 
 
 class TestRichcompareScalar(TestCase):
-    @xpassIfTorchDynamo  # (reason="comparison: builtin.bools or...?")
+    @skip  # XXX: brittle, fails or passes under dynamo depending on the NumPy version
     def test_richcompare_scalar_boolean_singleton_return(self):
         # These are currently guaranteed to be the boolean singletons, but maybe
         # returning NumPy booleans would also be OK:

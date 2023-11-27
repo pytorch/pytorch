@@ -1454,6 +1454,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_maxpool_dynamic(self):
+        class test(torch.nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                norm_layer = functools.partial(torch.nn.BatchNorm2d, eps=0.0009)
+                self.avgpool = torch.nn.MaxPool2d((2, 2), stride=2, ceil_mode=True)
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                )
+                self.norm = norm_layer(out_channels)
+
+            def forward(self, x):
+                return self.norm(self.conv(self.avgpool(x)))
+
+        model = test(8, 16)
+        inputs = torch.randn(2, 8, 64, 64)
+        self.run_test(
+            model,
+            inputs,
+            input_names=["input_0"],
+            dynamic_axes={"input_0": {3: "x", 2: "y"}, "output_0": {3: "x", 2: "y"}},
+            output_names=["output_0"],
+        )
+
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_1d_ceil_corner(self):
         model = torch.nn.MaxPool1d(
             kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=False
@@ -1461,6 +1488,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_2d_ceil_corner(self):
         model = torch.nn.MaxPool2d(
             kernel_size=[1, 1],
@@ -1472,6 +1501,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_3d_ceil_corner(self):
         model = torch.nn.MaxPool3d(
             kernel_size=[7, 8, 4],
@@ -1484,6 +1515,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 51, 52, 45)
         self.run_test(model, x)
 
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_1d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool1d(
@@ -1492,6 +1525,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_2d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool2d(
@@ -1504,6 +1539,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
+    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_3d_ceil_corner_with_indices(self):
         model = torch.nn.MaxPool3d(
@@ -3734,13 +3771,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, input):
                 index = torch.tensor([2, 0])
                 source = torch.ones(3, 2, 5)
-                return input.index_copy(1, index, source)
+                return input.index_copy(self.dim, index, source)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(IndexCopyModel(), x)
+        for dim in (1, -2):
+            self.run_test(IndexCopyModel(dim), x)
 
     def test_select(self):
         class Select(torch.nn.Module):
@@ -3940,9 +3982,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
         # situation of axis=2 mapping to the same axis as axis=-2
-        model = torch.nn.LayerNorm([10, 10, 10])
-        x = torch.randn(20, 5, 10, 10, 10)
-        self.run_test(model, x)
+        for elementwise_affine in (True, False):
+            for bias in (True, False):
+                model = torch.nn.LayerNorm(
+                    [10, 10, 10], elementwise_affine=elementwise_affine, bias=bias
+                )
+                x = torch.randn(20, 5, 10, 10, 10)
+                self.run_test(model, x)
 
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
@@ -7100,6 +7146,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         fp16 = fp16.half()
         fp32 = Tensor([1.5])
         self.run_test(CatModel(), (fp16, fp32))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type_does_not_trigger_upcast_type_promotion(self):
+        class DoNotUpcastModel(torch.nn.Module):
+            def forward(self, x):
+                scale = x.size()[-1] ** -0.5
+                # 'scale' is exported as onnx float32 rank 0 tensor.
+                # The following 'Mul' should NOT be promoted to float32.
+                return x * scale
+
+        x = torch.ones(2, 3, dtype=torch.float16)
+        self.run_test(DoNotUpcastModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):

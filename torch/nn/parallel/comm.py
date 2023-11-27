@@ -38,9 +38,9 @@ def broadcast(tensor, devices=None, *, out=None):
 
 
 def broadcast_coalesced(tensors, devices, buffer_size=10485760):
-    """Broadcasts a sequence tensors to the specified GPUs.
-    Small tensors are first coalesced into a buffer to reduce the number
-    of synchronizations.
+    """Broadcast a sequence of tensors to the specified GPUs.
+
+    Small tensors are first coalesced into a buffer to reduce the number of synchronizations.
 
     Args:
         tensors (sequence): tensors to broadcast. Must be on the same device,
@@ -58,7 +58,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
 
 
 def reduce_add(inputs, destination=None):
-    """Sums tensors from multiple GPUs.
+    """Sum tensors from multiple GPUs.
 
     All inputs should have matching shapes, dtype, and layout. The output tensor
     will be of the same shape, dtype, and layout.
@@ -103,7 +103,7 @@ def reduce_add(inputs, destination=None):
 
 
 def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
-    """Sums tensors from multiple GPUs.
+    """Sum tensors from multiple GPUs.
 
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.

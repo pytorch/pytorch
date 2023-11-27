@@ -136,6 +136,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other);
 
+  bool is_multi_output_view() {
+    return is_multi_output_view_;
+  }
+
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
 
@@ -190,6 +194,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_hidden_from_autograd_counter_ = 0;
   bool has_metadata_mutation_ = false;
+  bool is_multi_output_view_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;

@@ -247,6 +247,40 @@ class TestFlopCounter(TestCase):
         self.assertEqual(len(model._forward_pre_hooks), 0)
         self.assertEqual(len(model._forward_hooks), 0)
 
+    def test_pytrees(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = x['a'].relu_()
+                return {'a': torch.mm(x, x)}
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = Foo()
+                self.b = Foo()
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        mod = Mod()
+        mode = FlopCounterMode(mod)
+        with mode:
+            mod({'a': torch.randn(10, 10, requires_grad=True).clone()})['a'].sum().backward()
+        self.assertExpectedInline((mode.flop_counts['Mod'][torch.ops.aten.mm]), """12000""")
+
+        class Mod2(torch.nn.Module):
+            def forward(self, x):
+                return (torch.mm(x, x),)
+
+        mod = Mod2()
+        mode = FlopCounterMode(mod)
+        with mode:
+            mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
+        self.assertExpectedInline((mode.flop_counts['Mod2'][torch.ops.aten.mm]), """6000""")
+
+
+
+
 
 if __name__ == '__main__':
     run_tests()

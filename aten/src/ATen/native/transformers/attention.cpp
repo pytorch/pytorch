@@ -15,7 +15,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
@@ -555,8 +554,13 @@ at::Tensor preprocess_mask(
     return pad_bias<mem_eff_alignment>(attn_mask);
   }
   // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
+  auto needs_contig = [](const c10::SymInt& stride) {
+    return (stride % 16 != 0) || (stride == 0);
+  };
+  if (needs_contig(attn_mask.sym_stride(0)) ||
+      needs_contig(attn_mask.sym_stride(1)) ||
+      needs_contig(attn_mask.sym_stride(2)) ||
+      needs_contig(attn_mask.sym_stride(3))) {
     return attn_mask.contiguous();
   }
 

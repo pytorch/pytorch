@@ -13,6 +13,8 @@ import traceback
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
+import numpy
+
 import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
@@ -1856,6 +1858,7 @@ class TestQR(TestCase):
         assert_(isinstance(r2, a_type))
         assert_almost_equal(r2, r1)
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails on CI with numpy 1.21.2")
     @parametrize("size", [(3, 4), (4, 3), (4, 4), (3, 0), (0, 3)])
     @parametrize("outer_size", [(2, 2), (2,), (2, 3, 4)])
     @parametrize("dt", [np.single, np.double, np.csingle, np.cdouble])
@@ -2232,6 +2235,7 @@ class TestTensorsolve(TestCase):
             b = np.ones(a.shape[:2])
             linalg.tensorsolve(a, b, axes=axes)
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails on CI with numpy 1.21.2")
     @parametrize(
         "shape",
         [(2, 3, 6), (3, 4, 4, 3), (0, 3, 3, 0)],
