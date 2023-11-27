@@ -1,15 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
-import copy
 import unittest
 
 import torch._dynamo as torchdynamo
+from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,
     get_rewrite_cases,
 )
-from torch.export import export
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -29,19 +28,18 @@ class ExampleTests(TestCase):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
 
-        inputs_export = normalize_inputs(case.example_inputs)
-        inputs_model = copy.deepcopy(inputs_export)
+        inputs = normalize_inputs(case.example_inputs)
         exported_program = export(
             model,
-            inputs_export.args,
-            inputs_export.kwargs,
+            inputs.args,
+            inputs.kwargs,
             dynamic_shapes=case.dynamic_shapes,
         )
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
-            exported_program(*inputs_export.args, **inputs_export.kwargs),
-            model(*inputs_model.args, **inputs_model.kwargs),
+            exported_program(*inputs.args, **inputs.kwargs),
+            model(*inputs.args, **inputs.kwargs),
         )
 
         if case.extra_inputs is not None:

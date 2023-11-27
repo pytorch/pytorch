@@ -230,6 +230,12 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
 
+    bs_grad_to_param = {}
+    bs_grad_to_user_inputs = {}
+    if gs.backward_signature is not None:
+        bs_grad_to_param = gs.backward_signature.gradients_to_parameters
+        bs_grad_to_user_inputs = gs.backward_signature.gradients_to_user_inputs
+
     # Check every node in the signature exists in the graph
     input_node_names = [node.name for node in exported_program.graph.nodes if node.op == "placeholder"]
 
@@ -318,28 +324,19 @@ def _verify_exported_program_signature(exported_program) -> None:
             f"Number of user outputs: {len(gs.user_outputs)}. \n"
         )
 
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate)
-    mutate_nodes: List[str] = output_nodes[:end]
-    user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
+    buffer_mutate_nodes = output_nodes[:len(gs.buffers_to_mutate)]
+    user_output_nodes = output_nodes[len(gs.buffers_to_mutate):len(gs.user_outputs) + len(gs.buffers_to_mutate)]
 
-    for mutation_node in mutate_nodes:
-        if mutation_node in gs.buffers_to_mutate:
-            if gs.buffers_to_mutate[mutation_node] not in gs.buffers:
-                raise SpecViolationError(
-                    f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
-                    f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
-                    f"Buffer nodes available: {gs.buffers} \n"
-                )
-        elif mutation_node in gs.user_inputs_to_mutate:
-            if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
-                raise SpecViolationError(
-                    f"User input output {mutation_node} does not point to a user input that exists. \n"
-                    f"Dict of user inputs that are mutated, in order: {gs.user_inputs_to_mutate} \n"
-                    f"User input nodes available: {gs.user_inputs} \n")
-        else:
+    for buffer_node in buffer_mutate_nodes:
+        if (
+            buffer_node not in gs.buffers_to_mutate or
+            gs.buffers_to_mutate[buffer_node] not in gs.buffers
+        ):
             raise SpecViolationError(
-                f"Mutation node {mutation_node} is neither a buffer nor a user input. "
-                f"Buffers to mutate: {gs.buffers_to_mutate}, User inputs to mutate: {gs.user_inputs_to_mutate}"
+                f"Buffer output {buffer_node} is not in buffer mutation dictionary "
+                "or, it does not point to a buffer that exists. \n"
+                f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
+                f"Buffer nodes available: {gs.buffers} \n"
             )
 
     for user_output_node, user_output_name in zip(user_output_nodes, gs.user_outputs):

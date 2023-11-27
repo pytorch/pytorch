@@ -44,7 +44,6 @@ def get_filtered_export_db_tests():
         "dictionary",  # Graph output must be a tuple()
         "fn_with_kwargs",  # export doesn't support kwargs yet
         "scalar_output",  # Tracing through 'f' must produce a single graph
-        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
     }
 
     return [

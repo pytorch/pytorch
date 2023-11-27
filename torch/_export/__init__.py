@@ -30,28 +30,28 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._functorch.aot_autograd import aot_export_module, GraphSignature
+from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
-from torch.export.exported_program import (
-    ExportedProgram,
-    ModuleCallEntry,
-    ModuleCallSignature,
-)
 from torch.export.graph_signature import (
+    ExportGraphSignature,
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
-    ExportGraphSignature,
     InputKind,
-    InputSpec,
     OutputKind,
     OutputSpec,
     SymIntArgument,
     TensorArgument,
+    InputSpec
+)
+from torch.export.exported_program import (
+    ExportedProgram,
+    ModuleCallEntry,
+    ModuleCallSignature,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
@@ -559,88 +559,6 @@ def export(
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
-
-def _prepare_module(
-    gm_torch_level: torch.fx.GraphModule,
-    aot_export_args
-) -> List[str]:
-    flat_args = pytree.tree_leaves(aot_export_args)
-    user_input_names = []
-    with gm_torch_level.graph.inserting_before():
-        for i, (arg, node) in enumerate(zip(flat_args, gm_torch_level.graph.nodes)):
-            assert node.op == "placeholder"
-            user_input_names.append(node.name)
-            if isinstance(arg, torch.Tensor):
-                assert not hasattr(gm_torch_level, node.name)
-                gm_torch_level.register_buffer(node.name, arg)
-                get_attr = gm_torch_level.graph.get_attr(node.name)
-                node.replace_all_uses_with(get_attr)
-                get_attr.meta = copy.copy(node.meta)
-
-    for node in list(gm_torch_level.graph.nodes):
-        if node.op == "placeholder":
-            assert len(node.users) == 0
-            gm_torch_level.graph.erase_node(node)
-    gm_torch_level.recompile()
-    return user_input_names
-
-
-def _unwrap_user_inputs(
-    gm: torch.fx.GraphModule,
-    graph_signature: GraphSignature,
-    user_input_names: List[str]
-) -> Dict[str, str]:
-    assert len(graph_signature.user_inputs) == 0
-    assert graph_signature.backward_signature is None
-    names = set(user_input_names)
-
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    # user inputs are always added in the end
-    start = len(graph_signature.parameters)
-    end = start + len(graph_signature.buffers)
-    buffer_nodes = placeholders[start:end]
-    last_placeholder_node = placeholders[-1] if len(placeholders) > 0 else None
-    old_nodes: Dict[str, torch.fx.Node] = {}
-    for node in buffer_nodes:
-        buffer_name = graph_signature.inputs_to_buffers[node.name]
-        if buffer_name not in names:
-            continue
-        old_nodes[buffer_name] = node
-    replaces = {}
-    new_node_names: Dict[str, str] = {}
-    with gm.graph.inserting_after(last_placeholder_node):
-        for name in reversed(user_input_names):
-            new_node = gm.graph.placeholder(name)
-            new_node.target = new_node.name
-            new_node_names[name] = new_node.name
-            if name in old_nodes:
-                old_node = old_nodes[name]
-                new_node.meta = copy.copy(old_node.meta)
-                old_node.replace_all_uses_with(new_node)
-                replaces[old_node.name] = new_node.name
-
-    for old_node in old_nodes.values():
-        gm.graph.erase_node(old_node)
-
-    gm.recompile()
-
-    graph_signature.buffers = [b for b in graph_signature.buffers if b not in names]
-    graph_signature.inputs_to_buffers = {
-        i: b for i, b in graph_signature.inputs_to_buffers.items() if b not in names
-    }
-    user_inputs_to_mutate = {
-        o: b for o, b in graph_signature.buffers_to_mutate.items() if b in names
-    }
-    graph_signature.buffers_to_mutate = {
-        o: b for o, b in graph_signature.buffers_to_mutate.items() if b not in names
-    }
-    graph_signature.user_inputs = list(reversed(new_node_names.values()))  # type: ignore[arg-type]
-    graph_signature.user_outputs = [
-        replaces[o] if o in replaces else o for o in graph_signature.user_outputs
-    ]
-    return user_inputs_to_mutate  # type: ignore[return-value]
-
-
 def _disable_prexisiting_fake_mode(fn):
 
     @functools.wraps(fn)
@@ -785,10 +703,6 @@ def _export(
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
 
-    aot_export_args = (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values())
-
-    user_input_names = _prepare_module(gm_torch_level, aot_export_args)
-
     # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
     # to follow the order in orig_args and correctly call gm_torch_level
 
@@ -798,10 +712,9 @@ def _export(
     with torch.nn.utils.stateless._reparametrize_module(gm_torch_level, fake_params_buffers):
         gm, graph_signature = aot_export_module(
             gm_torch_level,
-            (),
+            (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
             trace_joint=False
         )
-    user_inputs_to_mutate = _unwrap_user_inputs(gm, graph_signature, user_input_names)
 
     def to_str_list(sig_component: List[Any]):
         return [str(v) for v in sig_component]
@@ -858,7 +771,6 @@ def _export(
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)
@@ -872,7 +784,6 @@ def _export(
         inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
         user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
         buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
-        user_input_mutations=user_inputs_to_mutate,  # type: ignore[arg-type]
         grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
