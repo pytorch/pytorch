@@ -169,10 +169,17 @@ def generate_pattern_with_binary(
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
-        return CallFunction(
-            unary_post_op,
-            computation_call,
-        )
+        if unary_post_op == aten.hardtanh.default:
+            return CallFunction(
+                aten.clamp_max,
+                CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
+                KeywordArg("max_value"),
+            )
+        else:
+            return CallFunction(
+                unary_post_op,
+                computation_call,
+            )
     return computation_call
 
 
@@ -395,6 +402,9 @@ def _register_quantized_linear_lowering(
 
 
 def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
+    # Check if it's a valid Conv Binary Pattern:
+    # * qconv2d_pointwise should only has one users
+    # * Extra input of binary node comes from dequant pattern
     def fn(match):
         qconv2d_node_after_weight_prepack = filter_nodes(
             match.nodes, torch.ops.onednn.qconv2d_pointwise
@@ -486,8 +496,6 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
-    from .mkldnn_fusion import _hardtanh_fusion
-
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
@@ -511,7 +519,9 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                _hardtanh_fusion(dequantize_qconv_pt2e_pattern),
+                generate_pattern_with_unary(
+                    dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                ),
                 dtype=original_pattern_output_dtype,
             ),
         }
@@ -532,8 +542,8 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 dequantize_qconv_pt2e_pattern, aten.relu.default
             ),
-            UnaryAttr("hardtanh", [], ""): _hardtanh_fusion(
-                dequantize_qconv_pt2e_pattern
+            UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
+                dequantize_qconv_pt2e_pattern, aten.hardtanh.default
             ),
         }
 
