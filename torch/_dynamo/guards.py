@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from weakref import ReferenceType
 
 
@@ -110,6 +110,7 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
+    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -194,7 +195,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
+        lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
         check_fn_manager: CheckFunctionManager,
@@ -276,7 +277,7 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def TYPE_MATCH(self, guard: Guard):
+    def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
@@ -318,7 +319,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
             )
 
         ref = self.arg_ref(guard)
@@ -609,6 +610,13 @@ class GuardBuilder(GuardBuilderBase):
         assert guard.source is GuardSource.GLOBAL
         code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
         self.config_hash = config_hash
+        self._produce_guard_code(guard, code)
+
+    def HAS_GRAPH_BREAK(self, guard: Guard):
+        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
+        # if the compiled object needs nopython. We only need to install this guard if
+        # there is a graph break.
+        code = ["not ___needs_nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1023,15 +1031,15 @@ class CheckFunctionManager:
 
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
             extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
                     if fs.filename not in uninteresting_files():
+                        extra = f"  # {format_frame(fs, line=True)}"
                         break
-                else:
-                    extra = f"  # {format_frame(fs, line=True)}"
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
@@ -1056,6 +1064,7 @@ class CheckFunctionManager:
 
             if not log_only:
                 code_parts.append(code)
+                verbose_code_parts.append(f"{code:<60}{extra}")
 
         seen = set()
         for gcl in builder.code:
@@ -1105,6 +1114,7 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
+            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
             tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
@@ -1175,6 +1185,7 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
+        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
             "G": builder.scope["G"],
@@ -1274,7 +1285,7 @@ def get_guard_fail_reason(
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
     reasons: List[str] = []
-    for part in guard_fn.code_parts:
+    for part in guard_fn.verbose_code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():

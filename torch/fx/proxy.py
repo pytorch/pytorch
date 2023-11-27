@@ -409,6 +409,9 @@ class Proxy:
 
         return self.tracer.iter(self)
 
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
+
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
             # check if this boolean is used in an assertion, bytecode pattern for assertions

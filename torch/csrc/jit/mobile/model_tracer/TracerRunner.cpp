@@ -343,6 +343,16 @@ TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
           << "ModelTracer encountered an error while attempting to run the model in FBGEMM mode"
           << ex.what() << "\n Skipping FBGEMM execution" << std::endl;
     }
+    try {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+      c10::InferenceMode guard(true);
+      run_model(
+          input_module_path, root_ops, enabled_backends, called_kernel_tags);
+    } catch (std::exception& ex) {
+      std::cerr
+          << "ModelTracer encountered an error while attempting to run the model under an inference guard"
+          << ex.what() << "\n Skipping inference guard execution" << std::endl;
+    }
   }
 
   call_dependent_methods(root_ops);

@@ -8,18 +8,7 @@ import traceback
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from weakref import ReferenceType
 
 import torch
@@ -50,11 +39,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
-
-if TYPE_CHECKING:
-    # Import the following modules during type checking to enable code intelligence features
-    # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -330,10 +314,16 @@ class FakeTensorConverter:
         shape_env=None,
         *,
         source=None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        symbolic_context=None,
         memoized_only=False,
     ):
+        # see note [Tensor Fakification and Symbol Caching]
+        if not symbolic_context and not source and shape_env:
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if t in tracing_context.tensor_to_context:
+                    symbolic_context = tracing_context.tensor_to_context[t]
+                    source = symbolic_context.tensor_source
+
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -367,8 +357,7 @@ class FakeTensorConverter:
             shape_env=shape_env,
             callback=mk_fake_tensor,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            symbolic_context=symbolic_context,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -403,8 +392,7 @@ class FakeTensorConverter:
         make_constant=False,
         shape_env=None,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        symbolic_context=None,
         memoized_only=False,
     ):
         return self.from_real_tensor(
@@ -413,8 +401,7 @@ class FakeTensorConverter:
             make_constant,
             shape_env=shape_env,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            symbolic_context=symbolic_context,
             memoized_only=memoized_only,
         )
 
@@ -1392,15 +1379,15 @@ class _DispatchCacheKey(list):
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
-    1) We need to create a new FakeTensor given some Tensor metadata. 2 )The op is
-    an in-place op and we need to alias the correct input.
+    1) We need to create a new FakeTensor given Tensor metadata. 2 )The op is an
+    in-place op and we need to alias the given input.
     """
 
     metadata: Optional[TensorMetadata] = None
     arg_idx: Optional[int] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class _UnhashableDispatchArg(Exception):
     """
     Signals when a dispatch arg prevents FakeTensor caching.
@@ -1569,7 +1556,7 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result.
         """
         try:
-            key = self._cache_key(func, args, kwargs)
+            key = self._make_cache_key(func, args, kwargs)
         except _UnhashableDispatchArg as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
             return self._dispatch_impl(func, types, args, kwargs)
@@ -1584,19 +1571,30 @@ class FakeTensorMode(TorchDispatchMode):
             if isinstance(output, FakeTensor):
                 # Some ops return simple data types or tuples of Tensors, but
                 # it's rare, so skip the complexity of caching other types.
-                FakeTensorMode.cache[key] = self._cache_entry(args, output)
+                FakeTensorMode.cache[key] = self._make_cache_entry(args, output)
 
         return output
 
-    def _cache_key(
+    def _make_cache_key(
         self, func: OpOverload, args: Tuple[Any], kwargs: Dict[str, Any]
     ) -> _DispatchCacheKey:
         """
-        Create a cache key given the dispatch args.
+        Create a cache key given the dispatch args. Raise _UnhashableDispatchArg
+        for any situation that precludes caching.
         """
+        # In-place view ops mutate metadata; avoid that complexity.
         if torch.Tag.inplace_view in func._tags:
             raise _UnhashableDispatchArg("inplace view")
 
+        # In order to handle storage aliasing, we need to establish the alias
+        # for any view op on a cache hit. But CompositeImplicitAutograd ops may
+        # or may not alias the input, so just punt on caching these.
+        if func.is_view and torch._C._dispatch_has_kernel_for_dispatch_key(
+            func.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            raise _UnhashableDispatchArg("CompositeImplicitAutograd op")
+
+        # Even though func.is_view says otherwise, this seems to be a view op:
         if func == torch.ops.aten._unsafe_view.default:
             raise _UnhashableDispatchArg("unsafe view")
 
@@ -1631,7 +1629,9 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return arg
 
-    def _cache_entry(self, args: Tuple[Any], output: FakeTensor) -> _DispatchCacheEntry:
+    def _make_cache_entry(
+        self, args: Tuple[Any], output: FakeTensor
+    ) -> _DispatchCacheEntry:
         """
         Create an entry to cache the given 'output' Tensor.
         """
@@ -1752,11 +1752,14 @@ class FakeTensorMode(TorchDispatchMode):
                 return t
 
         # To constant propagate through these functions:
-        # 1, If this is a lift, the input tensor is guaranteed to be a
+        # 1, If this is a lift due to a torch.tensor call,
+        #    the input tensor is guaranteed to be a
         #    constant, so we keep a copy of the original argument along so
-        #    we can query it if we're asked to item() it at some later point
+        #    we can query it if we're asked to item() it at some later point.
+        #    (Note that you can always call a lift fn manually, so we do
+        #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if func in self.lift_fns or (
+        if (func in self.lift_fns and not flat_arg_fake_tensors) or (
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
@@ -1796,11 +1799,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if func in self.lift_fns:
-            assert (
-                len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
-            ), f"{args} {kwargs}"
+            assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
-            return converter(self, args[0])
+            if type(args[0]) is torch.Tensor:
+                return converter(self, args[0])
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
@@ -2140,8 +2142,7 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         static_shapes=None,
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        symbolic_context=None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -2151,16 +2152,21 @@ class FakeTensorMode(TorchDispatchMode):
             static_shapes = self.static_shapes
         if static_shapes:
             assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
+                symbolic_context is None
+            ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
+        # see note [Tensor Fakification and Symbol Caching]
+        if not symbolic_context and not source and not static_shapes:
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tensor in tracing_context.tensor_to_context:
+                    symbolic_context = tracing_context.tensor_to_context[tensor]
+                    source = symbolic_context.tensor_source
         return self.fake_tensor_converter(
             self,
             tensor,
             shape_env=shape_env,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
+            symbolic_context=symbolic_context,
             memoized_only=memoized_only,
         )
 

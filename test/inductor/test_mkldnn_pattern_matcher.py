@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import unittest
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
@@ -23,7 +24,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
 
 
@@ -274,6 +275,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     mod, (v,), matcher_count, matcher_nodes, check_autocast=True
                 )
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -1437,6 +1439,101 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+    def test_reproduce_113440_issue_1(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                res = self.add_fn2(tmp1, tmp2)
+                if self.use_relu:
+                    res = self.relu2(res)
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            example_inputs[0].get_device()
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
+
+    def test_reproduce_113440_issue_2(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+
+                self.conv5 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv6 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv7 = torch.nn.Conv2d(6, 6, kernel_size=1, stride=1)
+                self.add_fn3 = add_fn
+                self.relu3 = torch.nn.ReLU(inplace=True)
+
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+
+                tmp1 = self.conv3(tmp)
+                res = self.relu2(tmp1)
+
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
