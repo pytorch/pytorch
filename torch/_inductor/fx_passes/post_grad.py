@@ -987,9 +987,10 @@ def cannot_be_moved_to_cuda(node):
     if node.target == "output":
         return True
 
-    if not isinstance(
-        node.target, torch._ops.OpOverload
-    ) and node.target.namespace not in ("prims", "aten"):
+    if not (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target.namespace in ("prims", "aten")
+    ):
         return True
 
     # only move ops to inductor lowerings for now,
