@@ -388,6 +388,7 @@ def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
         patterns = DEFAULT_PIP_PATTERNS
+
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
