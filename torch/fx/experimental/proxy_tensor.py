@@ -426,8 +426,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
 
-    log.warning("%s", proxy_out.node.format_node_compact())
-
     return out
 
 
