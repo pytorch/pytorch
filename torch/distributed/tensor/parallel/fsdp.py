@@ -300,7 +300,7 @@ def _all_gather_dtensor(
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
-    if parent_mesh.ndim == tensor.device.ndim:
+    if parent_mesh.ndim == tensor.device_mesh.ndim:
         assert parent_mesh == tensor.device_mesh, f"{parent_mesh=} {tensor.device_mesh=}"
 
     placements = list(copy.deepcopy(tensor.placements))
