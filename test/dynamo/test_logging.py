@@ -249,7 +249,7 @@ LoweringException: AssertionError:
             logger = logging.getLogger(logger_qname)
 
             # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
-            if any([logger_qname.find(d) == 0 for d in dynamo_qnames]):
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
