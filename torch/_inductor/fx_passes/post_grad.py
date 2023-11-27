@@ -15,6 +15,7 @@ from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, inductor_prims, ir, pattern_matcher
@@ -495,11 +496,14 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
-        and val1.size() == val2.size()
+        and definitely_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
         and val1.device == val2.device
-        and (val1.layout != torch.strided or val1.stride() == val2.stride())
+        and (
+            val1.layout != torch.strided
+            or definitely_true(sym_eq(val1.stride(), val2.stride()))
+        )
     )
 
 

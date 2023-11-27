@@ -490,8 +490,18 @@ class InputAliasInfo:
     mutates_data: bool
     mutates_metadata: bool
     mutations_hidden_from_autograd: bool
+    # This can only happen from a call to aten.set_() on a graph input.
+    mutates_storage_metadata: bool
     requires_grad: bool
     mutation_type: MutationType
+
+    def __post_init__(self):
+        if self.mutates_storage_metadata:
+            # For convenience, we guarantee that this is always true.
+            # In practice, If we call .set_(), then at runtime there is no need
+            # to additionally fix  up the tensor metadata, since our runtime
+            # call to inp.set_(updated_inp) will already have the right metadata
+            assert self.mutates_metadata
 
 
 @dataclasses.dataclass
@@ -949,65 +959,85 @@ def is_fun(t):
 # t here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
-def has_metadata_mutation(t):
+# (3) Not a tensor
+def has_data_mutation(t):
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
-        return any(has_metadata_mutation(getattr(t, attr)) for attr in attrs)
+        return any(has_data_mutation(getattr(t, attr)) for attr in attrs)
     else:
-        assert isinstance(t, FunctionalTensor)
-        return torch._functionalize_has_metadata_mutation(t.elem)
+        if isinstance(t, torch.Tensor):
+            assert isinstance(t, FunctionalTensor)
+            return torch._functionalize_has_data_mutation(t.elem)
+        return False
 
 def are_all_mutations_hidden_from_autograd(t):
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # If all inner elements are mutations hidden from autograd, then it is a mutation hidden from autograd.
         return all(are_all_mutations_hidden_from_autograd(getattr(t, attr)) for attr in attrs)
-    else:
+    elif isinstance(t, torch.Tensor):
         assert isinstance(t, FunctionalTensor)
         return torch._functionalize_are_all_mutations_hidden_from_autograd(t.elem)
-
-# new_arg and arg here are either:
-# (1) both a FakeTensor
-# (2) both a traceable tensor subclass that holds a FakeTensor
-# Pre-condition: the two args are the "old" and "new" inputs from running functionalization.
-# When we run functionalization and wrap our inputs into FunctionalTensors,
-# we can detect whether or not an input was mutated by checking to see if the inner tensor has changed
-#
-# Normally it would be enough just to check if arg is new_arg, which is normally enough for functionalization
-# to confirm that inputs were not mutated when running the user's model with functionalization on.
-# But when we have subclass inputs, we can't rely on that:
-# `from_fun(to_fun(x)) is x` will return False, because the call to `from_fun` constructs
-# a brand new subclass instance: we are calling __tensor_unflatten__, and going
-# from Subclass(FakeTensor) to Subclass(FunctionalTensor(FakeTensor))
-def was_updated(arg, new_arg):
-    if is_traceable_wrapper_subclass(arg):
-        assert is_traceable_wrapper_subclass(new_arg)
-        attrs, _ = arg.__tensor_flatten__()
-        new_attrs, _ = new_arg.__tensor_flatten__()
-        assert attrs == new_attrs
-        # A tensor subclass was updated if any of its inner elements were updated
-        return any(was_updated(getattr(arg, attr), getattr(new_arg, attr)) for attr in attrs)
     else:
-        return arg is not new_arg
+        return False
 
-# new_arg and arg here are either:
-# (1) both a FakeTensor
-# (2) both a traceable tensor subclass that holds a FakeTensor
-# Pre-condition: the two args are the "old" and "new" inputs from running functionalization.
-# When we run functionalization and wrap our inputs into FunctionalTensors,
-# we can detect whether or not an input was mutated by checking to see if the inner tensor has changed,
-# but shares storage with the old input
-def was_metadata_updated(arg, new_arg):
-    if is_traceable_wrapper_subclass(arg):
-        assert is_traceable_wrapper_subclass(new_arg)
-        attrs, _ = arg.__tensor_flatten__()
-        new_attrs, _ = new_arg.__tensor_flatten__()
-        assert attrs == new_attrs
+# f_arg here is either
+# (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
+# (2) A traceable tensor subclass that holds a FunctionalTensor
+# (3) Not a tensor
+# Assumption: arg promises to be the "original" tensor wrapped by f_arg
+# Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
+# - check_only_storage_mutation=True: only return true if there was a storage mutation
+# - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
+def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
+    if is_traceable_wrapper_subclass(f_arg):
+        attrs, _ = f_arg.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
-        return any(was_metadata_updated(getattr(arg, attr), getattr(new_arg, attr)) for attr in attrs)
+        f_inner_ts = [getattr(f_arg, attr) for attr in attrs]
+        inner_ts = [getattr(arg, attr) for attr in attrs]
+        return any(has_metadata_mutation(f_inner_t, inner_t, check_only_storage_mutation=check_only_storage_mutation)
+                   for f_inner_t, inner_t in zip(f_inner_ts, inner_ts))
     else:
-        return arg is not new_arg and StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage())
+        if not isinstance(f_arg, torch.Tensor):
+            assert not isinstance(arg, torch.Tensor)
+            return False
+        assert isinstance(f_arg, FunctionalTensor)
+        assert isinstance(arg, FakeTensor)
+
+        arg_after = torch._from_functional_tensor(f_arg.elem)
+        # This is true if the current tensor experienced at least one set_() call
+        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)
+        # However, multiple set_() calls can cancel out. So we also check whether the
+        # storage of the tensor has changed.
+        # Note: if an input experienced two set_() calls that cancel out, **and**
+        # it experiences an data mutation, we pessimistically think that the set_()
+        # call is necessary here. We could in theory fix this, but this will
+        # hopefully never happen in user code, and is not needed for fsdp.
+        same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(arg_after.untyped_storage())
+        has_storage_metadata_mutation = maybe_storage_changed and not same_storages
+        if check_only_storage_mutation:
+            return has_storage_metadata_mutation
+
+        # storage metadata mutation is a type of metadata mutation, so return true if we saw one
+        if has_storage_metadata_mutation:
+            return True
+
+        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)
+        # This is true if the current tensor experienced at least one metadata mutation.
+        # So if false, we know there was no metadata mutation
+        if not maybe_metadata_mutated:
+            return False
+
+        # However, multi metadata mutations can cancel out.
+        # So we also check if the concrete sizes/strides on the tensor have changed.
+        same_sizes = arg.shape == arg_after.shape
+        same_strides = arg.stride() == arg_after.stride()
+        same_offsets = arg.storage_offset() == arg_after.storage_offset()
+        has_metadata_mutation_ = maybe_metadata_mutated and not (same_sizes and same_strides and same_offsets)
+        # We consider a tensor to have been metadata mutated if its storage was mutated through a set_() call.
+        return has_metadata_mutation_
+
 
 def _get_hints(exprs):
     """
@@ -1135,18 +1165,27 @@ def run_functionalized_fw_and_collect_metadata(
                 new_arg = arg
             else:
                 new_arg = from_fun(f_arg)
-            if was_updated(arg, new_arg):
-                if was_metadata_updated(arg, new_arg):
-                    mutates_data = False
-                    mutates_metadata = True
-                else:
-                    mutates_data = True
-                    mutates_metadata = has_metadata_mutation(f_arg)
-                mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
-            else:
+            mutates_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=False)
+            mutates_storage_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=True)
+            mutates_data = has_data_mutation(f_arg)
+            mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
+
+            # Here, we're saying that if an input experienced a set call, inp.set_(other),
+            # then we can effectively not have to worry about whether its data was mutated.
+            # There are 3 cases:
+            # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+            #     In this case, we're not really mutating the input storage of "inp";
+            #     we're mutating the storage of an intermdiate value (other),
+            #     and slamming that storage into the input tensor. So no data mutation is necessary.
+            # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+            #     In this case, the data mutation will be properly handled in the runtime
+            #     epilogue during the processing of "other"
+            # (3) We mutate inp *before* the set_() call.
+            #     This case is *not* currently handled.
+            #     TODO: discuss this in the PR. Both supporting this, and detecting + erroring out,
+            #     seem painful to get working.
+            if mutates_storage_metadata:
                 mutates_data = False
-                mutates_metadata = False
-                mutations_hidden_from_autograd = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
 
@@ -1155,6 +1194,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+                mutates_storage_metadata=mutates_storage_metadata,
                 requires_grad=requires_grad,
                 mutation_type=_get_mutation_type(
                     keep_input_mutations,
@@ -1683,6 +1723,8 @@ def maybe_to_fresh_input(idx, t, meta):
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
             return t.clone()
+        # No need to do anything for  meta.input_info[idx].mutates_storage_metadata,
+        # Because autograd doesn't support set_()
         if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the metadata mutation
@@ -2660,7 +2702,8 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
-            mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+            mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
+            mutates_storage_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_storage_metadata,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             mutation_type=mutation_type,
@@ -3210,6 +3253,22 @@ def create_runtime_wrapper(
                     continue
                 original_inpt = args[inpt_idx]
                 updated_inpt = updated_inputs[i]
+                if meta.mutates_storage_metadata:
+                    # mutates_storage_metadata means our input saw a x.set_(y) call.
+                    # What if x **also** saw a data and/or a metadata mutation?
+                    # (1) If the [meta]data mutation occurred after the set_(),
+                    #     then there is no need to copy_() the data.
+                    #     When we perform x.set_(x_updated), we are guaranteed that
+                    #     x_updated already has the final version of the data/metadata
+                    # (2) If a data mutation occurred before the set_().
+                    #     This case seems very difficult to support.
+                    #     TODO: discuss on the PR and decide if we want to tr to
+                    #     either support it, or detect and ban it.
+                    if trace_joint:
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
+                    original_inpt.set_(updated_inpt)
+                    continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
@@ -4381,14 +4440,17 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return torch._dynamo.utils.to_fake_tensor(x, fake_mode)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 

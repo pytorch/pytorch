@@ -589,13 +589,12 @@ class TensorVariable(VariableTracker):
                     return False
 
             if (
-                not config.capture_dynamic_output_shape_ops
-                and has_bool_key(key)
+                has_bool_key(key)
                 and isinstance(value, TensorVariable)
                 and value.requires_grad
             ):
                 unimplemented(
-                    "boolean masking setitem backwards requires dynamic shapes"
+                    "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
                 )
             tx.output.create_proxy(
                 "call_function",
@@ -606,6 +605,14 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
+        elif name == "set_" and len(args) > 1:
+            # torch.Tensor.set_() has several overloads.
+            # aten::set_.source_Tensor(Tensor) gets special handling
+            # in AOTAutograd and functionalization, because it is the most common
+            # overload and is used by FSDP.
+            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
+            # unless we find that we need to make it work.
+            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -917,6 +924,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
+        if name == "tobytes":
+            unimplemented("tobytes is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),

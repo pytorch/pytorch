@@ -207,6 +207,14 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_bool_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item()
+
+        f(torch.tensor([True], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
         def f(x):
@@ -255,6 +263,16 @@ class TestInductorDynamic(TestCase):
 
         finally:
             custom_ops._destroy("test::foo")
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_return(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item()
+
+        f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
