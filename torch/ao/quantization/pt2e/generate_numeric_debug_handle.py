@@ -1,7 +1,7 @@
-import torch
-from torch.fx import Node, GraphModule
+from torch.fx import GraphModule, Node
 
 __all__ = ["generate_numeric_debug_handle"]
+
 
 def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     unique_id = 0

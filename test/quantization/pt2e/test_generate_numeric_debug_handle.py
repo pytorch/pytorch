@@ -1,12 +1,11 @@
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
-from torch.testing._internal.common_quantization import (
-    TestHelperModules,
-)
-from torch.ao.quantization import (
-    generate_numeric_debug_handle,
-)
-from torch.fx import Node
+# Owner(s): ["oncall: quantization"]
+
 from torch._export import capture_pre_autograd_graph
+from torch.ao.quantization import generate_numeric_debug_handle
+from torch.fx import Node
+from torch.testing._internal.common_quantization import TestHelperModules
+from torch.testing._internal.common_utils import TestCase
+
 
 class TestGenerateNumericDebugHandle(TestCase):
     def test_simple(self):
