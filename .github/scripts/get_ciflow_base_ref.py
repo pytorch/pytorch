@@ -11,28 +11,8 @@ import urllib.parse
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.request import Request, urlopen
 
-def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
-    links = {}
-    # Extract links which GH uses for pagination
-    # see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Link
-    if "Link" in conn.headers:
-        for elem in re.split(", *<", conn.headers["Link"]):
-            try:
-                url, params_ = elem.split(";", 1)
-            except ValueError:
-                continue
-            url = urllib.parse.unquote(url.strip("<> "))
-            qparams = urllib.parse.parse_qs(params_.strip(), separator=";")
-            params = {
-                k: v[0].strip('"')
-                for k, v in qparams.items()
-                if type(v) is list and len(v) > 0
-            }
-            params["url"] = url
-            if "rel" in params:
-                links[params["rel"]] = params
-
-    return json.load(conn), links
+def parse_json(conn: Any) -> Any:
+    return json.load(conn)
 
 def fetch_url(
     url: str,
@@ -65,7 +45,7 @@ def fetch_url(
         raise RuntimeError(exception_message) from err
 
 def fetch_base_ref(url: str, headers: Dict[str, str]) -> Any:
-    response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
+    response = fetch_url(url, headers=headers, reader=parse_json)
     return response["base"]["ref"]
 
 
