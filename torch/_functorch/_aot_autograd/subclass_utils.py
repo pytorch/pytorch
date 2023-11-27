@@ -176,49 +176,53 @@ def wrap_tensor_subclasses_maybe_joint(
 
 
 # TODO: UNUSED. delete?
-# def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMeta:
-#     # input infos
-#     input_info = []
-#     for inp, subclass_meta in zip(meta.input_info, meta.subclass_inp_meta):
-#         num_inps = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-#         for _ in range(num_inps):
-#             input_info.append(inp)
+def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMeta:
+    # input infos
+    input_info = []
+    for inp, subclass_meta in zip(meta.input_info, meta.subclass_inp_meta):
+        num_inps = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
+        for _ in range(num_inps):
+            input_info.append(inp)
 
-#     # output infos
-#     output_info = []
-#     subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[meta.num_mutated_inp_runtime_indices:]
-#     if meta.num_intermediate_bases > 0:
-#         subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[:-meta.num_intermediate_bases]
-#     # sanity assert
-#     assert len(meta.output_info) == len(subclass_out_meta_user_outs_only)
-#     # Assume that the information on the output is shared by all of its inner tensors.
-#     for out, subclass_meta in zip(meta.output_info, subclass_out_meta_user_outs_only):
-#         num_outs = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
-#         for _ in range(num_outs):
-#             output_info.append(out)
+    # output infos
+    output_info = []
+    subclass_out_meta_user_outs_only = meta.subclass_fw_graph_out_meta[
+        meta.num_mutated_inp_runtime_indices :
+    ]
+    if meta.num_intermediate_bases > 0:
+        subclass_out_meta_user_outs_only = subclass_out_meta_user_outs_only[
+            : -meta.num_intermediate_bases
+        ]
+    # sanity assert
+    assert len(meta.output_info) == len(subclass_out_meta_user_outs_only)
+    # Assume that the information on the output is shared by all of its inner tensors.
+    for out, subclass_meta in zip(meta.output_info, subclass_out_meta_user_outs_only):
+        num_outs = 1 if isinstance(subclass_meta, int) else subclass_meta.arg_count
+        for _ in range(num_outs):
+            output_info.append(out)
 
-#     # A bit hacky, but we don't actually care about all of the metadata here.
-#     # This metadata is used **underneath** both autograd and subclass de-sugaring,
-#     # So all we really care about is stuff like:
-#     # - num inputs/outputs (needed by the partitioner)
-#     # - input mutations (**not** used today, since we don't handle input mutations inside the subclass,
-#     #   although we should handle this eventually)
-#     #   TODO: add a test case to assert we error when this happens, instead of getting silent correctness
-#     num_intermediate_bases = None
-#     keep_input_mutations = meta.keep_input_mutations
-#     traced_tangents = None
-#     subclass_inp_meta = None
-#     subclass_fw_graph_out_meta = None
-#     subclass_tangent_meta = None
+    # A bit hacky, but we don't actually care about all of the metadata here.
+    # This metadata is used **underneath** both autograd and subclass de-sugaring,
+    # So all we really care about is stuff like:
+    # - num inputs/outputs (needed by the partitioner)
+    # - input mutations (**not** used today, since we don't handle input mutations inside the subclass,
+    #   although we should handle this eventually)
+    #   TODO: add a test case to assert we error when this happens, instead of getting silent correctness
+    num_intermediate_bases = None
+    keep_input_mutations = meta.keep_input_mutations
+    traced_tangents = None
+    subclass_inp_meta = None
+    subclass_fw_graph_out_meta = None
+    subclass_tangent_meta = None
 
-#     metadata = ViewAndMutationMeta(
-#         input_info=input_info,
-#         output_info=output_info,
-#         num_intermediate_bases=num_intermediate_bases,
-#         keep_input_mutations=keep_input_mutations,
-#         traced_tangents=traced_tangents,
-#         subclass_inp_meta=subclass_inp_meta,
-#         subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
-#         subclass_tangent_meta=subclass_tangent_meta,
-#     )
-#     return metadata
+    metadata = ViewAndMutationMeta(
+        input_info=input_info,  # type: ignore[arg-type]
+        output_info=output_info,  # type: ignore[arg-type]
+        num_intermediate_bases=num_intermediate_bases,  # type: ignore[arg-type]
+        keep_input_mutations=keep_input_mutations,  # type: ignore[arg-type]
+        traced_tangents=traced_tangents,  # type: ignore[arg-type]
+        subclass_inp_meta=subclass_inp_meta,  # type: ignore[arg-type]
+        subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,  # type: ignore[arg-type]
+        subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]
+    )
+    return metadata
