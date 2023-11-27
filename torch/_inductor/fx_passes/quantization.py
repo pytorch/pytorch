@@ -390,6 +390,9 @@ def _register_quantized_linear_lowering(
 
 
 def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
+    # Check if it's a valid Conv Binary Pattern:
+    # * qconv2d_pointwise should only has one users
+    # * Extra input of binary node comes from dequant pattern
     def fn(match):
         qconv2d_node_after_weight_prepack = filter_nodes(
             match.nodes, torch.ops.onednn.qconv2d_pointwise
