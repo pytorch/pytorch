@@ -9,7 +9,7 @@
 
 namespace at::native {
 
-#if MAC_OS_VERSION_13_2
+#ifdef MAC_OS_VERSION_13_2
 // Create 3D convolution descriptor
 static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
                       NSUInteger strideInX,
@@ -116,9 +116,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                              IntArrayRef dilation,
                              int64_t groups,
                              c10::optional<IntArrayRef> input_shape) {
-  const bool is_macOS_13_0_or_newer = is_macos_13_or_newer();
+  const bool is_macOS_13_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
     
-  TORCH_CHECK(((input_t.dim() < 5)|is_macOS_13_0_or_newer), "Conv3D is only supported on MPS for MacOS_13_2 or newer");
+  TORCH_CHECK(( (input_t.dim() < 5) || is_macOS_13_0_or_newer), "Conv3D is only supported on MPS for MacOS_13_2 or newer");
   bool is3DConv = input_t.dim() == 5;
 
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");

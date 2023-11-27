@@ -2672,7 +2672,7 @@ class TestMPS(TestCaseMPS):
         helper(3, layer='conv')
         helper(-1, layer='conv')
 
-        if float('.'.join(platform.mac_ver()[0].split('.')[:2])) > 13:
+        if product_version >= 13.2:
             # Conv3d is only available from MacOS 13 onwards
             helper(0, layer='conv3d')
             helper(1, layer='conv3d')
@@ -8376,10 +8376,9 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
     def test_conv3d_backward_collision(self):
-        # Conv3D is only available from MacOS 13 onwards
-        if float('.'.join(platform.mac_ver()[0].split('.')[:2])) < 13:
-            return
+        # Conv3D is only available from MacOS 13.2 onwards
         x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
         m1 = nn.Conv3d(1, 1, 3, stride=2, padding=1).to("mps")
         m2 = nn.Conv3d(1, 1, 4, stride=2, padding=1).to("mps")
@@ -9611,11 +9610,9 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
     def test_conv3d_single_stride(self):
-        # Conv3d is only available from MacOS 13 onwards
-        if float('.'.join(platform.mac_ver()[0].split('.')[:2])) < 13:
-            return
-
+        # Conv3d is only available from MacOS 13.2 onwards
         y_cpu = torch.randn(2, 2, 3, 6)
         y_gpu = y_cpu.to(device='mps')
         for stride in range(1, 4):
