@@ -940,7 +940,7 @@ c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
   if (writeDebugInfo_) {
     return c10::nullopt;
   }
-  // If we have not dumped the debugInfo return true and set the flag to false
+  // If we have not dumped the debugInfo return true and set the flag
   writeDebugInfo_ = true;
   return c10::optional<std::thread>(
       std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
@@ -1050,7 +1050,7 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 
 void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR)
-      << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
+      << "ProcessGroupNCCL preparing to dump debug info.";
   if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 20000) > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1258,6 +1258,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (timedOut) {
           try {
+            LOG(ERROR) << "Timeout observed by ProcessGroupNCCL WorkCleanuploop";
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
