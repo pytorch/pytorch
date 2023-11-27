@@ -528,20 +528,23 @@ class FileSystemCheckpointer(Checkpointer):
         process_group: Optional[dist.ProcessGroup] = None,
         coordinator_rank: int = 0,
         no_dist: bool = False,
-        planner: Optional[LoadPlanner] = None,
+        load_planner: Optional[LoadPlanner] = None,
+        save_planner: Optional[SavePlanner] = None,
     ):
-    """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
+        """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
 
-    Args:
-        path: The directory to store/load checkpoints.
-        single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-        sync_files: force files to be synced to permanent storage. Default to True.
-        thread_count: Number of IO threads to use to write. Default to 1.
-        per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
-        process_group: ProcessGroup to be used for cross-rank synchronization.
-        coordinator_rank (int): Rank to use to coordinate the checkpoint. rank0 is used by default.
-        no_dist (bool): If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
-    """
+        Args:
+            path: The directory to store/load checkpoints.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
+            sync_files: force files to be synced to permanent storage. Default to True.
+            thread_count: Number of IO threads to use to write. Default to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            process_group: ProcessGroup to be used for cross-rank synchronization.
+            coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
+            no_dist: If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
+            loader_planner: Instance of LoadPlanner to use when loading.
+            save_planner: Instance of SavePlanner to use when saving.
+        """
 
         storage_writer = FileSystemWriter(
             path,
@@ -558,5 +561,6 @@ class FileSystemCheckpointer(Checkpointer):
             process_group,
             coordinator_rank,
             no_dist,
-            planner
+            load_planner,
+            save_planner
         )
