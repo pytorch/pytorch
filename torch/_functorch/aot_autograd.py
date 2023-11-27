@@ -1,5 +1,4 @@
 import itertools
-import logging
 from contextlib import nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -14,7 +13,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, preserve_rng_state
 from torch._guards import detect_fake_mode
-from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -44,18 +42,14 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     get_aot_compilation_context,
     get_aot_graph_name,
     get_graph_being_compiled,
+    set_model_name,
+    setup_stacktrace_preservation_hooks,
 )
 from ._aot_autograd.alias_runtime_wrappers import aot_wrapper_dedupe, aot_wrapper_synthetic_base
 from ._aot_autograd.jit_compile_runtime_wrappers import aot_dispatch_base, aot_dispatch_autograd
 from ._aot_autograd.dispatch_and_compile_graph import aot_dispatch_base_graph, aot_dispatch_autograd_graph
 
 zip = strict_zip
-
-log = logging.getLogger(__name__)
-aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
-
-aten = torch.ops.aten
 
 # This global counter increments every time we compile a graph with
 # AOTAutograd.  You can use this to correlate runtime error messages
