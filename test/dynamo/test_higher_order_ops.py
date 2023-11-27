@@ -1321,7 +1321,8 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
@@ -1329,7 +1330,7 @@ def forward(self, L_x_ : torch.Tensor):
 def forward(self, l_x_):
     l_x__1 = l_x_
     sin = torch.sin(l_x__1);  l_x__1 = None
-    return sin""",
+    return (sin,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1337,7 +1338,7 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     cos = torch.cos(l_x__1);  l_x__1 = None
-    return cos""",
+    return (cos,)""",
             )
 
     def test_cond_branches_no_arguments_no_closure(self):
@@ -1364,14 +1365,15 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
                 """\
 def forward(self):
     ones = torch.ones(3, 4)
-    return ones""",
+    return (ones,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1379,7 +1381,7 @@ def forward(self):
 def forward(self):
     ones = torch.ones(3, 4)
     sin = ones.sin();  ones = None
-    return sin""",
+    return (sin,)""",
             )
 
     def test_cond_side_effect_in_one_branches(self):
@@ -2185,7 +2187,8 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
-    return (cond,)""",  # noqa: B950
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
         )
 
     def test_cond_pytree_operands_with_non_tensor_leaves(self):
