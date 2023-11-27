@@ -263,13 +263,14 @@ class TestAOTAutograd(AOTTestCase):
         inp_: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
+        only_keep_inference_mutations: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
         make_inputs_subclasses: bool = False,
     ):
-        for keep_input_mutations in [True, False]:
+        for keep_input_mutations in [True] if only_keep_inference_mutations else [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
             # (useful if we want to generate complicated aliasing inputs)
             if isinstance(inp_, Callable):
@@ -623,7 +624,31 @@ def forward(self, primals_1, primals_2, primals_3):
                 a.mul_(2)
             return a + 3
         inp = [torch.ones(4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        # Even though the input requires_grad, we expect the keep the input mutation in the graph
+        # (Even though this is a training graph!)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 2)
+    add = torch.ops.aten.add.Tensor(mul, 3)
+    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = None
+    return [add]""")
+
+    def test_input_mutation_requires_grad_no_grad_inference_graph(self):
+        def f(a):
+            with torch.no_grad():
+                a.mul_(2)
+                return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        # Even though the input requires_grad, we expect the keep the input mutation in the graph
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 2)
+    add = torch.ops.aten.add.Tensor(mul, 3)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = None
+    return (add,)""")
 
     def test_input_mutation_requires_grad_no_grad_detach_mixed(self):
         # Perform a mix of mutations on a:
