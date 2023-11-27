@@ -1051,7 +1051,7 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR)
       << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
-  if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0) {
+  if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 20000) > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
