@@ -22,7 +22,11 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
 if dist.is_available():
-    from torch.distributed.distributed_c10d import _get_default_group, ReduceOp
+    from torch.distributed.distributed_c10d import (
+        _get_default_group,
+        _rank_not_in_group,
+        ReduceOp,
+    )
     from torch.distributed.utils import (
         _alloc_storage,
         _cast_forward_inputs,
@@ -782,7 +786,6 @@ class DistributedDataParallel(Module, Joinable):
         if len(self._delay_all_reduce_params) != 0:
             self._register_delay_all_reduce_hook(
                 bucket_cap_mb=bucket_cap_mb,
-                process_group=self.process_group,
                 param_to_hook_all_reduce=param_to_hook_all_reduce,
                 device_ids=device_ids,
             )
@@ -861,10 +864,18 @@ class DistributedDataParallel(Module, Joinable):
 
         self._lazy_init_ran = False
 
+    def _delayed_all_reduce_hook(self, grad):
+        world_size = dist.get_world_size(self.process_group)
+
+        self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
+        _ = dist.all_reduce(
+            self._delay_grad_buffer, group=self.process_group, async_op=True
+        )
+        return grad
+
     def _register_delay_all_reduce_hook(
         self,
         bucket_cap_mb,
-        process_group,
         param_to_hook_all_reduce,
         device_ids,
     ):
@@ -877,19 +888,10 @@ class DistributedDataParallel(Module, Joinable):
 
         # 2. Broadcast the parameters
         detached_params = [p.detach() for p in self._delay_all_reduce_params]
-        dist._broadcast_coalesced(process_group, detached_params, bucket_cap_mb, 0)
+        dist._broadcast_coalesced(self.process_group, detached_params, bucket_cap_mb, 0)
 
         # 3. Hook all reduce to the specified parameter
-        world_size = dist.get_world_size(process_group)
-
-        def _delayed_all_reduce(grad):
-            self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
-            _ = dist.all_reduce(
-                self._delay_grad_buffer, group=process_group, async_op=True
-            )
-            return grad
-
-        param_to_hook_all_reduce.register_hook(_delayed_all_reduce)
+        param_to_hook_all_reduce.register_hook(self._delayed_all_reduce_hook)
 
         # 4. Build tensor views for gradients
         offset = 0
@@ -2238,3 +2240,22 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_sparse_metadata(self, global_unique_ids):
         self.reducer._set_sparse_metadata(global_unique_ids)
+
+    def _update_process_group(self, new_process_group):
+        """
+        Dynamically updates the process group for DDP so that we can shrink/expand DDP
+        world size without having to reinitialize DDP.
+
+        NOTE: If you are using custom communications hooks via, register_comm_hook,
+        you need to update the process groups for those hooks separately.
+        """
+        # Force a rebuild of buckets for a new process group. This ensures all ranks
+        # are synchronized in terms of when they will rebuild buckets and also
+        # re-evaluates previous assumptions of buckets given the world size might have
+        # changed.
+        self._has_rebuilt_buckets = False
+        self.reducer._force_bucket_rebuild()
+
+        if not _rank_not_in_group(new_process_group):
+            self.process_group = new_process_group
+            self.reducer._update_process_group(new_process_group)

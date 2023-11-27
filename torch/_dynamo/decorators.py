@@ -249,9 +249,9 @@ def mark_static_address(t, guard=True):
         raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
 
     if guard:
-        t._dynamo_static_input_type = "guarded"
+        t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
     else:
-        t._dynamo_static_input_type = "unguarded"
+        t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
 # Note: this carefully avoids eagerly import einops.

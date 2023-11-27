@@ -230,6 +230,10 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
   mutation_counter_++;
+  if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
+    // This mutation happened under no_grad or inference_mode
+    mark_mutation_during_no_grad_or_inference_mode();
+  }
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
@@ -543,6 +547,11 @@ void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
 bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
   TORCH_CHECK(isFunctionalTensor(functional_tensor));
   return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
+}
+
+bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_under_no_grad_or_inference_mode();
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {
