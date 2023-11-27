@@ -146,7 +146,7 @@ class CUDACPPScheduling(BaseScheduling):
                 cast(str, cuda_template_buffer.name), "anything", [additional_node]
             )
             CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                cast(str, cuda_template_buffer.name), [additional_node]
+                cast(str, cuda_template_buffer.name), [additional_node], dry_run=True
             )
         except CUTLASSEVTOpNotImplementedError as e:
             not_implemented_op = str(e)
@@ -162,11 +162,6 @@ class CUDACPPScheduling(BaseScheduling):
                     f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
-        if len(after_fuse_reading_buffers) > 3:
-            log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since that would require auxiliary input support."
-            )
-            return False
         return True
 
     @staticmethod

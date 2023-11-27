@@ -4,6 +4,7 @@ from unittest.mock import patch
 import sympy
 
 import torch._inductor.virtualized as virtualized
+from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
 from torch._inductor.ir import ComputedBuffer, FlexibleLayout, IRNode, Pointwise
 from torch._inductor.utils import IndentedBuffer, sympy_str
 
@@ -46,7 +47,12 @@ class CutlassEVTEpilogueTypeFormatter:
     """
 
     def __init__(
-        self, accumulator_node_name, evt_type_name, pre_fused_evt: Optional[str] = None
+        self,
+        accumulator_node_name,
+        evt_type_name,
+        pre_fused_evt: Optional[str] = None,
+        c_operand_alias: Optional[str] = None,
+        dry_run: bool = False,
     ):
         """
 
@@ -58,6 +64,7 @@ class CutlassEVTEpilogueTypeFormatter:
         - evt_type_name (str):      The output name of the EVT type we are generating.
         - pre_fused_evt (Optional[str]): Optional EVT expression declaration that is pre-fused into the template
                                     (typically addmm style bias addition etc.)
+        - c_operand_alias (Optional[str]): Optional name of the C operand
 
         """
         self.accumulator_node_name = accumulator_node_name
@@ -66,6 +73,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.evt_type_name = evt_type_name
         self.aliases: Dict[str, str] = dict()
         self.pre_fused_evt = pre_fused_evt
+        self.c_operand_alias = c_operand_alias
 
     @staticmethod
     def ir_to_evt_string(
@@ -73,6 +81,7 @@ class CutlassEVTEpilogueTypeFormatter:
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
         pre_fused_evt: Optional[str] = None,
+        c_operand_alias: Optional[str] = None,
     ):
         """
         Formats IR nodes into a string representation compatible with Cutlass EVT format.
@@ -84,6 +93,7 @@ class CutlassEVTEpilogueTypeFormatter:
                 ComputedBuffer nodes wrapping Pointwise nodes.
             pre_fused_evt: Optional EVT expression declaration that is pre-fused into the template
                            (typically addmm style bias addition etc.)
+            c_operand_alias: Optional name of the C operand
 
         Returns:
             A string representation of the IR nodes formatted according to the Cutlass EVT format.
@@ -94,7 +104,7 @@ class CutlassEVTEpilogueTypeFormatter:
             return f"using {evt_type_name} = cutlass::epilogue::fusion::Sm90AccFetch"
 
         formatter = CutlassEVTEpilogueTypeFormatter(
-            template_output_node_name, evt_type_name, pre_fused_evt
+            template_output_node_name, evt_type_name, pre_fused_evt, c_operand_alias
         )
 
         with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
@@ -162,6 +172,20 @@ class CutlassEVTEpilogueTypeFormatter:
         else:
             raise CUTLASSEVTOpNotImplementedError(name)
 
+    def _aux_load_decl(self, name):
+        graph = virtualized.V.graph
+        node = graph.get_buffer(name)
+        assert (
+            node is not None
+        ), f"Input buffer with name {name} not found in current graph"
+        aux_load_descriptor = create_cutlass_aux_load_descriptor(node)
+        ALD = f"{name}AuxLoadDesc"
+        self.output.writeline(f"using {ALD} = {aux_load_descriptor};")
+        aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
+        return f"""cutlass::epilogue::fusion::Sm90EVT<
+                                        cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >,
+                                        cutlass::epilogue::fusion::Sm90AuxLoad<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""
+
     def _op_load(self, name, index_expr):
         # Load an input to an operation. Might be the output of the matmul, the result
         # of a previous epilogue node, a constant or (TODO) an auxiliary input.
@@ -172,10 +196,12 @@ class CutlassEVTEpilogueTypeFormatter:
                 return self.pre_fused_evt
         elif name in self.aliases:
             return self.aliases[name]
-        else:
+        elif name == self.c_operand_alias:
             return f"""cutlass::epilogue::fusion::Sm90EVT<
                                 cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >,
                                 cutlass::epilogue::fusion::Sm90SrcFetch> /* :={name} as operand C, cast to accumulator dtype */"""
+        else:
+            return self._aux_load_decl(name)
 
     def _op_constant(self, value, dtype):
         # Load a constant
@@ -274,6 +300,8 @@ class CutlassEVTEpilogueArgumentFormatter:
         self,
         accumulator_node_name: str,
         pre_fused_evt_args: Optional[str] = None,
+        c_operand_alias: Optional[str] = None,
+        dry_run: bool = False,
     ):
         """
 
@@ -284,6 +312,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             accumulator_node_name (str): The name of the accumulator node which should contain
                                           the Matmul result before fusion according to the IR graph.
             pre_fused_evt_args (Optional[str]): Optional arguments for a pre-fused EVT expression (typically addmm args).
+            dry_run(bool): If true, will not require an actual Kernel as context and assume we're only doing validity checking
         """
         self.accumulator_node_name: str = accumulator_node_name  #
         self.output: IndentedBuffer = IndentedBuffer(0)  # The output buffer for codegen
@@ -292,15 +321,19 @@ class CutlassEVTEpilogueArgumentFormatter:
         )
         self.pre_fused_evt_args: Optional[str] = pre_fused_evt_args
         self.aliases: Dict[str, str] = dict()  # Aliases for subexpression functors
+        self.c_operand_alias = c_operand_alias
+        self.dry_run = dry_run
 
     @staticmethod
     def ir_to_evt_argument_string(
         template_output_node_name: str,
         epilogue_nodes: List[IRNode],
         pre_fused_evt_args: Optional[str] = None,
+        c_operand_alias: Optional[str] = None,
+        dry_run: bool = False,
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
-            template_output_node_name, pre_fused_evt_args
+            template_output_node_name, pre_fused_evt_args, c_operand_alias, dry_run
         )
         result = pre_fused_evt_args
         if (pre_fused_evt_args is None) and (
@@ -370,8 +403,34 @@ class CutlassEVTEpilogueArgumentFormatter:
                 return self.pre_fused_evt_args
         elif name in self.aliases:
             return self.aliases[name]
-        else:
+        elif name == self.c_operand_alias:
             return "{}"
+        else:
+            if self.dry_run:
+                return f"{{ /* dry run placeholder for aux input {name} */ }}"
+            kernel = virtualized.V.kernel
+            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateKernel
+
+            assert isinstance(kernel, CUDATemplateKernel)
+            aux_arg_name = "aux_" + name
+            assert (
+                aux_arg_name in kernel.named_nodes
+            ), f"Auxiliary argument {aux_arg_name} not found in kernel"
+            aux_input_node = kernel.named_nodes[aux_arg_name]
+            cutlass_dtype = CUTLASSTemplate._DTYPE_TO_CUTLASS[
+                aux_input_node.get_layout().dtype
+            ]
+            # cpp_dtype = kernel.dtype(aux_input_node)
+            data_ptr = kernel.ptr(aux_input_node)
+            m_stride = kernel.stride(aux_input_node, -2)
+            n_stride = kernel.stride(aux_input_node, -1)
+            batch_stride = kernel.stride(aux_input_node, 0)
+            if str(m_stride) in ["1", "0", "1L", "0L"]:
+                m_stride = f"cute::Int<{m_stride}>{{}}"
+            if str(n_stride) in ["1", "0", "1L", "0L"]:
+                n_stride = f"cute::Int<{n_stride}>{{}}"
+
+            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {m_stride}, {n_stride}, {batch_stride} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
@@ -437,3 +496,27 @@ class CutlassEVTEpilogueArgumentFormatter:
 
     def getvalue(self, result) -> str:
         return "{" + str(result) + "}"
+
+
+def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
+    stride_args = []
+    for stride in strides:
+        if stride in [0, 1]:
+            stride_args.append(f"cute::Int<{stride}>")
+        else:
+            stride_args.append(stride_dtype)
+    return "cute::Stride<" + ", ".join(stride_args) + ">"
+
+
+def cute_stride_mnl_decl(strides):
+    return cute_stride_decl([strides[-2], strides[-1]] + list(strides[:-2][::-1]))
+
+
+def create_cutlass_aux_load_descriptor(node: IRNode) -> str:
+    """
+    Creates a Cutlass auxiliary descriptor for the given node.
+    This is used to pass auxiliary inputs to the kernel.
+    """
+    cutlass_dtype = CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+    layout_stride_decl = cute_stride_mnl_decl(node.get_stride())
+    return f"""cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, {layout_stride_decl}, {cutlass_dtype}>"""

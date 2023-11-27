@@ -269,6 +269,7 @@ class TestMaxAutotune(TestCase):
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         with_bias=False,
+        with_aux=False,
         m=1024,
         n=1024,
         k=1024,
@@ -295,14 +296,20 @@ class TestMaxAutotune(TestCase):
             b = torch.randn(batch_size, k, n).mul(1.0 / 32).cuda()
             if with_bias:
                 bias = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
+            if with_aux:
+                aux = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
         if fp16:
             a = a.half()
             b = b.half()
             if with_bias:
                 bias = bias.half()
+            if with_aux:
+                aux = aux.half()
         args = [a, b]
         if with_bias:
             args.append(bias)
+        if with_aux:
+            args.append(aux)
         with config.patch(
             {
                 "max_autotune": True,
@@ -465,6 +472,29 @@ class TestMaxAutotune(TestCase):
             m=2048,
             n=512,
             k=4096,
+            batch_size=2,
+            max_profiling_configs=1,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_two_additional_inputs_random_mask(self):
+        def mm(a, b, c, aux):
+            return ((a @ b) * torch.relu(c)) + aux
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            with_aux=True,
+            m=2048,
+            n=512,
+            k=4096,
+            batch_size=2,
+            max_profiling_configs=1,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
