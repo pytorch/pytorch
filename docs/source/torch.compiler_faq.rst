@@ -630,7 +630,8 @@ but no real data movement happens. Note that the original program would not run
 on eager mode now. If you want to run it in eager mode, you would need to call
 ``.numpy(force=True)`` doing ``Z = Z.cuda()`` before returning
 ``Z``. Of course, doing this would execute the program on eager mode NumPy, and
-on CPU.
+on CPU. Note also that calling ``.numpy(force=True`` under ``torch.compile`` also
+moves to CPU and deactivates gradient computations.
 
 We provide the decorator ``torch.compiler.wrap_np``  that implements the patteron of wrapping
 a NumPy function into a PyTorch one. Using it, we can simply write

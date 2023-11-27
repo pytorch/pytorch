@@ -9,6 +9,7 @@ __all__ = [
     "list_backends",
     "disable",
     "cudagraph_mark_step_begin",
+    "wrap_np",
 ]
 
 def compile(*args, **kwargs):
@@ -130,6 +131,8 @@ def wrap_np(fn):
     to compute gradients through NumPy functions.
 
     Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Compile a NumPy function as a Tensor -> Tensor function
         >>> @torch.compile(fullgraph=True)
         >>> @torch.compiler.wrap_np

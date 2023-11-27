@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 try:
     import numpy as np
 except ModuleNotFoundError:
-    np = None
+    np = None  # type: ignore[assignment]
 
 
 def is_compiling() -> bool:
@@ -46,7 +46,10 @@ def wrap_np(f):
 
     @functools.wraps(f)
     def wrap(*args, **kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, lambda x: x.numpy(), (args, kwargs))
+        args, kwargs = pytree.tree_map_only(
+            torch.Tensor, lambda x: x.numpy(), (args, kwargs)
+        )
         out = f(*args, **kwargs)
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
+
     return wrap
