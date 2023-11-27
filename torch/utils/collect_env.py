@@ -46,6 +46,27 @@ SystemEnv = namedtuple('SystemEnv', [
     'cpu_info',
 ])
 
+DEFAULT_CONDA_PATTERNS = {
+    "torch",
+    "numpy",
+    "cudatoolkit",
+    "soumith",
+    "mkl",
+    "magma",
+    "triton",
+    "optree",
+}
+
+DEFAULT_PIP_PATTERNS = {
+    "torch",
+    "numpy",
+    "mypy",
+    "flake8",
+    "triton",
+    "optree",
+    "onnx",
+}
+
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
@@ -91,17 +112,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda, patterns=None):
     if patterns is None:
-        # default conda patterns
-        patterns = {
-            "torch",
-            "numpy",
-            "cudatoolkit",
-            "soumith",
-            "mkl",
-            "magma",
-            "triton",
-            "optree",
-        }
+        patterns = DEFAULT_CONDA_PATTERNS
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
@@ -376,16 +387,7 @@ def get_libc_version():
 def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
-        # default conda patterns
-        patterns = {
-            "torch",
-            "numpy",
-            "mypy",
-            "flake8",
-            "triton",
-            "optree",
-            "onnx",
-        }
+        patterns = DEFAULT_PIP_PATTERNS
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
