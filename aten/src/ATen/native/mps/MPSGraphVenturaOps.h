@@ -1,7 +1,7 @@
 #pragma once
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
-
+// TODO: Remove me when moved to MacOS 13
 @interface MPSGraph (VenturaOps)
 
 #if !defined(__MAC_13_0) && \
@@ -16,28 +16,6 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
     MPSGraphResizeNearestRoundingModeRoundToEven       =  4L,
     MPSGraphResizeNearestRoundingModeRoundToOdd        =  5L,
 };
-
-
-
-#endif
-
-#ifdef MAC_OS_VERSION_13_2
-- (MPSGraphTensor * _Nonnull) convolution3DWithSourceTensor:(MPSGraphTensor * _Nonnull) source
-                                    weightsTensor:(MPSGraphTensor * _Nonnull) weights
-                                       descriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) descriptor
-                                                      name:(NSString * _Nullable) name;
-
-- (MPSGraphTensor * _Nonnull) convolution3DDataGradientWithIncomingGradientTensor:(MPSGraphTensor * _Nonnull) incomingGradient
-                                                          weightsTensor:(MPSGraphTensor * _Nonnull) weights
-                                                            outputShape:(MPSShape * _Nonnull) outputShape
-                                           forwardConvolutionDescriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) forwardConvolutionDescriptor
-                                                                   name:(NSString * _Nullable) name;
-
-- (MPSGraphTensor * _Nonnull) convolution3DWeightsGradientWithIncomingGradientTensor:(MPSGraphTensor * _Nonnull) incomingGradient
-                                                            sourceTensor:(MPSGraphTensor * _Nonnull) source
-                                                            outputShape:(MPSShape * _Nonnull) outputShape
-                                           forwardConvolutionDescriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) forwardConvolutionDescriptor
-                                                                   name:(NSString * _Nullable) name;
 #endif
 
 - (MPSGraphTensor * _Nonnull)cumulativeSumWithTensor:(MPSGraphTensor * _Nonnull)tensor
