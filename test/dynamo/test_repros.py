@@ -3638,6 +3638,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
 
+    def test_numpy_tobytes_no_error(self):
+        def fn(x):
+            x += 1
+            z = x.tobytes()
+            x += 1
+            return z
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_arg, arg = np.array([1, 2]), np.array([1, 2])
+        self.assertEqual(opt_fn(opt_arg), fn(arg))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_numpy_not_ndarray_recompiles(self):
         import torch
 

@@ -235,6 +235,26 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_inf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == math.inf
+
+        f(torch.tensor([3.0], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_neginf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == -math.inf
+
+        f(torch.tensor([3.0], device=device))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
