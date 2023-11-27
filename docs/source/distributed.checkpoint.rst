@@ -24,7 +24,10 @@ The entrypoints to load and save a checkpoint are the following:
 .. autofunction::  save
 
 In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
-.. autoclass:: torch.distributed.checkpoint.Stateful
+.. automodule:: torch.distributed.checkpoint.stateful
+
+.. autoclass:: torch.distributed.checkpoint.stateful.Stateful
+  :members:
 
 This `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py>`_ shows how to use Pytorch Distributed Checkpoint to save a FSDP model.
 
