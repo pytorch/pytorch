@@ -2044,6 +2044,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
+        is_backward = fx_node.target in (
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._scaled_dot_product_flash_attention_backward.default,
+        )
+
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
@@ -2056,12 +2061,23 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 # Would be nice to be able to require certain padding from inductor ir, nyi
                 if is_aligned(arg.unwrap_view()):
                     return arg
-        # This is needed for the backward case:
-        # Hacky but not sure of a better way
-        if isinstance(arg.data, ir.StorageBox) and arg.data.is_input_buffer():
-            if "expand" in arg.data.get_name():
-                if (V.graph.sizevars.size_hint(arg.get_stride()[-2]) % ALIGNMENT) == 0:
-                    return arg
+
+        def is_aligned_backward(x):
+            aligned_strides = all(
+                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
+                for i in range(len(x.get_stride()) - 1)
+            )
+            return (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+            ) == 1 and aligned_strides
+
+        if (
+            isinstance(arg.data, ir.StorageBox)
+            and arg.data.is_input_buffer()
+            and is_backward
+        ):
+            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+                return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
