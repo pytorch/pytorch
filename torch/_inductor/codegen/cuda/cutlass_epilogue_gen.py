@@ -174,7 +174,7 @@ class CutlassEVTEpilogueTypeFormatter:
             return self.aliases[name]
         else:
             return f"""cutlass::epilogue::fusion::Sm90EVT<
-                                cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >, 
+                                cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >,
                                 cutlass::epilogue::fusion::Sm90SrcFetch> /* :={name} as operand C, cast to accumulator dtype */"""
 
     def _op_constant(self, value, dtype):
@@ -229,6 +229,12 @@ class CutlassEVTEpilogueTypeFormatter:
     def _op_relu(self, a):
         const_zero = self._op_constant(0.0, "torch.float32")
         return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::maximum, ElementAcc, ElementAcc, RoundStyle>,{a}, {const_zero}>"  # noqa: B950
+
+    def _op_sigmoid(self, a):
+        return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::epilogue::thread::Sigmoid, ElementAcc, ElementAcc, RoundStyle>,{a}>"  # noqa: B950
+
+    def _op_tanh(self, a):
+        return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::epilogue::thread::Tanh, ElementAcc, ElementAcc, RoundStyle>,{a}>"  # noqa: B950
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise CUTLASSEVTOpNotImplementedError()
@@ -405,6 +411,12 @@ class CutlassEVTEpilogueArgumentFormatter:
     def _op_relu(self, a):
         const_zero = self._op_constant(0.0, "torch.float32")
         return "{" + str(a) + ", " + const_zero + "}"
+
+    def _op_sigmoid(self, a):
+        return "{}"
+
+    def _op_tanh(self, a):
+        return "{}"
 
     def _op_to_dtype(self, a, dtype, src_dtype=None):
         # Is is asserted ( and ascertained during can_fuse decision ) that the dtype remains compatible
