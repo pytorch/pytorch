@@ -11,14 +11,14 @@ from torch.utils._python_dispatch import (
 from .schemas import MutationType
 
 
-def to_functional(t):
+def to_fun(t):
     if isinstance(t, Tensor):
         if is_traceable_wrapper_subclass(t):
             # See Note [Functionalization always runs last]
             # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
-            out = transform_subclass(t, lambda _, inner_t: to_functional(inner_t))
+            out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
             torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
             return out
         else:
@@ -37,14 +37,14 @@ def sync_functional_tensor(t):
 
 
 # When subclasses are involved, t here will usually look something like:
-# SubclassA(SubclassB(FunctionalTensor(_to_functional_tensor(FakeTensor))))
-def from_functional(t):
+# SubclassA(SubclassB(FunctionalTensor(_to_fun_tensor(FakeTensor))))
+def from_fun(t):
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
-        out = transform_subclass(t, lambda _, inner_t: from_functional(inner_t))
+        out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
         torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
         return out
 
@@ -57,7 +57,7 @@ def from_functional(t):
     return torch._from_functional_tensor(t.elem)
 
 
-def is_functional(t):
+def is_fun(t):
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
@@ -65,8 +65,8 @@ def is_functional(t):
         # recurse here, so we can support nested wrapper subclasses
         t_attrs, _ = t.__tensor_flatten__()  # type: ignore[attr-defined]
         t_inners = [getattr(t, attr) for attr in t_attrs]
-        any_fun = any(is_functional(x) for x in t_inners)
-        all_fun = all(is_functional(x) for x in t_inners)
+        any_fun = any(is_fun(x) for x in t_inners)
+        all_fun = all(is_fun(x) for x in t_inners)
         assert any_fun == all_fun
         return any_fun
 
@@ -74,7 +74,7 @@ def is_functional(t):
 
 
 # t here is either
-# (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
+# (1) A FunctionalTensor(_to_fun_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
 def has_metadata_mutation(t: Tensor):
     if is_traceable_wrapper_subclass(t):
@@ -175,7 +175,7 @@ def has_same_metadata(t1, t2):
 # Normally it would be enough just to check if arg is new_arg, which is normally enough for functionalization
 # to confirm that inputs were not mutated when running the user's model with functionalization on.
 # But when we have subclass inputs, we can't rely on that:
-# `from_functional(to_functional(x)) is x` will return False, because the call to `from_fun` constructs
+# `from_fun(to_fun(x)) is x` will return False, because the call to `from_fun` constructs
 # a brand new subclass instance: we are calling __tensor_unflatten__, and going
 # from Subclass(FakeTensor) to Subclass(FunctionalTensor(FakeTensor))
 def was_tensor_updated(arg, new_arg):
