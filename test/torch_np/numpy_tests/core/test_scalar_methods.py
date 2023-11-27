@@ -137,6 +137,7 @@ class TestAsIntegerRatio(TestCase):
             assert_equal(nf / df, f, f"{n}/{d}")
 
 
+@skip(reason="NP_VER: older numpies has problems with .is_integer")
 @instantiate_parametrized_tests
 class TestIsInteger(TestCase):
     @parametrize("str_value", ["inf", "nan"])
@@ -146,13 +147,15 @@ class TestIsInteger(TestCase):
         value = cls(str_value)
         assert not value.is_integer()
 
-    @parametrize("code", np.typecodes["Float"] + np.typecodes["AllInteger"])
+    @parametrize(
+        "code", "efd" + "Bbhil"
+    )  # np.typecodes["Float"] + np.typecodes["AllInteger"])
     def test_true(self, code: str) -> None:
         float_array = np.arange(-5, 5).astype(code)
         for value in float_array:
             assert value.is_integer()
 
-    @parametrize("code", np.typecodes["Float"])
+    @parametrize("code", "bhil")  # np.typecodes["Float"])
     def test_false(self, code: str) -> None:
         float_array = np.arange(-5, 5).astype(code)
         float_array *= 1.1

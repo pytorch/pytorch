@@ -409,7 +409,9 @@ or file a github issue."""
                     if isinstance(arg, torch.Tensor) and not isinstance(
                         arg, torch._subclasses.FakeTensor
                     ):
-                        new_args.append(fake_mode.from_tensor(arg))
+                        new_args.append(
+                            torch._dynamo.utils.to_fake_tensor(arg, fake_mode)
+                        )
                     else:
                         new_args.append(arg)
 

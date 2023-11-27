@@ -10,7 +10,6 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -19,7 +18,6 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
-#include <stdexcept>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
@@ -87,7 +85,8 @@ inline std::string getValueShape(
     const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
-    if (tensor.defined()) {
+    if (tensor.defined() &&
+        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
       return vectorToString(tensor.sizes().vec());
     }
   } else if (val.isTuple()) {
@@ -389,7 +388,8 @@ inline std::string convertIValue(
     size_t numel = 0;
     size_t itemsize = 0;
     std::string device_str = "";
-    if (t->has_storage()) {
+    // symbolic sizes/strides implies t->storage_offset() will fail
+    if (t->has_storage() && !t->has_symbolic_sizes_strides()) {
       auto& t_storage = t->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();

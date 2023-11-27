@@ -72,7 +72,7 @@ on:
         required: true
         description: Conda PyTorchBot token
 jobs:
-  build:
+  upload:
     runs-on: ubuntu-22.04
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     container:

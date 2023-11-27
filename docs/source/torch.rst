@@ -55,6 +55,7 @@ Creation Ops
     asarray
     as_tensor
     as_strided
+    from_file
     from_numpy
     from_dlpack
     frombuffer

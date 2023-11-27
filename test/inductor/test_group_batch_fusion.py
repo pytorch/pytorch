@@ -212,8 +212,19 @@ class MyModule6(torch.nn.Module):
         return torch.cat(tanh_1, dim=1) + torch.cat(tanh_2, dim=1)
 
 
+class MyModule7(torch.nn.Module):
+    def __init__(self, device, has_bias=True):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = torch.unbind(x.to(self.device), dim=0)
+        relu = [torch.nn.functional.relu(inputs[i]) for i in range(len(inputs))]
+        return torch.stack(relu, dim=0)
+
+
 @requires_cuda()
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@torch._inductor.config.patch(post_grad_fusion_options={"group_linear": {}})
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -402,6 +413,21 @@ class TestGroupBatchFusion(TestCase):
             counters["inductor"]["scmerge_cat_removed"],
             2,
         )
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    def test_batch_relu_pre_grad_fusion(self):
+        counters.clear()
+        module = MyModule7("cuda")
+        input = [torch.randn(20, 40, 60, requires_grad=True, device="cuda")]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)

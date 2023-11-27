@@ -205,6 +205,8 @@ class TORCH_API Context {
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
   void setDeterministicAlgorithms(bool, bool);
+  bool deterministicFillUninitializedMemory() const;
+  void setDeterministicFillUninitializedMemory(bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -301,6 +303,7 @@ class TORCH_API Context {
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
+  bool _deterministic_fill_uninitialized_memory = true;
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;

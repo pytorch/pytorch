@@ -264,7 +264,42 @@ used.  For example, the following code is incorrect::
 When the "current stream" is the default stream, PyTorch automatically performs
 necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
-ensure proper synchronization.
+ensure proper synchronization.  The fixed version of this example is::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # NEW!
+    with torch.cuda.stream(s):
+        B = torch.sum(A)
+    A.record_stream(s)  # NEW!
+
+There are two new additions.  The :meth:`torch.cuda.Stream.wait_stream` call
+ensures that the ``normal_()`` execution has finished before we start running
+``sum(A)`` on a side stream.  The :meth:`torch.Tensor.record_stream` (see for
+more details) ensures that we do not deallocate A before ``sum(A)`` has
+completed.  You can also manually wait on the stream at some later point in
+time with ``torch.cuda.default_stream(cuda).wait_stream(s)`` (note that it
+is pointless to wait immediately, since that will prevent the stream execution
+from running in parallel with other work on the default stream.)  See the
+documentation for :meth:`torch.Tensor.record_stream` on more details on when
+to use one or another.
+
+Note that this synchronization is necessary even when there is no
+read dependency, e.g., as seen in this example::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # STILL REQUIRED!
+    with torch.cuda.stream(s):
+        A.normal_(0.0, 1.0)
+        A.record_stream(s)
+
+Despite the computation on ``s`` not reading the contents of ``A`` and no
+other uses of ``A``, it is still necessary to synchronize, because ``A``
+may correspond to memory reallocated by the CUDA caching allocator, with
+pending operations from the old (deallocated) memory.
 
 .. _bwd-cuda-stream-semantics:
 

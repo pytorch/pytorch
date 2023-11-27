@@ -405,7 +405,7 @@ def create_python_bindings(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         py_methods.append(
             method_impl(name, module, overloads, method=method, symint=symint)
@@ -443,7 +443,7 @@ def create_python_return_type_bindings(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         definitions, registrations = generate_return_type_definition_and_registrations(
             overloads
@@ -481,7 +481,7 @@ def create_python_return_type_bindings_header(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         declarations = generate_return_type_declarations(overloads)
         py_return_types_declarations.append(

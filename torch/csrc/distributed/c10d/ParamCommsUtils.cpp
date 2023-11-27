@@ -7,8 +7,6 @@
 
 namespace torch {
 
-extern const std::string kParamCommsCallName = "record_param_comms";
-
 ParamCommsDebugInfo::ParamCommsDebugInfo(
     int rank,
     std::string&& colName,

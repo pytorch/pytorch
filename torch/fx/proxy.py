@@ -84,7 +84,7 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
 
 
 @compatibility(is_backward_compatible=True)
@@ -408,6 +408,9 @@ class Proxy:
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
+
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
 
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:

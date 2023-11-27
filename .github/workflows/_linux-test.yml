@@ -128,13 +128,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
-
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        continue-on-error: true
-        with:
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Set Test step time
         id: test-timeout
@@ -156,6 +150,8 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
@@ -203,6 +199,7 @@ jobs:
             -e GITHUB_RUN_ID \
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
+            -e JOB_ID \
             -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \
@@ -252,7 +249,9 @@ jobs:
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          test_config: ${{ matrix.config }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Print remaining test logs
         shell: bash
