@@ -513,6 +513,9 @@ class FileSystemReader(StorageReader):
         return global_plan
 
 class FileSystemCheckpointer(Checkpointer):
+    """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
+    for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
+    """
 
     def __init__(
         self,
@@ -527,6 +530,18 @@ class FileSystemCheckpointer(Checkpointer):
         no_dist: bool = False,
         planner: Optional[LoadPlanner] = None,
     ):
+    """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
+
+    Args:
+        path: The directory to store/load checkpoints.
+        single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
+        sync_files: force files to be synced to permanent storage. Default to True.
+        thread_count: Number of IO threads to use to write. Default to 1.
+        per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+        process_group: ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int): Rank to use to coordinate the checkpoint. rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
+    """
 
         storage_writer = FileSystemWriter(
             path,

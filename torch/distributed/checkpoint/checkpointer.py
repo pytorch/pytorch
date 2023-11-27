@@ -29,6 +29,19 @@ class Checkpointer:
         no_dist: bool = False,
         planner: Optional[LoadPlanner] = None,
     ):
+    """
+    Args:
+        storage_writer (StorageWriter):
+            Instance of StorageWrite use to perform writes.
+        storage_reader (StorageReader): StorageReader used to load data from.
+        process_group (ProcessGroup):
+            ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int):
+            Rank to use to coordinate the checkpoint.
+            rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not load
+            in SPMD style. (Default: ``False``)
+    """
         self.storage_writer = storage_writer
         self.storage_reader = storage_reader
         self.process_group = process_group
@@ -46,6 +59,11 @@ class Checkpointer:
         no_dist: bool = False,
         planner: Optional[SavePlanner] = None,
     ):
+        """
+            Calls :py:meth: `torch.distributed.state_dict_saver.save`.
+            This method will default to the values passed during initialization.
+
+        """
         storage_writer = storage_writer or self.storage_writer
         process_group = process_group or self.process_group
         coordinator_rank = coordinator_rank or self.coordinator_rank
@@ -71,6 +89,10 @@ class Checkpointer:
             no_dist: bool = False,
             planner: Optional[LoadPlanner] = None,
     ):
+        """
+        Calls :py:meth: `torch.distributed.state_dict_loader.load`.
+        This method will default to the values passed during initialization.
+        """
         storage_reader = storage_reader or self.storage_reader
         process_group = process_group or self.process_group
         coordinator_rank = coordinator_rank or self.coordinator_rank
