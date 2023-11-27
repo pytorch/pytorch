@@ -2501,7 +2501,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           auto device = pop(stack).toOptional<c10::Device>();
           push(
               stack,
-              at::make_generator_for_device(
+              torch::jit::make_generator_for_device(
                   device.value_or(c10::Device("cpu")), seed));
         },
         aliasAnalysisFromSchema()),
