@@ -726,19 +726,20 @@ def raw_performance_experiment(args, model_iter_fn, model, example_inputs, extra
         headers.append(k)
         row.append(v)
 
-    # Gather profiled data
-    events = prof.events()
+    if args.profile:
+        # Gather profiled data
+        events = prof.events()
 
-    if events is not None:
-        step_events = [evt for evt in events if evt.key == PROF_TIMED_STEP]
-        cpu_timings = np.array([evt.self_cpu_time_total for evt in step_events])
-        cuda_timings = np.array([evt.self_cuda_time_total for evt in step_events])
+        if events is not None:
+            step_events = [evt for evt in events if evt.key == PROF_TIMED_STEP]
+            cpu_timings = np.array([evt.self_cpu_time_total for evt in step_events])
+            cuda_timings = np.array([evt.self_cuda_time_total for evt in step_events])
 
-        headers.extend(["cpu_time", "cpu_time_std"])
-        row.extend([cpu_timings.sum(), cpu_timings.std()])
+            headers.extend(["cpu_time", "cpu_time_std"])
+            row.extend([cpu_timings.sum(), cpu_timings.std()])
 
-        headers.extend(["cuda_time", "cuda_time_std"])
-        row.extend([cuda_timings.sum(), cuda_timings.std()])
+            headers.extend(["cuda_time", "cuda_time_std"])
+            row.extend([cuda_timings.sum(), cuda_timings.std()])
 
     # Write the performance data into the output file.
     output_csv(output_filename, headers, row)
@@ -2502,7 +2503,7 @@ class BenchmarkRunner:
 
         is_xla_device = self.args.trace_on_xla
 
-        # To be fare, we should also consider XLA/GPU as is_cuda_device.
+        # To be fair, we should also consider XLA/GPU as is_cuda_device.
         # Problem is that we don't have access to torch.cuda API. That is,
         # assuming we didn't compile PyTorch with CUDA support.
         is_cuda_device = current_device == "cuda"
