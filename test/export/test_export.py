@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa
+import copy
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -1092,13 +1093,13 @@ class TestExport(TestCase):
             torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"
+            RuntimeError, "is specialized to be 5 at tracing time"
         ):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"
+            RuntimeError, "is specialized to be 5.0 at tracing time"
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
@@ -1109,7 +1110,7 @@ class TestExport(TestCase):
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
+        with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
@@ -1190,7 +1191,7 @@ class TestExport(TestCase):
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         reexported = torch.export.export(exported, (inp,))
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1\.shape\[0\] is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 5"):
             reexported(torch.ones(7, 5))
 
         reexported = torch.export.export(exported, (inp,), dynamic_shapes=({0: dim0_x},))
@@ -1199,7 +1200,7 @@ class TestExport(TestCase):
         # can't retrace with invalid inputs with respect to the original ExportedProgram
         dim0_x_v2 = torch.export.Dim("dim0_x_v2", min=3)
         exported_v2 = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}})
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -1472,8 +1473,8 @@ class TestExport(TestCase):
 
         ep = export(f, (torch.tensor([3]),))
         self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
-def forward(self, arg0_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+def forward(self, l_x_):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(l_x_);  l_x_ = None
     ge = _local_scalar_dense >= 0
     scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
     _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
@@ -1492,7 +1493,7 @@ def forward(self, arg0_1):
         self.assertEqual(ep(*test_inp), foo(*test_inp))
 
         ep_v2 = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, None))
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1.shape\[0\] is specialized at 4"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -1540,7 +1541,7 @@ def forward(self, arg0_1):
         test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
         with self.assertRaisesRegex(
             RuntimeError,
-            "Input arg1_1.shape\[0\] is outside of specified dynamic range \[3, inf\]"
+            "shape\[0\] is outside of specified dynamic range \[3, inf\]"
         ):
             ep(*test_inp)
 
@@ -1583,6 +1584,180 @@ def forward(self, arg0_1):
         # there is no functionalization.
         self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
 
+    def test_issue_113041(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(1.0)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.a
+
+        def forward_hook(
+            module: torch.nn.Module, inputs, output
+        ) -> torch.Tensor:
+            return 2 * output
+
+        seq = torch.nn.Sequential(TestModule()).eval()
+        seq.b = torch.tensor(2)
+        handle = seq.register_forward_hook(forward_hook)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = seq
+
+            def forward(self, x):
+                return self.seq(x) + self.seq.b
+
+        inp = (torch.randn(2, 8),)
+        ep = export(M(), inp)  # This errors because dynamo adds an extra input
+
+    def test_export_with_fake_tensor_inputs(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+    def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        # Put the inputs on a device
+        with fake_mode, torch.device('meta'):
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        # Manualy set the fake_device of fake tensors.
+        x.fake_device = torch.device('cuda:0')
+        for n, p in model.named_parameters():
+            p.fake_device = torch.device('cuda:0')
+
+        # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
+        # doesn't quite work well with aot_autograd right now due to some logic fails
+        # the check in call getDeviceGuardImpl in InputMetadata.
+        x.requires_grad = False
+        for n, p in model.named_parameters():
+            p.requires_grad = False
+
+
+        def check_device_and_fake_mode():
+            exported_program = torch.export.export(model, (x,))
+            export_res = exported_program(x)
+            exp_res = model(x)
+            all_meta_val = [node.meta["val"] for node in exported_program.graph_module.graph.nodes if 'val' in node.meta]
+            self.assertTrue(export_res.size() == exp_res.size())
+            self.assertTrue(all(val.device == x.device for val in all_meta_val))
+            self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
+
+        check_device_and_fake_mode()
+
+
+    def test_export_graph_with_no_inputs(self):
+        # We saw this pattern when users want to export
+        # a graph that initlizes the states of a model.
+        def f():
+            return torch.randn(3, 4), torch.randn(3, 4)
+
+        ep = torch.export.export(f, ())
+        a, b = ep()
+        self.assertEqual(a.size(), torch.Size([3, 4]))
+        self.assertEqual(b.size(), torch.Size([3, 4]))
+
+    def test_export_then_compile_tensor_ctor(self):
+        class M(torch.nn.Module):
+            def __init__(self,):
+                super().__init__()
+
+            def forward(self, scores, mask):
+                scores = scores.masked_fill(
+                    mask, torch.tensor(torch.finfo(scores.dtype).min)
+                )  # (bs, n_heads, q_length, k_length)
+                return scores
+
+        tensor_cpu = torch.randn(2, 4)
+        mask_cpu = torch.BoolTensor(
+            [[False,  True, False, False],
+            [False, False, False, False]]
+        )
+
+        m = M().eval()
+        # res_ref = m(tensor_cpu, mask_cpu)
+        # print("res_ref is: {}".format(res_ref), flush=True)
+
+        exported_model = capture_pre_autograd_graph(
+            m,
+            (tensor_cpu, mask_cpu),
+        )
+        optimized_model = torch.compile(exported_model)
+        optimized_model(tensor_cpu, mask_cpu)
+
+    def test_export_input_mutation_static_shape(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x, y):
+                x.view(3, 2, -1).add_(y)
+                return x
+        inputs = (torch.randn(12), 2.0)
+        model = MutationModel()
+        ep = torch.export.export(model, inputs)
+        inputs_export = copy.deepcopy(inputs)
+        inputs_model = copy.deepcopy(inputs)
+        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(inputs[0] + 2.0, inputs_model[0])
+        self.assertEqual(inputs[0] + 2.0, inputs_export[0])
+
+    def test_export_input_mutation_dynamic_shape(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x, y):
+                x[0].mul_(y)
+                return x
+        inputs = ((torch.randn(12), torch.randn(3, 2)), 2.0)
+        model = MutationModel()
+        ep = torch.export.export(
+            model,
+            inputs,
+            dynamic_shapes={'x': ({0: torch.export.Dim("dim")}, None), "y": None}
+        )
+        nodes = list(ep.graph.nodes)
+        self.assertEqual(nodes[0].op, "placeholder")
+        self.assertIsInstance(nodes[0].meta['val'], torch.Tensor)
+        self.assertIsInstance(nodes[0].meta['val'].shape[0], torch.SymInt)
+
+        inputs_export = copy.deepcopy(inputs)
+        inputs_model = copy.deepcopy(inputs)
+        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
+        self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
 if __name__ == '__main__':
     run_tests()
