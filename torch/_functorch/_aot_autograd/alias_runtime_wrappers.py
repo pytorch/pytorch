@@ -8,42 +8,17 @@ from torch import Tensor
 from torch._guards import DuplicateInputs, TracingContext
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-from .functional_utils import (  # noqa: F401
-    assert_functional_graph,
-    from_functional,
-    gen_alias_from_base,
-)
+from .functional_utils import gen_alias_from_base
 from .input_output_analysis import (
     create_synthetic_base_metadata,
     merge_view_inputs,
     remove_dupe_metadata,
 )
-from .logging_utils import (  # noqa: F401
-    describe_input,
-    format_guard_bug_msg,
-    get_aot_compilation_context,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-    set_model_name,
-    setup_stacktrace_preservation_hooks,
-    track_graph_compiling,
-)
+from .logging_utils import describe_input, format_guard_bug_msg
 from .schemas import AOTConfig, ViewAndMutationMeta
 from .subclass_utils import requires_subclass_dispatch
 
-from .utils import (  # noqa: F401
-    _get_autocast_states,
-    _get_symint_hints,
-    call_func_at_runtime_with_args,
-    create_tree_flattened_fn,
-    KNOWN_TYPES,
-    make_boxed_compiler,
-    make_boxed_func,
-    maybe_to_fresh_input,
-    normalize_as_list,
-    partial_flatten_asdict,
-    strict_zip,
-)
+from .utils import make_boxed_func, partial_flatten_asdict, strict_zip
 
 zip = strict_zip
 
