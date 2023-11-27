@@ -24,7 +24,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
-from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import (
@@ -152,9 +151,6 @@ class TestNew2dParallelTraining(DTensorTestBase):
             use_orig_params=use_orig_params,
         )
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
-
-        if recompute_activation:
-            model_2d = input_reshard(model_2d, mesh_2d["tp"], 0)
 
         # Check named parameters are returning the same name at least.
         param_names_2d = [

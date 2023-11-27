@@ -13,7 +13,6 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -70,14 +69,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             else RowwiseParallel(),
         }
         model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
-        if recompute_activation:
-            model_tp = input_reshard(
-                checkpoint_wrapper(
-                    model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
-                ),
-                device_mesh,
-                None if is_seq_parallel else 0,
-            )
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
