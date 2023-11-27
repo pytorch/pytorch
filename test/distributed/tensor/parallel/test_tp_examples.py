@@ -4,10 +4,6 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
-)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
