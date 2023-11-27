@@ -250,12 +250,12 @@ def _chunk_dtensor(
         # For tensors, it is replicated across tp dimension and sharded across FSDP dimension.
         # TP is the inner dimension and FSDP is the outer dimension.
         # Therefore, shard placements for tensor is (Shard(0), Replicate()).
-        replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
+        replicate_placements = [Replicate()]
         shard_placements = [DShard(0)]
         # shard_placements[0] = DShard(0)  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, device_mesh, replicate_placements
         ).redistribute(
             device_mesh=device_mesh,
             placements=shard_placements,
@@ -300,10 +300,12 @@ def _all_gather_dtensor(
     parent_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
-    assert parent_mesh == tensor.device_mesh
+    if parent.mesh.ndim == tensor.device.ndim:
+        assert parent_mesh == tensor.device_mesh, f"{parent_mesh=} {tensor.device_mesh=}"
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]
+    # FSDP + tensor: [Shard(0)] -> [Replicate()]
     placements[0] = Replicate()
     tensor = tensor.redistribute(
         device_mesh=tensor.device_mesh,

@@ -265,20 +265,30 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
             self.assertEqual(no_wrap_k, two_d_k)
 
-            # check if all value in 2D state_dict are DTensor
-            self.assertTrue(isinstance(two_d_v, DT))
-            self.assertEqual(len(two_d_v.placements), 2)
             # the outer dimension is the FSDP dimension and the placement is always Shard(0)
             self.assertEqual(two_d_v.placements[0], Shard(0))
-            self.assertEqual(two_d_v.device_mesh, mesh_2d)
+            # check if all value in 2D state_dict are DTensor
+            self.assertTrue(isinstance(two_d_v, DT))
 
-            # check if the parameter value is the same between 2D model and the model without wrapper
-            all_gather_two_d_v = two_d_v.redistribute(
-                mesh_2d, (Replicate(), Replicate())
-            )
-            self.assertEqual(
-                torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
-            )
+            if two_d_v.device_mesh.ndim == 2:
+                self.assertEqual(two_d_v.device_mesh, mesh_2d)
+
+                # check if the parameter value is the same between 2D model and the model
+                # without wrapper
+                all_gather_two_d_v = two_d_v.redistribute(
+                    mesh_2d, (Replicate(), Replicate())
+                )
+                self.assertEqual(
+                    torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
+                )
+            else:
+                self.assertEqual(two_d_v.device_mesh.ndim, 1)
+                self.assertEqual(two_d_v.device_mesh, dp_mesh)
+                all_gather_two_d_v = two_d_v.redistribute(dp_mesh, (Replicate(),))
+                self.assertEqual(
+                    torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
+                )
+
 
     @with_comms
     @skip_if_lt_x_gpu(4)
