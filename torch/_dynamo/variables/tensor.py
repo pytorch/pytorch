@@ -529,13 +529,17 @@ class TensorVariable(VariableTracker):
             # TODO: We may want to avoid detaching if `requires_grad=True`
             #       and `force=False` to allow computing gradients.
             force = "force" in kwargs and kwargs["force"].as_python_constant()
-            proxy = tx.output.create_proxy(
-                "call_method", "detach", *proxy_args_kwargs([self], {})
-            )
             if force:
                 # TODO Add resolve_conj and resolve_neg once we support complex tensors
                 proxy = tx.output.create_proxy(
                     "call_method", "cpu", *proxy_args_kwargs([self], {})
+                )
+            else:
+                # Create a view of self that will be marked as NumpyNdarray
+                assert self.device is not None
+                device = ConstantVariable.create(self.device)
+                proxy = tx.output.create_proxy(
+                    "call_method", "to", *proxy_args_kwargs([self, device], {})
                 )
             return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
