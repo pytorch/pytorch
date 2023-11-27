@@ -36,56 +36,78 @@ from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
 from ._aot_autograd.utils import (  # noqa: F401
-    strict_zip, _get_symint_hints, create_tree_flattened_fn,
-    KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
-    _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
-    make_boxed_compiler, maybe_to_fresh_input,
+    strict_zip,
+    _get_symint_hints,
+    KNOWN_TYPES,
+    partial_flatten_asdict,
+    normalize_as_list,
+    _get_autocast_states,
+    make_boxed_func,
+    make_boxed_compiler,
+    call_func_at_runtime_with_args,
+    create_tree_flattened_fn,
+    maybe_to_fresh_input,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
-    setup_stacktrace_preservation_hooks,
+    graph_being_compiled,
+    nth_graph,
+    model_name,
+    set_model_name,
+    get_aot_compilation_context,
     get_aot_graph_name,
     get_graph_being_compiled,
-    get_aot_compilation_context,
     track_graph_compiling,
+    callback_set,
+    setup_stacktrace_preservation_hooks,
     describe_input,
     format_guard_bug_msg,
-    set_model_name,
 )
-from ._aot_autograd.functional_utils import (
-    is_functional,
-    to_functional,
-    from_functional,
+from ._aot_autograd.functional_utils import (  # noqa: F401
+    is_fun,
+    to_fun,
+    from_fun,
     sync_functional_tensor,
     gen_alias_from_base,
     assert_functional_graph,
+    _get_mutation_type,
+    _check_if_mutation_can_be_in_graph,
 )
-from ._aot_autograd.schemas import (
-    SubclassMeta,
-    ViewAndMutationMeta,
-    TensorAlias,
-    MutationType,
+from ._aot_autograd.schemas import (  # noqa: F401
     OutputType,
-    GraphSignature,
+    OutputAliasInfo,
+    MutationType,
+    InputAliasInfo,
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+    SubclassMeta,
+    TensorAlias,
     BackwardSignature,
+    GraphOutputName,
+    GraphInputName,
+    FQN,
+    GraphSignature,
     AOTConfig,
     SubclassTracingInfo,
 )
-from ._aot_autograd.subclass_utils import (
+from ._aot_autograd.subclass_utils import (  # noqa: F401
     requires_subclass_dispatch,
     create_subclass_meta,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
+    create_metadata_for_subclass,
 )
-from ._aot_autograd.collect_metadata_analysis import (
+from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
-from ._aot_autograd.input_output_analysis import (
+from ._aot_autograd.input_output_analysis import (  # noqa: F401
     remove_dupe_metadata,
-    merge_view_inputs,
     create_synthetic_base_metadata,
+    _tensors_definitely_do_not_overlap,
+    _compute_overlapping_inputs,
+    merge_view_inputs,
 )
-from ._aot_autograd.runtime_wrappers import (
+from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     create_runtime_wrapper,
     functionalized_rng_runtime_epilogue,
     create_functionalized_rng_ops_wrapper,
@@ -566,7 +588,7 @@ def create_functionalized_fn(
 ) -> Tuple[Callable, List[Any]]:
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
-        f_args = pytree.tree_map(to_functional, args)
+        f_args = pytree.tree_map(to_fun, args)
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
@@ -602,8 +624,8 @@ def create_functionalized_fn(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                assert is_functional(inpt_f)
-                inpt_new = from_functional(inpt_f)
+                assert is_fun(inpt_f)
+                inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
@@ -614,7 +636,7 @@ def create_functionalized_fn(
                     else:
                         inpt_old.copy_(inpt_new)
 
-        return pytree.tree_map(from_functional, f_outs)
+        return pytree.tree_map(from_fun, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
@@ -1975,14 +1997,27 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
+                # see note [Tensor Fakification and Symbol Caching]
+                symbolic_context = None
+                source = None
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if x in tracing_context.tensor_to_context:
+                        symbolic_context = tracing_context.tensor_to_context[x]
+                        source = symbolic_context.tensor_source
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
+                    and not symbolic_context
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return fake_mode.from_tensor(
+                    x, static_shapes=False, symbolic_context=symbolic_context, source=source
+                )
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
