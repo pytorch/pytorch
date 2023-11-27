@@ -281,13 +281,18 @@ class TestFSDPIgnoredModules(FSDPTest):
             transformer_auto_wrap_policy, transformer_layer_cls={nn.Sequential}
         )
         self.run_subtests(
-            {"policy": [transformer_policy, ModuleWrapPolicy((nn.Sequential,))]},
+            {
+                "policy": [transformer_policy, ModuleWrapPolicy((nn.Sequential,))],
+                "ignore_bias": [True, False],
+            },
             self._test_ignored_states_auto_wrap,
         )
 
-    def _test_ignored_states_auto_wrap(self, policy):
+    def _test_ignored_states_auto_wrap(self, policy, ignore_bias: bool):
         model = Model().cuda()
-        ignored_states = [model.layer1[1].weight, model.layer1[1].bias]
+        ignored_states = [model.layer1[1].weight]
+        if ignore_bias:
+            ignored_states.append(model.layer1[1].bias)
         # Construct 2 flat parameters: one for `layer1` and one for the model
         fsdp_model = FSDP(
             model,
@@ -299,7 +304,9 @@ class TestFSDPIgnoredModules(FSDPTest):
         ref_model = Model()
         expected_layer1_unsharded_numel = sum(
             p.numel() for p in ref_model.layer1.parameters()
-        ) - sum(p.numel() for p in ref_model.layer1[1].parameters())
+        ) - ref_model.layer1[1].weight.numel()
+        if ignore_bias:
+            expected_layer1_unsharded_numel -= ref_model.layer1[1].bias.numel()
         expected_model_unsharded_numel = sum(
             p.numel() for p in ref_model.parameters()
         ) - sum(p.numel() for p in ref_model.layer1.parameters())
