@@ -1339,9 +1339,9 @@ TORCH_IMPL_FUNC(mean_out)
     switch(dtype) {
       case kHalf:
       case kBFloat16:
-        // For accuracy reasons, BF16 mean should be computed by following
-        // this approach (FP16 would also use a similar approach):
-        //  cast_fp32 -> sum -> div -> cast_bf16
+        // For accuracy reasons, BF16/FP16 mean should be computed by the
+        // following approach:
+        //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
         //
         // Such an approach is necessary because if we were to choose the same
         // approach for BF16/FP16 as FP32 here, then it would have resulted in
