@@ -650,9 +650,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertIn(
-            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+        self.assertExpectedInline(
             guard_failure.reason,
+            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
         )
 
     def test_builtin_abs(self):
@@ -716,9 +716,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ),
             sorted(guard_code),
         )
-        guard_code_str = "\n".join(guard_code)
-
-        for line in """\
+        self.assertExpectedInline(
+            "\n".join(guard_code),
+            """\
 2 <= L['x'].size()[0]
 L['x'] is L['y']
 L['x'].ndimension() == 2
@@ -734,13 +734,8 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split(
-            "\n"
-        ):
-            self.assertIn(
-                line,
-                guard_code_str,
-            )
+utils_device.CURRENT_DEVICE == None""",
+        )
 
     def test_fold(self):
         def fn(a):
@@ -5245,12 +5240,12 @@ def fn():
         self.assertTrue(guard_failure is not None)
         first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
-            self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+            self.assertExpectedInline(
                 first_guard_failure,
+                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertExpectedInline(first_guard_failure, """L['x'].size()[0] < 3""")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -5278,9 +5273,9 @@ def fn():
         opt_fn(x2, y2)
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+            self.assertExpectedInline(
                 guard_failure[0],
+                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
             )
         else:
             self.assertTrue(guard_failure is None)
@@ -5313,9 +5308,9 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertIn(
-            """len(L['x']) == 10""",
+        self.assertExpectedInline(
             guard_failure[0],
+            """len(L['x']) == 10""",
         )
 
     def test_restore_graphstate(self):
@@ -6366,11 +6361,14 @@ def fn():
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     def test_anomaly_aot_autograd(self):
+        def fail():
+            raise AssertionError("fail")
+
         @allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
-            r.register_hook(lambda x: x + x.item())
+            r.register_hook(lambda x: fail())
             return r
 
         @torch.compile(backend="aot_eager")
@@ -6382,8 +6380,8 @@ def fn():
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        self.assertEqual(len(w), 1)
-        self.assertIn("forward call that caused the error", str(w[0].message))
+        # Suppress unrelated pkg_resources warnings
+        self.assertIn("forward call that caused the error", str(w[-1].message))
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
@@ -8288,6 +8286,28 @@ ShapeEnv not equal: field values don't match:
             foo()
         with set_default_dtype(torch.double):
             foo()
+
+    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+        for super_class in (
+            collections.OrderedDict,
+            dict,
+        ):
+
+            class CustomDict(super_class):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+
+            def fn(x):
+                c = CustomDict()
+                c["key"] = x
+                assert "key" in c
+                return c["key"] + 1
+
+            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
+            ):
+                print(fn_opt(torch.zeros(1)))
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):

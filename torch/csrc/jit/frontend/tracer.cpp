@@ -614,7 +614,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymInt value) {
-  addInputs(n, name, value.expect_int());
+  addInputs(n, name, value.guard_int(__FILE__, __LINE__));
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
@@ -815,8 +815,9 @@ void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
   addInputs(
       n,
       name,
-      value.has_value() ? c10::make_optional(value->expect_int())
-                        : c10::nullopt);
+      value.has_value()
+          ? c10::make_optional(value->guard_int(__FILE__, __LINE__))
+          : c10::nullopt);
 }
 
 void addInputs(

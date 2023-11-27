@@ -1252,6 +1252,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
+
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
             index = x.shape[-1]
@@ -2006,6 +2014,7 @@ def forward(self, x_1, output_1):
             n_elements,
             dummy_None,
             dummy_empty,
+            dummy_float,
             BLOCK_SIZE: "tl.constexpr",
             RANDOM_SIZE: "tl.constexpr",
         ):
@@ -2020,6 +2029,7 @@ def forward(self, x_1, output_1):
                 n_elements,
                 None,
                 torch.empty_like(output),
+                3.1415926,
                 RANDOM_SIZE=0,
             )
             return output
