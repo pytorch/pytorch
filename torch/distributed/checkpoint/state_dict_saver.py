@@ -37,6 +37,7 @@ def save_state_dict(
 def save(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
+    *,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
@@ -46,10 +47,10 @@ def save(
     Save a distributed model in SPMD style.
 
     This function is different from ``torch.save()`` as it handles
-    ``ShardedTensor`` by having each rank only save their local shards.
+    ``ShardedTensor`` , and ``DTensor`` by having each rank only save their local shards.
 
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
-    load will call ``state_dict`` before serialization.
+    save will call ``state_dict`` before serialization.
 
     .. warning::
         There is no guarantees of Backwards Compatibility across PyTorch versions

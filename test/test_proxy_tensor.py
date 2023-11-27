@@ -1737,7 +1737,6 @@ symbolic_tensor_failures = {
     xfail('renorm', ''),
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
-    xfail('randint_like', ''),  # when unpacking SymInt, expected int but got s0
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
