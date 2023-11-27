@@ -2093,7 +2093,8 @@ class CppTile2DKernel(CppVecKernel):
 
     def need_vec_transpose(self, index):
         return (
-            stride_at(self.itervars[self.outer_idx], index) == 1
+            self._load_mask is None  # TODO: support transposition with mask
+            and stride_at(self.itervars[self.outer_idx], index) == 1
             and index.has(self.itervars[self.tiling_idx])
             and not stride_at(self.itervars[self.tiling_idx], index).has(
                 self.itervars[self.tiling_idx]
