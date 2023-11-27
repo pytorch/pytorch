@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 from __future__ import annotations
 
 import contextlib
@@ -12,6 +14,7 @@ import threading
 import traceback
 import types
 import warnings
+from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -36,9 +39,14 @@ from torch import _guards
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    DimDynamic,
+    StatelessSymbolicContext,
+)
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -49,7 +57,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        set_guard_fail_hook,
         skip_code,
         unsupported,
     )
@@ -111,7 +118,7 @@ def _reset_guarded_backend_cache():
 
 
 @contextlib.contextmanager
-def backend_cache_wrapper(callback: CompilerFn):
+def backend_cache_wrapper(callback: DynamoCallback):
     _maybe_init_guarded_backend_cache()
 
     # callback is False for RunOnlyContext. RunOnlyContext is used
@@ -151,7 +158,7 @@ DONT_WRAP_FILES = {
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
-) -> List[CacheEntry]:  # type: ignore[valid-type]
+) -> List[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
      stored in this code.
@@ -171,6 +178,9 @@ class OptimizedModule(torch.nn.Module):
     Wraps the original nn.Module object and later patches its
     forward method to optimized self.forward method.
     """
+
+    _torchdynamo_orig_callable: Callable[..., Any]
+    get_compiler_config: Callable[[], Any]
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
@@ -217,8 +227,7 @@ class OptimizedModule(torch.nn.Module):
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
             # to avoid treating it as lazy on subsequent recompile.
-            assert len(kwargs) == 0
-            self._orig_mod._infer_parameters(self._orig_mod, args)
+            self._orig_mod._infer_parameters(self._orig_mod, args, kwargs)
         return self._forward(*args, **kwargs)
 
     def __dir__(self):
@@ -262,19 +271,70 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+# The config to restore to should dynamo compile / recompile when
+# executing from the compiled function's _TorchDynamoContext
+config_cache = threading.local()
+
+
+@dataclass
+class ConfigAndHash:
+    config: Dict[str, Any]
+    hash: bytes
+
+
+def _maybe_init_guarded_config_cache():
+    if not hasattr(config_cache, "saved_config_and_hash"):
+        # Optional[ConfigAndHash]
+        config_cache.saved_config_and_hash = None
+        config_cache.nopython = None
+
+
 @contextlib.contextmanager
-def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
-    if enable is None:
+def restore_guarded_dynamo_config(
+    first_ctx: bool, saved_config_and_hash: ConfigAndHash, nopython: bool
+):
+    _maybe_init_guarded_config_cache()
+    # Set exactly once from top-level compile
+    is_top_level = False
+    try:
+        if first_ctx and config_cache.saved_config_and_hash is None:
+            assert config_cache.nopython is None
+            is_top_level = True
+            config_cache.saved_config_and_hash = saved_config_and_hash
+            config_cache.nopython = nopython
+            log.debug(
+                "Setting top-level compile config hash: %s",
+                saved_config_and_hash.hash.hex(),
+            )
+        else:
+            log.debug("Ignoring inner dynamo compile config and hash")
         yield
-    elif enable:
-        # Assume everything is dynamic by default
-        with config.patch(assume_static_by_default=False):
-            yield
+    finally:
+        if is_top_level:
+            log.debug(
+                "Unsetting top-level compile config hash: %s",
+                config_cache.saved_config_and_hash.hash.hex(),
+            )
+            config_cache.saved_config_and_hash = None
+            config_cache.nopython = None
+
+
+def _get_config_and_hash(dynamic=None):
+    if dynamic is None:
+        updates = {}
+    elif dynamic:
+        updates = {"assume_static_by_default": False}
     else:
-        with config.patch(
-            automatic_dynamic_shapes=False, assume_static_by_default=True
-        ):
-            yield
+        updates = {"automatic_dynamic_shapes": False, "assume_static_by_default": True}
+    return ConfigAndHash(*config.get_config_and_hash_with_updates(updates))
+
+
+def get_saved_else_current_config_hash() -> bytes:
+    _maybe_init_guarded_config_cache()
+    if config_cache.saved_config_and_hash is not None:
+        return config_cache.saved_config_and_hash.hash
+    else:
+        return config.get_hash()
 
 
 class _TorchDynamoContext:
@@ -286,9 +346,10 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
-        export=False,
         dynamic=None,
         compiler_config=None,
+        save_config=True,
+        nopython=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -297,10 +358,21 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
-        self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
+        self.save_config = save_config and first_ctx
+        self.nopython = nopython
+        if self.save_config:
+            self.save_and_hash_config()
         patch_fn()
+
+    def save_and_hash_config(self):
+        # save current value of dynamo configs
+        self.saved_config_and_hash = _get_config_and_hash(self.dynamic)
+        log.debug(
+            "Saving dynamo config and hash for new compiled object(s). Hash: %s",
+            self.saved_config_and_hash.hash.hex(),
+        )
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -315,15 +387,19 @@ class _TorchDynamoContext:
         self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-        self.dynamic_ctx.__enter__()
+        if self.save_config:
+            self.dynamo_config_ctx = restore_guarded_dynamo_config(
+                self.first_ctx, self.saved_config_and_hash, self.nopython
+            )
+            self.dynamo_config_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
         # TODO: This is totally not the right way to chain contexts manually
-        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
+        if self.save_config:
+            self.dynamo_config_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
@@ -352,7 +428,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+            new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
         assert callable(fn)
@@ -404,13 +480,17 @@ class _TorchDynamoContext:
             backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-            dynamic_ctx.__enter__()
+            if self.save_config:
+                dynamo_config_ctx = restore_guarded_dynamo_config(
+                    self.first_ctx, self.saved_config_and_hash, self.nopython
+                )
+                dynamo_config_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                dynamic_ctx.__exit__(None, None, None)
+                if self.save_config:
+                    dynamo_config_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
                 backend_cache_manager.__exit__(None, None, None)
 
@@ -478,9 +558,10 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
-        export=False,
         dynamic=None,
+        save_config=True,
         compiler_config=None,
+        nopython=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -491,9 +572,10 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
-            export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            save_config=save_config,
+            nopython=nopython,
         )
 
 
@@ -525,13 +607,28 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
+        is_skipfile = skipfiles.check(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check(frame.f_code)
+            or is_skipfile
             or config.disable
         ):
-            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+            if log.isEnabledFor(logging.DEBUG):
+                skip_reason = (
+                    "traced frame already"
+                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    else "in skipfiles"
+                    if skipfiles.check(frame.f_code)
+                    else "dynamo tracing is disabled"
+                )
+                if not is_skipfile or config.verbose:
+                    log.debug(
+                        "skipping: %s (reason: %s, file: %s)",
+                        frame.f_code.co_name,
+                        skip_reason,
+                        frame.f_code.co_filename,
+                    )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -565,17 +662,19 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
-    export=False,
     dynamic=None,
     compiler_config=None,
+    save_config=True,
+    nopython=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
-        export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
+        save_config=save_config,
+        nopython=nopython,
     )
 
 
@@ -621,6 +720,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    save_config=True,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -641,7 +741,9 @@ def optimize(
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
             detect when sizes vary and generate dynamic kernels upon recompile.
-
+        save_config: If True, recompiling this function will first restore the dynamo config
+            at the time when `optimize` was first called, for the duration of the compilation
+            process.
     Example Usage::
 
         @torch._dynamo.optimize()
@@ -669,12 +771,14 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            save_config=save_config,
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        save_config=save_config,
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
@@ -799,12 +903,15 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
                     arg.node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i],
-                        dynamic_dims=[
-                            DimDynamic.DYNAMIC
-                            if d in flat_args_dynamic_dims[i]
-                            else DimDynamic.STATIC
-                            for d in range(len(flat_args[i].shape))
-                        ],
+                        symbolic_context=StatelessSymbolicContext(
+                            dynamic_sizes=[
+                                DimDynamic.DYNAMIC
+                                if d in flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
+                                for d in range(len(flat_args[i].shape))
+                            ],
+                            constraint_sizes=[None] * len(flat_args[i].shape),
+                        ),
                     )
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
@@ -816,6 +923,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             arg.node.meta["val"] = self.current_node.meta["val"]
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        if "example_value" in self.current_node.meta:
+            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -829,6 +938,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if "example_value" in self.current_node.meta:
+            result_proxy.node.meta["example_value"] = self.current_node.meta[
+                "example_value"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
@@ -838,7 +951,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
-    guards: Set[_guards.Guard]
+    guards: _guards.GuardsSet
     # NB: Do not add new fields without overriding __iter__; people are
     # destructuring so it is BC-breaking
 
@@ -1069,6 +1182,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
+    disable_constraint_solver: bool = False,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1093,6 +1207,8 @@ def export(
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
+
+        disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
 
     Returns:
         A function that given args and kwargs, returns a tuple of (graph, guards)
@@ -1131,7 +1247,7 @@ def export(
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
 
-        def guard_export_print(guards: Set[_guards.Guard]):
+        def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
             assert (
                 out_guards is None
@@ -1229,7 +1345,8 @@ def export(
         remove_from_cache(f)
 
         if (
-            (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+            not disable_constraint_solver
+            and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
             and not skipfiles.check(call_to_inspect)
         ):
@@ -1349,6 +1466,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    save_config=True,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1364,8 +1482,9 @@ def optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
-        export=export,
         dynamic=dynamic,
+        save_config=save_config,
+        nopython=True,
     )
 
 
@@ -1472,7 +1591,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            opt.step.hooked = True
+            opt.step.hooked = True  # type: ignore[attr-defined]
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

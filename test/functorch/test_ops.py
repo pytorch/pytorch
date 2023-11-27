@@ -319,12 +319,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-    # https://github.com/pytorch/pytorch/issues/96560
-    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
@@ -344,7 +340,7 @@ aliasing_ops = {
     'narrow',
     'permute',
     'positive',
-    # 'ravel', is composite implict autograd and may call clone
+    # 'ravel', is composite implicit autograd and may call clone
     'real',
     'reshape',
     'resolve_conj',
@@ -396,6 +392,7 @@ class TestOperators(TestCase):
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail("torch.ops.aten._efficient_attention_forward"),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -478,16 +475,16 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._efficient_attention_forward'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
 
         # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -606,6 +603,7 @@ class TestOperators(TestCase):
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._efficient_attention_forward'),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -684,6 +682,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
         skip('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._efficient_attention_forward'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
@@ -779,6 +778,7 @@ class TestOperators(TestCase):
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         xfail('nn.functional.multi_head_attention_forward'),  # randomness
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
@@ -893,9 +893,9 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
-        xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('pca_lowrank', ''),  # randomness
@@ -988,6 +988,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -1036,11 +1037,8 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
 
         # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
+        # ROCm: NotImplementedError
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -1058,7 +1056,7 @@ class TestOperators(TestCase):
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
-    # because that coresponds to "batched forward-mode AD" testing in PyTorch core
+    # because that corresponds to "batched forward-mode AD" testing in PyTorch core
     def test_vmapjvpall(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
             # TODO: test in-place
@@ -1262,6 +1260,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -1385,6 +1384,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         skip('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
@@ -1463,7 +1463,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
-        # Following operatos take too long, hence skipped
+        # Following operators take too long, hence skipped
         skip('atleast_1d'),
         skip('atleast_2d'),
         skip('atleast_3d'),
@@ -1509,6 +1509,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.alpha_dropout'),  # calls randomn op
@@ -1554,8 +1555,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward'),
-        decorate('linalg.svd', decorator=skipIfRocm),  # https://github.com/pytorch/pytorch/issues/97256
-        decorate('svd', decorator=skipIfRocm),  # Flaky tensor-likes are not close error on ROCm, adjust tolerance?
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1574,7 +1573,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapjvpvjp(self, device, dtype, op):
-        # Since we test `jvpvjp` seperately,
+        # Since we test `jvpvjp` separately,
         # in this we just check that vmap of `jvpvjp`
         # is correct.
         if not op.supports_autograd:
@@ -1779,13 +1778,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),  # contiguous call
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
 
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
-        # https://github.com/pytorch/pytorch/issues/96560
-        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('xlogy', decorator=skipIfRocm),
 
@@ -1814,6 +1808,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):

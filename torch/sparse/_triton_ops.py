@@ -4,6 +4,7 @@ import torch
 import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
+from ._triton_ops_meta import get_meta
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
 
@@ -444,15 +445,18 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
 def scatter_mm_meta(M, K, N, Ms, Ks,
                     GROUP_SIZE=None, TILE_M=None, TILE_N=None, SPLIT_N=None, num_warps=None, num_stages=None, **extra):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
+        device_name = torch.cuda.get_device_name()
+        meta = get_meta('scatter_mm', (M, K, N, Ms, Ks), device_name,
+                        version=(0, torch.float16, 0.5))
+        if meta is not None:
+            meta.update(**extra)
+            return meta
         # The following parameters are optimized for the performance
         # equilibrium points of bsr-dense and dense-dense matrix
-        # multiplications when using GPU cards NVIDIA A100 and NVIDIA
-        # GeForce RTX 2060 SUPER. For points far from the performance
-        # equilibrium points as well as for other GPU cards, the
-        # optimal parameters are likely different from what specified
-        # below.
-        device_name = torch.cuda.get_device_name()
-        is_A100 = 'A100' in device_name
+        # multiplications when using GPU card NVIDIA GeForce RTX 2060
+        # SUPER. For points far from the performance equilibrium
+        # points as well as for other GPU cards, the optimal
+        # parameters are likely different from what specified below.
         if (M, K, N) == (256,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=1;TILE_M=16;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
@@ -465,98 +469,41 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=32;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=8;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=16;TILE_M=32;TILE_N=64;GROUP_SIZE=1;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=4;TILE_M=64;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
                 SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=32;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
                 SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
                 SPLIT_N=2;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
                 SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
                 SPLIT_N=2;TILE_M=64;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-                if is_A100:
-                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    SPLIT_N=2;TILE_M=128;TILE_N=128;GROUP_SIZE=1;num_stages=1;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (8192,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    SPLIT_N=4;TILE_M=128;TILE_N=128;GROUP_SIZE=2;num_stages=3;num_warps=8  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (256, 256):
-                if is_A100:
-                    SPLIT_N=8;TILE_M=256;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=16  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (512, 512):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=128;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (16384,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    SPLIT_N=1;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    SPLIT_N=2;TILE_M=32;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
@@ -598,79 +545,12 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
 def bsr_dense_mm_meta(M, K, N, Ms, Ks,
                       GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, **extra):
     if {num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        # The following parameters are optimized for the performance
-        # equilibrium points of bsr-dense and dense-dense matrix
-        # multiplications when using GPU cards NVIDIA A100. For points
-        # far from the performance equilibrium points as well as for
-        # other GPU cards, the optimal parameters are likely different
-        # from what specified below.
         device_name = torch.cuda.get_device_name()
-        is_A100 = 'A100' in device_name
-        if (M, K, N) == (1024,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=2;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (2048,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=3;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=2;num_warps=8  # noqa: E225,E231,E702
-        elif (M, K, N) == (4096,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=1;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=3;num_stages=4;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=2;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-        elif (M, K, N) == (8192,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
-        elif (M, K, N) == (16384,) * 3:
-            if (Ms, Ks) == (16, 16):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (32, 32):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=4;num_warps=1  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (64, 64):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=3;num_warps=2  # noqa: E225,E231,E702
-            elif (Ms, Ks) == (128, 128):
-                if is_A100:
-                    GROUP_SIZE_ROW=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+        meta = get_meta('bsr_dense_mm', (M, K, N, Ms, Ks), device_name,
+                        version=(0, torch.float16, 0.5))
+        if meta is not None:
+            meta.update(**extra)
+            return meta
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
     num_warps = num_warps or 4
@@ -1029,8 +909,6 @@ if has_triton():
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
-        BLOCKSIZE_ROW: tl.constexpr,
-        BLOCKSIZE_COL: tl.constexpr,
         # values prologue
         values_ptr,
         values_batch_stride,
@@ -1064,6 +942,13 @@ if has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        #
+        # gh-113754: Always keep all constexpr arguments at the end of
+        # triton kernel arguments list because with triton 2.1 or
+        # earlier non-contiguous outputs will corrupt CUDA state due
+        # to a triton bug (fixed in openai/triton#2262).
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
         acc_dtype: tl.constexpr,
         allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
@@ -1179,8 +1064,8 @@ if has_triton():
 
         def kernel(grid, *sliced_tensors):
             _bsr_strided_dense_rowspace_kernel[grid](
-                *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
+                *blocksize,
                 acc_dtype=acc_dtype,
                 allow_tf32=allow_tf32,
                 **meta)
@@ -1322,7 +1207,8 @@ if has_triton():
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None
+        meta: Optional[dict] = None,
+        enable_bsr_scatter_mm: bool = True
     ):
         f_name = "bsr_dense_mm"
         m, kl = bsr.shape[-2:]
@@ -1369,10 +1255,21 @@ if has_triton():
 
         blocksize = bsr.values().shape[-2:]
 
-        if max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
-            # bsr_scatter_mm is more efficient than bsr_dense_mm for
-            # 16x16 blocksizes:
-            return bsr_scatter_mm(bsr, dense, out=out)
+        if enable_bsr_scatter_mm and max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
+            dtype = bsr.dtype
+            # bsr_scatter_mm is more performant than bsr_dense_mm for
+            # 16x16 blocksizes and large enough input shapes:
+            if (
+                    (dtype in {torch.float16, torch.bfloat16}
+                     and ((m >= 4096 and n >= 8192)
+                          or (m == 2048 and n >= 32768)
+                          or (n >= 131072))) or
+                    (dtype == torch.float32
+                     and (m >= 1024
+                          or (m == 512 and n >= 512)
+                          or (m == 256 and n >= 2048)))
+            ):
+                return bsr_scatter_mm(bsr, dense, out=out)
 
         if meta is None:
             meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1])
@@ -1756,7 +1653,8 @@ if has_triton():
             p_offsets: torch.Tensor,
             q_offsets: torch.Tensor,
             meta: dict,
-            accumulators: torch.Tensor
+            accumulators: torch.Tensor,
+            force_contiguous: bool = True,
     ):
         SPLIT_N = meta['SPLIT_N']
         P, Ms, Ks = blocks.shape
@@ -1794,12 +1692,13 @@ if has_triton():
         # following we'll always convert tensor arguments to
         # C-contiguous tensors.
 
-        blocks = blocks.contiguous()
-
-        others = others.contiguous()
-
-        if not accumulators.is_contiguous():
-            accumulators_ = accumulators.contiguous()
+        if force_contiguous:
+            blocks = blocks.contiguous()
+            others = others.contiguous()
+            if not accumulators.is_contiguous():
+                accumulators_ = accumulators.contiguous()
+            else:
+                accumulators_ = accumulators
         else:
             accumulators_ = accumulators
 
@@ -1816,7 +1715,7 @@ if has_triton():
             **meta
         )
 
-        if not accumulators.is_contiguous():
+        if force_contiguous and not accumulators.is_contiguous():
             accumulators.copy_(accumulators_)
 
 else:

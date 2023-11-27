@@ -170,6 +170,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
+    def test_adaptive_max_pool3d_with_indices(self, device):
+        x = 5
+        y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
+
+        def fn(x, y):
+            return torch.nn.functional.adaptive_max_pool3d_with_indices(
+                output_size=x, input=y, return_indices=True
+            )
+
+        opt_f = self.compile_fn(fn)
+        r = fn(x, y)
+        opt_r = opt_f(x, y)
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -193,6 +207,14 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_bool_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item()
+
+        f(torch.tensor([True], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
         def f(x):
@@ -212,6 +234,26 @@ class TestInductorDynamic(TestCase):
             return y + z
 
         f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_inf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == math.inf
+
+        f(torch.tensor([3.0], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_neginf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == -math.inf
+
+        f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
@@ -241,6 +283,16 @@ class TestInductorDynamic(TestCase):
 
         finally:
             custom_ops._destroy("test::foo")
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_return(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item()
+
+        f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -354,6 +406,15 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, b)
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
+
+    def test_sym_stride_lowering(self, device):
+        def fn(x):
+            s0 = (x + 1).stride(0)
+            return x * s0
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+        self.assertEqual(fn(a), cfn(a))
 
     def test_abs(self, device):
         def fn(x, y):

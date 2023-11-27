@@ -14,11 +14,7 @@
 #include <cuda_fp16.h>
 #include <curand_kernel.h>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
-
+#include <ATen/cuda/PhiloxUtils.cuh>
 #include <cutlass/cutlass.h>
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/scale_type.h>

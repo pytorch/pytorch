@@ -326,7 +326,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifdynstaticdefault(4, 1))
+        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -477,8 +477,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 12)
-        self.assertEqual(cnt.op_count, 16)
+        self.assertEqual(cnt.frame_count, 7)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):
@@ -493,7 +493,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self._common(fn, 2, 9)
         torch._dynamo.reset()
         with torch.no_grad():
-            self._common(fn, 2, 9)
+            self._common(fn, 2, 5)
 
     def test_resume_with_no_grad2(self):
         def fn(a, b):
@@ -522,7 +522,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 4
             return x
 
-        self._common(fn, 2, 19)
+        self._common(fn, 2, 11)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):

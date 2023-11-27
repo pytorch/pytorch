@@ -264,11 +264,8 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_scaled_dot_product_attention", datetime.date(2023, 8, 1)),
-    ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 8, 1)),
-    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 9, 30)),
-    ("aten::_flash_attention_forward", datetime.date(2023, 9, 30)),
-    ("aten::_flash_attention_backward", datetime.date(2023, 9, 30)),
+    ("aten::_efficient_attention_forward", datetime.date(2023, 11, 30)),
+    ("aten::_efficient_attention_backward", datetime.date(2023, 11, 30)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
@@ -297,6 +294,8 @@ ALLOW_LIST = [
     ("c10d::allreduce_", datetime.date(2023, 7, 30)),
     ("c10d::_allgather_base_", datetime.date(2023, 12, 30)),
     ("c10d::_reduce_scatter_base_", datetime.date(2023, 12, 30)),
+    ("c10d::broadcast_", datetime.date(2023, 12, 30)),
+    ("c10d::scatter_", datetime.date(2023, 12, 30)),
     # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
@@ -312,6 +311,10 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2023, 12, 31)),
     ("onednn::qlinear_pointwise", datetime.date(2023, 12, 31)),
 ]
 

@@ -276,6 +276,14 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
       "If you need it, please file an issue describing your use case.");
 }
 
+void CUDAPluggableAllocator::attachAllocatorTraceTracker(
+    c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not support attachAllocatorTraceTracker. "
+      "attachAllocatorTraceTracker is only used inside Pytorch.");
+}
+
 std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
 CUDAPluggableAllocator::getCheckpointState(
     int device,

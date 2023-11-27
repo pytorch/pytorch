@@ -164,7 +164,9 @@ def mps_ops_grad_modifier(ops):
         '__rpow__': [torch.float32],
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32],
+        'cumprod': [torch.float32, torch.float16],
+        # See https://github.com/pytorch/pytorch/issues/109166 for more information
+        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
@@ -415,7 +417,7 @@ def mps_ops_modifier(ops):
         'cdist': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # test blow pass on macOS 12 as it falls back to cpu
         # Argsort case using duplicate indices (undefined behaviour):
@@ -508,7 +510,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_0': None,
         '__rsub__': None,
         'angle': None,
-        'bucketize': None,
         'cauchy_': None,
         'cauchy': None,
         'cholesky': None,
@@ -609,7 +610,6 @@ def mps_ops_modifier(ops):
         'scatter_reducemean': None,
         'scatter_reduceprod': None,
         'scatter_reducesum': None,
-        'searchsorted': None,
         'segment_reduce': None,
         '_segment.reduce': None,
         'segment.reduce': None,
@@ -695,6 +695,7 @@ def mps_ops_modifier(ops):
         # Convolution for integral types is not supported on MPS
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
+        'nn.functional.conv3d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
 
@@ -882,6 +883,7 @@ def mps_ops_error_inputs_modifier(ops):
         'multinomial',
         'nn.functional.conv1d',
         'nn.functional.conv2d',
+        'nn.functional.conv3d',
         'gather',
         'scatter',
         'scatter_add',
@@ -1052,6 +1054,22 @@ class TestMemoryLeak(TestCaseMPS):
         # confirm whether memory leak detection worked successfully or not.
         with self.assertRaisesRegex(RuntimeError, r"MPS driver API confirmed .+"):
             leak_gpu0()
+
+    def test_copy_cast_no_leak(self):
+
+        def step(x):
+            x = x.to(device='cpu', dtype=torch.float32)
+            x = x.to(device='mps', dtype=torch.float16)
+
+        a = torch.randn(128, 128, device='mps', dtype=torch.float16)
+        # Warm up / prebuild MPS shaders (otherwise check fails on 13.2)
+        step(a)
+        torch.mps.empty_cache()
+        driver_before = torch.mps.driver_allocated_memory()
+        step(a)
+        torch.mps.empty_cache()
+        driver_after = torch.mps.driver_allocated_memory()
+        self.assertTrue(driver_before == driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
 
 
 class TestPixelShuffle(TestCaseMPS):
@@ -7998,6 +8016,33 @@ class TestNLLLoss(TestCaseMPS):
         helper(torch.log)
         helper(torch.cos)
 
+    def test_unary_ops_storage_offset_strided(self):
+        def helper(shape, op, inplace, dtype=torch.float32):
+            # test in-place with storage_offset
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            mps_x = cpu_x.detach().clone().to('mps')
+            y = op(mps_x[1])
+            cpu_y = op(cpu_x[1])
+            self.assertEqual(y, cpu_y)
+
+
+            # See https://github.com/pytorch/pytorch/issues/100764
+            if not inplace:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+                mps_x = cpu_x.detach().clone().to('mps')
+                cpu_y = torch.empty(shape, device='cpu', dtype=dtype).t()
+                mps_y = cpu_y.detach().clone().to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+
+
+        helper((5, 5), torch.exp, False)
+        helper((5, 5), torch.cos, False)
+        helper((5, 5), torch.neg, False)
+        helper((5, 5), torch.tanh, False)
+        helper((5, 5), torch.tanh_, True)
+
     def test_atan2(self):
         def helper(shape):
             input_cpu = torch.randn(shape)
@@ -8297,6 +8342,18 @@ class TestNNMPS(NNTestCase):
         expect = F.conv2d(x, y)
         actual = F.conv2d(x, y, padding='valid')
         self.assertEqual(expect.to('cpu'), actual.to('cpu'))
+
+    def test_conv2d_backward_collision(self):
+        # Test for https://github.com/pytorch/pytorch/issues/112998
+        x = torch.rand(1, 1, 10, 10, device="mps", requires_grad=True)
+        m1 = nn.Conv2d(1, 1, 3, stride=2, padding=1).to("mps")
+        m2 = nn.Conv2d(1, 1, 4, stride=2, padding=1).to("mps")
+        y1, y2 = m1(x), m2(x)
+        self.assertEqual(y1.shape, y2.shape)
+        y1.sum().backward()
+        # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
+        y2.sum().backward()
+
 
     def test_gemm_permute_transpose(self):
         batch_size = 32
@@ -10943,6 +11000,8 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.kl_div',
         'nn.functional.softmin',
         'cross', 'linalg.cross',
+        'prod', 'masked.prod',
+        'nextafter',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

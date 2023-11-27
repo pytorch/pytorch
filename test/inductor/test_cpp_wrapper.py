@@ -225,6 +225,19 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available(),
         ),
         BaseTest(
+            "test_qconv2d_maxpool2d_linear_dynamic",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                [
+                    "op_qconv2d_pointwise.call",
+                    "op_quantized_max_pool2d_.call",
+                    "op_qlinear_pointwise.call",
+                ]
+            ],
+        ),
+        BaseTest(
             "test_qlinear",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
