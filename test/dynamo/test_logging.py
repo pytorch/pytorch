@@ -248,7 +248,8 @@ LoweringException: AssertionError:
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname in dynamo_qnames:
+            # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
