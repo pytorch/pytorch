@@ -896,7 +896,7 @@ class CppVecOverrides(CppOverrides):
 
             return wrapper
 
-        for name, method in vars(cls).items():
+        for name, method in vars(CppVecOverrides).items():
             if getattr(method, "__class__", None) == staticmethod and name not in [
                 "masked",
                 "index_expr",
@@ -1197,6 +1197,7 @@ class CppVecOverrides(CppOverrides):
             torch.bfloat16,
             torch.float16,
             torch.uint8,
+            torch.int32,
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
@@ -1306,6 +1307,14 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel.load_non_contiguous(None, index, dtype, V.kernel.compute)
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+
+class CppTile2DOverrides(CppVecOverrides):
+    @staticmethod
+    def index_expr(expr, dtype):
+        assert isinstance(V.kernel, CppTile2DKernel)
+        expr = V.kernel.transform_indexing(expr)
+        return CppVecOverrides.index_expr(expr, dtype)
 
 
 class CppKernel(Kernel):
@@ -2071,6 +2080,8 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
+    overrides = CppTile2DOverrides  # type: ignore[assignment]
+
     def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
         super().__init__(
             args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
@@ -2146,11 +2157,7 @@ class CppTile2DKernel(CppVecKernel):
             csevar.is_vec = True
             return csevar
         else:
-            new_index = self.scale_index_with_offset(
-                index,
-                itervar_idx=self.outer_idx,
-                offset=inner,
-            )
+            new_index = self.transform_indexing(index)
             return super().load(name, new_index)
 
     def store(self, name, index, value, mode=None):
@@ -2175,11 +2182,7 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
-            new_index = self.scale_index_with_offset(
-                index,
-                itervar_idx=self.outer_idx,
-                offset=inner,
-            )
+            new_index = self.transform_indexing(index)
             super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):
@@ -2197,6 +2200,13 @@ class CppTile2DKernel(CppVecKernel):
             else reversed(self.tiling_indices)
         )
         return vars
+
+    def transform_indexing(self, index: sympy.Expr) -> sympy.Expr:
+        return self.scale_index_with_offset(
+            index,
+            itervar_idx=self.outer_idx,
+            offset=self.inner_itervar(),
+        )
 
 
 class CppVecKernelChecker(CppVecKernel):
