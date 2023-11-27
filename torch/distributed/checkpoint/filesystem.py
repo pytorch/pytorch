@@ -8,7 +8,7 @@ import os
 import dataclasses
 import io
 import pickle
-from typing import List, Union, Dict, cast
+from typing import Optional, List, Union, Dict, cast
 
 import torch
 from torch import Tensor
@@ -38,6 +38,7 @@ from .planner import (
 
 from .utils import _create_file_view
 
+import torch.distributed as dist
 from torch.distributed.checkpoint.checkpointer import Checkpointer
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch._utils import _get_device_module
@@ -516,15 +517,15 @@ class FileSystemCheckpointer(Checkpointer):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        ,*
+        *,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
-        process_group,
-        coordinator_rank,
-        no_dist,
-        planner
+        process_group: Optional[dist.ProcessGroup] = None,
+        coordinator_rank: int = 0,
+        no_dist: bool = False,
+        planner: Optional[LoadPlanner] = None,
     ):
 
         storage_writer = FileSystemWriter(
