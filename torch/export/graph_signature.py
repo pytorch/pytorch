@@ -57,7 +57,6 @@ class OutputKind(Enum):
     BUFFER_MUTATION = auto()
     GRADIENT_TO_PARAMETER = auto()
     GRADIENT_TO_USER_INPUT = auto()
-    USER_INPUT_MUTATION = auto()
 
 
 @dataclasses.dataclass
@@ -77,7 +76,6 @@ def _sig_to_specs(
     inputs_to_buffers: Mapping[str, str],
     user_outputs: Set[str],
     buffer_mutations: Mapping[str, str],
-    user_input_mutations: Mapping[str, str],
     grad_params: Mapping[str, str],
     grad_user_inputs: Mapping[str, str],
     loss_output: Optional[str],
@@ -103,49 +101,37 @@ def _sig_to_specs(
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
 
-    def to_output_spec(idx: int, o: ArgumentSpec) -> OutputSpec:
+    def to_output_spec(o: ArgumentSpec) -> OutputSpec:
         if not isinstance(o, TensorArgument):
             return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
         name = o.name
-        if idx < len(buffer_mutations) + len(user_input_mutations):
-            if name in buffer_mutations:
-                return OutputSpec(
-                    kind=OutputKind.BUFFER_MUTATION,
-                    arg=o,
-                    target=buffer_mutations[name],
-                )
-            elif name in user_input_mutations:
-                return OutputSpec(
-                    kind=OutputKind.USER_INPUT_MUTATION,
-                    arg=o,
-                    target=user_input_mutations[name],
-                )
-            else:
-                raise AssertionError(f"Unknown tensor mutation kind: {name}")
+        if name in user_outputs:
+            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
+        elif name in buffer_mutations:
+            return OutputSpec(
+                kind=OutputKind.BUFFER_MUTATION,
+                arg=o,
+                target=buffer_mutations[name],
+            )
+        elif name in grad_params:
+            return OutputSpec(
+                kind=OutputKind.GRADIENT_TO_PARAMETER,
+                arg=o,
+                target=grad_params[name],
+            )
+        elif name in grad_user_inputs:
+            return OutputSpec(
+                kind=OutputKind.GRADIENT_TO_USER_INPUT,
+                arg=o,
+                target=grad_user_inputs[name],
+            )
+        elif name == loss_output:
+            return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
         else:
-            if name in user_outputs:
-                return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
-
-            elif name in grad_params:
-                return OutputSpec(
-                    kind=OutputKind.GRADIENT_TO_PARAMETER,
-                    arg=o,
-                    target=grad_params[name],
-                )
-            elif name in grad_user_inputs:
-                return OutputSpec(
-                    kind=OutputKind.GRADIENT_TO_USER_INPUT,
-                    arg=o,
-                    target=grad_user_inputs[name],
-                )
-            elif name == loss_output:
-                return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
-
-            else:
-                raise AssertionError(f"Unknown tensor output kind: {name}")
+            raise AssertionError(f"Unknown tensor output kind: {name}")
 
     input_specs = [to_input_spec(i) for i in inputs]
-    output_specs = [to_output_spec(idx, o) for idx, o in enumerate(outputs)]
+    output_specs = [to_output_spec(o) for o in outputs]
     return input_specs, output_specs
 
 
@@ -314,16 +300,6 @@ class ExportGraphSignature:
             s.arg.name: s.target
             for s in self.output_specs
             if s.kind == OutputKind.BUFFER_MUTATION
-            and isinstance(s.arg, TensorArgument)
-            and isinstance(s.target, str)
-        }
-
-    @property
-    def user_inputs_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
-            for s in self.output_specs
-            if s.kind == OutputKind.USER_INPUT_MUTATION
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
         }

@@ -277,10 +277,9 @@ class ExportedProgram:
         )
 
         if self.call_spec.out_spec is not None:
-            buffer_mutation = self.graph_signature.buffers_to_mutate
-            user_input_mutation = self.graph_signature.user_inputs_to_mutate
-            num_mutated = len(buffer_mutation) + len(user_input_mutation)
-            mutated_values = res[:num_mutated]
+            mutation = self.graph_signature.buffers_to_mutate
+            num_mutated = len(mutation)
+            mutated_buffers = res[:num_mutated]
 
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
@@ -300,27 +299,10 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
             finally:
-                user_inputs = [
-                    spec
-                    for spec in self.graph_signature.input_specs
-                    if spec.kind == InputKind.USER_INPUT
-                ]
-                for i, value in enumerate(mutated_values):
-                    output_spec = self.graph_signature.output_specs[i]
-                    if output_spec.kind == OutputKind.BUFFER_MUTATION:
-                        assert output_spec.target is not None
-                        self.state_dict[output_spec.target] = value
-                    elif output_spec.kind == OutputKind.USER_INPUT_MUTATION:
-                        assert output_spec.target is not None
-                        index = next(
-                            i
-                            for i, spec in enumerate(user_inputs)
-                            if spec.arg.name == output_spec.target
-                        )
-                        args[index].copy_(value)
-                    else:
-                        raise AssertionError(f"Unexpected kind: {output_spec.kind}")
-
+                ix = 0
+                for buffer in self.graph_signature.buffers_to_mutate.values():
+                    self.state_dict[buffer] = mutated_buffers[ix]
+                    ix += 1
         return res
 
     def __str__(self) -> str:
@@ -383,6 +365,7 @@ class ExportedProgram:
         decomp_table = decomp_table or core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
+        old_outputs = list(self.graph.nodes)[-1].args[0]
         fake_args = [node.meta["val"] for node in old_placeholders]
 
         buffers_to_remove = [name for name, _ in self.graph_module.named_buffers()]
