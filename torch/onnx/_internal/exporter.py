@@ -1129,8 +1129,6 @@ class Exporter:
                 self.options, self.model, self.model_args, self.model_kwargs
             )
 
-            graph_module.print_readable()
-
             # TODO: Defer `import onnxscript` out of `import torch` path
             # https://github.com/pytorch/pytorch/issues/103764
             from torch.onnx._internal.fx import fx_onnx_interpreter

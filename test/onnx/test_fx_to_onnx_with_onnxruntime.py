@@ -43,14 +43,8 @@ def _parameterized_class_attrs_and_values():
     input_values = []
     input_values.extend(
         itertools.product(
-            (
-                True,
-                False,
-            ),
-            (
-                True,
-                False,
-            ),
+            (True, False),
+            (True, False),
             (
                 onnx_test_common.TorchModelType.TORCH_NN_MODULE,
                 onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
@@ -187,33 +181,35 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "Non-tensor input is not traceable in dynamo."
     )
     def test_xfail_func_with_non_tensor_args(self):
-        def func(x, b):
-            return x + b
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
 
-        tensor_x = torch.ones(7, 5)
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
         onnx_program = torch.onnx.dynamo_export(
             func,
             tensor_x,
-            5,
+            8.0,
             export_options=torch.onnx.ExportOptions(
                 op_level_debug=self.op_level_debug,
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
         onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 5)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 5))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
         ort_outputs = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
-        # # test on different non-tensor input - xfail
-        # onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
-        # ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
-        # _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
-        # for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        #     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+        # test on different non-tensor input - xfail
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
+        _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
+        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     def test_func_with_nested_input_structure(self):
         def func(
