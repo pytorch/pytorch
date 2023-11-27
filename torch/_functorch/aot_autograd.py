@@ -39,25 +39,36 @@ from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
 from ._aot_autograd.utils import (  # noqa: F401
-    strict_zip, _get_symint_hints, create_tree_flattened_fn,
-    KNOWN_TYPES, partial_flatten_asdict, normalize_as_list,
-    _get_autocast_states, make_boxed_func, call_func_at_runtime_with_args,
-    make_boxed_compiler, maybe_to_fresh_input,
+    strict_zip,
+    _get_symint_hints,
+    KNOWN_TYPES,
+    partial_flatten_asdict,
+    normalize_as_list,
+    _get_autocast_states,
+    make_boxed_func,
+    make_boxed_compiler,
+    call_func_at_runtime_with_args,
+    create_tree_flattened_fn,
+    maybe_to_fresh_input,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
-    setup_stacktrace_preservation_hooks,
+    graph_being_compiled,
+    nth_graph,
+    model_name,
+    set_model_name,
+    get_aot_compilation_context,
     get_aot_graph_name,
     get_graph_being_compiled,
-    get_aot_compilation_context,
     track_graph_compiling,
+    callback_set,
+    setup_stacktrace_preservation_hooks,
     describe_input,
     format_guard_bug_msg,
-    set_model_name,
 )
-from ._aot_autograd.functional_utils import (
-    is_functional,
-    to_functional,
-    from_functional,
+from ._aot_autograd.functional_utils import (  # noqa: F401
+    is_fun,
+    to_fun,
+    from_fun,
     sync_functional_tensor,
     has_metadata_mutation,
     are_all_mutations_hidden_from_autograd,
@@ -67,17 +78,20 @@ from ._aot_autograd.functional_utils import (
     was_tensor_metadata_updated,
     assert_functional_graph,
 )
-from ._aot_autograd.schemas import (
-    SubclassCreationMeta,
-    SubclassMeta,
-    ViewAndMutationMeta,
-    TensorAlias,
-    InputAliasInfo,
+from ._aot_autograd.schemas import (  # noqa: F401
+    OutputType,
     OutputAliasInfo,
     MutationType,
-    OutputType,
-    GraphSignature,
+    InputAliasInfo,
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+    SubclassMeta,
+    TensorAlias,
     BackwardSignature,
+    GraphOutputName,
+    GraphInputName,
+    FQN,
+    GraphSignature,
     AOTConfig,
     SubclassTracingInfo,
 )
@@ -410,11 +424,11 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> ViewAndMutationMeta:
     memo = {}
 
-    def _to_functional(t):
+    def _to_fun(t):
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = to_functional(t)
+            r = to_fun(t)
             memo[t] = r
             return r
         else:
@@ -428,7 +442,7 @@ def run_functionalized_fw_and_collect_metadata(
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
 
-        flat_f_args = pytree.tree_map(_to_functional, flat_args)
+        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -453,7 +467,7 @@ def run_functionalized_fw_and_collect_metadata(
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
-                new_arg = from_functional(f_arg)
+                new_arg = from_fun(f_arg)
             if was_tensor_updated(arg, new_arg):
                 if was_tensor_metadata_updated(arg, new_arg):
                     mutates_data = False
@@ -766,9 +780,9 @@ from a multi-output view call")
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
-        traced_tangents = pytree.tree_map(from_functional, f_tangents)
+        traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(view_avoid_dupes_with_primals, traced_tangents)
-        user_outs = pytree.tree_map(from_functional, f_output_tangents)
+        user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [
             inp
@@ -796,7 +810,7 @@ from a multi-output view call")
             f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
         if is_train:
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
-        fw_graph_outs = pytree.tree_map(from_functional, f_fw_graph_outs)
+        fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
         if torch.is_grad_enabled() != prior_grad_enabled:
@@ -1034,7 +1048,7 @@ def create_functionalized_fn(
 ) -> Tuple[Callable, List[Any]]:
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
-        f_args = pytree.tree_map(to_functional, args)
+        f_args = pytree.tree_map(to_fun, args)
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
@@ -1070,8 +1084,8 @@ def create_functionalized_fn(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                assert is_functional(inpt_f)
-                inpt_new = from_functional(inpt_f)
+                assert is_fun(inpt_f)
+                inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
@@ -1082,7 +1096,7 @@ def create_functionalized_fn(
                     else:
                         inpt_old.copy_(inpt_new)
 
-        return pytree.tree_map(from_functional, f_outs)
+        return pytree.tree_map(from_fun, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
@@ -1558,7 +1572,7 @@ def merge_view_inputs(
         # (1) The new args according to the updated calling convention: (synthetic_bases, other_args)
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
-        args_to_functionalization = base_args + other_args
+        args_to_funization = base_args + other_args
         arg_to_old_idx_map = {arg: i for (i, arg) in enumerate(fwd_inputs)}
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
@@ -3376,14 +3390,27 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
+                # see note [Tensor Fakification and Symbol Caching]
+                symbolic_context = None
+                source = None
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if x in tracing_context.tensor_to_context:
+                        symbolic_context = tracing_context.tensor_to_context[x]
+                        source = symbolic_context.tensor_source
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
+                    and not symbolic_context
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return fake_mode.from_tensor(
+                    x, static_shapes=False, symbolic_context=symbolic_context, source=source
+                )
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
