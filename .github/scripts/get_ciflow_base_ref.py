@@ -8,7 +8,7 @@ import time
 import urllib
 import urllib.parse
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.request import Request, urlopen
 
 def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
@@ -64,7 +64,7 @@ def fetch_url(
         )
         raise RuntimeError(exception_message) from err
 
-def fetch_base_ref(url: str, headers: Dict[str, str]) -> str:
+def fetch_base_ref(url: str, headers: Dict[str, str]) -> Any:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     return response["base"]["ref"]
 
