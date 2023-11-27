@@ -974,6 +974,7 @@ coverage_ignore_functions = [
     "parallel_and",
     "parallel_or",
     "sym_eq",
+    "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
