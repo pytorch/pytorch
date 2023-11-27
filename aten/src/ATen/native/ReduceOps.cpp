@@ -1327,7 +1327,7 @@ TORCH_IMPL_FUNC(mean_out)
   // in lieu of the sum + divide implementation below.
   // Note: there has an accuracy loss for half and bfloat16 which has one more type
   // cast compared with mean_stub path.
-  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
+  if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
@@ -1338,7 +1338,43 @@ TORCH_IMPL_FUNC(mean_out)
       }
     }
     auto& result_mut = const_cast<Tensor&>(result);
-    at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
+    if  (dtype == kHalf || dtype == kBFloat16) {
+      // For accuracy reasons, BF16 mean should be computed by following
+      // this approach (FP16 would also use a similar approach):
+      //  cast_fp32->sum ->div-> cast_bf16
+      //
+      // This approach results in one extra pass over all the
+      // elements of the output tensor, but the overhead is amortized by
+      // vectorization. Such an approach is necessary because
+      // cast_fp32->sum-> cast_bf16->cast_fp32->div-> cast_bf16
+      // does not produce as precise results.
+      result_mut = result_mut.to(ScalarType::Float,
+                                 result_mut.layout(),
+                                 result_mut.device(),
+                                 /*pin_memory=*/false,
+                                 /*non_blocking=*/false,
+                                 /*copy=*/false,
+                                 c10::nullopt);
+      // a copy of self (input tensor) will be implicitly cast to FP32.
+      // This results in an extra pass over the input array but maybe in the
+      // future, temporal locality could be leveraged such that for computing
+      // sum, the BF16/FP16 input tensor would be read only once.
+      // That would probably require some templatization/special-casing in
+      // binary_kernel_reduce_vec(), TensorIteratorBase::for_each(), and
+      // TensorIteratorBase::serial_for_each
+      at::sum_out(
+          result_mut, self, opt_dim, keepdim, ScalarType::Float).div_(dim_prod);
+      // cast result_mut back to BF16 or FP16
+      result_mut = result_mut.to(dtype,
+                                 self.layout(),
+                                 self.device(),
+                                 /*pin_memory=*/false,
+                                 /*non_blocking=*/false,
+                                 /*copy=*/false,
+                                 c10::nullopt);
+    } else {
+      at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
+    }
   } else {
     auto iter = at::meta::make_reduction_from_out_ty(
         self, result, opt_dim, keepdim, dtype);
