@@ -17,7 +17,12 @@ from torch.nn.utils import stateless
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-from .functional_utils import from_fun, is_fun, sync_functional_tensor, to_fun
+from .functional_utils import (
+    from_functional,
+    is_functional,
+    sync_functional_tensor,
+    to_functional,
+)
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
@@ -158,7 +163,7 @@ def fn_prepped_for_autograd(
 # (2) fn() cannot mutate any inputs that require gradient.
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
-def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
+def create_joint_function(fn: Callable, *, aot_config: AOTConfig) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
         assert len(tangent_mask) == len(outs)
@@ -325,7 +330,7 @@ def create_functionalized_fn(
 ) -> Any:
     def _functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
-        f_args = pytree.tree_map(to_fun, args)
+        f_args = pytree.tree_map(to_functional, args)
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -365,8 +370,8 @@ def create_functionalized_fn(
             ):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                assert is_fun(inpt_f)
-                inpt_new = from_fun(inpt_f)
+                assert is_functional(inpt_f)
+                inpt_new = from_functional(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
@@ -379,7 +384,7 @@ def create_functionalized_fn(
                     else:
                         inpt_old.copy_(inpt_new)
 
-        return pytree.tree_map(from_fun, f_outs)
+        return pytree.tree_map(from_functional, f_outs)
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)

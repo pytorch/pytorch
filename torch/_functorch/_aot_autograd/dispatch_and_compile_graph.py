@@ -14,7 +14,7 @@ from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
     create_functionalized_fn,
-    create_joint,
+    create_joint_function,
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
@@ -129,7 +129,9 @@ def aot_dispatch_autograd_graph(
         flat_fn,
         fw_metadata,
     )
-    joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
+    joint_fn_to_trace = create_joint_function(
+        fn_prepared_for_autograd, aot_config=aot_config
+    )
 
     joint_fn_to_trace, updated_joint_inputs = create_functionalized_fn(
         joint_fn_to_trace,

@@ -30,7 +30,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     make_boxed_compiler,
 )
 from ._aot_autograd.schemas import ViewAndMutationMeta, OutputType, GraphSignature, AOTConfig
-from ._aot_autograd.functional_utils import from_fun  # noqa: F401
+from ._aot_autograd.functional_utils import from_functional  # noqa: F401
 from ._aot_autograd.subclass_utils import requires_subclass_dispatch
 from ._aot_autograd.collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from ._aot_autograd.input_output_analysis import create_graph_signature
@@ -41,7 +41,7 @@ from ._aot_autograd.traced_function_transforms import (  # noqa: F401
     create_functionalized_rng_ops_wrapper,
     aot_dispatch_subclass,
     create_functional_call,
-    create_joint,
+    create_joint_function,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     get_aot_compilation_context,
