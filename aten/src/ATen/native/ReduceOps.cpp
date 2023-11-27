@@ -1325,8 +1325,6 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  // Note: there has an accuracy loss for half and bfloat16 which has one more type
-  // cast compared with mean_stub path.
   if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
@@ -1345,11 +1343,11 @@ TORCH_IMPL_FUNC(mean_out)
         // this approach (FP16 would also use a similar approach):
         //  cast_fp32 -> sum -> div -> cast_bf16
         //
-        // This approach results in one extra pass over all the
-        // elements of the output tensor, but that overhead is amortized by
-        // vectorization. Such an approach is necessary because
-        // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16
-        // does not produce as precise results.
+        // Such an approach is necessary because if we were to choose the same
+        // approach for BF16/FP16 as FP32 here, then it would have resulted in
+        // the following code-flow -
+        // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16,
+        // which does not produce as accurate results.
         result_mut = result_mut.to(ScalarType::Float,
                                    result_mut.layout(),
                                    result_mut.device(),
@@ -1359,11 +1357,11 @@ TORCH_IMPL_FUNC(mean_out)
                                    /*memory_format=*/at::MemoryFormat::Preserve);
 
         // self (input tensor) will initially be casted to FP32 in sum_out.
-        // This results in an extra pass over the input tensor but maybe in the
-        // future, temporal locality could be leveraged such that for computing
-        // sum, the BF16/FP16 input tensor would have to be read only once.
-        // That would probably require some templatization/special-casing in
-        // binary_kernel_reduce_vec(), TensorIteratorBase::for_each(), and
+        // This results in having to read that FP32 tensor again, but maybe in
+        // the future, we could revise the implementation to not materialize
+        // that intermediate FP32 tensor. That approach would probably require
+        // some modifications in binary_kernel_reduce_vec(),
+        // TensorIteratorBase::for_each(), and
         // TensorIteratorBase::serial_for_each().
         at::sum_out(
             result_mut, self, opt_dim, keepdim, ScalarType::Float).div_(dim_prod);
