@@ -549,7 +549,9 @@ class RegisterSchema:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
-        maybe_tags=""
+        if tags == "{}":
+            return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+        maybe_tags = ""
         if tags not in self.known_tags:
             idx = len(self.known_tags)
             self.known_tags[tags] = idx
