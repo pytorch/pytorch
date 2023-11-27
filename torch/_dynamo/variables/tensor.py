@@ -535,11 +535,9 @@ class TensorVariable(VariableTracker):
                     "call_method", "cpu", *proxy_args_kwargs([self], {})
                 )
             else:
-                # Create a view of self that will be marked as NumpyNdarray
-                assert self.device is not None
-                device = ConstantVariable.create(self.device)
+                # Hacky way to create a view of self that will be marked as NumpyNdarrayVariable
                 proxy = tx.output.create_proxy(
-                    "call_method", "to", *proxy_args_kwargs([self, device], {})
+                    "call_method", "view_as", *proxy_args_kwargs([self, self], {})
                 )
             return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
