@@ -695,6 +695,7 @@ def mps_ops_modifier(ops):
         # Convolution for integral types is not supported on MPS
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
+        'nn.functional.conv3d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
 
@@ -882,6 +883,7 @@ def mps_ops_error_inputs_modifier(ops):
         'multinomial',
         'nn.functional.conv1d',
         'nn.functional.conv2d',
+        'nn.functional.conv3d',
         'gather',
         'scatter',
         'scatter_add',
