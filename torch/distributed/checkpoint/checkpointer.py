@@ -10,6 +10,15 @@ import torch.distributed.checkpoint.state_dict_loader as loader
 __all__ = ["Checkpointer"]
 
 class Checkpointer:
+    """
+    This base class specefies a high level API for saving and loading
+    distributed `state_dict` 's. It provides an abstraction over the low-level APIs
+    provided by :py:mod:`torch.distributed.checkpoint.storage`, essentially calling
+    :py:meth: `torch.distributed.state_dict_saver.save` and
+    :py:meth: `torch.distributed.state_dict_loader.load` with the provided storage
+    readers and writers.
+
+    """
 
     def __init__(
         self,
