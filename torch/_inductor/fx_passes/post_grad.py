@@ -2,8 +2,8 @@ import functools
 import itertools
 import logging
 import operator
-from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from collections import defaultdict, namedtuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from sympy import Expr
 
@@ -91,7 +91,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     stable_topological_sort(gm.graph)
 
-    move_constructors_to_cuda(gm.graph)
+    move_constructors_to_cuda(gm)
 
     fake_tensor_updater.incremental_update()
 
@@ -961,6 +961,17 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
+class ZeroOrMultipleDevicesError(RuntimeError):
+    def __init__(self, target: str, devices: Iterable[torch.device]):
+        self.target = target
+        self.devices = list(devices)
+
+        super().__init__(
+            f"expected a single device of type {self.target} to be used "
+            f"in the whole graph. Got: {self.devices}."
+        )
+
+
 def allows_mixed_devices(op):
     return op in (
         aten.index.Tensor,
@@ -998,7 +1009,7 @@ def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
     """
     Get the number of cpu inputs to a node
     """
-    cpu_indeg: Dict[fx.Node, int] = Counter()
+    cpu_indeg: Dict[fx.Node, int] = defaultdict(int)
 
     for node in graph.nodes:
         cpu_count = 0
@@ -1016,13 +1027,9 @@ def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
     return cpu_indeg
 
 
-def move_constructors_to_cuda(graph):
-    """
-    Moves intermediary tensors which are constructed on the cpu to cuda when safe
-    """
-    if not torch.backends.cuda.is_built():
-        return
-
+def gather_constructors_and_cuda_devices(
+    graph: fx.Graph,
+) -> Tuple[List[fx.Node], Set[torch.device]]:
     cuda_devices = set()
     constructors = []
 
@@ -1031,9 +1038,10 @@ def move_constructors_to_cuda(graph):
         if device and device.type == "cuda":
             cuda_devices.add(device)
 
-        if not isinstance(
-            node.target, torch._ops.OpOverload
-        ) or node.target.namespace not in ("prims", "aten"):
+        if not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace in ("prims", "aten")
+        ):
             continue
 
         if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
@@ -1044,19 +1052,29 @@ def move_constructors_to_cuda(graph):
 
         constructors.append(node)
 
-    # not handling multiple cuda devices initially
-    if not constructors or len(cuda_devices) != 1:
+    return constructors, cuda_devices
+
+
+def move_constructors_to_cuda_impl(graph_module):
+    graph = graph_module.graph
+    constructors, cuda_devices = gather_constructors_and_cuda_devices(graph)
+    movable_constructors = find_movable_constructors(graph, constructors)
+
+    if len(movable_constructors) == 0:
         return
 
-    movable_constructors = find_movable_constructors(graph, constructors)
+    if len(cuda_devices) != 1:
+        raise ZeroOrMultipleDevicesError("cuda", cuda_devices)
+
+    cuda_device = next(iter(cuda_devices))
 
     for node in movable_constructors:
         kwargs = node.kwargs.copy()
-        kwargs["device"] = next(iter(cuda_devices))
+        kwargs["device"] = cuda_device
         node.kwargs = kwargs
 
 
-def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node]:
+def find_movable_constructors(graph, constructors: List[fx.Node]) -> List[fx.Node]:
     """
     Starting from the cpu constructors, iterate through the graph and test that all of their
     downstream uses can safely be moved to cpu.
@@ -1105,6 +1123,10 @@ def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node
                 and node_device
                 and node_device.type == "cuda"
             ):
+                # cpu_indeg is a defaultdict.
+                # The line below is needed so as to create, if not existent, the entry in
+                # the dictionary. Then, we can delete it. Otherwise, we get a KeyError.
+                cpu_indeg[user]
                 del cpu_indeg[user]
             else:
                 # otherwise, we should continue look at its downstream uses
@@ -1126,4 +1148,18 @@ def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node
     for constructor in cannot_move_to_cuda:
         all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
 
-    return set(constructors) - all_cannot_move_to_cuda
+    return list(set(constructors) - all_cannot_move_to_cuda)
+
+
+def move_constructors_to_cuda(graph_module):
+    """
+    Moves intermediary tensors which are constructed on the cpu to cuda when safe
+    """
+    if not torch.backends.cuda.is_built():
+        return
+
+    try:
+        move_constructors_to_cuda_impl(graph_module)
+    except ZeroOrMultipleDevicesError:
+        # If zero or multiple gpu setup, don't move the constructors.
+        pass
