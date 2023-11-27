@@ -15,6 +15,7 @@ import itertools
 import logging
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -79,9 +80,10 @@ from tqdm.auto import tqdm, trange
 try:
     import torch_xla
     import torch_xla.core.xla_model as xm
+    import torch_xla.debug.metrics as xmetrics
 
-    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
-    torch_xla._XLAC._init_computation_client()
+    # # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    # torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -626,6 +628,134 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields + data,
     )
     return msg
+
+
+def raw_performance_experiment(args, model_iter_fn, model, example_inputs, extra):
+    import contextlib
+    from torch._inductor.utils import maybe_profile
+
+    timings = np.zeros(args.repeat, np.float64)
+    times = args.iterations_per_run
+    # if we randomize the input, we should also check the result is correct
+    should_randomize_input = args.randomize_input
+
+    # Use higher tolerance for XLA since XLA cause numerical unstability when
+    # graph size changes
+    tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
+    torch._dynamo.config.repro_tolerance = tolerance
+
+    @contextlib.contextmanager
+    def maybe_mark_profile(mark):
+        if args.profile:
+            with torch.profiler.record_function(mark):
+                yield
+        else:
+            yield
+
+    PROF_TIMED_STEP = "timed-step"
+    with maybe_profile(args.profile) as prof:
+        if args.backend:
+            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+        else:
+            frozen_model_iter_fn = model_iter_fn
+
+        for rep in trange(args.repeat, desc="running benchmark"):
+            inputs = (
+                randomize_input(copy.deepcopy(example_inputs))
+                if should_randomize_input
+                else example_inputs
+            )
+
+            # need call mark_step to perform the computation
+            # on randomize_input. Otherwise the first call using the
+            # inputs will incur high penalty then the next one.
+            maybe_mark_step(args)
+
+            with maybe_mark_profile(PROF_TIMED_STEP):
+                # Collect time in milliseconds instead of seconds.
+                timings[rep] = 1000 * timed(
+                    model,
+                    frozen_model_iter_fn,
+                    inputs,
+                    times=times,
+                    collect_outputs=args.collect_outputs,
+                )
+
+    if args.export_profiler_trace:
+        assert args.profile, "needs --profile for exporting its trace"
+        name = args.profiler_trace_name + "_" + model.name + ".json"
+        name = os.path.join(torch._dynamo.config.base_dir, name)
+        prof.export_chrome_trace(name)
+
+    # Gather the headers and fields that will be at the beggining of each
+    # generated CSV file.
+    device = "xla" if args.trace_on_xla else current_device
+
+    first_headers = ["dev", "name", "batch_size", "niters", "repeat"]
+    first_fields = [device, current_name, current_batch_size, times, args.repeat]
+
+    if "tag" in extra:
+        value = extra.pop("tag")
+        first_headers.append("tag")
+        first_fields.append(value)
+
+    # Get the extension-less name of the output file
+    base_output_filename = os.path.splitext(output_filename)[0]
+
+    ############################################################################
+    # XLA Timings data file
+
+    # Look for XLA timings and dump them into their own file.
+    for k in list(extra.keys()):
+        if re.match(r"xla_.*_timings", k):
+            filename = "_".join([base_output_filename, k]) + ".csv"
+            output_csv(filename, first_headers, first_fields + extra.pop(k))
+
+    ############################################################################
+    # Actual Timings summary file
+
+    # Run some stats on the raw timings
+    statsfn_names = ["min", "median", "max", "mean", "std"]
+    stats = [getattr(np, name)(timings) for name in statsfn_names]
+
+    headers = first_headers + statsfn_names
+    row = first_fields + stats
+
+    # Append the extra fields
+    for k, v in extra.items():
+        headers.append(k)
+        row.append(v)
+
+    # Gather profiled data
+    events = prof.events()
+
+    if events is not None:
+        step_events = [evt for evt in events if evt.key == PROF_TIMED_STEP]
+        cpu_timings = np.array([evt.self_cpu_time_total for evt in step_events])
+        cuda_timings = np.array([evt.self_cuda_time_total for evt in step_events])
+
+        headers.extend(["cpu_time", "cpu_time_std"])
+        row.extend([cpu_timings.sum(), cpu_timings.std()])
+
+        headers.extend(["cuda_time", "cuda_time_std"])
+        row.extend([cuda_timings.sum(), cuda_timings.std()])
+
+    # Write the performance data into the output file.
+    output_csv(output_filename, headers, row)
+
+    ############################################################################
+    # Dynamo compilation time file
+
+    # Gather dynamo compile time data.
+    headers, data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
+    compile_times_output_filename = base_output_filename + "_compilation_metrics.csv"
+
+    # Write dynamo compile time data into a new output file.
+    output_csv(compile_times_output_filename, first_headers + headers, first_fields + data)
+
+    MEAN = statsfn_names.index("mean")
+    STD = statsfn_names.index("std")
+    return f"{current_name}: took {stats[MEAN]:.2f} +- {stats[STD]:.2f}"
 
 
 def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
@@ -2364,6 +2494,103 @@ class BenchmarkRunner:
             output_csv(output_filename, headers, fields)
         return tolerance_status
 
+    def run_raw_performance_test(
+        self, name, model, example_inputs, optimize_ctx, experiment, tag=None
+    ):
+        # Export AOT Inductor not supported
+        assert not self.args.export_aot_inductor
+
+        is_xla_device = self.args.trace_on_xla
+
+        # To be fare, we should also consider XLA/GPU as is_cuda_device.
+        # Problem is that we don't have access to torch.cuda API. That is,
+        # assuming we didn't compile PyTorch with CUDA support.
+        is_cuda_device = current_device == "cuda"
+
+        def warmup(fn, model, example_inputs, mode):
+            peak_mem = 0
+            start_stats = get_dynamo_stats()
+            xla_metrics = {}
+            try:
+                if is_cuda_device:
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.empty_cache()
+                if is_xla_device:
+                    xmetrics.clear_all()
+                    xm.mark_step()
+                    xm.wait_device_ops()
+
+                t0 = time.perf_counter()
+
+                for _ in range(self.args.warmup_iterations):
+                    y = fn(model, example_inputs)
+                    maybe_mark_step(self.args)
+
+                t1 = time.perf_counter()
+                latency = 1000 * (t1 - t0)
+
+                if is_cuda_device:
+                    peak_mem = get_peak_memory()
+                elif is_xla_device:
+                    xm.wait_device_ops()
+                    xla_metrics = {
+                        "xla_compile": xmetrics.metric_data("CompileTime"),
+                        "xla_execution": xmetrics.metric_data("ExecuteTime"),
+                    }
+                elif current_device == "cpu":
+                    total = psutil.virtual_memory().total
+                    percentage = psutil.Process(os.getpid()).memory_percent()
+                    peak_mem = percentage * total / 10**9
+
+            except Exception:
+                log.exception("Backend %s failed in warmup()", mode)
+                return sys.exit(-1)
+
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(start_stats)
+            return latency, peak_mem, dynamo_stats, xla_metrics
+
+        # Cast the model to float16/float32 as necessary
+        model, example_inputs = self.maybe_cast(model, example_inputs)
+
+        # Use distributed wrapping as necessary
+        model = self.deepcopy_and_maybe_ddp(model)
+
+        self.init_optimizer(name, current_device, model.parameters())
+        with self.pick_grad(name, self.args.training):
+            optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+
+            # Run warmup for both eager and the optimized version
+            optimized_latency, optimized_peak_mem, dynamo_stats, xla_metrics = warmup(
+                optimized_model_iter_fn, model, example_inputs, "optimized"
+            )
+
+            extra = {}
+
+            if tag is not None:
+                extra["tag"] = tag
+
+            extra["optimized_warmup_time"] = optimized_latency
+            extra["optimized_peak_mem"] = optimized_peak_mem
+
+            for k, v in dynamo_stats.items():
+                extra[k] = v
+
+            for k, data in xla_metrics.items():
+                if data is not None and len(data) == 3:
+                    extra[f"{k}_number"] = data[0]
+                    extra[f"{k}_time"] = data[1] * 1.0e-9
+                    extra[f"{k}_timings"] = [d[1] * 1.0e-9 for d in data[2]]
+                elif is_xla_device:
+                    print("Warning: XLA execution returned None for metric:", k)
+
+            if not hasattr(model, name):
+                model.name = name
+
+            # Support only raw_performance_experiment for this test.
+            assert experiment.func == raw_performance_experiment
+            return experiment(model, example_inputs, extra)
+
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
@@ -2533,6 +2760,11 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+        elif self.args.raw_performance:
+            status = self.run_raw_performance_test(
+                name, model, example_inputs, optimize_ctx, experiment, tag
+            )
+            print(status)
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
             from torch.utils._stats import simple_call_counter
@@ -2619,6 +2851,9 @@ def parse_args(args=None):
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
+    )
+    parser.add_argument(
+        "--warmup-iterations", type=int, default=5, help="number of warmup iterations"
     )
     iterations_per_run_help = """
         Run this may iterations for each time measurement. This is mainly used for
@@ -2808,6 +3043,11 @@ def parse_args(args=None):
         help="exports trace of kineto profiler",
     )
     parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="profiles CPU and CUDA kernels",
+    )
+    parser.add_argument(
         "--profiler-trace-name",
         "--profiler_trace_name",
         help="Overwrites exported trace name",
@@ -2887,6 +3127,11 @@ def parse_args(args=None):
         help="Whether to trace the model on XLA or on eager device",
     )
     parser.add_argument(
+        "--xla-device",
+        choices=("cpu", "cuda"),
+        help="Device for running PyTorch/XLA.",
+    )
+    parser.add_argument(
         "--xla-tolerance",
         type=float,
         default=1e-2,
@@ -2936,6 +3181,12 @@ def parse_args(args=None):
         "--minify",
         action="store_true",
         help="Enable minification when failure is below tolerance. Save repro script for each model.",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only print the names of the modules.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3060,6 +3311,9 @@ def parse_args(args=None):
         "--performance", action="store_true", help="Measures performance speedup"
     )
     mode_group.add_argument(
+        "--raw-performance", action="store_true", help="Measures raw performance numbers"
+    )
+    mode_group.add_argument(
         "--tolerance",
         action="store_true",
         help="extracts the tolerance for each model with small batch size and eval mode",
@@ -3178,6 +3432,25 @@ def run(runner, args, original_dir=None):
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
             )
             return sys.exit(-1)
+
+    if args.device_index is not None:
+        if args.multiprocess:
+            print("Cannot specify both --device_index and --multiprocess")
+            return sys.exit(-1)
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
+
+    if args.trace_on_xla:
+        assert args.xla_device, f"specify --xla-device when using XLA"
+        assert args.xla or args.backend == "openxla", (
+            "XLA tracing only works either on (i) --xla mode; or "
+            "(ii) with openxla as dynamo backend."
+        )
+        os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[args.xla_device]
+        torch._dynamo.mark_dynamic = MagicMock()
+
+        if args.only:
+            torch_xla._XLAC._init_computation_client()
+
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -3227,13 +3500,7 @@ def run(runner, args, original_dir=None):
         # Stricter check to disable fallbacks
         args.suppress_errors = False
 
-    if args.device_index is not None:
-        if args.multiprocess:
-            print("Cannot specify both --device_index and --multiprocess")
-            return sys.exit(-1)
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
-
-    elif args.performance:
+    if args.performance:
         # Ensure that we test on real scenarios
         args.use_eval_mode = False
 
@@ -3311,7 +3578,8 @@ def run(runner, args, original_dir=None):
 
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx, current_onnx_compiler
-    optimize_ctx = contextlib.nullcontext()
+    optimize_ctx = lambda fn: fn
+    mode = "training" if args.training else "inference"
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -3335,11 +3603,10 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
-        (dev,) = args.devices
-        os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
-        torch._dynamo.mark_dynamic = MagicMock()
-        experiment = xla
-        output_filename = "xla.csv"
+        assert args.raw_performance, "XLA only work with raw performance mode"
+        assert args.trace_on_xla, "Needs --trace-on-xla"
+        experiment = raw_performance_experiment
+        output_filename = f"perf_xla_{mode}.csv"
     elif args.torchscript_onnx:
         optimize_ctx = functools.partial(
             optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromTorchScript
@@ -3406,10 +3673,14 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
+
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
         elif args.tolerance:
             output_filename = f"tolerance_{args.backend}.csv"
+        elif args.raw_performance:
+            experiment = raw_performance_experiment
+            output_filename = f"perf_{args.backend}_{mode}.csv"
         else:
             output_filename = f"speedup_{args.backend}.csv"
     elif args.recompile_profiler:
@@ -3652,6 +3923,10 @@ def run(runner, args, original_dir=None):
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
+            if args.dry_run:
+                print(name)
+                continue
+
             def write_csv(status):
                 if args.accuracy:
                     headers = ["dev", "name", "batch_size", "accuracy"]
@@ -3663,6 +3938,12 @@ def run(runner, args, original_dir=None):
                     headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
                     rows = [
                         [device, name, placeholder_batch_size, 0.0, 0.0]
+                        for device in args.devices
+                    ]
+                elif args.raw_performance:
+                    headers = ["dev", "name", "batch_size"]
+                    rows = [
+                        [device, name, placeholder_batch_size]
                         for device in args.devices
                     ]
                 else:

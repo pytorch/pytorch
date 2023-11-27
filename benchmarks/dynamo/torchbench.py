@@ -462,6 +462,21 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
+
+        if model_name.startswith("detectron2"):
+            # work around for detectron2 models.
+            class EventStorageWrapperModule(torch.nn.Module):
+                def __init__(self, inner):
+                    super().__init__()
+                    self.inner = inner
+
+                def forward(self, *args, **kwargs):
+                    from detectron2.utils.events import EventStorage
+                    with EventStorage():
+                        return self.inner(*args, **kwargs)
+
+            model = EventStorageWrapperModule(model)
+
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
