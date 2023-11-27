@@ -2430,19 +2430,25 @@ class ShapeEnv:
         assert len(placeholders) == len(sources)
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
+        def _create_no_constraints_policy(t):
+            return FreshCreateSymbolicPolicy(
+                # Ignored; only the constraints part is relevant below.
+                dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
+                constraint_sizes=[None] * t.dim()
+            )
+
         # Expand optional inputs, or verify invariants are upheld
         if input_policies is None:
-            # TODO: does this work?
             input_policies = [
-                [None] * t.dim() if isinstance(t, Tensorlike) else None for t in placeholders
+                _create_no_constraints_policy(t) if isinstance(t, Tensorlike)
+                else None for t in placeholders
             ]
         else:
             assert len(input_policies) == len(placeholders)
             for i, (t, policy) in enumerate(zip(placeholders, input_policies)):
                 if isinstance(t, Tensorlike):
                     if policy is None:
-                        # TODO: does this work?
-                        policy_inputs[i] = [None] * t.dim()
+                        policy_inputs[i] = _create_no_constraints_policy(t)
                 else:
                     assert isinstance(t, (SymInt, int))
                     assert not isinstance(policy, list)
