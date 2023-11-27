@@ -1707,18 +1707,7 @@ def _automatic_dynamic(
         # Precedence: export constraints > eager constraints
         constraint = dim2constraint.get(i)
         if constraint is None:
-            # NB: The "not is_subclass" hack maintains legacy behavior: constraints have
-            # historically not been enforced on the outer tensors of subclasses. Removing
-            # the check results in constraint violations for tensor subclasses that manually
-            # mark_dynamic(), possibly due to the guards introduced by the assert check
-            # against outer_size. Notable examples include NestedTensor and the test subclass
-            # DoubleSizeMaybeAddGeThreeTensor.
-            # TODO: Figure out a better solution for this.
-            if (
-                not is_subclass
-                and marked_dynamic
-                and not config.allow_ignore_mark_dynamic
-            ):
+            if marked_dynamic and not config.allow_ignore_mark_dynamic:
                 constraint_dim = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
                 constraint_dim = RelaxedUnspecConstraint(warn_only=True)

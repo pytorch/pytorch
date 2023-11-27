@@ -2597,10 +2597,6 @@ class ShapeEnv:
                             # expect to have to compile in this case anyway
                             if i not in (0, 1):
                                 constraint_violated = True
-                        else:
-                            # TODO: Maybe non-strict constraint shouldn't error
-                            # here?  Check what happens in practice
-                            constraint_violated = True
                     if constraint_violated:
                         def hint(s):
                             sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
