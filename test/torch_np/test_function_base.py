@@ -3,10 +3,20 @@
 
 import pytest
 
-import torch._numpy as np
-from torch._numpy.testing import assert_equal
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_equal
 
 
 class TestAppend(TestCase):

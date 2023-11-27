@@ -13,15 +13,23 @@ from unittest import skipIf as skipif, SkipTest
 
 import pytest
 
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_equal
+
 
 skip = functools.partial(skipif, True)
 
@@ -124,11 +132,12 @@ class TestAsIntegerRatio(TestCase):
                 df = np.longdouble(d)
             except (OverflowError, RuntimeWarning):
                 # the values may not fit in any float type
-                raise SkipTest("longdouble too small on this platform")
+                raise SkipTest("longdouble too small on this platform")  # noqa: TRY200
 
             assert_equal(nf / df, f, f"{n}/{d}")
 
 
+@skip(reason="NP_VER: older numpies has problems with .is_integer")
 @instantiate_parametrized_tests
 class TestIsInteger(TestCase):
     @parametrize("str_value", ["inf", "nan"])
@@ -138,13 +147,15 @@ class TestIsInteger(TestCase):
         value = cls(str_value)
         assert not value.is_integer()
 
-    @parametrize("code", np.typecodes["Float"] + np.typecodes["AllInteger"])
+    @parametrize(
+        "code", "efd" + "Bbhil"
+    )  # np.typecodes["Float"] + np.typecodes["AllInteger"])
     def test_true(self, code: str) -> None:
         float_array = np.arange(-5, 5).astype(code)
         for value in float_array:
             assert value.is_integer()
 
-    @parametrize("code", np.typecodes["Float"])
+    @parametrize("code", "bhil")  # np.typecodes["Float"])
     def test_false(self, code: str) -> None:
         float_array = np.arange(-5, 5).astype(code)
         float_array *= 1.1

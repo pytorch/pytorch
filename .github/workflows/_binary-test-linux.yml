@@ -62,7 +62,7 @@ on:
       runs_on:
         required: true
         type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.t4g.2xlarge, and linux.rocm.gpu
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
     secrets:
       github-token:
         required: true
@@ -128,6 +128,7 @@ jobs:
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
           github-secret: ${{ secrets.github-token }}
 

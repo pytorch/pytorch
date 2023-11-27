@@ -478,32 +478,6 @@ class Vectorized<ComplexDbl> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexDbl> hypot(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> nextafter(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igamma(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> igammac(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> atan2(const Vectorized<ComplexDbl>& b) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erf() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> erfc() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
@@ -526,19 +500,6 @@ class Vectorized<ComplexDbl> {
     auto ne = (*this != other);  // compares real and imag individually
     // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
     return (ne.real() | ne.imag()) & vd_one;
-  }
-
-  Vectorized<ComplexDbl> lt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> le(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> gt(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<ComplexDbl> ge(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   DEFINE_MEMBER_OP(operator==, ComplexDbl, vec_cmpeq)

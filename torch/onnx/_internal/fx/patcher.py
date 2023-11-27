@@ -37,7 +37,7 @@ class ONNXTorchPatcher:
         This list is extended with (torch.Tensor, "__getitem__") so that
         weight[x, :, y] becomes exportable with torch.fx.symbolic_trace.
     safetensors.torch.load_file:
-        This function is patached to allow safetensors to be loaded within
+        This function is patched to allow safetensors to be loaded within
         FakeTensorMode. Remove after https://github.com/huggingface/safetensors/pull/318
 
     Search for ONNXTorchPatcher in test_fx_to_onnx_with_onnxruntime.py for

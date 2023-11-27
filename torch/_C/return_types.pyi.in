@@ -16,7 +16,7 @@ from typing import (
     Union,
 )
 
-from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor
+from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor, SymInt
 from torch.types import (
     _bool,
     _device,

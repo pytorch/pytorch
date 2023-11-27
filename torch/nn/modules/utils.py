@@ -31,7 +31,8 @@ def _reverse_repeat_tuple(t, n):
 
 
 def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
-    if isinstance(out_size, int):
+    import torch
+    if isinstance(out_size, (int, torch.SymInt)):
         return out_size
     if len(defaults) <= len(out_size):
         raise ValueError(

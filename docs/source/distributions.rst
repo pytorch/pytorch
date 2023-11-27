@@ -167,6 +167,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`InverseGamma`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.inverse_gamma
+.. autoclass:: InverseGamma
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Kumaraswamy`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -394,3 +403,48 @@ Probability distributions - torch.distributions
 .. automodule:: torch.distributions.constraint_registry
     :members:
     :member-order: bysource
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.distributions.bernoulli
+.. py:module:: torch.distributions.beta
+.. py:module:: torch.distributions.binomial
+.. py:module:: torch.distributions.categorical
+.. py:module:: torch.distributions.cauchy
+.. py:module:: torch.distributions.chi2
+.. py:module:: torch.distributions.continuous_bernoulli
+.. py:module:: torch.distributions.dirichlet
+.. py:module:: torch.distributions.distribution
+.. py:module:: torch.distributions.exp_family
+.. py:module:: torch.distributions.exponential
+.. py:module:: torch.distributions.fishersnedecor
+.. py:module:: torch.distributions.gamma
+.. py:module:: torch.distributions.geometric
+.. py:module:: torch.distributions.gumbel
+.. py:module:: torch.distributions.half_cauchy
+.. py:module:: torch.distributions.half_normal
+.. py:module:: torch.distributions.independent
+.. py:module:: torch.distributions.inverse_gamma
+.. py:module:: torch.distributions.kumaraswamy
+.. py:module:: torch.distributions.laplace
+.. py:module:: torch.distributions.lkj_cholesky
+.. py:module:: torch.distributions.log_normal
+.. py:module:: torch.distributions.logistic_normal
+.. py:module:: torch.distributions.lowrank_multivariate_normal
+.. py:module:: torch.distributions.mixture_same_family
+.. py:module:: torch.distributions.multinomial
+.. py:module:: torch.distributions.multivariate_normal
+.. py:module:: torch.distributions.negative_binomial
+.. py:module:: torch.distributions.normal
+.. py:module:: torch.distributions.one_hot_categorical
+.. py:module:: torch.distributions.pareto
+.. py:module:: torch.distributions.poisson
+.. py:module:: torch.distributions.relaxed_bernoulli
+.. py:module:: torch.distributions.relaxed_categorical
+.. py:module:: torch.distributions.studentT
+.. py:module:: torch.distributions.transformed_distribution
+.. py:module:: torch.distributions.uniform
+.. py:module:: torch.distributions.utils
+.. py:module:: torch.distributions.von_mises
+.. py:module:: torch.distributions.weibull
+.. py:module:: torch.distributions.wishart

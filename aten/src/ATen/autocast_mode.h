@@ -45,7 +45,9 @@ TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 namespace {
-bool is_autocast_eligible(const Tensor& tensor, c10::DeviceType device_type) {
+inline bool is_autocast_eligible(
+    const Tensor& tensor,
+    c10::DeviceType device_type) {
   switch (device_type) {
     case c10::DeviceType::CUDA:
       return (tensor.is_cuda() || tensor.is_xla()) &&
@@ -62,8 +64,7 @@ bool is_autocast_eligible(const Tensor& tensor, c10::DeviceType device_type) {
     case c10::DeviceType::XLA:
       return tensor.is_xla() && tensor.is_floating_point();
     case c10::DeviceType::PrivateUse1:
-      return tensor.device().type() == c10::DeviceType::PrivateUse1 &&
-          tensor.is_floating_point();
+      return tensor.is_privateuseone() && tensor.is_floating_point();
     default:
       return false;
   }

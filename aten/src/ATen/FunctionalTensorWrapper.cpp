@@ -135,7 +135,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_value.dtype(),
       view_value.device()
     ),
-    value_(view_value)
+    value_(view_value),
+    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -228,6 +229,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
+  mutation_counter_++;
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
@@ -500,8 +502,7 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (const auto i : c10::irange(functional_tensor.size())) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
     replace_(*functional_tensor_it++, *other_it++);
   }
 }
@@ -518,8 +519,7 @@ void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef o
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (const auto i : c10::irange(functional_tensor.size())) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
     propagate_xla_data(*functional_tensor_it++, *other_it++);
   }
 }
@@ -533,6 +533,16 @@ void commit_update(ITensorListRef functional_tensor) {
   for (const auto& t : functional_tensor) {
     commit_update(t);
   }
+}
+
+void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->mark_mutation_hidden_from_autograd();
+}
+
+bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {

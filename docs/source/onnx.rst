@@ -62,3 +62,24 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
     onnx_dynamo
     onnx_dynamo_onnxruntime_backend
     onnx_torchscript
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.onnx.errors
+.. py:module:: torch.onnx.operators
+.. py:module:: torch.onnx.symbolic_caffe2
+.. py:module:: torch.onnx.symbolic_helper
+.. py:module:: torch.onnx.symbolic_opset10
+.. py:module:: torch.onnx.symbolic_opset11
+.. py:module:: torch.onnx.symbolic_opset13
+.. py:module:: torch.onnx.symbolic_opset14
+.. py:module:: torch.onnx.symbolic_opset15
+.. py:module:: torch.onnx.symbolic_opset16
+.. py:module:: torch.onnx.symbolic_opset17
+.. py:module:: torch.onnx.symbolic_opset18
+.. py:module:: torch.onnx.symbolic_opset7
+.. py:module:: torch.onnx.symbolic_opset8
+.. py:module:: torch.onnx.symbolic_opset9
+.. py:module:: torch.onnx.utils
+.. py:module:: torch.onnx.verification
+.. py:module:: torch.onnx.symbolic_opset12

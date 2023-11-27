@@ -732,7 +732,7 @@ TEST(Simplify, SimplifyMuls) {
 
   {
     // (x + y) * (x + y) => (x + y) * (x + y)
-    // We don't attempt to simplify mulitplication of polynomials since the
+    // We don't attempt to simplify multiplication of polynomials since the
     // result is only very rarely more efficient.
     ExprHandle body = (x + y) * (x + y);
     ExprHandle simplified = IRSimplifier::simplify(body);

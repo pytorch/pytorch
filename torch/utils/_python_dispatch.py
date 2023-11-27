@@ -45,6 +45,7 @@ class TorchDispatchMode:
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
@@ -182,7 +183,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs, _ = torch.utils._pytree.tree_flatten(outs)
+    flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:

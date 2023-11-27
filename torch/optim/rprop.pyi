@@ -1,11 +1,11 @@
 from typing import Tuple
 
-from .optimizer import Optimizer, params_t
+from .optimizer import Optimizer, ParamsT
 
 class Rprop(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: float = ...,
         etas: Tuple[float, float] = ...,
         step_sizes: Tuple[float, float] = ...,

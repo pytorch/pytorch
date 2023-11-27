@@ -95,11 +95,12 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     const auto buffer_size = get_buffer_size();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
         c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
-    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size));
+    buffer_tensor_impl->set_sizes_contiguous(
+        c10::makeArrayRef(static_cast<int64_t>(buffer_size)));
     return Tensor(buffer_tensor_impl);
   }
 
-  int64_t get_buffer_size() const {
+  size_t get_buffer_size() const {
     return storage_.nbytes() / data_type_.itemsize();
   }
 
@@ -146,6 +147,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // to TensorImpl.
   void refresh_dim();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::Tensor nested_sizes_, nested_strides_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
@@ -159,6 +161,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Some strong enough constraints are:
   // 1. every underlying tensor is contiguous in memory
   //    && nesting in ascending order
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::Tensor storage_offsets_;
   // NOTE: -1 here means the size is missing
   // Optional to allow it to be computed lazily from nested.

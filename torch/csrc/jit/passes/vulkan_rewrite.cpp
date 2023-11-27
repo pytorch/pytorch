@@ -1,7 +1,6 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -216,6 +215,24 @@ void rewriteQuantizedOps(std::shared_ptr<Graph>& graph) {
   quantized_conv2d_relu_rewriter.RegisterRewritePattern(
       quantized_conv2d_relu_pattern, vk_quantized_conv2d_relu_pattern);
   quantized_conv2d_relu_rewriter.runOnGraph(graph);
+
+  // quantized::linear
+  std::string quantized_linear_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_linear_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %vk_packed_params : __torch__.torch.classes.vulkan.LinearPackedContext = vulkan_quantized_prepack::convert_linear_context(
+        %packed_params)
+      %res = vulkan_prepack::run_qlinear_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_linear_rewriter;
+  quantized_linear_rewriter.RegisterRewritePattern(
+      quantized_linear_pattern, vk_quantized_linear_pattern);
+  quantized_linear_rewriter.runOnGraph(graph);
 }
 
 void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
@@ -387,6 +404,9 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_qconv2d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_quantized_prepack::convert_linear_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
         (n->kind() ==

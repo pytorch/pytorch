@@ -377,6 +377,7 @@ def emit_view_functionalization_body(
 """
 
         else:
+            is_multi_output_view = isinstance(f.func.returns[0].type, ListType)
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
@@ -415,7 +416,8 @@ def emit_view_functionalization_body(
         }},
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
-        }}
+        }},
+        /*is_multi_output=*/{str(is_multi_output_view).lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -629,7 +631,7 @@ def emit_inplace_functionalization_body(
       if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
-        // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        // (We can only do this for inplace ops today though, because they technically all support meta tensors).
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
@@ -731,7 +733,7 @@ def gen_functionalization_registration(
             # See Note [resize_ in Functionalization]
             return []
         assert not f.is_view_op
-        # functionalization needs to generate and register kernals for inplace ops.
+        # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
         if modifies_arguments(f):

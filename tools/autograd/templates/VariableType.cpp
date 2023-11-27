@@ -37,7 +37,7 @@ using namespace torch::autograd::generated;
 using namespace torch::autograd::generated::details;
 
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 namespace VariableType {
 namespace{
@@ -62,4 +62,4 @@ ${wrapper_registrations}
 
 }
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

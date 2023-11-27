@@ -44,6 +44,88 @@ python test/mobile/model_test/gen_test_model.py ios-test
 cd ios/TestApp/benchmark; python coreml_backend.py
 ```
 
+## Run test on AWS Device Farm
+The test app and its test suite could also be run on actual devices via
+AWS Device Farm.
+
+1. The following steps could only be done on MacOS with Xcode installed.
+   I'm using Xcode 15.0 on MacOS M1 arm64
+
+2. Checkout PyTorch repo including all submodules
+
+3. Build PyTorch for iOS devices, not for simulator
+```
+export BUILD_LITE_INTERPRETER=1
+export USE_PYTORCH_METAL=1
+export USE_COREML_DELEGATE=1
+export IOS_PLATFORM=OS
+export IOS_ARCH=arm64
+
+./scripts/build_ios.sh
+```
+
+4. Build the test app locally
+```
+# Use the pytorch nightly build to generate models
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+
+# Generate models for differnet backends
+pushd ios/TestApp/benchmark
+mkdir -p ../models
+
+# This requires numpy==1.23.1
+python coreml_backend.py
+
+# NB: Also need to set the team ID with -t if you are running this locally. This
+# command setups an app that could be used to launch TestAppTests on device. On
+# the other hand, adding the --benchmark flag to build the one that runs benchmark
+# instead.
+ruby setup.rb --lite 1
+popd
+
+# Build the TestApp and its TestAppTests
+ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "OS"
+```
+
+5. Prepare the artifacts
+https://docs.aws.amazon.com/devicefarm/latest/developerguide/test-types-ios-xctest.html
+
+```
+export DEST_DIR="Payload"
+
+pushd ios/TestApp/build/Release-iphoneos
+mkdir "${DEST_DIR}"
+
+cp -r TestApp.app "${DEST_DIR}"
+# TestApp.ipa is just a zip file with a payload subdirectory
+zip -vr TestApp.ipa "${DEST_DIR}"
+
+pushd TestApp.app/PlugIns
+# Also zip the TestAppTests.xctest test suite
+zip -vr TestAppTests.xctest.zip TestAppTests.xctest
+popd
+
+cp TestApp.app/PlugIns/TestAppTests.xctest.zip .
+popd
+```
+
+6. Upload the artifacts to AWS Device Farm and run the tests
+```
+export PYTORCH_ARN="arn:aws:devicefarm:us-west-2:308535385114:project:b531574a-fb82-40ae-b687-8f0b81341ae0"
+
+pushd ios/TestApp
+# AWS Device Farm is only available on us-west-2
+AWS_DEFAULT_REGION=us-west-2 python run_on_aws_devicefarm.py \
+  --project-arn "${PYTORCH_ARN}" \
+  --app-file build/Release-iphoneos/TestApp.ipa \
+  --xctest-file build/Release-iphoneos/TestAppTests.xctest.zip \
+  --name-prefix PyTorch
+popd
+```
+
+7. The script will continue polling for the outcome. A visual output of
+   the test results could be view on AWS Device Farm console for [PyTorch project](https://us-west-2.console.aws.amazon.com/devicefarm/home#/mobile/projects/b531574a-fb82-40ae-b687-8f0b81341ae0/runs)
+
 ## Debug Test Failures
 Make sure all models are generated. See https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test to learn more.
 

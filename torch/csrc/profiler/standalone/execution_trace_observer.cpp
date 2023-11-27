@@ -10,7 +10,6 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -19,7 +18,6 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
-#include <stdexcept>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
@@ -47,6 +45,7 @@ inline std::string vectorToString(const std::vector<T>& v) {
 std::string json_str_escape(const std::string& str);
 
 constexpr size_t maxNumElements = 4096;
+constexpr size_t maxStrLength = 8192;
 
 inline std::string getValueType(
     const c10::IValue& val,
@@ -86,7 +85,8 @@ inline std::string getValueShape(
     const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
-    if (tensor.defined()) {
+    if (tensor.defined() &&
+        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
       return vectorToString(tensor.sizes().vec());
     }
   } else if (val.isTuple()) {
@@ -127,11 +127,11 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > maxNumElements) {
+    if (str_val.size() > maxStrLength) {
       LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded maxNumElements=" << maxNumElements;
+                   << " exceeded maxStrLength=" << maxStrLength;
       return fmt::format(
-          "\"{}\"", json_str_escape(str_val.substr(0, maxNumElements)));
+          "\"{}\"", json_str_escape(str_val.substr(0, maxStrLength)));
     }
 
     return fmt::format("\"{}\"", json_str_escape(str_val));
@@ -388,7 +388,8 @@ inline std::string convertIValue(
     size_t numel = 0;
     size_t itemsize = 0;
     std::string device_str = "";
-    if (t->has_storage()) {
+    // symbolic sizes/strides implies t->storage_offset() will fail
+    if (t->has_storage() && !t->has_symbolic_sizes_strides()) {
       auto& t_storage = t->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();

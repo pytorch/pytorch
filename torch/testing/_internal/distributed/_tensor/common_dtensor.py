@@ -127,7 +127,7 @@ class DTensorTestBase(MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+            raise RuntimeError(f"Backend {self.backend} not supported!")
 
         dist.init_process_group(
             backend=self.backend,
@@ -169,6 +169,9 @@ class DTensorTestBase(MultiProcessTestCase):
                     out,
                 )
 
+    def run_subtests(self, *args, **kwargs):
+        return run_subtests(self, *args, **kwargs)
+
 
 TestFunc = Callable[[object], object]
 
@@ -191,6 +194,38 @@ def with_comms(func: TestFunc) -> TestFunc:
         self.destroy_pg()
 
     return wrapper
+
+
+def run_subtests(
+    cls_inst,
+    subtest_config: Dict[str, List[Any]],
+    test_fn: Callable,
+    *test_args,
+    **test_kwargs: Any,
+):
+    """
+    Runs a test function given by ``test_fn`` as a subtest according to the
+    configurations specified by ``subtest_config``. This amortizes the
+    costly setup overhead (including process spawn and initializing the
+    process group) over the subtests.
+
+    Args:
+        subtest_config (Dict[str, List[Any]]): A mapping from subtest
+            keyword argument name to a list of its possible values.
+        test_fn (Callable): A callable that runs the actual test.
+        test_args: Positional arguments to pass to ``test_fn``.
+        test_kwargs: Keyword arguments to pass to ``test_fn``.
+    """
+    # Convert the config mapping to a list to have a fixed order
+    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    for values in itertools.product(*subtest_config_values):
+        # Map keyword to chosen value
+        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        with cls_inst.subTest(**subtest_kwargs):
+            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+        dist.barrier()
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
@@ -336,21 +371,11 @@ class DTensorConverter:
         if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
-                # We cannot use distribute_tensor for bool tensors as c10d
-                # collectives does not support the dtype, we assume op with
-                # bool tensor args the same tensor so we don't need to broadcast
-                # TODO: add bool tensor dtype support in c10d collective
-                if t.dtype == torch.bool:
-                    r = DTensor(
-                        t,
-                        mesh,
-                        tuple(placements),
-                        size=t.size(),
-                        dtype=torch.bool,
-                        requires_grad=t.requires_grad,
-                        stride=t.stride()
-                    )
+                if t.ndim == 0:
+                    # scalar tensor by default will be replicated
+                    r = distribute_tensor(t, mesh, [Replicate()] * mesh.ndim)
                 else:
+                    # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(  # type: ignore[assignment]
