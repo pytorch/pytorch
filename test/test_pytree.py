@@ -557,6 +557,13 @@ class TestPythonPytree(TestCase):
                 lambda xs, _: DummyType(*xs),
             )
 
+        with self.assertWarnsRegex(UserWarning, "already registered"):
+            py_pytree._register_pytree_node(
+                DummyType,
+                lambda dummy: ([dummy.x, dummy.y], None),
+                lambda xs, _: DummyType(*xs),
+            )
+
     def test_treespec_equality(self):
         self.assertTrue(
             py_pytree.LeafSpec() == py_pytree.LeafSpec(),
