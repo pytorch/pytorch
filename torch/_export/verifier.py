@@ -203,12 +203,23 @@ class Verifier(metaclass=_VerifierMeta):
                     if isinstance(attr, torch.nn.Module):
                         def _is_type(name, ty):
                             return isinstance(getattr(attr, name, None), ty)
-                        if type(attr).__name__ == "LoweredBackendModule" \
-                                and _is_type("backend_id", str) \
-                                and _is_type("processed_bytes", bytes) \
-                                and _is_type("compile_specs", list) \
-                                and hasattr(attr, "original_module"):
-                            continue
+                        if type(attr).__name__ == "LoweredBackendModule":
+                            if _is_type("backend_id", str) \
+                                    and _is_type("processed_bytes", bytes) \
+                                    and _is_type("compile_specs", list) \
+                                    and hasattr(attr, "original_module"):
+                                continue
+                            else:
+                                backend_id = getattr(attr, "backend_id", None)
+                                processed_bytes = getattr(attr, "processed_bytes", None)
+                                compile_specs = getattr(attr, "compile_specs", None)
+                                raise SpecViolationError(
+                                    f"Invalid get_attr type {type(attr)}. \n"
+                                    f"LoweredBackendModule fields: "
+                                    f"backend_id(str) : {type(backend_id)}, "
+                                    f"processed_bytes(bytes) : {type(processed_bytes)}, "
+                                    f"compile_specs(list) : {type(compile_specs)}"
+                                )
 
                     if not isinstance(attr, _allowed_getattr_types()):
                         raise SpecViolationError(
