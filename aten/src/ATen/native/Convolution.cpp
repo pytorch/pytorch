@@ -917,6 +917,14 @@ at::Tensor conv1d_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
@@ -962,6 +970,14 @@ at::Tensor conv3d_symint(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
 
   Tensor input;
   bool is_batched;
