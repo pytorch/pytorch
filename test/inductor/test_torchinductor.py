@@ -2159,6 +2159,47 @@ class CommonTemplate:
                 (v,),
             )
 
+    @skipIfRocm
+    def test_conv_inference_heuristics(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("cuda only test")
+
+        in_channels = 6
+        out_channels = 6
+        kernel_size = 3
+        groups = 3
+
+        grouped_conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size, groups=groups
+        ).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        # Perform the forward pass
+        @torch.compile()
+        def foo(m, inp):
+            return m(inp)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+            # no to channels last permuting before kernel
+            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+
+        # in out should do channels last in inference
+        in_channels = 8
+        out_channels = 4
+        kernel_size = 3
+
+        # Create the convolution layer
+        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, conv_layer, input_tensor)
+            # should be channels last permuting before kernel
+            FileCheck().check(".run(").check(".convolution(").run(code[0])
+
     def test_upsample_cat_conv(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")

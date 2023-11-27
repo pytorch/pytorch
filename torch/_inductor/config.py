@@ -194,6 +194,10 @@ coordinate_descent_search_radius = int(
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
 
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
+
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 

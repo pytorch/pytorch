@@ -84,14 +84,15 @@ def microbenchmark(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
     if device == "cuda":
-        cudagraphs_eager = cudagraphs_inner(
-            gm, gm_args, copy_outputs=False, copy_inputs=False
-        )
+        # cudagraphs_eager = cudagraphs_inner(
+        #     gm, gm_args, copy_outputs=False, copy_inputs=False
+        # )
         compiled_fn = compile_fx(gm, gm_args)
         cudagraphs_compiled = cudagraphs_inner(
             compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
         )
-        compiled = [cudagraphs_eager, cudagraphs_compiled]
+        # compiled = [cudagraphs_eager, cudagraphs_compiled]
+        compiled = [cudagraphs_compiled]
     else:
         compiled_fn = compile_fx(gm, gm_args)
         compiled = [gm, compiled_fn]
@@ -143,9 +144,69 @@ def skip_operator(operator):
         return True
 
     if "convolution" in str(operator):
-        return True
+        return False
 
     return False
+
+
+def check_grouped_conv_heuristic(conv_nodes):
+    for node in conv_nodes:
+        if node.args[-1] > 1 and node.args[1].meta["val"].size(1) > 1:
+            return True
+    return False
+
+
+def check_in_out_channel_heuristic(conv_nodes):
+    for node in conv_nodes:
+        if (node.args[1].meta["val"].size(0) * 2 <= node.args[1].meta["val"].size(1)
+            and node.args[1].meta["val"].size(2) > 1):
+            return True
+    return False
+
+
+def check_small_channel_heuristic(conv_nodes):
+    return all(
+        node.args[1].meta["val"].size(0) <= 64 and node.args[1].meta["val"].size(1) <= 64
+        for node in conv_nodes
+    )
+
+import torch.utils.flop_counter
+
+def FlopCounterMode(*args, **kwargs):
+    return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
+
+
+def get_total_flops(mode):
+    return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
+
+def get_flops(gm, gm_args):
+
+    with torch._subclasses.fake_tensor.FakeTensorMode(allow_non_fake_inputs=True):
+        with FlopCounterMode() as m:
+            gm(*gm_args)
+
+    return get_total_flops(m)
+
+
+def classify_gm(gm, gm_args):
+    from torch._inductor.compile_fx import fake_tensor_prop
+
+    fake_tensor_prop(gm, gm_args, force_allow_non_fake_inputs=True)
+    conv_nodes = [
+        n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+    ]
+    if check_grouped_conv_heuristic(conv_nodes):
+        return "grouped"
+    elif check_in_out_channel_heuristic(conv_nodes):
+        return "in_out"
+    elif check_small_channel_heuristic(conv_nodes):
+        return "small_channel"
+    else:
+        return "default"
+
+    
+
+
 
 
 @click.command()
@@ -207,6 +268,10 @@ def benchmark(
     else:
         ops = [eval(op)]
 
+
+    f = open("conv_speedups.csv", "a")
+    f.write("conv_contig, conv_channels_last, classification\n")
+    
     max_samples = max_samples + start_idx
     for operator in ops:
         if skip_operator(operator):
@@ -233,9 +298,12 @@ def benchmark(
             except StopIteration:
                 break
             try:
+                torch._inductor.config.force_layout_optimization = False
+                torch._inductor.config.keep_output_stride = False
+                torch._inductor.config.layout_optimization = False
+
                 # aten, nvfuser, inductor
-                timings.append(
-                    microbenchmark(
+                tmp1 = (microbenchmark(
                         operator,
                         args,
                         kwargs,
@@ -246,6 +314,31 @@ def benchmark(
                         device,
                     )
                 )
+                args = list(args)
+                # args[0] = args[0].to(memory_format=torch.channels_last).contiguous(memory_format=torch.channels_last)
+
+                torch._inductor.config.layout_optimization = True
+                torch._inductor.config.force_layout_optimization = True
+                        
+                tmp2 = microbenchmark(
+                        operator,
+                        args,
+                        kwargs,
+                        dtype,
+                        accuracy_checking,
+                        repeats,
+                        measure_nvfuser,
+                        device,
+                )
+
+                gm, gm_args = gen_gm_and_inputs(operator, args, kwargs)
+                out = classify_gm(gm, gm_args)
+
+                flops = get_flops(gm, gm_args)
+
+                f.write(",".join([str(tmp1[0]), str(tmp2[0]), out, flops, str(args[0].shape), str(args[1].shape)]))
+                f.write("\n")
+
             except Exception as e:
                 print(f"error {operator}")
                 print(e)
@@ -262,7 +355,7 @@ def benchmark(
             output += f"NVFUSER Speedups :{(torch.quantile(timings[0] / timings[2], q)).tolist()}\n"
         if op == "all":
             f.write(output)
-        print(output)
+        # print(output)
 
     if op == "all":
         f.close()
