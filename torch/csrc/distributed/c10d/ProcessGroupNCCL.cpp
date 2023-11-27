@@ -1269,6 +1269,15 @@ void ProcessGroupNCCL::workCleanupLoop() {
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
               dumpingDebugInfo = tryWriteDebugInfo();
+            }
+
+            if (desyncDebug_) {
+              auto desyncMsg = getNCCLWatchdogDebugInfo();
+              LOG(ERROR) << desyncMsg;
+            }
+
+            if (dumpOnTimeout_) {
+              // Store debug info to storage. (By default to local disk)
               if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
@@ -1280,10 +1289,6 @@ void ProcessGroupNCCL::workCleanupLoop() {
               }
             }
 
-            if (desyncDebug_) {
-              auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << desyncMsg;
-            }
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
