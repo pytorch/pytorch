@@ -24,7 +24,21 @@ CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-PYTORCH_EXTRA_INSTALL_REQUIREMENTS = (
+PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU118 = (
+    "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
+    "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cudnn-cu11==8.7.0.84; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-nccl-cu11==2.15.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+    "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
+)
+
+PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU121 = (
     "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
     "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
     "nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -68,7 +82,7 @@ def get_nccl_submodule_version() -> str:
 def get_nccl_wheel_version() -> str:
     import re
 
-    requrements = map(str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS))
+    requrements = map(str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU121))
     return [x for x in requrements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
 
 
@@ -310,10 +324,30 @@ def generate_wheels_matrix(
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS,
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU121,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
                             ".", "_"
                         ),
+                    }
+                )
+            elif arch_version == "11.8" and os == "linux":
+                ret.append(
+                    {
+                        "python_version": python_version,
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
+                        "devtoolset": "cxx11-abi"
+                        if arch_version == "cpu-cxx11-abi"
+                        else "",
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "package_type": package_type,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                            ".", "_"
+                        ),
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU118,
                     }
                 )
             else:
@@ -333,7 +367,7 @@ def generate_wheels_matrix(
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS_CU121 # Windows/Mac for poetry
                         if os != "linux"
                         else "",
                     }
