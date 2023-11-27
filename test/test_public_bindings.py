@@ -169,7 +169,6 @@ class TestPublicBindings(TestCase):
             "is_anomaly_check_nan_enabled",
             "is_autocast_cache_enabled",
             "is_autocast_cpu_enabled",
-            "is_autocast_ipu_enabled",
             "is_autocast_enabled",
             "is_grad_enabled",
             "is_inference_mode_enabled",
@@ -217,7 +216,6 @@ class TestPublicBindings(TestCase):
             "set_autocast_cpu_dtype",
             "set_autocast_ipu_dtype",
             "set_autocast_cpu_enabled",
-            "set_autocast_ipu_enabled",
             "set_autocast_enabled",
             "set_flush_denormal",
             "set_num_interop_threads",
@@ -245,10 +243,8 @@ class TestPublicBindings(TestCase):
             "vitals_enabled",
             "wait",
             "Tag",
-            "set_autocast_xla_enabled",
             "set_autocast_xla_dtype",
             "get_autocast_xla_dtype",
-            "is_autocast_xla_enabled",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 

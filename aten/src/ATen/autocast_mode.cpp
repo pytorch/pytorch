@@ -7,59 +7,43 @@
 namespace at::autocast {
 
 bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
 }
 
 bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
 }
 
 void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
 }
 
 bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
 }
 
 void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
-}
-
-bool is_ipu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
-}
-
-void set_ipu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
 }
 
 bool is_hpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
 }
 
 void set_hpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
-}
-
-bool is_xla_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
-}
-
-void set_xla_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
 }
 
 bool is_privateuseone_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
 }
 
 void set_privateuseone_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
 }
 
 namespace {
@@ -241,11 +225,11 @@ namespace {
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
-TORCH_LIBRARY_IMPL(_, Autocast, m) {
+TORCH_LIBRARY_IMPL(_, AutocastCUDA, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
 
-TORCH_LIBRARY_IMPL(aten, Autocast, m) {
+TORCH_LIBRARY_IMPL(aten, AutocastCUDA, m) {
   // lower_precision_fp
   KERNEL_CUDA2(_convolution, deprecated, lower_precision_fp)
   KERNEL_CUDA(_convolution, lower_precision_fp)

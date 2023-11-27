@@ -25,16 +25,12 @@ TORCH_API bool is_xpu_enabled();
 TORCH_API void set_xpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_xpu_dtype();
 TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_ipu_enabled();
-TORCH_API void set_ipu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_ipu_dtype();
 TORCH_API void set_autocast_ipu_dtype(at::ScalarType dtype);
 TORCH_API bool is_hpu_enabled();
 TORCH_API void set_hpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_hpu_dtype();
 TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_xla_enabled();
-TORCH_API void set_xla_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_xla_dtype();
 TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
 TORCH_API bool is_privateuseone_enabled();
@@ -70,29 +66,6 @@ inline bool is_autocast_eligible(
   }
 }
 } // namespace
-
-inline DispatchKey get_autocast_dispatch_key_from_device_type(
-    c10::DeviceType device_type) {
-  switch (device_type) {
-    case c10::DeviceType::CUDA:
-      return DispatchKey::Autocast;
-    case c10::DeviceType::CPU:
-      return DispatchKey::AutocastCPU;
-    case c10::DeviceType::XPU:
-      return DispatchKey::AutocastXPU;
-    case c10::DeviceType::IPU:
-      return DispatchKey::AutocastIPU;
-    case c10::DeviceType::HPU:
-      return DispatchKey::AutocastHPU;
-    case c10::DeviceType::XLA:
-      return DispatchKey::AutocastXLA;
-    case c10::DeviceType::PrivateUse1:
-      return DispatchKey::AutocastPrivateUse1;
-    default:
-      throw std::runtime_error(
-          "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
-  }
-}
 
 inline at::ScalarType get_lower_precision_fp_from_device_type(
     c10::DeviceType device_type) {
@@ -368,8 +341,7 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     return (*F)(cached_cast(
         get_lower_precision_fp_from_device_type(device_type),
         args,
@@ -392,8 +364,7 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     return (*F)(cached_cast(at::kFloat, args, device_type)...);
   }
 };
@@ -413,8 +384,7 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     if (firstarg_is_eligible(device_type, args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -441,8 +411,7 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     at::ScalarType out_type =
         type_from_firstarg(device_type, at::kFloat, args...);
     return (*F)(args..., out_type);
@@ -464,8 +433,7 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(
-        get_autocast_dispatch_key_from_device_type(device_type));
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
     auto to_type = promote_type(
         get_lower_precision_fp_from_device_type(device_type),
         device_type,
