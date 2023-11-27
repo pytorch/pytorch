@@ -614,15 +614,15 @@ to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
 .. code-block:: python
 
    @torch.compile
-   def numpy_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+   def torch_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
        X, Y = X.numpy(), Y.numpy()
-       Z = np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+       Z = numpy_fn(X, Y)
        return torch.from_numpy(Z)
 
    X = torch.randn(1024, 64, device="cuda")
    Y = torch.randn(1024, 64, device="cuda")
    with torch.device("cuda"):
-       Z = numpy_fn(X, Y)
+       Z = torch_fn(X, Y)
 
 By doing this, we explicitly create the tensors in CUDA memory, and we keep
 them there. In this case ``X.numpy()`` and ``from_numpy()`` are hints to the compiler
@@ -631,6 +631,40 @@ on eager mode now. If you want to run it in eager mode, you would need to call
 ``.numpy(force=True)`` doing ``Z = Z.cuda()`` before returning
 ``Z``. Of course, doing this would execute the program on eager mode NumPy, and
 on CPU.
+
+We provide the decorator ``torch.compiler.wrap_np``  that implements the patteron of wrapping
+a NumPy function into a PyTorch one. Using it, we can simply write
+
+.. code-block:: python
+
+   @torch.compile
+   @torch.compiler.wrap_fn
+   def numpy_fn(X, Y):
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = torch.randn(1024, 64, device="cuda")
+   Y = torch.randn(1024, 64, device="cuda")
+   with torch.device("cuda"):
+       Z = numpy_fn(X, Y)
+
+This pattern of wrapping a NumPy function into a PyTorch function and compiling it, allows you
+to treat a NumPy function as if it writen in PyTorch. For example, you can use it to
+compute gradients along NumPy functions!
+
+.. code-block:: python
+
+   @torch.compile
+   @torch.compiler.wrap_fn
+   def numpy_fn(X, Y):
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = torch.randn(1024, 64, device="cuda", requires_grad=True)
+   Y = torch.randn(1024, 64, device="cuda")
+   with torch.device("cuda"):
+       Z = numpy_fn(X, Y)
+   Z.backward()
+   # X.grad now holds the gradient of the computation
+   print(X.grad)
 
 
 How do I debug NumPy code under ``torch.compile``?

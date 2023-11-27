@@ -118,3 +118,29 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
+def wrap_np(fn):
+    r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
+    from ``torch.Tensor``s to ``torch.Tensor``s.
+
+    It is designed to be used with :func:`torch.compile`. It allows to compile a NumPy function
+    as if it were a PyTorch function. If the function can be traced without graph breaks,
+    this allows you to run NumPy code on CUDA.
+    Similarly, you can pass Tensors with ``requires_grad=True`` and then call ``backward()`` on the output
+    to compute gradients through NumPy functions.
+
+    Example::
+        >>> # Compile a NumPy function as a Tensor -> Tensor function
+        >>> @torch.compile(fullgraph=True)
+        >>> @torch.compiler.wrap_np
+        >>> def fn(a):
+        >>>     return np.sum(a * a)
+        >>> # Execute the NumPy function on CUDA and compute the gradients
+        >>> x = torch.arange(6, dtype=torch.float32, device="cuda", requires_grad=True)
+        >>> out = fn(x)
+        >>> out.backward()
+        >>> print(x.grad)
+        tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
+    """
+    from torch._dynamo.external_utils import wrap_np as wrap
+    return wrap(fn)
