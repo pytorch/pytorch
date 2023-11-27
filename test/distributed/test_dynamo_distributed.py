@@ -312,14 +312,23 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor_static_graph(self):
         self._test_hf_bert_ddp_inductor(static_graph=True)
 
+    def _test_hf_bert_aot_eager(self, static_graph):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model, inputs = get_hf_bert(self.rank)
+            model = DDP(model, static_graph=static_graph)
+            run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model, inputs = get_hf_bert(self.rank)
-            model = DDP(model)
-            run_hf_bert_ddp(self, model, inputs, "aot_eager")
+        self._test_hf_bert_aot_eager(static_graph=False)
+
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @patch.object(config, "optimize_ddp", True)
+    def test_hf_bert_ddp_aot_eager_static_graph(self):
+        self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
