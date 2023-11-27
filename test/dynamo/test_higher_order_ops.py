@@ -2669,7 +2669,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -3256,7 +3256,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)

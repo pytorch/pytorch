@@ -3,7 +3,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch.nn
 
@@ -779,8 +779,21 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
-        if torch._dynamo.config.skip_fsdp_guards:
-            self.source = FSDPNNModuleSource(source)
+        self.source = source
+
+    @staticmethod
+    def _wrap_source(source):
+        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
+            if torch._dynamo.config.skip_fsdp_guards:
+                return FSDPNNModuleSource(source)
+            else:
+                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+                return NotNNModuleSource(source)
         else:
-            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-            self.source = NotNNModuleSource(source)
+            return source
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "source":
+            value = FSDPManagedNNModuleVariable._wrap_source(value)
+
+        return super().__setattr__(name, value)
