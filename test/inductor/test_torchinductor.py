@@ -2514,6 +2514,20 @@ class CommonTemplate:
             rtol=0.001,
         )
 
+    @skipIfRocm
+    def test_convolution4(self):
+        def fn(x, w):
+            x = F.conv2d(x, w, groups=w.shape[0])
+            return x.sum()
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 20]),
+                torch.randn([3, 1, 5, 5]),
+            ),
+        )
+
     def test_conv2d_channels_last(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv2d channels_last")
@@ -7712,6 +7726,24 @@ class CommonTemplate:
         a = torch.randn(2**24, 65, device=self.device)
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
+
+    def test_fuse_large_params(self):
+        def pt2_optimizer_step(optimizer):
+            @torch.compile()
+            def f():
+                optimizer.step()
+
+            f()
+
+        params = [
+            torch.rand(10, 10, dtype=torch.float32, device=self.device)
+            for _ in range(194)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        o = torch.optim.AdamW(params)
+        pt2_optimizer_step(o)
 
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013

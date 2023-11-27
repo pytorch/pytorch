@@ -43,7 +43,7 @@ ignore = [
     "F821",
     "F841",
     # these ignores are from flake8-logging-format; please fix!
-    "G101", "G201", "G202",
+    "G101",
     # these ignores are from RUFF perf; please fix!
     "PERF203", "PERF4",
     # these ignores are from PYI; please fix!
