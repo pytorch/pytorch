@@ -73,15 +73,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Metal:
       return "Metal";
 
-    case DispatchKey::Lazy:
-      return "Lazy";
-    case DispatchKey::MPS:
-      return "MPS";
-    case DispatchKey::HPU:
-      return "HPU";
-    case DispatchKey::MTIA:
-      return "MTIA";
-
     case DispatchKey::Quantized:
       return "Quantized";
     case DispatchKey::CustomRNGKeyId:
@@ -134,21 +125,6 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Tracer:
       return "Tracer";
-
-    case DispatchKey::AutocastCPU:
-      return "AutocastCPU";
-    case DispatchKey::AutocastXPU:
-      return "AutocastXPU";
-    case DispatchKey::AutocastIPU:
-      return "AutocastIPU";
-    case DispatchKey::AutocastHPU:
-      return "AutocastHPU";
-    case DispatchKey::AutocastCUDA:
-      return "AutocastCUDA";
-    case DispatchKey::AutocastXLA:
-      return "AutocastXLA";
-    case DispatchKey::AutocastPrivateUse1:
-      return "AutocastPrivateUse1";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
@@ -290,13 +266,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
-      {"AutocastCPU", c10::DispatchKey::AutocastCPU},
-      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
-      {"AutocastIPU", c10::DispatchKey::AutocastIPU},
-      {"AutocastHPU", c10::DispatchKey::AutocastHPU},
-      {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
-      {"AutocastXLA", c10::DispatchKey::AutocastXLA},
-      {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"BatchedNestedTensor", c10::DispatchKey::BatchedNestedTensor},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -364,6 +333,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
       {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+
+      {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
+      {"AutocastIPU", c10::DispatchKey::AutocastIPU},
+      {"AutocastHPU", c10::DispatchKey::AutocastHPU},
+      {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
+      {"AutocastXLA", c10::DispatchKey::AutocastXLA},
+      {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
 
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",

@@ -2153,10 +2153,9 @@ fake_skips = (
     "narrow",  # Fails only for one overload with DataDependentOutputException (hence skip).
 )
 
-fake_autocast_device_skips = defaultdict(dict)
-
-# TODO: investigate/fix
+fake_autocast_device_skips = defaultdict(set)
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
+fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 
 
 dynamic_output_op_tests = (
@@ -2355,9 +2354,13 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
-        if op.name in fake_autocast_device_skips[device]:
+        if op.name in fake_autocast_device_skips[device.split(":")[0]]:
             self.skipTest("Skip failing test")
-        context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
+        context = (
+            torch.cuda.amp.autocast
+            if device.startswith("cuda")
+            else torch.cpu.amp.autocast
+        )
         self._test_fake_helper(device, dtype, op, context)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):

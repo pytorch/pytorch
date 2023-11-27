@@ -653,15 +653,8 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradNestedTensor,
 });
 
-constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-    DispatchKey::AutocastIPU,
-    DispatchKey::AutocastHPU,
-    DispatchKey::AutocastXLA,
-    DispatchKey::AutocastPrivateUse1,
-});
+constexpr DispatchKeySet autocast_dispatch_keyset =
+    DispatchKeySet(DispatchKey::Autocast);
 
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
@@ -669,15 +662,8 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::ADInplaceOrView,
 });
 
-constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-    DispatchKey::AutocastIPU,
-    DispatchKey::AutocastHPU,
-    DispatchKey::AutocastXLA,
-    DispatchKey::AutocastPrivateUse1,
-});
+constexpr DispatchKeySet default_excluded_set =
+    DispatchKeySet(DispatchKey::Autocast);
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
