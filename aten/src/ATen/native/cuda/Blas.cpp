@@ -189,6 +189,7 @@ static bool getDisableAddmmCudaLt() {
 #endif
 }
 
+#ifdef USE_ROCM
 static bool isSupportedHipLtROCmArch(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
@@ -202,6 +203,7 @@ static bool isSupportedHipLtROCmArch(int index) {
     TORCH_CHECK(false, "Attempting to use HIPBlasLT on a unsupported architecture!");
     return false;
 }
+#endif
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
