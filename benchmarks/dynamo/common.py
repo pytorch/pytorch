@@ -1193,14 +1193,15 @@ class OnnxModel(abc.ABC):
             f.write(proto_tensor.SerializeToString())
 
     def run_and_serialize_inputs_outputs(self, pt_inputs):
-        onnx_inputs = self.adapt_pt_inputs_to_onnx(pt_inputs)
-        onnx_outputs = self.run_with_onnx_inputs(onnx_inputs)
-
         test_data_dir = self.model_dir / "test_data_set_0"
         test_data_dir.mkdir(parents=True, exist_ok=True)
 
+        onnx_inputs = self.adapt_pt_inputs_to_onnx(pt_inputs)
         for i, onnx_input in enumerate(onnx_inputs.values()):
             self.save_tensor_data(onnx_input, str(test_data_dir / f"input_{i}.pb"))
+
+        onnx_outputs = self.run_with_onnx_inputs(onnx_inputs)
+
         for i, onnx_output in enumerate(onnx_outputs):
             self.save_tensor_data(onnx_output, str(test_data_dir / f"output_{i}.pb"))
 
