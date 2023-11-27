@@ -99,6 +99,7 @@ class NestedTensor(torch.Tensor):
         # collapsed ragged dim must always be dynamic
         torch._dynamo.mark_dynamic(self, 0)
         torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+        torch._dynamo.mark_dynamic(self._offsets, 0)
 
     def values(self):
         return DifferentiableValues.apply(self)
