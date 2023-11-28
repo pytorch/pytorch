@@ -453,7 +453,7 @@ def init_device_mesh(
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>>
         >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
         >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))

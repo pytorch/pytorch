@@ -72,6 +72,7 @@ Features described in this documentation are classified by release status:
    torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
+   torch.distributed.device_mesh <distributed.device_mesh>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>

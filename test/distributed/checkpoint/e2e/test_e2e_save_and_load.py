@@ -5,8 +5,8 @@ from enum import auto, Enum
 import torch
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
