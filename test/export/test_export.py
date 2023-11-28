@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa
+import copy
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -1092,13 +1093,13 @@ class TestExport(TestCase):
             torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5 at tracing time"
+            RuntimeError, "is specialized to be 5 at tracing time"
         ):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
         with self.assertRaisesRegex(
-            RuntimeError, "Input arg1_1 is specialized to be 5.0 at tracing time"
+            RuntimeError, "is specialized to be 5.0 at tracing time"
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
@@ -1109,7 +1110,7 @@ class TestExport(TestCase):
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1 is specialized to be trunc at"):
+        with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
@@ -1190,7 +1191,7 @@ class TestExport(TestCase):
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         reexported = torch.export.export(exported, (inp,))
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1\.shape\[0\] is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 5"):
             reexported(torch.ones(7, 5))
 
         reexported = torch.export.export(exported, (inp,), dynamic_shapes=({0: dim0_x},))
@@ -1199,7 +1200,7 @@ class TestExport(TestCase):
         # can't retrace with invalid inputs with respect to the original ExportedProgram
         dim0_x_v2 = torch.export.Dim("dim0_x_v2", min=3)
         exported_v2 = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}})
-        with self.assertRaisesRegex(RuntimeError, "Input arg2_1"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -1472,8 +1473,8 @@ class TestExport(TestCase):
 
         ep = export(f, (torch.tensor([3]),))
         self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
-def forward(self, arg0_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+def forward(self, l_x_):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(l_x_);  l_x_ = None
     ge = _local_scalar_dense >= 0
     scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
     _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
@@ -1492,7 +1493,7 @@ def forward(self, arg0_1):
         self.assertEqual(ep(*test_inp), foo(*test_inp))
 
         ep_v2 = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, None))
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1.shape\[0\] is specialized at 4"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -1540,7 +1541,7 @@ def forward(self, arg0_1):
         test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
         with self.assertRaisesRegex(
             RuntimeError,
-            "Input arg1_1.shape\[0\] is outside of specified dynamic range \[3, inf\]"
+            "shape\[0\] is outside of specified dynamic range \[3, inf\]"
         ):
             ep(*test_inp)
 
@@ -1721,6 +1722,42 @@ def forward(self, arg0_1):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    def test_export_input_mutation_static_shape(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x, y):
+                x.view(3, 2, -1).add_(y)
+                return x
+        inputs = (torch.randn(12), 2.0)
+        model = MutationModel()
+        ep = torch.export.export(model, inputs)
+        inputs_export = copy.deepcopy(inputs)
+        inputs_model = copy.deepcopy(inputs)
+        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(inputs[0] + 2.0, inputs_model[0])
+        self.assertEqual(inputs[0] + 2.0, inputs_export[0])
+
+    def test_export_input_mutation_dynamic_shape(self):
+        class MutationModel(torch.nn.Module):
+            def forward(self, x, y):
+                x[0].mul_(y)
+                return x
+        inputs = ((torch.randn(12), torch.randn(3, 2)), 2.0)
+        model = MutationModel()
+        ep = torch.export.export(
+            model,
+            inputs,
+            dynamic_shapes={'x': ({0: torch.export.Dim("dim")}, None), "y": None}
+        )
+        nodes = list(ep.graph.nodes)
+        self.assertEqual(nodes[0].op, "placeholder")
+        self.assertIsInstance(nodes[0].meta['val'], torch.Tensor)
+        self.assertIsInstance(nodes[0].meta['val'].shape[0], torch.SymInt)
+
+        inputs_export = copy.deepcopy(inputs)
+        inputs_model = copy.deepcopy(inputs)
+        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
+        self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
 if __name__ == '__main__':
     run_tests()
