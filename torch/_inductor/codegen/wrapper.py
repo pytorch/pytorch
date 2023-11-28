@@ -7,7 +7,7 @@ import operator
 import os
 import re
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -21,7 +21,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer
+from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -379,7 +379,7 @@ class WrapperCodeGen(CodeGen):
                 self.write_constant(name, hashed)
 
         self.allocated = set()
-        self.freed = set()
+        self.freed: Set[str] = set()
 
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
@@ -527,8 +527,9 @@ class WrapperCodeGen(CodeGen):
             ending = f".clone(){ending}"
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
-            f"{self.declare}{output_name} = {extern_kernel.kernel}({', '.join(args)}){ending}"
+            f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
         if (
             self.supports_intermediate_hooks
@@ -599,7 +600,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -630,11 +631,12 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
-                self.wrapper_call.writeline("end_graph()")
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
@@ -686,7 +688,9 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
         )
 
-    def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
+    def codegen_inputs(
+        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+    ):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
@@ -742,6 +746,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
                 )
+
+    def finalize_prefix(self):
+        pass
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -867,14 +874,12 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
-        from ..ir import Buffer
-
         original_name = kernel.__name__
 
         # Distinguish between different functions using function id
         cache_key = [id(kernel.fn)]
         for arg in kwargs.values():
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 cache_key.append(arg.get_dtype())
             elif len(configs) > 0:
                 # We need to key on non tensor arg only in autotune mode
@@ -913,9 +918,15 @@ class WrapperCodeGen(CodeGen):
             ):
                 constants[key] = arg
                 continue
-            if isinstance(arg, Buffer):
+            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
-                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                    TensorArg(
+                        key,
+                        arg.codegen_reference(),
+                        arg.get_dtype(),
+                        # For ReinterpretView, we do not want to check alignment
+                        not isinstance(arg, ReinterpretView),
+                    )
                 )
             else:
                 signature.append(SizeArg(key, arg))
@@ -1014,6 +1025,12 @@ class WrapperCodeGen(CodeGen):
         )
         stack.enter_context(self.wrapper_call.indent())
 
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
+
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
 
@@ -1074,9 +1091,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, ComputedBuffer):
-            return s.codegen_reference()
-        elif isinstance(s, InputBuffer):
+        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -1293,6 +1308,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_dtypes = set()
         self.cached_output_id = count()
 
         from .cpp import cexpr, CppPrinter
@@ -1739,6 +1755,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
+    def finalize_prefix(self):
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.aot_inductor.abi_compatible:
+            for dtype in self.used_cached_dtypes:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
+
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
@@ -1962,11 +1986,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        assert (
-            extern_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {extern_kernel.kernel=}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.abi_compatible_kernel, args
+            extern_kernel.codegen_kernel_name(), args
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2019,6 +2040,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            # call the ABI shim function instead of the ATen one
+            kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
         if fn == "aten.scatter_":
             if src_is_tensor:
@@ -2092,6 +2116,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
+
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
@@ -2113,7 +2143,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
+            dtype_str = str(dtype).split('.')[-1]
+            self.used_cached_dtypes.add(dtype_str)
+            return f"cached_torch_dtype_{dtype_str}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
@@ -2568,28 +2600,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
-        if (
-            config.aot_inductor.abi_compatible
-            and not is_legacy_abi
-            and isinstance(type_, torch.OptionalType)
-        ):
-            if val is None:
-                return "0"  # nullptr is not available in C
-            if isinstance(val, (bool, int, str, float)):
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
-                return f"&{var_name}"
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                return f"&{self.val_to_arg_str(val)}"
-
-        return self.val_to_arg_str(val)
-
-    def val_to_arg_str(self, val) -> str:
+    def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            if config.aot_inductor.abi_compatible:
-                return "0"  # nullptr is not available in C
+            # TODO: add abi-compatible support
             return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
@@ -2600,9 +2614,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, ComputedBuffer):
-            return val.codegen_reference()
-        elif isinstance(val, InputBuffer):
+        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
@@ -2614,8 +2626,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            # FIXME handle embedded optional types?
-            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
+            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
             if config.aot_inductor.abi_compatible:
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector

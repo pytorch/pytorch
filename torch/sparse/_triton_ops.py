@@ -909,8 +909,6 @@ if has_triton():
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
-        BLOCKSIZE_ROW: tl.constexpr,
-        BLOCKSIZE_COL: tl.constexpr,
         # values prologue
         values_ptr,
         values_batch_stride,
@@ -944,6 +942,13 @@ if has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        #
+        # gh-113754: Always keep all constexpr arguments at the end of
+        # triton kernel arguments list because with triton 2.1 or
+        # earlier non-contiguous outputs will corrupt CUDA state due
+        # to a triton bug (fixed in openai/triton#2262).
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
         acc_dtype: tl.constexpr,
         allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
@@ -1059,8 +1064,8 @@ if has_triton():
 
         def kernel(grid, *sliced_tensors):
             _bsr_strided_dense_rowspace_kernel[grid](
-                *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
+                *blocksize,
                 acc_dtype=acc_dtype,
                 allow_tf32=allow_tf32,
                 **meta)
