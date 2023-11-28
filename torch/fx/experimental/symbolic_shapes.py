@@ -2276,9 +2276,6 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            # We don't expect to ever reach here even the user specifies
-            # dynamic=False, because automatic_dynamic skipped for
-            # nested tensors.
             return sympy.Integer(val)
 
         elif dynamic_dim is DimDynamic.DUCK:

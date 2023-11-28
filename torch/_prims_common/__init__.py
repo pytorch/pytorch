@@ -1522,22 +1522,6 @@ def reduction_dtypes(
     return computation_dtype, result_dtype
 
 
-def _is_singleton(s):
-    # check for SingletonSymNode
-    if not isinstance(s, torch.SymInt):
-        return False
-    if s.node.singleton_int() is not None:
-        return True
-
-    # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
-    return (
-        s.node.is_symbolic()
-        and s.node.hint is not None
-        and isinstance(s.node.hint, torch.SymInt)
-        and s.node.hint.node.singleton_int() is not None
-    )
-
-
 # This function's logic is borrowed from the following functions defined in C++:
 # batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
