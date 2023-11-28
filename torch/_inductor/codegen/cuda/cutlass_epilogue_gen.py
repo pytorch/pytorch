@@ -429,7 +429,8 @@ class CutlassEVTEpilogueArgumentFormatter:
                 m_stride = f"cute::Int<{m_stride}>{{}}"
             if str(n_stride) in ["1", "0", "1L", "0L"]:
                 n_stride = f"cute::Int<{n_stride}>{{}}"
-
+            # Note: The datatype asks for MNL strides, but this seems to be working only if I pass strides in NML order
+            # TODO: Investigate why this is the case
             return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {n_stride}, {m_stride}, {batch_stride} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
 
     def _op_constant(self, value, dtype):
@@ -509,6 +510,8 @@ def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
 
 
 def cute_stride_mnl_decl(strides):
+    # Note: The datatype asks for MNL strides, but this seems to be working correctly only if I pass strides in NML order
+    # TODO: Investigate why this is the case
     return cute_stride_decl([strides[-1], strides[-2]] + list(strides[:-2][::-1]))
 
 
