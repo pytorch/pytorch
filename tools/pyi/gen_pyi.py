@@ -1267,6 +1267,11 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
         ]
     ]
 

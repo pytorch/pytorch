@@ -29,7 +29,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
@@ -93,19 +93,6 @@ OutputType = Enum(
         # Instead, we'll treat this output "normally", and trace its backward into the graph.
         "custom_function_view",
     )
-)
-
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
 )
 
 def partial_asdict(obj: Any) -> Any:
@@ -1933,7 +1920,7 @@ def create_functionalized_fn(
                         # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
                             inpt_old.copy_(inpt_new)
-                    if meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
                         # Under no_grad = run under no_grad (we still bump the VC though)
                         # (inference_mode will also bump the VC, as long as the tensor in question
                         # was created outside of inference_mode)
@@ -2307,7 +2294,11 @@ def _check_if_mutation_can_be_in_graph(
     requires_grad
 ):
     if keep_input_mutations:
-        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd or mutations_under_no_grad_or_inference_mode)
+        return mutates_data and (
+            (not mutates_metadata and not requires_grad) or
+            mutations_hidden_from_autograd or
+            mutations_under_no_grad_or_inference_mode
+        )
     return False
 
 
@@ -2644,7 +2635,8 @@ def create_synthetic_base_metadata(
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
-        mutations_under_no_grad_or_inference_mode = all(m.input_info[x].mutations_under_no_grad_or_inference_mode for x in outer_indices)
+        mutations_under_no_grad_or_inference_mode = all(
+            m.input_info[x].mutations_under_no_grad_or_inference_mode for x in outer_indices)
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,
