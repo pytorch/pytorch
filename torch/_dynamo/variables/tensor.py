@@ -523,19 +523,18 @@ class TensorVariable(VariableTracker):
                     f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
                 )
             # We don't check that the tensor is on CPU when force is False, as this
-            # allows us to execute NumPy code on CUDA.
-            # We don't check that requires_grad=False as we are currently doing an
-            # unconditional detach.
-            # TODO: We may want to avoid detaching if `requires_grad=True`
-            #       and `force=False` to allow computing gradients.
+            # allows us to execute NumPy code on CUDA. Same for requires_grad=True
             force = "force" in kwargs and kwargs["force"].as_python_constant()
-            proxy = tx.output.create_proxy(
-                "call_method", "detach", *proxy_args_kwargs([self], {})
-            )
             if force:
-                # TODO Add resolve_conj and resolve_neg once we support complex tensors
+                # If the user set force=True we try to preserve the semantics (no gradients, move to CPU...)
+                t = self.call_method(tx, "detach", [], {})
                 proxy = tx.output.create_proxy(
-                    "call_method", "cpu", *proxy_args_kwargs([self], {})
+                    "call_method", "cpu", (t.as_proxy(),), {}
+                )
+            else:
+                # Hacky way to create a view of self that will be marked as NumpyNdarrayVariable
+                proxy = tx.output.create_proxy(
+                    "call_method", "view_as", *proxy_args_kwargs([self, self], {})
                 )
             return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
@@ -605,6 +604,14 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
+        elif name == "set_" and len(args) > 1:
+            # torch.Tensor.set_() has several overloads.
+            # aten::set_.source_Tensor(Tensor) gets special handling
+            # in AOTAutograd and functionalization, because it is the most common
+            # overload and is used by FSDP.
+            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
+            # unless we find that we need to make it work.
+            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
