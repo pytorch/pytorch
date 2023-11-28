@@ -624,3 +624,4 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
 . py:module:: torch.ao.quantization.pt2e.generate_numeric_debug_handle
+
