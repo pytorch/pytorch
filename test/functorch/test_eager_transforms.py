@@ -2647,7 +2647,6 @@ class TestJvp(TestCase):
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
 class TestLinearize(TestCase):
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_basic(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2662,7 +2661,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2677,7 +2675,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_composition(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2696,7 +2693,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2723,7 +2719,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @onlyCUDA
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_errors(self):
         dtype = torch.float
         device = torch.device('cpu')
