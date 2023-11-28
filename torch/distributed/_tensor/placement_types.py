@@ -156,7 +156,7 @@ class Shard(Placement):
         0 on the mesh dimension as source of truth)
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return an empty tensor
@@ -186,7 +186,7 @@ class Shard(Placement):
         reduce and scatter a tensor on a mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
@@ -220,7 +220,7 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
