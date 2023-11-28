@@ -6,6 +6,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
 import inspect
 import contextlib
+import os
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -28,7 +29,7 @@ SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
-GFX90A_Exact = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_properties('cuda').gcn_arch_name == 'gfx90a:sramecc+:xnack-')
+GFX90A_Exact = LazyVal(lambda: torch.cuda.is_available() and os.environ.get('PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE', torch.cuda.get_device_properties('cuda').gcn_arch_name) == 'gfx90a:sramecc+:xnack-')
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: (TEST_CUDA and not TEST_WITH_ROCM and (not IS_WINDOWS) and SM80OrLater) or (TEST_WITH_ROCM and GFX90A_Exact))
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)

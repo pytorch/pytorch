@@ -66,6 +66,20 @@
 
 namespace pytorch_flash {
 
+void check_gpu_arch() {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
+  const char* arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  if (arch) {
+      TORCH_CHECK(mi200 == arch,
+                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName) + " override as " + arch);
+  } else {
+      TORCH_CHECK(mi200 == dprops->gcnArchName,
+                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
+  }
+}
+
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -82,11 +96,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         int window_size_right,
         const bool return_softmax,
         c10::optional<at::Generator> gen_) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-
-  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  TORCH_CHECK(mi200 == dprops->gcnArchName,
-              "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
+  check_gpu_arch();
 
   auto q_dtype = q.dtype();
   TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -322,12 +332,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         int window_size_right,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
-
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-
-  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  TORCH_CHECK(mi200 == dprops->gcnArchName,
-              "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
+  check_gpu_arch();
 
   bool is_dropout = p_dropout > 0.0;
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
