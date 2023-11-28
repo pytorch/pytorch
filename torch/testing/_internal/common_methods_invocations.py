@@ -14265,6 +14265,8 @@ op_db: List[OpInfo] = [
             # TODO: These two do not work even on MI200, skip for now.
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cuda', active_if=TEST_WITH_ROCM),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', active_if=TEST_WITH_ROCM),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
                          device_type='cuda', active_if=TEST_WITH_ROCM),
             # Skip on ROCM if FlashAttention is not supported on the GPU
