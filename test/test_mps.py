@@ -1053,6 +1053,16 @@ class TestMemoryLeak(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, r"MPS driver API confirmed .+"):
             leak_gpu0()
 
+    def test_copy_cast_no_leak(self):
+        a = torch.randn(128, 128, device='mps', dtype=torch.float16)
+        torch.mps.empty_cache()
+        driver_before = torch.mps.driver_allocated_memory()
+        a = a.to(device='cpu', dtype=torch.float32)
+        a = a.to(device='mps', dtype=torch.float16)
+        torch.mps.empty_cache()
+        driver_after = torch.mps.driver_allocated_memory()
+        self.assertTrue(driver_before == driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+
 
 class TestPixelShuffle(TestCaseMPS):
     def test_pixel_shuffle_unshuffle(self):
