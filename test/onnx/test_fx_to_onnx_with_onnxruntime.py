@@ -458,9 +458,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "RuntimeError:"
-        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
-        " If you need this functionality, please file a github issue."
+        "torch._export.verifier.SpecViolationError: User input output view_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'view_1': 'l_x_'}"
+        "User input nodes available: ('arg0_1',)"
         " Github issue: https://github.com/pytorch/pytorch/issues/112429"
     )
     def test_mutation(self):
@@ -491,10 +491,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "RuntimeError:"
-        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
-        " If you need this functionality, please file a github issue."
-        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
@@ -516,9 +515,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "RuntimeError:"
-        "Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
-        "If you need this functionality, please file a github issue."
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
