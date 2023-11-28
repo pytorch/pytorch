@@ -3223,13 +3223,12 @@ class GraphModule(torch.nn.Module):
 
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
-        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(len(counters["graph_break"]), 1)
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
             {
                 ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
-                "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
         self.assertEqual(actual, expected)
@@ -3334,8 +3333,8 @@ class GraphModule(torch.nn.Module):
         # Third invocation of `opt` makes `in_dims` as SymInt.
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
-        self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 9)
+        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
