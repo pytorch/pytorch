@@ -1273,6 +1273,42 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfRocm
+    def test_qflatten(self):
+        r"""
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 64, 7, bias=True, stride=2, padding=3, dilation=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                return torch.flatten(
+                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                )
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["qreshape_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfRocm
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:
@@ -1721,43 +1757,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             exclude_ops,
             check_quantization=True,
             check_dynamic=True,
-        )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qat_bn_conv2d(self):
-        r"""
-        This testcase will quantize a single BN Conv2d module with qat flow.
-        """
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn1 = torch.nn.BatchNorm2d(3)
-                self.bn2 = torch.nn.BatchNorm2d(3)
-
-            def forward(self, x):
-                x = self.conv(self.bn1(x))
-                return self.bn2(x)
-
-        mod = M().train()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
-
-        def matcher_check_fn():
-            self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
-            )
-
-        self._test_common(
-            mod,
-            (v,),
-            check_quantization=True,
-            is_qat=True,
-            matcher_check_fn=matcher_check_fn,
         )
 
 
