@@ -43,7 +43,7 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
 
-// Environment Variable to control whether dumping debug infon on watchdog
+// Environment Variable to control whether dumping debug info on watchdog
 // timeout is enabled. This variable must be set together with
 // TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
