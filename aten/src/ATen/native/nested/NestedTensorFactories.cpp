@@ -214,8 +214,8 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
   auto storage_offsets = nt_impl->get_storage_offsets();
   auto storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
 
-  auto start_int = start.expect_int();
-  auto length_int = length.expect_int();
+  auto start_int = start.guard_int(__FILE__, __LINE__);
+  auto length_int = length.guard_int(__FILE__, __LINE__);
   auto buffer_offset = storage_offsets_ptr[start_int];
 
   nested_sizes = nested_sizes.narrow(0, start_int, length_int);
