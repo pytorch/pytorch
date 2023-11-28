@@ -76,10 +76,10 @@ class Checkpointer:
         saver.save(
             state_dict,
             storage_writer,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
+            process_group=process_group,
+            coordinator_rank=coordinator_rank,
+            no_dist=no_dist,
+            planner=planner,
         )
 
     def load(
@@ -103,9 +103,9 @@ class Checkpointer:
 
         loader.load(
             state_dict,
-            storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
+            storage_reader=storage_reader,
+            process_group=process_group,
+            coordinator_rank=coordinator_rank,
+            no_dist=no_dist,
+            planner=planner,
         )
