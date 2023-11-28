@@ -381,7 +381,11 @@ class CutlassEVTEpilogueArgumentFormatter:
         gemm_output_layout: Layout = None,
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
-            template_output_node_name, pre_fused_evt_args, c_operand_alias, dry_run
+            template_output_node_name,
+            pre_fused_evt_args,
+            c_operand_alias,
+            dry_run,
+            gemm_output_layout,
         )
         result = pre_fused_evt_args
         if (pre_fused_evt_args is None) and (
@@ -471,19 +475,30 @@ class CutlassEVTEpilogueArgumentFormatter:
             ]
             # cpp_dtype = kernel.dtype(aux_input_node)
             data_ptr = kernel.ptr(aux_input_node)
-            m_stride = kernel.stride(aux_input_node, -2)
-            n_stride = kernel.stride(aux_input_node, -1)
-            if len(aux_input_node.get_stride()) > 2:
-                batch_stride = kernel.stride(aux_input_node, 0)
-            else:
-                batch_stride = "cute::Int<0L>{}"
-            if str(m_stride) in ["1", "0", "1L", "0L"]:
-                m_stride = f"cute::Int<{m_stride}>{{}}"
-            if str(n_stride) in ["1", "0", "1L", "0L"]:
-                n_stride = f"cute::Int<{n_stride}>{{}}"
-            # Note: The datatype asks for MNL strides, but this seems to be working only if I pass strides in NML order
-            # TODO: Investigate why this is the case
-            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {n_stride}, {m_stride}, {batch_stride} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
+
+            strides: List[int] = map_pointwise_index_to_read_strides(
+                index_expr, self.gemm_output_layout
+            )
+            assert len(strides) == 3
+            load_stride_max_idx = sum(
+                [
+                    stride * (dim - 1)
+                    for stride, dim in zip(strides, self.gemm_output_layout.size)
+                ]
+            )
+            # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
+            assert (
+                load_stride_max_idx < aux_input_node.get_numel()
+            ), f"Aux input would read beyond bounds (A): Load stride {strides} for node {aux_input_node.get_name()} with layout {aux_input_node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {self.gemm_output_layout}."
+            stride_strings = [
+                f"{stride}L" if stride not in [0, 1] else f"cute::Int<{stride}L>{{}}"
+                for stride in strides
+            ]
+            # Note: The datatype asks for strides in MNL, but this seems to be working correctly only if I pass strides in NML order
+            # TODO: Investigate
+            stride_strings = [stride_strings[-1], stride_strings[-2], stride_strings[0]]
+            stride_args = ", ".join(stride_strings)
+            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {stride_args} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
@@ -587,7 +602,7 @@ def create_cutlass_aux_load_descriptor(
     # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
     assert (
         load_stride_max_idx < node.get_numel()
-    ), f"Aux input would read beyond bounds: Load stride {strides} for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {gemm_output_layout}."
+    ), f"Aux input would read beyond bounds (B): Load stride {strides} for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {gemm_output_layout}."
     if len(strides) < 2:
         raise CUTLASSEVTOpNotImplementedError(
             f"Unsupported number of strides: {len(strides)} for aux input for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr}. Accumulator index expr={accumulator_index_expr}"

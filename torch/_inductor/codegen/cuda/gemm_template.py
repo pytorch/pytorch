@@ -930,7 +930,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             cast(str, template_output_node_name),
             epilogue_nodes,
             Bias=Bias,
-            gemm_output_layout = template_buffer_node.get_layout() if template_buffer_node is not None else None
+            gemm_output_layout = self.output_node.get_layout()
         )
 
         options = dict(
