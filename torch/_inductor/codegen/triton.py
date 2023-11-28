@@ -1268,7 +1268,7 @@ class TritonKernel(Kernel):
         return mask
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
@@ -2858,6 +2858,9 @@ class TritonScheduling(BaseScheduling):
 
     def flush(self):
         pass
+
+    def ready_to_flush(self) -> bool:
+        return False
 
     def benchmark_fused_nodes(self, nodes):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
