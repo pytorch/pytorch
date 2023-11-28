@@ -693,6 +693,8 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
+  public:
+  bool hack_use_compiled_apply = false;
 };
 
 } // namespace torch::dynamo::autograd

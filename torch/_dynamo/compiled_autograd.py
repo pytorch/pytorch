@@ -62,8 +62,7 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-        # is this needed? error at runtime: forward() missing 1 required positional argument: 'ctx'
-        # self.ctx_proxy = self.fx_tracer.create_proxy("placeholder", "test", (), {})
+        self.ctx_proxy = self.fx_tracer.create_proxy("placeholder", "ctx", (), {})
 
         # tensor inputs to fake tensors
         inputs = [
@@ -110,12 +109,14 @@ class AutogradCompilerInstance:
 
     def proxy_call_backward(self, apply_fn, inputs):
         print("hello from proxy_call_backward")
-        # assert self.ctx_proxy is not None
+        assert self.ctx_proxy is not None
+        ctx = self.ctx_proxy[0]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=apply_fn,
             args=(
-                inputs
+                ctx,
+                *[self.to_proxy(x) for x in inputs],
             ),
             kwargs={},
         )
@@ -123,9 +124,6 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             inputs = [maybe_clone(x) for x in inputs]
             self.bind_tensors_to_proxies(inputs, proxies)
-
-        import pdb
-        pdb.set_trace()
 
         if len(inputs) > 1:
             return inputs
@@ -181,8 +179,6 @@ class AutogradCompilerInstance:
         return outputs
 
     def post_acc_grad_hook(self, input, hook_id):
-        import pdb
-        pdb.set_trace()
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]

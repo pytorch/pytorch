@@ -311,9 +311,6 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
 
             self.__class__.__getattribute__ = compiled_autograd_getattribute
 
-        import pdb
-        pdb.set_trace()
-
         return user_fn(self, *args)
 
     def apply_jvp(self, *args):

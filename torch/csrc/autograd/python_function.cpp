@@ -379,8 +379,12 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
   std::cout << "start PyNode::apply" << std::endl;
-  auto result = compiled_apply(variable_list(inputs), saved);
-  // auto result = apply(variable_list(inputs));
+  variable_list result;
+  if (saved.hack_use_compiled_apply) {
+    result = compiled_apply(variable_list(inputs), saved);
+  } else {
+    result = apply(variable_list(inputs));
+  }
   std::cout << "done PyNode::apply" << std::endl;
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);

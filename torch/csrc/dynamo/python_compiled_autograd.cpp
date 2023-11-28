@@ -427,11 +427,11 @@ variable_list compiled_autograd(
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       std::cout << "calling apply_with_saved on name=" << call.node->name() << std::endl;
       variable_list outputs;
-      // if (call.node->name() == "MyFnBackward") {
-      //   std::cout << "lift custom autograd function's backward" << std::endl;
-      // } else {
+      if (call.node->name() == "MyFnBackward") {
+        std::cout << "lift custom autograd function's backward" << std::endl;
+        saved.hack_use_compiled_apply = true;
+      }
       outputs = call.node->apply_with_saved(inputs, saved);
-      // }
       std::cout << "done apply_with_saved" << std::endl;
 
       saved.debug_asserts();
