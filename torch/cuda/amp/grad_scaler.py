@@ -10,6 +10,23 @@ import torch
 from .common import amp_definitely_not_available
 
 
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
 __all__ = ["OptState", "GradScaler"]
 
 
@@ -289,9 +306,20 @@ class GradScaler:
         per_device_and_dtype_grads: Dict[
             torch.device, Dict[torch.dtype, List[torch.Tensor]]
         ] = defaultdict(lambda: defaultdict(list))
+
+        # TODO: whether import affects perf
+        # place import there because grad_scaler is init at import torch
+        # otherwise error in import torch
+        from torch.distributed._tensor import DTensor
+
         with torch.no_grad():
             for group in optimizer.param_groups:
+
                 for param in group["params"]:
+
+                    # if isinstance(param, DTensor) and torch.distributed.get_rank() == 0:
+                    #     ForkedPdb().set_trace()
+                    # torch.distributed.barrier()
                     assert isinstance(param, torch.Tensor)
                     if param.grad is None:
                         continue
@@ -304,9 +332,15 @@ class GradScaler:
                         # so we should check the coalesced _values().
                         if param.grad.dtype is torch.float16:
                             param.grad = self._sparse_coalesce(param.grad)
-                        to_unscale = param.grad._values()  # type: ignore[union-attr]
+                        if isinstance(param, DTensor):
+                            to_unscale = param.grad._local_tensor._values()  # type: ignore[union-attr]
+                        else:
+                            to_unscale = param.grad._values()  # type: ignore[union-attr]
                     else:
-                        to_unscale = param.grad
+                        if isinstance(param, DTensor):
+                            to_unscale = param.grad._local_tensor
+                        else:
+                            to_unscale = param.grad
 
                     per_device_and_dtype_grads[to_unscale.device][
                         to_unscale.dtype
