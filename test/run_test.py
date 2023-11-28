@@ -298,6 +298,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "dynamo/test_activation_checkpointing",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -819,7 +820,7 @@ def run_doctests(test_module, test_directory, options):
 
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    exclude_module_list = []
+    exclude_module_list = ["torch._vendor.*"]
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests

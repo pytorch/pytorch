@@ -107,6 +107,8 @@ def is_magic_method(op):
 
 
 class GraphLowering(torch.fx.Interpreter):
+    graph_outputs: List[ir.IRNode]
+
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
         Support dynamic shapes and dynamic strides by assigning variables
@@ -196,11 +198,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
         self.cuda = False
-        self.buffers: List[ir.ComputedBuffer] = []
+        self.buffers: List[ir.Buffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
@@ -208,25 +209,25 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
-        self.wrapper_code: Optional[WrapperCodeGen] = None
+        self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
         self.extern_node_serializer: Optional[
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = extern_node_serializer
-        self.current_node: Optional[torch.fx.Node] = None
+        self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
         self.aot_mode = aot_mode
         self.graph_id = graph_id
-        self.scheduler = None
+        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
@@ -447,7 +448,7 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def register_buffer(self, buffer: ir.ComputedBuffer):
+    def register_buffer(self, buffer: ir.Buffer):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -533,7 +534,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
 
-    def constant_name(self, name: str, device_override: torch.device):
+    def constant_name(self, name: str, device_override: Optional[torch.device]):
         """
         We AOT copy constants to the devices they are needed on.
         If device_override doesn't match the constant's device, then
@@ -970,10 +971,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
-        assert self.scheduler is not None  # mypy can't figure this out
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
-        assert self.wrapper_code is not None
         return self.wrapper_code.generate(self.is_inference)
 
     def count_bytes(self):
@@ -1049,7 +1048,6 @@ class GraphLowering(torch.fx.Interpreter):
             return self.compile_to_module().call
 
     def get_output_names(self):
-        assert self.graph_outputs is not None
         return [
             node.get_name()
             for node in self.graph_outputs
