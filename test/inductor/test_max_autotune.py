@@ -6,7 +6,7 @@ from typing import Callable, List, Optional
 
 import torch
 from torch import multiprocessing as mp
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -680,7 +680,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         # failure by virtue of not receiving the expected result back.
         visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
         if not self.multi_device:
-            assert visible_devices == self.parent_valid_devices
+            assert visible_devices == self.parent_visible_devices
         else:
             valid_devices = self.parent_visible_devices.split(",")
             assert visible_devices in valid_devices
@@ -716,7 +716,7 @@ class TestTuningProcess(TestCase):
             # Then send another request and make sure the sub-process
             # has restarted and is operational. 'valid_devices' expected
             # to be None because autotune_multi_device is off.
-            choice.bmreq.parent_valid_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+            choice.bmreq.parent_visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
 
             timings = tuning_pool.benchmark([choice])
             self.assertTrue(choice in timings)
@@ -755,6 +755,8 @@ class TestTuningProcess(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._inductor.utils import is_big_gpu
 
-    run_inductor_tests(triton=True, big_gpu=True)
+    # Set env to make it work in CI.
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+        run_tests()

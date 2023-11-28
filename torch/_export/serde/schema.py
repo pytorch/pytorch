@@ -1,7 +1,7 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields, field
+from dataclasses import dataclass, fields
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
@@ -199,7 +199,6 @@ class Graph:
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
     is_single_tensor_return: bool = False
-    constants: Dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -220,10 +219,17 @@ class InputToBufferSpec:
 
 
 @dataclass
+class InputToTensorConstantSpec:
+    arg: TensorArgument
+    tensor_constant_name: str
+
+
+@dataclass
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
+    tensor_constant: InputToTensorConstantSpec
 
 
 @dataclass

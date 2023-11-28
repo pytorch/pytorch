@@ -466,7 +466,7 @@ def try_ann_to_type(ann, loc, rcb=None):
         return FloatType.get()
     if ann is complex:
         return ComplexType.get()
-    if ann is int:
+    if ann is int or ann is torch.SymInt:
         return IntType.get()
     if ann is str:
         return StringType.get()
