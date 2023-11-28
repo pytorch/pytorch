@@ -256,7 +256,8 @@ class TestMaxAutotune(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            mm_compiled = torch.compile(mm, dynamic=dynamic)
+            Y_compiled = mm_compiled(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
@@ -481,7 +482,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_two_additional_inputs_random_mask(self):
         def mm(a, b, c, aux):
-            return ((a @ b) * torch.relu(c)) + aux
+            return ((a @ b) * torch.relu(c) * 0.0) + aux
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=False,

@@ -430,7 +430,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             if str(n_stride) in ["1", "0", "1L", "0L"]:
                 n_stride = f"cute::Int<{n_stride}>{{}}"
 
-            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {m_stride}, {n_stride}, {batch_stride} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
+            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {n_stride}, {m_stride}, {batch_stride} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
@@ -501,7 +501,7 @@ class CutlassEVTEpilogueArgumentFormatter:
 def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
     stride_args = []
     for stride in strides:
-        if stride in [0, 1]:
+        if str(stride) in ["0", "1", "0L", "1L"]:
             stride_args.append(f"cute::Int<{stride}>")
         else:
             stride_args.append(stride_dtype)
@@ -509,7 +509,7 @@ def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
 
 
 def cute_stride_mnl_decl(strides):
-    return cute_stride_decl([strides[-2], strides[-1]] + list(strides[:-2][::-1]))
+    return cute_stride_decl([strides[-1], strides[-2]] + list(strides[:-2][::-1]))
 
 
 def create_cutlass_aux_load_descriptor(node: IRNode) -> str:
