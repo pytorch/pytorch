@@ -266,6 +266,48 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.clone.default",
         )
 
+    def test_missing_complex_onnx_variant_raises_errors_in_dispatcher(self):
+        registry = torch.onnx.OnnxRegistry()
+
+        # NOTE: simulate unsupported nodes
+        aten_mul_tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="mul", overload="Tensor"
+        )
+
+        # Only keep real aten.mul to test missing complex aten.mul
+        registry._registry[aten_mul_tensor] = [
+            onnx_func
+            for onnx_func in registry._registry[aten_mul_tensor]
+            if not onnx_func.is_complex
+        ]
+
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul.Tensor(input, input)
+
+        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as e:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+
+        try:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            assert_has_diagnostics(
+                e.onnx_program.diagnostic_context,
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                expected_node="aten.mul.Tensor",
+            )
+
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
