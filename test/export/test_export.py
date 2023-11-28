@@ -1637,7 +1637,6 @@ def forward(self, l_x_):
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        def check_device_and_fake_mode():
             exported_program = torch.export.export(model, (x,))
             export_res = exported_program(x)
             exp_res = model(x)
@@ -1645,8 +1644,9 @@ def forward(self, l_x_):
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
+            decomposed_ep = exported_program.run_decompositions()
+            export_res = decomposed_ep(x)
+            self.assertTrue(export_res.size() == exp_res.size())
 
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
