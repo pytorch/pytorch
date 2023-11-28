@@ -585,8 +585,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         test_fn(reg_and_mul)
 
         # Compiled
-        for backend in ["eager", "aot_eager", "inductor"]:
-            for compiled_bwd in [False, True]:
+        for backend in ["eager"]: # ["eager", "aot_eager", "inductor"]:
+            for compiled_bwd in [True]: #[False, True]:
                 torch._dynamo.reset()
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)

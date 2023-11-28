@@ -310,6 +310,7 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
+  std::cout << "CPP COMPILED_AUTOGRAD" << std::endl;
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
@@ -330,6 +331,7 @@ variable_list compiled_autograd(
 
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
+    std::cout << "visiting worklist, name=" << fn->name() << std::endl;
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     calls.emplace_back(&call);
@@ -367,7 +369,9 @@ variable_list compiled_autograd(
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
+  std::cout << "checking for cache hit" << std::endl;
   if (!cache->check_dynamic_sizes(compiler_call)) {
+    std::cout << "cache miss" << std::endl;
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
@@ -421,7 +425,14 @@ variable_list compiled_autograd(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      std::cout << "calling apply_with_saved on name=" << call.node->name() << std::endl;
+      variable_list outputs;
+      // if (call.node->name() == "MyFnBackward") {
+      //   std::cout << "lift custom autograd function's backward" << std::endl;
+      // } else {
+      outputs = call.node->apply_with_saved(inputs, saved);
+      // }
+      std::cout << "done apply_with_saved" << std::endl;
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());

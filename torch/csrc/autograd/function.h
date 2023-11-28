@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <optional>
 
 namespace torch {
 namespace autograd {

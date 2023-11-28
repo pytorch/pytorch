@@ -15,6 +15,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <optional>
 
 namespace torch {
 namespace jit {
@@ -29,6 +30,7 @@ namespace autograd {
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
+  variable_list compiled_apply(variable_list&& inputs, SwapSavedVariables& saved);
   variable_list apply(variable_list&& inputs) override;
 
   void release_variables() override;

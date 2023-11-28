@@ -62,6 +62,8 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
+        # is this needed? error at runtime: forward() missing 1 required positional argument: 'ctx'
+        # self.ctx_proxy = self.fx_tracer.create_proxy("placeholder", "test", (), {})
 
         # tensor inputs to fake tensors
         inputs = [
@@ -90,6 +92,45 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
+
+    """
+    python_compiled_autograd.cpp
+    - traces a Graph
+    - goes over every node
+    - calls apply_with_saved
+    - calls into python method here
+
+    for hooks, we created a subclass to "lift" them
+    - swapping them with proxies before executing the hook
+
+    for backwards, we need to do the same
+    - swap with a proxy before executing the backward_cls apply method
+    - needs to happen for both the input and the gradients
+    """
+
+    def proxy_call_backward(self, apply_fn, inputs):
+        print("hello from proxy_call_backward")
+        # assert self.ctx_proxy is not None
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=apply_fn,
+            args=(
+                inputs
+            ),
+            kwargs={},
+        )
+
+        with disable_proxy_modes_tracing():
+            inputs = [maybe_clone(x) for x in inputs]
+            self.bind_tensors_to_proxies(inputs, proxies)
+
+        import pdb
+        pdb.set_trace()
+
+        if len(inputs) > 1:
+            return inputs
+
+        return inputs[0]
 
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
@@ -140,6 +181,8 @@ class AutogradCompilerInstance:
         return outputs
 
     def post_acc_grad_hook(self, input, hook_id):
+        import pdb
+        pdb.set_trace()
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]

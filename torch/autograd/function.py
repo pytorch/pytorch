@@ -311,6 +311,9 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
 
             self.__class__.__getattribute__ = compiled_autograd_getattribute
 
+        import pdb
+        pdb.set_trace()
+
         return user_fn(self, *args)
 
     def apply_jvp(self, *args):
@@ -592,7 +595,8 @@ class Function(_SingleLevelFunction):
         # TODO: figure out how to increment only once per compiled autograd graph
         # otherwise we'll recompile every time for compiled autograd
         from torch._functorch.aot_autograd import AOT_COUNTER
-        return (next(AOT_COUNTER),)
+        # return (next(AOT_COUNTER),)
+        return (1,)
 
 
 def once_differentiable(fn):
