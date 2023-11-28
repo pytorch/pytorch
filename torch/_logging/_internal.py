@@ -515,10 +515,12 @@ def help_message(verbose=False):
     lines = (
         ["all"]
         + sorted(log_registry.log_alias_to_log_qnames.keys())
-        + sorted([
-            f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
-            for name in printed_artifacts
-        ])
+        + sorted(
+            [
+                f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
+                for name in printed_artifacts
+            ]
+        )
     )
     setting_info = "  " + "\n  ".join(lines)
     examples = """
