@@ -340,7 +340,7 @@ def _broadcast_processed_state(
     if fsdp_state.rank == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
-            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),
+            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
