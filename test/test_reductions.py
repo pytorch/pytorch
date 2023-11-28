@@ -26,18 +26,16 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
-# TODO: replace with make_tensor
+# Generate a tensor in dimensions specified in 'shape'.
+# The tensor is filled with random numbers of type specified in 'dtype'.
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
         x = torch.tensor((), dtype=dtype, device=device)
     else:
         if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+            x = (torch.randn(1, dtype=dtype, device=device) *
+                 make_tensor(shape, dtype=dtype, device=device, low=40.0, high=100.0))
+
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
@@ -52,16 +50,20 @@ def _generate_input(shape, dtype, device, with_extremal):
             x = torch.zeros(shape, dtype=dtype, device=device)
             x[torch.randn(*shape) > 0.5] = True
         else:
-            x = torch.randint(15, 100, shape, dtype=dtype, device=device)
+            x = make_tensor(shape, dtype=dtype, device=device, low=15, high=100)
 
     return x
 
-# TODO: replace with make_tensor
+# Generate a one-dimensional array of length 'dim',
+#   containing integers from min_size (inclusive) and max_size (inclusive)
 def _rand_shape(dim, min_size, max_size):
-    shape = []
-    for i in range(dim):
-        shape.append(random.randint(min_size, max_size))
-    return tuple(shape)
+    # To make the maximum possible value max_size,
+    #   'high' should be max_size + 1 because high is exclusive
+    list_of_tensors = make_tensor(dim, dtype=torch.int32, device="cpu",
+                                  low=min_size, high=max_size + 1)
+    list_of_integers = [int(tensor.item()) for tensor in list_of_tensors]
+
+    return tuple(list_of_integers)
 
 def _reduced_shape(shape, dim=None, keepdim=False):
     """Computes the expected reduced shape given dim and keepdim
