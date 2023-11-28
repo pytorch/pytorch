@@ -1,4 +1,3 @@
-import collections
 import inspect
 import logging
 
@@ -20,7 +19,6 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, polyfill, variables
 from ..allowed_functions import torch_get_name
@@ -50,19 +48,6 @@ from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
 
-# TODO(voz): Maybe rename these later
-tensor_dunder_fns = [
-    torch.Tensor.__rmatmul__,
-    torch.Tensor.__rmod__,
-    torch.Tensor.__rpow__,
-    torch.Tensor.__rsub__,
-    torch.Tensor.__rdiv__,
-    torch._C.TensorBase.__radd__,
-    torch._C.TensorBase.__rmul__,
-    torch._C.TensorBase.__ror__,
-    torch._C.TensorBase.__rxor__,
-    torch._C.TensorBase.__rand__,
-]
 
 torch_special_class_types = (torch._C.Generator,)
 
@@ -102,38 +87,19 @@ if torch.distributed.is_available():
     )
 
 
-# TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
-def remap_as_fn___radd__(*args):
-    return torch._C.TensorBase.__radd__(*args)
-
-
-def remap_as_fn___rmul__(*args):
-    return torch._C.TensorBase.__rmul__(*args)
-
-
-def remap_as_fn___ror__(*args):
-    return torch._C.TensorBase.__ror__(*args)
-
-
-def remap_as_fn___rxor__(*args):
-    return torch._C.TensorBase.__rxor__(*args)
-
-
-def remap_as_fn___rand__(*args):
-    return torch._C.TensorBase.__rand__(*args)
-
-
-tensor_dunder_fns_remap = {
-    torch._C.TensorBase.__radd__: remap_as_fn___radd__,
-    torch._C.TensorBase.__rmul__: remap_as_fn___rmul__,
-    torch._C.TensorBase.__ror__: remap_as_fn___ror__,
-    torch._C.TensorBase.__rxor__: remap_as_fn___rxor__,
-    torch._C.TensorBase.__rand__: remap_as_fn___rand__,
+tracing_state_functions = {
+    torch.jit.is_scripting: False,
+    torch.jit.is_tracing: False,
+    torch._C._get_tracing_state: None,
+    torch.fx._symbolic_trace.is_fx_tracing: False,
+    torch.onnx.is_in_onnx_export: False,
+    torch._dynamo.external_utils.is_compiling: True,
+    torch._utils.is_compiling: True,
 }
 
 
 class BaseTorchVariable(VariableTracker):
-    """Points to a context manager class in torch.* that dynamo has implementations"""
+    """common base for all torch.* functions, classes, modules and other things"""
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -260,12 +226,32 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
 
-        if self.value is torch._functorch.vmap.vmap_impl:
+        if self.can_constant_fold_through() and (constant_args or unspec_python_args):
+            # constant fold
+            return ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        elif self.value in tracing_state_functions:
+            assert not args and not kwargs
+            # See: https://github.com/pytorch/pytorch/issues/110765
+            if self.value in [
+                torch._utils.is_compiling,
+                torch._dynamo.external_utils.is_compiling,
+            ]:
+                tx.mark_inconsistent_side_effects()
+            return ConstantVariable.create(tracing_state_functions[self.value])
+        elif self.value in (
+            torch._functorch.vmap.vmap_impl,
+            torch._functorch.eager_transforms.grad_impl,
+        ):
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        if self.value is torch.overrides.get_default_nowrap_functions:
+        elif self.value is torch.overrides.get_default_nowrap_functions:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
@@ -274,29 +260,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
-            )
-        elif self.value in config.constant_functions:
-            assert not args and not kwargs
-            # See: https://github.com/pytorch/pytorch/issues/110765
-            if self.value in [
-                torch._utils.is_compiling,
-                torch._dynamo.external_utils.is_compiling,
-            ]:
-                tx.mark_inconsistent_side_effects()
-            return ConstantVariable.create(config.constant_functions[self.value])
-        elif self.value is torch._functorch.eager_transforms.grad_impl:
-            op = TorchHigherOrderOperatorVariable.make(
-                self.value,
-                source=self.source,
-            ).call_function(tx, args, kwargs)
-            return op
-        elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            # constant fold
-            return ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
             )
         elif self.value == math.radians and not (constant_args or unspec_python_args):
             # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
@@ -481,11 +444,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             # decompose addcdiv into constituent ops, prevents a graph break due to converting
             # value to a scalar
-            result = TorchVariable(torch.div).call_function(tx, args[1:], {})
-            result = TorchVariable(torch.mul).call_function(
+            result = TorchInGraphFunctionVariable(torch.div).call_function(
+                tx, args[1:], {}
+            )
+            result = TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, [result, kwargs["value"]], {}
             )
-            return TorchVariable(torch.add).call_function(tx, [args[0], result], {})
+            return TorchInGraphFunctionVariable(torch.add).call_function(
+                tx, [args[0], result], {}
+            )
         elif (
             self.value is torch._assert
             and len(args) >= 1
@@ -534,10 +501,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     *proxy_args_kwargs([args[0]], {}),
                 ),
             )
-        elif self.value == torch.nn.init._calculate_correct_fan:
-            return UserFunctionVariable(
-                torch.nn.init._calculate_correct_fan
-            ).call_function(tx, args, {})
         elif (
             self.value is torch.nested.nested_tensor
             and kwargs.get("layout", torch.strided) == torch.strided
@@ -699,13 +662,6 @@ class TorchVariable(BaseTorchVariable):
     """Points to a module, classes or functions in torch.*"""
 
     def __init__(self, value, **kwargs):
-        # TODO: Remove tensor_dunder_fns_remap since it's not used anymore.
-        if (
-            isinstance(value, collections.abc.Hashable)
-            and value in tensor_dunder_fns_remap
-        ):
-            value = tensor_dunder_fns_remap[value]
-
         assert not isinstance(
             value, (torch.dtype, torch.device)
         ), "should use ConstantVariable"
@@ -721,8 +677,6 @@ class TorchVariable(BaseTorchVariable):
         except AssertionError as e:
             assert "Unknown attribute" in str(e), str(e)
             self_should_be_none = None
-
-        # assert "_ntuple.<locals>.parse" not in str(value)
 
         if self_should_be_none is None:
             pass
