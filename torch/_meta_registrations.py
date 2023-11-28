@@ -402,7 +402,6 @@ def meta_sparse_structured_linear(
     bias: Optional[Tensor] = None,
     _activation_opt: Optional[str] = None,
 ):
-
     output_sizes = list(input.shape)
     if bias is not None:
         assert weight.size(0) == bias.size(0), "output size mismatch"
