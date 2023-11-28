@@ -10,8 +10,10 @@ import urllib.parse
 from typing import Any, Callable, Dict, Optional
 from urllib.request import Request, urlopen
 
+
 def parse_json(conn: Any) -> Any:
     return json.load(conn)
+
 
 def fetch_url(
     url: str,
@@ -43,6 +45,7 @@ def fetch_url(
         )
         raise RuntimeError(exception_message) from err
 
+
 def fetch_base_ref(url: str, headers: Dict[str, str]) -> Any:
     response = fetch_url(url, headers=headers, reader=parse_json)
     return response["base"]["ref"]
@@ -71,6 +74,7 @@ def find_base_branch() -> Any:
         return base_ref
 
     return "main"
+
 
 def main() -> None:
     try:
