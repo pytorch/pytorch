@@ -153,6 +153,10 @@ def register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
+    with _NODE_REGISTRY_LOCK:
+        if cls in SUPPORTED_NODES:
+            raise ValueError(f"{cls} is already registered as pytree node.")
+
     _private_register_pytree_node(
         cls,
         flatten_fn,
@@ -245,7 +249,11 @@ def _private_register_pytree_node(
     """
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
-            raise ValueError(f"{cls} is already registered as pytree node.")
+            # TODO: change this warning to an error after OSS/internal stabilize
+            warnings.warn(
+                f"{cls} is already registered as pytree node. "
+                "Overwriting the previous registration.",
+            )
 
         node_def = NodeDef(
             cls,
