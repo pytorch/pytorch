@@ -381,7 +381,34 @@ class DeviceMesh:
         return tuple(self.mesh.shape)
 
     def get_rank(self) -> int:
+        """
+        Returns the current global rank.
+        """
         return get_rank()
+
+    def get_local_rank(
+        self, mesh_dim: Optional[Union[int, str]] = None
+    ) -> int:
+        """
+        Returns the local rank of the given mesh_dim.
+
+        Optional Args:
+            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+            of the mesh dimension. Default is None.
+
+        Returns:
+            An integer denotes the local rank.
+        """
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found mesh_dim = {self.mesh.ndim}",
+                "Optional kwarg `mesh_dim` needs to be specified when mesh_dim > 1."
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        mesh_dim_group = self.get_group(mesh_dim)
+        return get_rank(mesh_dim_group)
 
     def get_coordinate(self) -> Optional[List[int]]:
         """
