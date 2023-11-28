@@ -122,6 +122,18 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // tensor by replaying the views off of the alias.
   void mutate_view_meta(at::functionalization::ViewMeta meta);
 
+  // Custom implementation of self.set_(src)
+  void set__impl(const FunctionalTensorWrapper* other);
+
+  // Returns whether the current tensor's data was ever mutated
+  bool has_data_mutation();
+  //
+  // Returns whether the current FunctionalTensorWrapper
+  // experienced a set_() call.
+  bool was_storage_changed() {
+    return was_storage_changed_;
+  }
+
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding
   // out-of-place op, followed by a call to replace_(). e.g:
@@ -195,6 +207,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   uint64_t mutation_hidden_from_autograd_counter_ = 0;
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
+  // Did the tensor experience a set_() call.
+  bool was_storage_changed_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
