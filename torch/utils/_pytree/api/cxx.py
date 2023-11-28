@@ -79,7 +79,7 @@ __all__ = [
 
 
 TreeSpec = PyTreeSpec
-OpTreeUnflattenFunc = Callable[[Context, Iterable], PyTree]
+OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
