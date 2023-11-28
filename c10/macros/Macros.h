@@ -393,18 +393,14 @@ __host__ __device__
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
-#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS)
-// ROCm supports __assert_fail only as a device side function.
-__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
-    const char* assertion,
-    const char* file,
-    unsigned int line,
-    const char* function);
-#endif // defined(__HIP_ARCH__) || defined(__HIP__)
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
+
+#if defined(TORCH_DISABLE_GPU_ASSERTS)
+#define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
@@ -415,6 +411,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif //  TORCH_DISABLE_GPU_ASSERTS
 #endif // __APPLE__
 
 #ifdef __APPLE__
