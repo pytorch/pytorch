@@ -797,15 +797,9 @@ _flash_attention_forward(
       cumulative_sequence_length_q.has_value() ==
           cumulative_sequence_length_k.has_value(),
       "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
-  TORCH_CHECK(
-      max_seqlen_batch_q.has_value() == max_seqlen_batch_k.has_value(),
-      "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
   Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
       philox_seed, philox_offset, debug_attn_mask;
   if (cumulative_sequence_length_q.has_value()) {
-    TORCH_CHECK(
-        max_seqlen_batch_q.has_value(),
-        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
     std::tie(
         output,
         q_padded,
