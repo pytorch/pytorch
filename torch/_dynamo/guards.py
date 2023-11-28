@@ -1139,7 +1139,7 @@ class CheckFunctionManager:
                     log_only=True,
                 )
 
-                # TODO: Figure out if this is the right place for this??
+                # TODO: Do this somewhere better / figure out how to do this from C++.
                 # guard ctx for python subclasses
                 if is_traceable_wrapper_subclass(t):
                     ctx = t.__tensor_flatten__()[1]

@@ -1566,11 +1566,11 @@ class TrackedFake:
 # Performs automatic dynamic dim determination.
 # Returns a CreateSymbolicPolicy
 def _automatic_dynamic(
-    e, tx, name, static_shapes, recurse=True
+    e, tx, name, static_shapes, outer_only=False
 ) -> CreateSymbolicPolicy:
-    is_subclass = is_traceable_wrapper_subclass(e)
-    if recurse and is_subclass:
-        outer_policy = _automatic_dynamic(e, tx, name, static_shapes, recurse=False)
+    if is_traceable_wrapper_subclass(e) and not outer_only:
+        # Get policy for outer tensor
+        outer_policy = _automatic_dynamic(e, tx, name, static_shapes, outer_only=True)
 
         # Get policies for inner tensors
         attrs, _ = type(e).__tensor_flatten__(e)

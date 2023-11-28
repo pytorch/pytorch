@@ -186,8 +186,6 @@ class MetaConverter:
         source: Optional[Source] = None,
         policy: Optional["CreateSymbolicPolicy"] = None,
     ):
-        from torch._subclasses.fake_tensor import FakeTensor
-
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -238,22 +236,8 @@ class MetaConverter:
             t, src, policy=policy
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                # Returns the ShapeEnv from the FakeMode associated with this tensor, or None.
-                def get_fake_mode_shape_env(t):
-                    if isinstance(t, FakeTensor):
-                        return t.fake_mode.shape_env
-
-                    # subclass case: try to pull fake mode from inner tensors
-                    if is_traceable_wrapper_subclass(t):
-                        attrs, _ = t.__tensor_flatten__()
-                        for attr in attrs:
-                            inner = getattr(t, attr)
-                            if isinstance(inner, FakeTensor):
-                                return inner.fake_mode.shape_env
-
-                    return None
-
-                if get_fake_mode_shape_env(t) is shape_env:
+                fake_mode = torch._subclasses.fake_tensor.maybe_get_fake_mode(t)
+                if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size(), t.stride(), t.storage_offset())
