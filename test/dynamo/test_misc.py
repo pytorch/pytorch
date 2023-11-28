@@ -1356,6 +1356,25 @@ utils_device.CURRENT_DEVICE == None""".split(
             self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 18)
         )
 
+    def test_list_iadd_side_effect(self):
+        def fn(a, b):
+            a += [b]
+            torch._dynamo.graph_break()
+            return a
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+
+        exp = fn(a, b)
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+        act = opt_fn(a, b)
+
+        self.assertEqual(exp, act)
+
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
