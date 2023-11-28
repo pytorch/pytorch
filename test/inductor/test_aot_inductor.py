@@ -1366,7 +1366,7 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa": fail_with_and_without_stack_allocation(),
-    "test_sdpa2": fail_with_and_without_stack_allocation(),
+    "test_sdpa_2": fail_with_and_without_stack_allocation(),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(is_skip=True),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
