@@ -90,6 +90,7 @@ from ._optim_utils import (
     _get_param_to_param_key,
     _optim_state_dict,
     _rekey_sharded_optim_state_dict,
+    _set_optim_use_dtensor,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
 from ._unshard_param_utils import (
@@ -763,6 +764,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     state_dict_config=submodule._state_dict_config,
                     optim_state_dict_config=submodule._optim_state_dict_config,
                 )
+                _set_optim_use_dtensor(submodule, state_dict_settings)
             else:
                 submodule_settings = StateDictSettings(
                     submodule._state_dict_type,
@@ -773,15 +775,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
-
-            # If device_mesh is passed in when initalizing FSDP, we automatically turn the
-            # _use_dtensor flag to be true for ShardedOptimStateDictConfig().
-            if (
-                getattr(module, "device_mesh", None)
-                and state_dict_settings.state_dict_type
-                == StateDictType.SHARDED_STATE_DICT
-            ):
-                state_dict_settings.optim_state_dict_config._use_dtensor = True
+                _set_optim_use_dtensor(submodule, submodule_settings)
         return state_dict_settings
 
     @staticmethod

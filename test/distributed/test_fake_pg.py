@@ -20,7 +20,6 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
     parallelize_module,
 )
-from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
 )
@@ -179,7 +178,7 @@ class TestFakePG(TestCase):
         dist.recv(output, 1)
         self.assertEqual(tuple(output.shape), (3, 3))
 
-    @unittest.skipIf(not HAS_CUDA or not enable_2d_with_fsdp(), "No CUDA or TP+FSDP")
+    @unittest.skipIf(not HAS_CUDA, "No CUDA or TP+FSDP")
     def test_fsdp_tp_fake_e2e(self):
         world_size = 4
         tp_size = 2
