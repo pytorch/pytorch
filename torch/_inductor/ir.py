@@ -2088,12 +2088,11 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        if free_unbacked_symbols(start) or free_unbacked_symbols(end):
-            end = sympy.Min(end, new_size[dim])
-            start = sympy.Min(start, end)
-        else:
-            end = sizevars.evaluate_min(end, new_size[dim])
-            start = sizevars.evaluate_min(start, end)
+        end = sizevars.evaluate_min(end, new_size[dim])
+        start = sizevars.evaluate_min(start, end)
+        if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
+            sizevars.guard_equals(end, new_size[dim])
+            return x
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -2522,7 +2521,7 @@ class MutationLayout(Layout):
         return self.get_buffer().layout
 
     @classmethod
-    def realize_into(cls, src, dst):
+    def realize_into(cls, src, dst, unsafe_alias=False):
         dst.realize()
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
@@ -2536,20 +2535,22 @@ class MutationLayout(Layout):
         # be fused into a single kernel by the scheduler.
         # NOTE: We cannot change src's layout to mutate dst directly as this
         # would alias src to dst, which is not correct as further mutations to
-        # dst would effect users of src.
+        # dst would effect users of src. However if there are no more users of
+        # dst, we can alias src to dst.
         src.realize_hint()
 
-        src = Pointwise.create(
-            device=src.get_device(),
-            dtype=src.get_dtype(),
-            inner_fn=src.make_loader(),
-            ranges=[
-                V.graph.sizevars.guard_equals(a, b)
-                for a, b in zip(src.get_size(), dst.get_size())
-            ],
-        ).data
-        src.realize()
+        if not unsafe_alias:
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=src.get_dtype(),
+                inner_fn=src.make_loader(),
+                ranges=[
+                    V.graph.sizevars.guard_equals(a, b)
+                    for a, b in zip(src.get_size(), dst.get_size())
+                ],
+            ).data
 
+        src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
         return src.data
