@@ -151,6 +151,18 @@ inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
   }
 }
 
+inline ivec4 make_ivec4_prepadded1(IntArrayRef ints) {
+  TORCH_CHECK(ints.size() <= 4);
+
+  ivec4 result = {1, 1, 1, 1};
+  size_t base = 4 - ints.size();
+  for (size_t i = 0; i < ints.size(); ++i) {
+    result.data[i + base] = safe_downcast<int32_t>(ints[i]);
+  }
+
+  return result;
+}
+
 inline ivec3 make_ivec3(uvec3 ints) {
   return {
       safe_downcast<int32_t>(ints.data[0u]),

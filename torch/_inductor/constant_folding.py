@@ -178,7 +178,8 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     erased_params = []
     for node in gm.graph.nodes:
         if node.op == "get_attr" and len(node.users) == 0:
-            delattr(gm, node.target)
+            if hasattr(gm, node.target):
+                delattr(gm, node.target)
             erased_params.append(node)
 
     for node in erased_params:
