@@ -1066,7 +1066,7 @@ def merge_view_inputs(
         # (1) The new args according to the updated calling convention: (synthetic_bases, other_args)
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
-        args_to_funization = base_args + other_args
+        args_to_functionalization = base_args + other_args
         arg_to_old_idx_map = {arg: i for (i, arg) in enumerate(fwd_inputs)}
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
