@@ -212,11 +212,11 @@ class BaseSchedulerNode:
 
     def prune_redundant_deps(self, name_to_fused_node):
         """
-        Prunes stardeps intended for mutation ordering
+        Prunes weakdeps intended for mutation ordering
         on an upstream fused node if after fusion there is another dependency
-        on the fused upstream node, making the stardep redundant
+        on the fused upstream node, making the weakdep redundant
 
-        In essence this enforces an ordering on fusions. As fusions occur, prunable stardeps will
+        In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
         be incrementally removed, enabling other fusions, ensuring they are fused in order.
         """
         name_to_dep_count: Counter[str] = collections.Counter()
@@ -239,8 +239,10 @@ class BaseSchedulerNode:
                 return False
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
-        self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
-        self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
+
+        if deps_to_prune:
+            self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
+            self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -1081,6 +1083,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def get_first_name(self):
         return self.snodes[0].get_first_name()
+
+    def prune_redundant_deps(self, name_to_fused_node):
+        for node in self.snodes:
+            node.prune_redundant_deps(name_to_fused_node)
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -2194,6 +2200,11 @@ class Scheduler:
 
             self.available_buffer_names.update(node.get_names())
 
+            if not isinstance(node, NopKernelSchedulerNode):
+                device = node.get_device()
+                if self.get_backend(device).ready_to_flush():
+                    self.flush()
+
         self.flush()
 
     def is_unaligned_buffer(self, buf_name):
@@ -2249,6 +2260,13 @@ class BaseScheduling:
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
         raise NotImplementedError()
+
+    def ready_to_flush(self) -> bool:
+        """
+        Check whether the backend is requesting the scheduler to flush the generated kernel.
+        If not supported, please return False.
+        """
+        return False
 
     def flush(self):
         """
