@@ -1628,8 +1628,11 @@ def forward(self, arg0_1):
         args, fn = self._create_test_fns_for_cond(pred, inner_fn, operands, closure, nesting)
         eager_res = fn(*args)
         out = torch.vmap(fn)(*args)
-        print(eager_res.shape, out.shape)
-        # self.assertEqual(eager_res, out)
+        if nClosure == 0:
+            self.assertEqual(eager_res, out)
+        else:
+            self.assertEqual(eager_res, out[0])
+            self.assertEqual(eager_res, out[1])
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 

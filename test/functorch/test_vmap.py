@@ -1171,6 +1171,18 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out, f(None, y))
         self.assertEqual(out_dims, (None, None, None))
 
+    # >>> import torch
+    # >>> from torch._subclasses.fake_tensor import FakeTensorMode
+    # >>> fake_mode = FakeTensorMode()
+    # >>> a = torch.arange(5)
+    # >>> fake_x = fake_mode.from_tensor(a)
+    # >>> fake_x
+    # FakeTensor(..., size=(5,), dtype=torch.int64)
+    # >>> a.data
+    # tensor([0, 1, 2, 3, 4])
+    # >>> fake_x.data
+    # FakeTensor(..., size=(5,), dtype=torch.int64)
+    @skipIf(TEST_WITH_TORCHDYNAMO, "It is not invalid to access .data of a FakeTensor")
     def test_data_attribute(self):
         def foo(x):
             y = x.data

@@ -8,6 +8,7 @@ from torch._C._functorch import (
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
     current_level,
+    is_batchedtensor,
     peek_interpreter_stack,
     TransformType,
 )
@@ -128,7 +129,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn or torch._C._functorch.is_batchedtensor(t):
+        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -308,7 +309,7 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
-                elif torch._C._functorch.is_batchedtensor(t):
+                elif is_batchedtensor(t):
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
                         t, source
                     )
@@ -564,6 +565,9 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
+
+                    # if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                    #     return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
