@@ -65,9 +65,9 @@ R = TypeVar("R")
 Context = Optional[Any]
 PyTree = Any
 TreeSpec = PyTreeSpec
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
-OpTreeUnflattenFunc = Callable[[Context, Iterable], PyTree]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
+OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:

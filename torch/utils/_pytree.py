@@ -77,8 +77,8 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
