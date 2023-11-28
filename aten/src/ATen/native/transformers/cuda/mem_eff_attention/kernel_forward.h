@@ -7,8 +7,8 @@
  */
 #pragma once
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
+#include <c10/util/Exception.h>
 
 #include <curand_kernel.h>
 #include <cmath>
@@ -577,13 +577,19 @@ struct AttentionKernel {
       CHECK_ALIGNED_PTR(p.attn_bias_ptr, kAlignmentQ);
       TORCH_CHECK(
           p.num_batches <= 1 || p.bias_strideB % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned (strideB)");
+          "attn_bias is not correctly aligned (strideB). ",
+          "attn_bias.stride( 0) = ", p.bias_strideB, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
       TORCH_CHECK(
           p.num_heads <= 1 || p.bias_strideH % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned (strideH)");
+          "attn_bias is not correctly aligned (strideH). "
+          "attn_bias.stride(1) = ", p.bias_strideH, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
       TORCH_CHECK(
           p.num_queries <= 1 || p.bias_strideM % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned (strideM)");
+          "attn_bias is not correctly aligned (strideM). "
+          "attn_bias.stride(2) = ", p.bias_strideM, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
     }
     TORCH_CHECK(
         p.q_strideM % kAlignmentQ == 0,

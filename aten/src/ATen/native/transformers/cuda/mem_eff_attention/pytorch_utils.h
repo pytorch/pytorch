@@ -7,8 +7,7 @@
  */
 #pragma once
 
-#include <ATen/core/TensorBody.h>
-#include <c10/util/Exception.h>
+#include <c10/core/ScalarType.h>
 
 #include <cutlass/bfloat16.h>
 #include <cutlass/half.h>

@@ -213,6 +213,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_CUSPARSELT "Use cuSPARSELt" ON
     "USE_CUDA" OFF)
+cmake_dependent_option(
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -325,9 +328,6 @@ cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(
-    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
-    "USE_C10D_NCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(

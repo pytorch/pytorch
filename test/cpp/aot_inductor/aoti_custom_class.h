@@ -6,7 +6,7 @@
 
 namespace torch::inductor {
 
-class AOTIModelRunner;
+class AOTIModelContainerRunner;
 
 } // namespace torch::inductor
 
@@ -39,7 +39,7 @@ class MyAOTIClass : public torch::CustomClassHolder {
 
   const std::string device_;
 
-  std::unique_ptr<torch::inductor::AOTIModelRunner> runner_;
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner_;
 };
 
 } // namespace torch::aot_inductor
