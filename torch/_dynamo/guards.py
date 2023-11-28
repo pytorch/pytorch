@@ -1315,9 +1315,8 @@ def get_guard_fail_reason(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
-        log.error(
+        log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
-            exc_info=True,
         )
 
     return reason_str
