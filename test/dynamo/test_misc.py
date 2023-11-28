@@ -1692,6 +1692,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
         def fn(x):
@@ -1701,6 +1702,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3, requires_grad=True)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_recompilation_scalar(self):
