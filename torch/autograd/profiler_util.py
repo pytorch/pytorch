@@ -774,11 +774,11 @@ class MemRecordsAcc:
 
     def __init__(self, mem_records):
         self._mem_records = mem_records
-        self._start_uses = []
-        self._indices = []
+        self._start_uses: List[int] = []
+        self._indices: List[int] = []
         if len(mem_records) > 0:
             tmp = sorted([(r[0].start_us(), i) for i, r in enumerate(mem_records)])
-            self._start_uses, self._indices = zip(*tmp)
+            self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
         start_idx = bisect.bisect_left(self._start_uses, start_us)
