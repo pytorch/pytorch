@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -14266,6 +14267,8 @@ op_db: List[OpInfo] = [
                          device_type='cuda', active_if=TEST_WITH_ROCM),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
                          device_type='cuda', active_if=TEST_WITH_ROCM),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
+                         device_type='cuda', active_if=TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
                          device_type='cpu'),
