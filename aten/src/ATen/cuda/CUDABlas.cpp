@@ -611,7 +611,7 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
   params.c = c;
   params.ldc = ldc;
 
-  tunable::GemmTunableOp<DType> gemm{};
+  static tunable::GemmTunableOp<DType> gemm{};
   gemm(&params);
 }
 
