@@ -25,15 +25,12 @@ GEMM_TEMPLATE = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel_call_signature}} {
+{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
   {{kernel.check_not_null(X)}}
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
   {{kernel.check_not_null(Y)}}
-  {% for aux_node in aux_input_nodes %}
-  {{kernel.check_not_null(aux_node)}}
-  {% endfor %}
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
   int64_t K = {{kernel.size(X, -1)}};
@@ -417,7 +414,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
         Bias: Optional[Buffer] = None,
-        gemm_output_layout: Layout = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
         if len(self.input_nodes) > 2:  # if no bias arg passed in at construction
@@ -431,8 +427,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             evt_type_name,
             epilogue_nodes,
             pre_fused_addmm_evt,
-            Bias.get_name() if Bias is not None else None,
-            gemm_output_layout=gemm_output_layout
         )
 
     def define_gemm_instance(
@@ -441,7 +435,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         output_buffer_name: str,
         epilogue_nodes: Optional[List[IRNode]] = None,
         Bias: Optional[Buffer] = None,
-        gemm_output_layout: Optional[Layout] = None,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -460,13 +453,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             )
             if use_evt:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
-                assert gemm_output_layout is not None
                 op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
                     output_buffer_name,
                     epilogue_functor_type_name,
                     epilogue_nodes,
                     Bias=Bias,
-                    gemm_output_layout=gemm_output_layout
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -715,8 +706,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_args,
     ) -> str:
         options = dict(
-            alpha=alpha,
-            beta=beta,
+            alpha=self.alpha,
+            beta=self.beta,
             X=X,
             W=W,
             Y=Y,
@@ -844,51 +835,23 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-        aux_input_nodes: List[ir.Buffer] = []
         if (
-            template_buffer_node is not None
+            Bias is None
+            and template_buffer_node is not None
             and epilogue_nodes is not None
             and len(epilogue_nodes) > 0
         ):
             additional_input_nodes: List[
                 ir.ComputedBuffer
             ] = self.get_additional_input_nodes(template_buffer_node, epilogue_nodes)
-            if Bias is None:
+            assert (
+                len(additional_input_nodes) <= 1
+            ), "Only one additional input node is supported at the moment"
+            if len(additional_input_nodes) == 1:
                 Bias = additional_input_nodes[0]
                 assert self.are_inputs_layout_compatible(
                     [X.get_layout(), W.get_layout(), Bias.get_layout()]
                 ), "Input layouts are not compatible"
-                aux_input_nodes = additional_input_nodes[1:]
-            else:
-                aux_input_nodes = additional_input_nodes
-            for i, aux_input_node in enumerate(aux_input_nodes):
-                assert (
-                    aux_input_node.get_name() is not None
-                ), f"Auxiliary input node {i} has to have a name"
-                assert self.are_inputs_layout_compatible(
-                    [X.get_layout(), W.get_layout(), aux_input_node.get_layout()]
-                ), f"Input layouts are not compatible with auxiliary input {i}: {aux_input_node}"
-
-        # Define Kernel call signature, including potentially auxiliary input nodes
-        # required for the fused epilogue nodes
-        # Important: This step also populates Kernel name to node mapping data structures,
-        # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
-        # the template renderer )
-        inputs = [X, W, Bias] + aux_input_nodes
-        names = (
-            ["X", "W", "Bias"]
-            + ["aux_" + n.get_name() for n in aux_input_nodes]
-            + ["Y"]
-        )
-        names_str = ",".join(names)
-        if self.input_reorder is not None:
-            input_reorder = self.input_reorder + list(range(3, len(aux_input_nodes)))
-        else:
-            input_reorder = None
-        kernel_call_signature = kernel.def_kernel(
-            inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder
-        )
-
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
         # Also there might be a Bias / additional input node which was not present during autotuning
@@ -915,8 +878,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         cast(str, template_output_node_name),
                         epilogue_nodes,
                         pre_fused_evt_args,
-                        Bias.get_name() if Bias is not None else None,
-                        gemm_output_layout=self.output_node.get_layout()
                     )
                 )
             epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
@@ -930,16 +891,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             cast(str, template_output_node_name),
             epilogue_nodes,
             Bias=Bias,
-            gemm_output_layout = template_buffer_node.get_layout() if template_buffer_node is not None else None
         )
-
         options = dict(
             alpha=self.alpha,
             beta=self.beta,
             X=X,
             W=W,
             Y=Y,
-            kernel_call_signature=kernel_call_signature,
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
@@ -950,7 +908,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             instance_type=instance_type,
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
-            aux_input_nodes=aux_input_nodes,
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res
