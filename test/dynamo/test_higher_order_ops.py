@@ -3606,6 +3606,18 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AssertionError):
             opt_test(True, False, inp)
 
+    def test_non_aliasing_util(self):
+        from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
+
+        a = [torch.tensor(1), {"a": torch.tensor(1)}]
+        b = (torch.tensor(1),)
+        _assert_tensors_nonaliasing(a, b)
+
+        with self.assertRaisesRegex(
+            AssertionError, "inputs to function body cannot alias outputs"
+        ):
+            _assert_tensors_nonaliasing(a, a)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
