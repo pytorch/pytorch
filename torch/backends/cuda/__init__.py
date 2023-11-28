@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 
 from typing import Union
 
@@ -318,6 +319,15 @@ def sdp_kernel(
     This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
+    warnings.warn(
+        (
+            "torch.backends.cuda.sdp_kernel() "
+            "is deprecated. In the future, this context manager will be removed. "
+            "Please see, torch.nn.attention.sdpa_kernel() for the new context manager, with updated "
+            "signature"
+        ),
+        FutureWarning,
+    )
     previous_flash: bool = flash_sdp_enabled()
     previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
