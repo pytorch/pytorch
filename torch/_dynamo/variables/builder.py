@@ -26,11 +26,11 @@ from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
-    CreateSymbolicPolicy,
     DimConstraint,
     DimDynamic,
-    FreshCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
+    StatefulSymbolicContext,
+    SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
@@ -1567,14 +1567,22 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns a CreateSymbolicPolicy
-def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
+# Returns a SymbolicContext
+def _automatic_dynamic(e, tx, source, static_shapes) -> SymbolicContext:
+    name = source.name()
+    prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
+    source_to_symint_node_cache = (
+        prior_policy.source_to_symint_node_cache if prior_policy else None
+    )
+
     if static_shapes:
-        return FreshCreateSymbolicPolicy(
+        return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             dynamic_offset=DimDynamic.STATIC,
             constraint_offset=None,
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -1582,7 +1590,7 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
     if any(isinstance(s, SymInt) for s in e.size()) or isinstance(
         e.storage_offset(), SymInt
     ):
-        return FreshCreateSymbolicPolicy(
+        return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
@@ -1594,6 +1602,8 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
                 else DimDynamic.STATIC
             ),
             constraint_offset=None,
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # Prep for automatic dynamic
@@ -1751,7 +1761,7 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
         # Now, figure out if the dim is dynamic/duck/static
         if constraint_dim is not None or marked_dynamic or marked_weak_dynamic:
             # NB: We could assert static_shapes is False here, but it
-            # seems better to allow the user to override policy in this
+            # seems better to allow the user to override symbolic_context in this
             # case
             dynamic = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
@@ -1763,14 +1773,17 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return FreshCreateSymbolicPolicy(
+    return StatefulSymbolicContext(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
         dynamic_offset=dynamic_storage_offset,
         constraint_offset=None,
+        tensor_source=source,
+        source_to_symint_node_cache=source_to_symint_node_cache,
     )
 
 
+# See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -1782,31 +1795,36 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        policy = None
+        symbolic_context = None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
+            symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
+
+        if symbolic_context:
+            tx.output.tracing_context.tensor_to_context[e] = symbolic_context
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
-            policy.dynamic_sizes if policy is not None else None,
-            policy.constraint_sizes if policy is not None else None,
+            symbolic_context.dynamic_sizes if symbolic_context is not None else None,
+            symbolic_context.constraint_sizes if symbolic_context is not None else None,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 source=source,
-                policy=policy,
+                symbolic_context=symbolic_context,
             )
         )
-        # TODO: just store the whole policy here
+        # TODO: just store the whole symbolic_context here
         tx.output.tracked_fakes.append(
             TrackedFake(
                 fake_e,
                 source,
-                policy.constraint_sizes if policy is not None else None,
+                symbolic_context.constraint_sizes
+                if symbolic_context is not None
+                else None,
             )
         )
         tx.output.tracked_fakes_id_to_source[id(e)].append(source)

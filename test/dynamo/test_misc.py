@@ -1245,7 +1245,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x, y):
             return x + y
 
-        fn_opt = torch._dynamo.optimize("eager", nopython=True, guard_fail_fn=guard_fail_fn)(fn)
+        fn_opt = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_fail_fn
+        )(fn)
 
         x1, y1 = (torch.rand((4, 4)) for _ in range(2))
         fn_opt(x1, y1)

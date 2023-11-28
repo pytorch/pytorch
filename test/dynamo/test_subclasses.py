@@ -15,8 +15,8 @@ from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
-    FreshCreateSymbolicPolicy,
     ShapeEnv,
+    StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
     jagged_from_list,
@@ -337,7 +337,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
                     x,
-                    policy=FreshCreateSymbolicPolicy(
+                    policy=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())],
                         constraint_sizes=[None] * x.dim(),
                         dynamic_offset=DimDynamic.DYNAMIC,
@@ -346,7 +346,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 )
                 x1_fake = fake_mode.from_tensor(
                     x1,
-                    policy=FreshCreateSymbolicPolicy(
+                    policy=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())],
                         constraint_sizes=[None] * x.dim(),
                         dynamic_offset=DimDynamic.DYNAMIC,
@@ -379,9 +379,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
                         inp,
-                        policy=FreshCreateSymbolicPolicy(
-                            dynamic_dims=[dim_dynamic for i in range(x.dim())],
-                            constraint_dims=[None] * x.dim(),
+                        symbolic_context=StatelessSymbolicContext(
+                            dynamic_sizes=[dim_dynamic for i in range(x.dim())],
+                            constraint_sizes=[None] * x.dim(),
                             dynamic_offset=DimDynamic.DYNAMIC,
                             constraint_offset=None,
                         ),
@@ -717,7 +717,7 @@ class GraphModule(torch.nn.Module):
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
                     x,
-                    policy=FreshCreateSymbolicPolicy(
+                    policy=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())],
                         constraint_sizes=[None] * x.dim(),
                         dynamic_offset=DimDynamic.DYNAMIC,
