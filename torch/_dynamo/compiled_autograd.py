@@ -3,7 +3,7 @@ import functools
 from typing import List, Optional
 
 import torch
-from torch._dynamo.external_utils import call_hook
+from torch._dynamo.external_utils import call_hook, call_backward
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -62,7 +62,7 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-        self.ctx_proxy = self.fx_tracer.create_proxy("placeholder", "ctx", (), {})
+        self.backward_proxy = self.fx_tracer.create_proxy("placeholder", "backward", (), {})
 
         # tensor inputs to fake tensors
         inputs = [
@@ -107,15 +107,16 @@ class AutogradCompilerInstance:
     - needs to happen for both the input and the gradients
     """
 
-    def proxy_call_backward(self, apply_fn, inputs):
+    def proxy_call_backward(self, backward_obj, inputs):
         print("hello from proxy_call_backward")
-        assert self.ctx_proxy is not None
-        ctx = self.ctx_proxy[0]
+        assert self.backward_proxy is not None
+        backward = self.backward_proxy[0]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
-            target=apply_fn,
+            target=call_backward,
             args=(
-                ctx,
+                backward_obj,
+                backward,
                 *[self.to_proxy(x) for x in inputs],
             ),
             kwargs={},

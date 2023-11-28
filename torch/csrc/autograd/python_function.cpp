@@ -115,14 +115,14 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
 
   /* START */
   // Compiled autograd: call backward with fake context and inputs
-  std::cout << "calling apply_fn" << std::endl;
+  std::cout << "lifting backward obj" << std::endl;
   THPObjectPtr r(PyObject_CallMethod(
     saved.get_py_compiler(),
     "proxy_call_backward",
     "OO",
-    apply_fn.get(),
+    obj,
     pyInputs.get()));
-  std::cout << "done apply_fn" << std::endl;
+  std::cout << "lifting backward obj" << std::endl;
   /* END */
   if (!r)
     throw_python_error();
