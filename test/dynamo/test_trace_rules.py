@@ -125,7 +125,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
-        objs = gen_allowed_objs_and_ids()
+        objs = gen_allowed_objs_and_ids(record=True, C_binding_only=True)
         # Test ctx manager classes are updated in torch_name_rule_map.
         generated = objs.ctx_mamager_classes
         used = set()

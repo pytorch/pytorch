@@ -152,7 +152,7 @@ def _disallowed_function_ids() -> Set[int]:
 # Helper function to dump the torch name rule map generated based on
 # the heuristic defined in gen_allowed_objs_and_ids.
 def dump_allowed_torch_name_rule_map() -> None:
-    m = gen_allowed_objs_and_ids(C_binding_only=False).name_rule_map
+    m = gen_allowed_objs_and_ids(record=True, C_binding_only=False).name_rule_map
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
@@ -173,7 +173,7 @@ class AllowedObjects:
     name_rule_map: Dict[str, Any]
 
 
-def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
+def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
@@ -364,12 +364,14 @@ def gen_allowed_objs_and_ids(C_binding_only=True) -> AllowedObjects:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
-                    heuristic_record_if_in_graph_function(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
-                    heuristic_record_if_in_graph_function(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
