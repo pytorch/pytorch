@@ -294,7 +294,7 @@ void TuningContext::DisableTunableOp() {
 bool TuningContext::IsTunableOpEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    //std::cerr << "PYTORCH_TUNABLEOP_ENABLED=1" << std::endl;
+    TORCH_WARN_ONCE("PYTORCH_TUNABLEOP_ENABLED=1");
     return true;
   }
   return enable_;
@@ -313,7 +313,7 @@ void TuningContext::DisableTuning() {
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    //std::cerr << "PYTORCH_TUNABLEOP_TUNING=1" << std::endl;
+    TORCH_WARN_ONCE("PYTORCH_TUNABLEOP_TUNING=1");
     return true;
   }
   return tuning_enable_;

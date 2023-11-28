@@ -11,6 +11,9 @@
 
 #include <ATen/cuda/tunable/GemmCommon.h>
 #ifdef USE_ROCM
+#if ROCM_VERSION >= 50700
+#include <ATen/cuda/tunable/GemmHipblaslt.h>
+#endif
 #include <ATen/cuda/tunable/GemmRocblas.h>
 #endif
 #include <ATen/cuda/tunable/StreamTimer.h>
@@ -69,13 +72,18 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       this->RegisterOp(std::move(op));
     }
 #endif
-//#ifdef USE_HIPBLASLT
-//    for (auto&& [_, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-//      ORT_UNUSED_PARAMETER(_);
-//      this->RegisterOp(std::move(op));
-//    }
-//#endif
-//
+
+#ifdef USE_ROCM && ROCM_VERSION >= 50700
+    // disallow tuning of hipblaslt with c10::complex
+    if constexpr (
+        !std::is_same_v<T, c10::complex<float>> &&
+        !std::is_same_v<T, c10::complex<double>>) {
+      for (auto&& [_, op] : GetHipBlasLtGemmTypeStringAndOps<T>()) {
+        this->RegisterOp(std::move(op));
+      }
+    }
+#endif
+
 //#ifdef USE_COMPOSABLE_KERNEL
 //    for (auto&& [_, op] : GetCKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
 //      ORT_UNUSED_PARAMETER(_);

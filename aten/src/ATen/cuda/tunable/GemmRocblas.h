@@ -195,7 +195,7 @@ auto GetRocBlasGemmTypeStringAndOps() {
       return OK;
     };
     ret.emplace_back(std::make_pair(
-        c10::str("RocBlasGemm_", i, "_sol_", solution), std::move(rocblas_gemm_op)));
+        c10::str("Gemm_Rocblas_", i, "_sol_", solution), std::move(rocblas_gemm_op)));
   }
   return ret;
 }
