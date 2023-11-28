@@ -11,7 +11,7 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
 
-from functorch import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -29,7 +29,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
@@ -93,19 +93,6 @@ OutputType = Enum(
         # Instead, we'll treat this output "normally", and trace its backward into the graph.
         "custom_function_view",
     )
-)
-
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
 )
 
 def partial_asdict(obj: Any) -> Any:
@@ -1156,7 +1143,13 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 requires_grad=requires_grad,
-                mutation_type=_get_mutation_type(keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
+                mutation_type=_get_mutation_type(
+                    keep_input_mutations,
+                    mutates_data,
+                    mutates_metadata,
+                    mutations_hidden_from_autograd,
+                    requires_grad
+                )
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
@@ -1426,6 +1419,7 @@ from a multi-output view call")
                 keep_input_mutations,
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
+                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -2295,17 +2289,35 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
+def _check_if_mutation_can_be_in_graph(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    requires_grad
+):
     if keep_input_mutations:
-        return mutates_data and not mutates_metadata and not requires_grad
+        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
     return False
 
 
-def _get_mutation_type(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
+def _get_mutation_type(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    requires_grad
+):
     if (not mutates_data) and (not mutates_metadata):
         return MutationType.NOT_MUTATED
 
-    if _check_if_mutation_can_be_in_graph(keep_input_mutations, mutates_data, mutates_metadata, requires_grad):
+    if _check_if_mutation_can_be_in_graph(
+        keep_input_mutations,
+        mutates_data,
+        mutates_metadata,
+        mutations_hidden_from_autograd,
+        requires_grad
+    ):
         return MutationType.MUTATED_IN_GRAPH
 
     return MutationType.MUTATED_OUT_GRAPH
@@ -2619,6 +2631,14 @@ def create_synthetic_base_metadata(
         mutates_data = True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
+        mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
+        mutation_type = _get_mutation_type(
+            m.keep_input_mutations,
+            mutates_data,
+            mutates_metadata,
+            mutations_hidden_from_autograd,
+            requires_grad
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -2627,10 +2647,10 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
-            mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
+            mutations_hidden_from_autograd=mutations_hidden_from_autograd,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=_get_mutation_type(m.keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
+            mutation_type=mutation_type,
         )
         input_infos.append(inpt_info)
 
@@ -4348,14 +4368,17 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
+
+
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
                     return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                return torch._dynamo.utils.to_fake_tensor(x, fake_mode)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
+    _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
     get_aten_graph_module,
 )
@@ -390,6 +391,7 @@ def _do_annotate_conv_bn(
 
     matches = []
     combinations = [
+        (F.conv1d, _conv1d_bn_example_inputs),
         (F.conv2d, _conv2d_bn_example_inputs),
     ]
 
