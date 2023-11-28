@@ -647,6 +647,52 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    def test_qconv2d_add_2(self):
+        r"""
+        This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
+                Conv(X)  3
+                    \   /
+                     Add
+        We see this pattern in Mobilenet v3 large which add is decomposed from torch.nn.Hardswish or torch.nn.Hardsigmoid.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                post_op,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.post_op = post_op
+
+            def forward(self, x):
+                return self.post_op(self.conv(x))
+
+        for post_op in [
+            torch.nn.Hardswish(inplace=True),
+            torch.nn.Hardsigmoid(inplace=True),
+        ]:
+            mod = M(post_op).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+
+            def matcher_check_fn():
+                # Shouldn't hit conv binary fusion
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 0
+                )
+
+            self._test_common(
+                mod,
+                (v,),
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_qat_qconv2d(self):
         r"""
         This testcase will quantize a single Conv2d module with qat flow.
@@ -1178,6 +1224,42 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfRocm
+    def test_qflatten(self):
+        r"""
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 64, 7, bias=True, stride=2, padding=3, dilation=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                return torch.flatten(
+                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                )
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["qreshape_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfRocm
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:
@@ -1439,6 +1521,101 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+    def test_reproduce_113440_issue_1(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                res = self.add_fn2(tmp1, tmp2)
+                if self.use_relu:
+                    res = self.relu2(res)
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            example_inputs[0].get_device()
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
+
+    def test_reproduce_113440_issue_2(self):
+        class Mod(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU(inplace=True)
+
+                self.conv5 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv6 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv7 = torch.nn.Conv2d(6, 6, kernel_size=1, stride=1)
+                self.add_fn3 = add_fn
+                self.relu3 = torch.nn.ReLU(inplace=True)
+
+                self.use_relu = True
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+
+                tmp1 = self.conv3(tmp)
+                res = self.relu2(tmp1)
+
+                return res
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                    1
+                ),
+            )
+            m = Mod(
+                lambda x, y: x.add_(y),
+            ).eval()
+            om = torch.compile(m)
+            om(*example_inputs)
+            om(*example_inputs)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
