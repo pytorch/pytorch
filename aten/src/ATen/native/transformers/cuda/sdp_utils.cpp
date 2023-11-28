@@ -181,6 +181,23 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+#if USE_ROCM
+  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
+  const char* real_arch = dprops->gcnArchName;
+  const char* over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  const char* arch = over_arch ? over_arch : real_arch;
+  if (mi200 != arch) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention only supports gpu architecture gfx90a, for now. Attempting to run on a ",
+          arch,
+          ".",
+          over_arch ? " This is overrided by PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE. Real architecture is " : "",
+          over_arch ? real_arch : "");
+    }
+    return false;
+  }
+#else
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -192,6 +209,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
     }
     return false;
   }
+#endif
   return true;
 }
 
