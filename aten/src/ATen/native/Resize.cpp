@@ -184,6 +184,11 @@ static void _maybe_resize_storage(TensorImpl* self, int64_t new_size_bytes) {
 }
 
 static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) {
+  if (self->is_cpu()) {
+    maybe_resize_storage_cpu(self, new_size_bytes.expect_int());
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(self->is_meta());
   maybe_resize_storage_meta(self, std::move(new_size_bytes));
 }
 

@@ -50,7 +50,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
-
+#include <ATen/ops/narrow_native.h>
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
@@ -742,7 +742,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       ? sdp::CustomMaskType::CausalFromTopLeft
       : sdp::CustomMaskType::NoCustomMask;
 
-  auto [attention, log_sumexp, seed, offset] = at::_efficient_attention_forward(
+  auto [attention, log_sumexp, seed, offset, max_seqlen_batch_q, max_seqlen_batch_kv] = at::_efficient_attention_forward(
       q_t,
       k_t,
       v_t,
@@ -874,7 +874,7 @@ _flash_attention_forward(
       Tensor());
 }
 
-std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]
     const at::Tensor& key, // [b, seqlen, num_heads, K]
     const at::Tensor& value, // [b, seqlen, num_heads, Kv]
@@ -915,8 +915,8 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
-  // TODO_DRISS we should return max_seqlen_k;
-  int64_t max_seqlen_q, max_seqlen_k;
+
+  int64_t max_seqlen_q = 0, max_seqlen_k = 0;
   TORCH_CHECK(seqstart_q.has_value() == seqstart_k.has_value());
   if (seqstart_q.has_value()) {
     TORCH_CHECK(seqstart_q->scalar_type() == at::ScalarType::Int);
@@ -1164,10 +1164,12 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
       std::move(res),
       std::move(logsumexp),
       std::move(seed_t),
-      std::move(offset_t));
+      std::move(offset_t),
+      max_seqlen_q,
+      max_seqlen_k);
 #endif
   TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
+  return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, 0, 0);
 }
 
 Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){
