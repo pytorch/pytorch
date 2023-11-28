@@ -58,17 +58,29 @@ jobs:
         with:
           no-sudo: true
 
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
+
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
+          quiet-checkout: true
+
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: ./test-infra/.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: ./test-infra/.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 

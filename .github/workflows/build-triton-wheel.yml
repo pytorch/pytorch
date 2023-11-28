@@ -57,11 +57,23 @@ jobs:
         with:
           submodules: false
 
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
+
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
+          quiet-checkout: true
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: ./test-infra/.github/actions/pull-docker-image
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -126,7 +138,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: ./test-infra/.github/actions/teardown-linux
         if: always()
 
   upload-wheel:
@@ -202,8 +214,20 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
+
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
+          quiet-checkout: true
+
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: ./test-infra/.github/actions/pull-docker-image
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
@@ -239,7 +263,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: ./test-infra/.github/actions/teardown-linux
         if: always()
 
   upload-conda:

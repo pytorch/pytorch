@@ -84,17 +84,29 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
+          quiet-checkout: true
+
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: ./test-infra/.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: ./test-infra/.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -200,5 +212,5 @@ jobs:
           path: sccache-stats-*.json
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: ./test-infra/.github/actions/teardown-linux
         if: always()

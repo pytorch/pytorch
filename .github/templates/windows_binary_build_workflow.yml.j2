@@ -65,8 +65,13 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
+      {%- if "release" in common.builder_branch %}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", branch=common.builder_branch, checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch, checkout_pr_head=False) }}
+      {%- else %}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      {%- endif %}
       - name: Populate binary env
         shell: bash
         run: |
@@ -105,8 +110,13 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      {%- if "release" in common.builder_branch %}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", branch=common.builder_branch, checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch, checkout_pr_head=False) }}
+      {%- else %}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      {%- endif %}
       - name: Populate binary env
         shell: bash
         run: |

@@ -54,9 +54,14 @@ def fetch_base_ref(url: str, headers: Dict[str, str]) -> Any:
 def find_base_branch() -> Any:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     GITHUB_REF_NAME = os.environ.get("GITHUB_REF_NAME", "")
+    GITHUB_EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")
     pull = ""
-    if GITHUB_REF_NAME != "" and "ciflow" in GITHUB_REF_NAME:
+    # GITHUB_REF_NAME for ciflow is defined as follows: ciflow/binaries/<pull request>
+    # GITHUB_REF_NAME for pull request defined as follows: <pull request>/merge
+    if GITHUB_EVENT_NAME == "push" and GITHUB_REF_NAME != "" and "ciflow" in GITHUB_REF_NAME:
         pull = GITHUB_REF_NAME.rsplit("/", 1)[-1]
+    elif GITHUB_EVENT_NAME == "pull_request"  and GITHUB_REF_NAME != "" and "merge" in GITHUB_REF_NAME:
+        pull = GITHUB_REF_NAME.rsplit("/", 1)[0]
     else:
         return "main"
 

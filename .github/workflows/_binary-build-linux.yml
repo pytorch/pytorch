@@ -148,6 +148,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+
       - name: Get Build Branch
         uses: ./.github/actions/get-build-branch
 

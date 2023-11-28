@@ -14,8 +14,9 @@ runs:
           REPO_BRANCH=${raw##*/}
           echo "REPO_BRANCH=release/${REPO_BRANCH}" >> $GITHUB_ENV
           echo "Branch is release/$REPO_BRANCH."
-        elif [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_NAME}" == *ciflow* ]]; then
-          echo "REPO_BRANCH=$(python3 ${GITHUB_ACTION_PATH}/../../scripts/get_ciflow_base_ref.py)" >> "${GITHUB_ENV}"
+        elif [[ "${GITHUB_EVENT_NAME}" == 'push' && "${GITHUB_REF_NAME}" == *ciflow* ]] ||
+             [[ "${GITHUB_EVENT_NAME}" == 'pull_request' && "${GITHUB_REF_NAME}" == *merge* ]]; then
+          echo "REPO_BRANCH=$(python3 ${GITHUB_ACTION_PATH}/../../scripts/get_base_branch.py)" >> "${GITHUB_ENV}"
         else
           echo "REPO_BRANCH=main" >> $GITHUB_ENV
         fi

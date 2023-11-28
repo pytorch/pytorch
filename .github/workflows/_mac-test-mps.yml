@@ -79,8 +79,20 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
+      - name: Get Build Branch
+        uses: ./.github/actions/get-build-branch
+
+      - name: Checkout pytorch/test-infra to test-infra dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ env.REPO_BRANCH }}
+          submodules: recursive
+          repository: pytorch/test-infra
+          path: test-infra
+          quiet-checkout: true
+
       - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: ./test-infra/.github/actions/setup-miniconda
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -158,4 +170,4 @@ jobs:
       - name: Clean up disk space
         if: always()
         continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+        uses: ./test-infra/.github/actions/check-disk-space
