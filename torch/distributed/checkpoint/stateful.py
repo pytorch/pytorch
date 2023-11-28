@@ -20,7 +20,7 @@ class Stateful(Protocol):
 
         .. warning::
             Because of the inplace nature of restoring a checkpoint, this function
-        is also called during `torch.distributed.checkpoint.load`.
+            is also called during `torch.distributed.checkpoint.load`.
 
 
         Returns:
