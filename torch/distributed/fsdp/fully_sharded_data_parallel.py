@@ -466,6 +466,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
                 "ignored_states": self._ignored_params,
+                "device_mesh": device_mesh,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain
