@@ -710,7 +710,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
+      dumpOnTimeout_ || getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -1050,8 +1050,7 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 }
 
 void ProcessGroupNCCL::dumpDebuggingInfo() {
-  LOG(ERROR)
-      << "ProcessGroupNCCL preparing to dump debug info.";
+  LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 20000) > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1259,7 +1258,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (timedOut) {
           try {
-            LOG(ERROR) << "Timeout observed by ProcessGroupNCCL WorkCleanuploop";
+            LOG(ERROR)
+                << "Timeout observed by ProcessGroupNCCL WorkCleanuploop";
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
