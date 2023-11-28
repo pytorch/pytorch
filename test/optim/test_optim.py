@@ -1276,6 +1276,13 @@ class TestOptim(TestCase):
             sparse_only=True,
             maximize=True,
         )
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            SparseAdam(torch.zeros(3))
+            self.assertEqual(len(w), 1)
+            for warning in w:
+                self.assertEqual(len(warning.message.args), 1)
+                self.assertRegex(warning.message.args[0], "Passing in a raw Tensor is deprecated.")
 
     # ROCm precision is too low to pass this test
     def test_adadelta(self):
