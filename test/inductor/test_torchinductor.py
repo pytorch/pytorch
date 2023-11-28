@@ -8181,16 +8181,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 y = my_np(x)
                 return torch.as_tensor(y)
 
+            @torch.compile
+            def wrapper2(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.from_numpy(y)
+
             x_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
             x = torch.arange(8, dtype=torch.float32, requires_grad=True)
-
             out_np = wrapper(x_np)
             out = my_torch(x)
             self.assertEqual(out, out_np)
 
+            x2_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            out2_np = wrapper2(x2_np)
+            self.assertEqual(out, out2_np)
+
             out_np.backward()
             out.backward()
             self.assertEqual(x.grad, x_np.grad)
+
+            out2_np.backward()
+            self.assertEqual(x.grad, x2_np.grad)
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
