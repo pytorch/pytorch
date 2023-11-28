@@ -43,8 +43,6 @@ class TorchExport(exporter.FXGraphExtractor):
         #         kwargs=model_kwargs,  # type: ignore[arg-type]
         #     )
 
-        model = model.run_decompositions(options.decomposition_table)
-
         # Export FX graph to ONNX ModelProto.
         self.input_adapter.append_step(
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
@@ -66,6 +64,11 @@ class TorchExport(exporter.FXGraphExtractor):
         options.fx_tracer.output_adapter.append_step(
             io_adapter.PrependParamsAndBuffersAotAutogradOutputStep(model)
         )
+
+        # TODO: https://github.com/pytorch/pytorch/issues/114628
+        # run_decomposition generates a new graph module with decomposed ops.
+        # Thus, we need to run this step after io_adapters.
+        model = model.run_decompositions(options.decomposition_table)
 
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
