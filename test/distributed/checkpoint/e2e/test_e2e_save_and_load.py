@@ -174,6 +174,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @with_temp_dir
+    @skip_if_lt_x_gpu(4)
     def test_different_ordered_state_dict_keys(self):
         """Tests that the order of keys in the state dict does not matter when loading
         If order was not accounted for, the following test would cause a deadlock.
