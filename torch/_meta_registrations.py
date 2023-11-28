@@ -5221,12 +5221,14 @@ def meta__scaled_dot_product_efficient_backward(
     )
     grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
-        grad_bias = torch.empty_strided(
-            attn_bias.size(),
-            attn_bias.stride(),
-            dtype=attn_bias.dtype,
-            device=attn_bias.device,
+        lastDim = attn_bias.size(-1)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
+        new_sizes = list(attn_bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(
+            new_sizes, dtype=attn_bias.dtype, device=attn_bias.device
         )
+        grad_bias = grad_bias[..., :lastDim]
 
     return grad_q, grad_k, grad_v, grad_bias
 
@@ -5303,12 +5305,12 @@ def meta__efficient_attention_backward(
     grad_value = torch.empty_like(value)
 
     if bias is not None:
-        assert bias is not None
         lastDim = bias.size(-1)
-        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
         new_sizes = list(bias.size())
         new_sizes[-1] = lastDimAligned
         grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+        grad_bias = grad_bias[..., :lastDim]
     else:
         grad_bias = torch.empty((), device=query.device)
 
