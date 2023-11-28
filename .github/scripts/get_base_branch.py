@@ -58,9 +58,17 @@ def find_base_branch() -> Any:
     pull = ""
     # GITHUB_REF_NAME for ciflow is defined as follows: ciflow/binaries/<pull request>
     # GITHUB_REF_NAME for pull request defined as follows: <pull request>/merge
-    if GITHUB_EVENT_NAME == "push" and GITHUB_REF_NAME != "" and "ciflow" in GITHUB_REF_NAME:
+    if (
+        GITHUB_EVENT_NAME == "push"
+        and GITHUB_REF_NAME != ""
+        and "ciflow" in GITHUB_REF_NAME
+    ):
         pull = GITHUB_REF_NAME.rsplit("/", 1)[-1]
-    elif GITHUB_EVENT_NAME == "pull_request"  and GITHUB_REF_NAME != "" and "merge" in GITHUB_REF_NAME:
+    elif (
+        GITHUB_EVENT_NAME == "pull_request"
+        and GITHUB_REF_NAME != ""
+        and "merge" in GITHUB_REF_NAME
+    ):
         pull = GITHUB_REF_NAME.rsplit("/", 1)[0]
     else:
         return "main"
