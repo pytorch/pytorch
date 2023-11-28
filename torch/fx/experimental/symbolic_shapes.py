@@ -2398,11 +2398,7 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
-        # An input is either a SymInt (in which case you directly have
-        # DimConstraint) or a Tensor (in which case you have a
-        # DimList[DimConstraint]).  Whenever Optional is accepted, that
-        # just means there are no constraints
-        input_policies=None,
+        input_policies: Optional[DimList[CreateSymbolicPolicy]] = None,
         equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
