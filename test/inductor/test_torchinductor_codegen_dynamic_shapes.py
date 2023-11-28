@@ -265,6 +265,7 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_sdpa_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_sdpa_unaligned_mask_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # The following tests do not support dynamic shapes yet:
     #
