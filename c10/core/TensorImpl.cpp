@@ -414,7 +414,7 @@ int64_t TensorImpl::storage_offset_custom() const {
     // TODO: fix this
     return pyobj_slot_.load_pyobj_interpreter()
         ->sym_storage_offset(this)
-        .expect_int();
+        .guard_int(__FILE__, __LINE__);
   }
   return storage_offset_default();
 }
