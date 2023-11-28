@@ -4,6 +4,8 @@ import warnings
 import functools
 import weakref
 
+import numpy as np
+
 import torch
 from torch._prims_common import DeviceLikeType
 from ..parameter import Parameter
@@ -2515,6 +2517,20 @@ class Module:
         keys = [key for key in keys if not key[0].isdigit()]
 
         return sorted(keys)
+
+    def __len__(self):
+        r"""return the number of trainable parameters of the model"""
+        return sum([np.prod(param.shape) for param in self.parameters() if param.requires_grad])
+
+    def parameters_num(self, trainable: bool = True):
+        r"""return the number of trainable parameters or all parameters
+            :param trainable: boolean to choose either get all parameters or just the trainable parameters.
+        """
+        match trainable:
+            case True:
+                return sum([np.prod(param.shape) for param in self.parameters() if param.requires_grad])
+            case False:
+                return sum([np.prod(param.shape) for param in self.parameters()])
 
     def _replicate_for_data_parallel(self):
         replica = self.__new__(type(self))
