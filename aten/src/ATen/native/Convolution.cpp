@@ -421,6 +421,9 @@ struct ConvParams {
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
   // that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
 #if !defined(C10_MOBILE)
+    if (at::globalContext().userForceCuDNN()) {
+      return true;
+    }
     if (!detail::getCUDAHooks().compiledWithCuDNN()) {
       return false;
     }
