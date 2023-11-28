@@ -180,6 +180,11 @@ class TORCH_API Context {
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
+  // NB: This method forces cuDNN to be used if it is enabled, even if the
+  // requested operation will error out (useful for functionality and
+  // performance testing)
+  bool userForceCuDNN() const;
+  void setUserForceCuDNN(bool f);
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
@@ -357,6 +362,7 @@ class TORCH_API Context {
   c10::once_flag th_mtia_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
+  bool force_cudnn = false;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
