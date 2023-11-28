@@ -34,7 +34,7 @@ This `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/ch
 A useful high-level abstraction is also provided:
 .. autoclass:: torch.distributed.checkpoint.checkpointer.Checkpoint
 
-For an example using `Checkpointer`, see `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/stateful_example.py>`_
+For an example using `Checkpointer`, see `stateful example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/stateful_example.py>`_
 
 The following types define the IO interface used during checkpoint:
 
