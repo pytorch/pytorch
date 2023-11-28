@@ -56,7 +56,7 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
@@ -73,7 +73,7 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0)
+                state["step"] = torch.tensor(0.0, dtype=torch.float32)
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
