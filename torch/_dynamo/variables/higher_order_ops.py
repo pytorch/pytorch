@@ -385,6 +385,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "trace_wrapped":
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
+        elif value.__name__ == "strict_mode":
+            return StrictModeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1397,6 +1399,14 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=example_value,
         )
+
+
+class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        callable = args[0]
+        return callable.call_method(tx, "forward", args[1].unpack_var_sequence(tx), kwargs)
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
