@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, overload, Tuple, Union

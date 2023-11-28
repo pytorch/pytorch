@@ -79,6 +79,7 @@ select = [
     "PGH004",
     "PIE794",
     "PIE800",
+    "PIE804",
     "PIE807",
     "PIE810",
     "PLE",
