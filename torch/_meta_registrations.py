@@ -394,6 +394,35 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten._sparse_semi_structured_linear)
+def meta_sparse_structured_linear(
+    input: Tensor,
+    weight: Tensor,
+    _meta: Tensor,
+    bias: Optional[Tensor] = None,
+    _activation_opt: Optional[str] = None,
+):
+    output_sizes = list(input.shape)
+    if bias is not None:
+        assert weight.size(0) == bias.size(0), "output size mismatch"
+    assert weight.size(1) == input.size(-1) / 2
+    output_sizes[-1] = weight.size(0)
+
+    # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
+    # We assume that we have already squashed the inputs into a 2-D tensor
+    # Then, as the output is transposed, we need to propagate the transposed
+    # stride information to the output tensor
+    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    transposed_strides = (1, input.size(0))
+
+    output = input.new_empty(
+        output_sizes,
+        dtype=input.dtype if input.dtype != torch.int8 else torch.int32,
+    ).as_strided(output_sizes, transposed_strides)
+
+    return output
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
@@ -5221,12 +5250,14 @@ def meta__scaled_dot_product_efficient_backward(
     )
     grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
-        grad_bias = torch.empty_strided(
-            attn_bias.size(),
-            attn_bias.stride(),
-            dtype=attn_bias.dtype,
-            device=attn_bias.device,
+        lastDim = attn_bias.size(-1)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
+        new_sizes = list(attn_bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(
+            new_sizes, dtype=attn_bias.dtype, device=attn_bias.device
         )
+        grad_bias = grad_bias[..., :lastDim]
 
     return grad_q, grad_k, grad_v, grad_bias
 
@@ -5303,12 +5334,12 @@ def meta__efficient_attention_backward(
     grad_value = torch.empty_like(value)
 
     if bias is not None:
-        assert bias is not None
         lastDim = bias.size(-1)
-        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
         new_sizes = list(bias.size())
         new_sizes[-1] = lastDimAligned
         grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+        grad_bias = grad_bias[..., :lastDim]
     else:
         grad_bias = torch.empty((), device=query.device)
 
