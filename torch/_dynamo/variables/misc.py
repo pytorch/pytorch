@@ -848,6 +848,60 @@ class SkipFilesVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+        elif self.value is itertools.groupby:
+            if any(kw != "key" for kw in kwargs.keys()):
+                unimplemented(
+                    "Unsupported kwargs for itertools.groupby: "
+                    f"{','.join(set(kwargs.keys()) - {'key'})}"
+                )
+
+            def retrieve_const_key(key):
+                if isinstance(key, variables.SymNodeVariable):
+                    return key.evaluate_expr()
+                elif isinstance(key, variables.ConstantVariable):
+                    return key.as_python_constant()
+                else:
+                    raise unimplemented(
+                        "Unsupported key type for itertools.groupby: " + str(type(key))
+                    )
+
+            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+                keyfunc = (
+                    (
+                        lambda x: (
+                            retrieve_const_key(
+                                kwargs.get("key").call_function(tx, [x], {})
+                            )
+                        )
+                    )
+                    if "key" in kwargs
+                    else None
+                )
+            else:
+                unimplemented("Unsupported arguments for itertools.groupby")
+
+            result = []
+            try:
+                for k, v in itertools.groupby(seq, key=keyfunc):
+                    result.append(
+                        variables.TupleVariable(
+                            [
+                                variables.ConstantVariable.create(k)
+                                if variables.ConstantVariable.is_literal(k)
+                                else k,
+                                variables.ListIteratorVariable(
+                                    list(v), mutable_local=MutableLocal()
+                                ),
+                            ],
+                            mutable_local=MutableLocal(),
+                        )
+                    )
+            except Exception:
+                raise unimplemented(  # noqa: TRY200
+                    "Unexpected failure when calling itertools.groupby"
+                )
+            return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif (
             self.value is functools.wraps
             and not kwargs
