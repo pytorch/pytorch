@@ -315,6 +315,13 @@ class FakeTensorConverter:
         symbolic_context=None,
         memoized_only=False,
     ):
+        # see note [Tensor Fakification and Symbol Caching]
+        if not symbolic_context and not source and shape_env:
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if t in tracing_context.tensor_to_context:
+                    symbolic_context = tracing_context.tensor_to_context[t]
+                    source = symbolic_context.tensor_source
+
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -1868,6 +1875,12 @@ class FakeTensorMode(TorchDispatchMode):
                 symbolic_context is None
             ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
+        # see note [Tensor Fakification and Symbol Caching]
+        if not symbolic_context and not source and not static_shapes:
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tensor in tracing_context.tensor_to_context:
+                    symbolic_context = tracing_context.tensor_to_context[tensor]
+                    source = symbolic_context.tensor_source
         return self.fake_tensor_converter(
             self,
             tensor,
