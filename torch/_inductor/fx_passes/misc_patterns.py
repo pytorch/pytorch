@@ -76,7 +76,7 @@ class NumpyCompatNormalization:
         "other": ("x2",),
     }
     inverse_mapping: Dict[str, str]
-    cache: Dict[Callable, Set[str]]  # type: ignore[type-arg]
+    cache: Dict["torch.fx.graph.Target", Set[str]]
 
     def __init__(self):
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
