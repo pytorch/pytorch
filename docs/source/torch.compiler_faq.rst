@@ -633,13 +633,13 @@ on eager mode now. If you want to run it in eager mode, you would need to call
 on CPU. Note also that calling ``.numpy(force=True`` under ``torch.compile`` also
 moves to CPU and deactivates gradient computations.
 
-We provide the decorator ``torch.compiler.wrap_np``  that implements the patteron of wrapping
+We provide the decorator ``torch.compiler.wrap_numpy``  that implements the patteron of wrapping
 a NumPy function into a PyTorch one. Using it, we can simply write
 
 .. code-block:: python
 
    @torch.compile
-   @torch.compiler.wrap_fn
+   @torch.compiler.wrap_numpy
    def numpy_fn(X, Y):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
@@ -655,7 +655,7 @@ compute gradients along NumPy functions!
 .. code-block:: python
 
    @torch.compile
-   @torch.compiler.wrap_fn
+   @torch.compiler.wrap_numpy
    def numpy_fn(X, Y):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 

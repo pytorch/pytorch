@@ -37,7 +37,7 @@ def call_hook(hook, *args):
     return result
 
 
-def wrap_np(f):
+def wrap_numpy(f):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
     """

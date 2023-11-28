@@ -9,7 +9,7 @@ __all__ = [
     "list_backends",
     "disable",
     "cudagraph_mark_step_begin",
-    "wrap_np",
+    "wrap_numpy",
 ]
 
 def compile(*args, **kwargs):
@@ -120,7 +120,7 @@ def cudagraph_mark_step_begin():
 
     cudagraph_trees.mark_step_begin()
 
-def wrap_np(fn):
+def wrap_numpy(fn):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
 
@@ -135,7 +135,7 @@ def wrap_np(fn):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Compile a NumPy function as a Tensor -> Tensor function
         >>> @torch.compile(fullgraph=True)
-        >>> @torch.compiler.wrap_np
+        >>> @torch.compiler.wrap_numpy
         >>> def fn(a):
         >>>     return np.sum(a * a)
         >>> # Execute the NumPy function on CUDA and compute the gradients
@@ -145,5 +145,5 @@ def wrap_np(fn):
         >>> print(x.grad)
         tensor([ 0.,  2.,  4.,  6.,  8., 10.], device='cuda:0')
     """
-    from torch._dynamo.external_utils import wrap_np as wrap
+    from torch._dynamo.external_utils import wrap_numpy as wrap
     return wrap(fn)

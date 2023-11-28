@@ -1183,6 +1183,8 @@ def cpp_wrapper_flags() -> str:
 def optimization_flags() -> str:
     base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
     base_flags += " -ffast-math -fno-finite-math-only"
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        base_flags += " -fno-unsafe-math-optimizations"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
