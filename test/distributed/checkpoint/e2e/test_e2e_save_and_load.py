@@ -36,8 +36,8 @@ class TestDummyModel(torch.nn.Module):
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
-        self.net3 = nn.Linear(32, 64)
-        self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
+        self.net3 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
+        self.net4 = nn.Sequential(nn.Linear(64, 8), nn.ReLU())
 
     def forward(self, x):
         return self.net4(self.net3(self.net2(self.net1(x))))

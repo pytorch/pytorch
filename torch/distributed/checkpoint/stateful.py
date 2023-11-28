@@ -8,10 +8,12 @@ __all__ = ["Stateful", "StatefulT"]
 
 @runtime_checkable
 class Stateful(Protocol):
-    """Stateful protocol for objects that can be checkpointed and restored.
+    """
+    Stateful protocol for objects that can be checkpointed and restored.
     """
     def state_dict(self) -> Dict[str, Any]:
-        """Objects should return their state_dict representation as a dictionary.
+        """
+        Objects should return their state_dict representation as a dictionary.
         The output of this function will be checkpointed, and later restored in
         `load_state_dict()`.
 
@@ -26,7 +28,8 @@ class Stateful(Protocol):
         ...
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Restore the object's state from the provided state_dict.
+        """
+        Restore the object's state from the provided state_dict.
 
         Args:
             state_dict: The state dict to restore from
