@@ -132,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -230,6 +232,20 @@ DONT_CHANGE_BATCH_SIZE = {
     "vision_maskrcnn",  # https://github.com/pytorch/benchmark/pull/1656
 }
 
+
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine. We have tested accuracy for smaller version of
+    # these models
+    "hf_GPT2_large",
+    "hf_T5_large",
+    "timm_vision_transformer_large",
+    "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "llama_v2_7b_16h",
+    "Background_Matting",
+    "stable_diffusion_unet",
+}
+
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     # Models that deterministic algorithms can not be turned on for eager mode.
     "Background_Matting",
@@ -250,6 +266,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
 }
+
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
 
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
@@ -304,6 +322,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
+
+    @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
 
     @property
     def skip_accuracy_check_as_eager_non_deterministic(self):

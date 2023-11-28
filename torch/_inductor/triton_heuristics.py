@@ -312,9 +312,7 @@ class CachingAutotuner(KernelInterface):
             for i, arg in enumerate(self.fn.arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = list(self.fn.arg_names)
-        while def_args and def_args[-1] in cfg.kwargs:
-            def_args.pop()
+        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
         scope = {
             "grid_meta": cfg.kwargs,
@@ -460,6 +458,8 @@ class CachingAutotuner(KernelInterface):
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
+            # User defined triton kernels will have arbitrary kwarg names
+            "meta": launcher.config.kwargs,
         }
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
@@ -591,11 +591,33 @@ def end_graph():
     overall_time = sum(call[0] for call in collected_calls)
     overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
-    print(f"SUMMARY ({cur_file})")
-    print(
+    summary_str = (
+        f"SUMMARY ({cur_file})\n"
         f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
     )
+    print(summary_str)
     print()
+    output_file = config.profile_bandwidth_output
+    if output_file is not None:
+        # sort perf numbers in descending order, i.e. placing the
+        # most runtime-heavy kernels at the top of the list
+        sorted_calls = sorted(collected_calls, key=lambda c: float(c[0]), reverse=True)
+        try:
+            with open(output_file, "a") as file:
+                log.debug("Save profile bandwidth results to %s", output_file)
+                file.write("====================\n")
+                file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
+                for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
+                    # also display the runtime percentage for each kernel
+                    percentage = f"{ms/overall_time*100:.2f}%"
+                    suffix = f" \t {percentage} \t {kernel_name}"
+                    bw_info_str = create_bandwidth_info_str(
+                        ms, num_gb, gb_per_s, suffix=suffix
+                    )
+                    file.write(bw_info_str + "\n")
+                file.write(f"{summary_str}\n\n")
+        except Exception as e:
+            log.warning("failed to write profile bandwidth result into %s", output_file)
 
 
 class DebugAutotuner(CachingAutotuner):
@@ -606,7 +628,7 @@ class DebugAutotuner(CachingAutotuner):
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
             return
         super().run(*args, grid=grid, stream=stream)
@@ -914,7 +936,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 16))
+    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -1076,7 +1098,7 @@ def reduction(
         contiguous_config = triton_config_reduction(
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8)
+        outer_config = triton_config_reduction(size_hints, 64, 8)
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )

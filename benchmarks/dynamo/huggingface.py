@@ -155,6 +155,13 @@ BATCH_SIZE_DIVISORS = {
     "YituTechConvBert": 2,
 }
 
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine.
+    "DebertaV2ForMaskedLM",
+    "BlenderbotForCausalLM",
+}
+
 SKIP_DUE_TO_CONTROL_FLOW = {"AllenaiLongformerBase"}
 
 
@@ -517,6 +524,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             ):
                 continue
             yield model_name
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
 
     def pick_grad(self, name, is_training):
         if is_training:

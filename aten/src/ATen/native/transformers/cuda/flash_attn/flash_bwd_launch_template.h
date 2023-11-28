@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/static_switch.h>
 #include <ATen/native/transformers/cuda/flash_attn/flash.h>

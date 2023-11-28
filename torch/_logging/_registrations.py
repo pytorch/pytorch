@@ -1,12 +1,15 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
-register_log("dynamo", "torch._dynamo")
+DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_node"]
+DISTRIBUTED = ["torch.distributed", "torch._dynamo.backends.distributed"]
+
+register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("aot", "torch._functorch.aot_autograd")
 register_log("inductor", "torch._inductor")
-register_log("dynamic", "torch.fx.experimental.symbolic_shapes")
+register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
-register_log("distributed", "torch.distributed")
+register_log("distributed", DISTRIBUTED)
 register_log("onnx", "torch.onnx")
 
 register_artifact(
@@ -62,6 +65,14 @@ register_artifact(
     "recompiles",
     "Prints the reason why we recompiled a graph. Very, very useful.",
     visible=True,
+)
+register_artifact(
+    "recompiles_verbose",
+    "Prints all guard checks that fail during a recompilation. "
+    "At runtime, Dynamo will stop at the first failed check for each failing guard. "
+    "So not all logged failing checks are actually ran by Dynamo.",
+    visible=True,
+    off_by_default=True,
 )
 register_artifact(
     "graph_breaks",

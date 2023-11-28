@@ -202,10 +202,8 @@ class ConstDictVariable(VariableTracker):
     def is_valid_key(cls, key):
         return (
             key.is_python_constant()
-            or isinstance(key, TensorVariable)
-            and key.specialized_value is not None
-            or isinstance(key, ConstantVariable)
-            and key.python_type() is torch.dtype
+            or (isinstance(key, TensorVariable) and key.specialized_value is not None)
+            or (isinstance(key, ConstantVariable) and key.python_type() is torch.dtype)
         )
 
     @classmethod
