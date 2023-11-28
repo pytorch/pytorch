@@ -394,6 +394,29 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten._cslt_sparse_mm)
+def meta__cslt_sparse_mm(
+    compressed_A: torch.Tensor,
+    dense_B: torch.Tensor,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    transpose_result: bool = False,
+):
+    assert len(dense_B.shape) == 2, "cslt_sparse_mm only supports 2d inputs"
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    k = dense_B.size(0)
+    n = dense_B.size(1)
+    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    if bias is not None:
+        assert m == bias.size(0)
+
+    mixed_dtype = out_dtype is not None and (is_int8_input_type != out_dtype)
+    output_shape = (n, m) if transpose_result else (m, n)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype if mixed_dtype else None)
+    return result
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
