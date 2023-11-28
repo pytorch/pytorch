@@ -1,7 +1,9 @@
 import argparse
 import collections
+import sys
 from pprint import pformat
 from typing import Dict, List, Sequence
+from unittest.mock import Mock, patch
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -580,6 +582,25 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
+def generate_docstrings() -> Dict[str, str]:
+    docstrings = {}
+
+    def mock_add_docstr(func, docstr):
+        docstrings[func._extract_mock_name()] = docstr
+
+    with patch.dict(
+        sys.modules,
+        {
+            "torch": Mock(name="torch"),
+            "torch._C": Mock(_add_docstr=mock_add_docstr),
+        },
+    ):
+        sys.path.append("torch")  # bypassing torch/__init__.py
+        import _torch_docs
+
+    return docstrings
+
+
 def gen_pyi(
     native_yaml_path: str,
     tags_yaml_path: str,
@@ -973,11 +994,21 @@ def gen_pyi(
         return hint
 
     function_hints = []
+    docstr_dict = generate_docstrings()
     for name, hints in sorted(unsorted_function_hints.items()):
-        hints = [replace_special_case(h) for h in hints]
-        if len(hints) > 1:
-            hints = ["@overload\n" + h for h in hints]
-        function_hints += hints
+        new_hints = []
+        for hint in hints:
+            hint = replace_special_case(hint)
+            if len(hints) > 1:
+                hint = "@overload\n" + hint
+            docstr = docstr_dict.get(f"torch.{name}")
+            if docstr is not None:
+                l, r = hint.rsplit("...", 1)
+                hint = "\n    ".join(
+                    [l, '"""'] + docstr.strip().split("\n") + ['"""', "...", r]
+                )
+            new_hints.append(hint)
+        function_hints += new_hints
 
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
