@@ -46,7 +46,7 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
-    "TORCH_NCCL_DESYNC_DEBUG"};
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
