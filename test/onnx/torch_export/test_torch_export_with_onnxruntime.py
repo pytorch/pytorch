@@ -28,6 +28,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         if input_kwargs is None:
             input_kwargs = {}
 
+        # NOTE: ONNXProgram holds a reference (not copy) to the original ref_model, including its state_dict.
+        # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
+        # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
         onnx_outputs = onnx_exported_program(*input_args, **input_kwargs)
         torch_outputs = torch_exported_program(*input_args, **input_kwargs)
         torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
