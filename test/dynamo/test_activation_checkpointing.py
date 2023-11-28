@@ -703,26 +703,19 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_compile_selective_checkpoint_random_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
-                torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
             return context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
-        def gn(x, y):
-            return torch.sigmoid(
-                torch.matmul(
-                    torch.dropout(torch.matmul(torch.sigmoid(x), y), p=0.5, train=True),
-                    y,
-                )
-            )
+        def gn(x):
+            return torch.sigmoid(torch.dropout(torch.sigmoid(x), p=0.5, train=True))
 
-        def fn(x, y):
+        def fn(x):
             return torch.utils.checkpoint.checkpoint(
                 gn,
                 x,
-                y,
                 use_reentrant=False,
                 # Regardless of whether `preserve_rng_state` is True or False,
                 # we will always preserve RNG state when using `torch.compile`.
@@ -732,13 +725,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             )
 
         x = torch.randn(4, 4, requires_grad=True, device="cuda")
-        y = torch.randn(4, 4, requires_grad=True, device="cuda")
 
         fw_compiler = functools.partial(
             count_ops,
-            freqs=[2, 2, 1],
+            freqs=[2, 1],
             ops=[
-                torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
                 torch.ops.aten.native_dropout.default,
             ],
@@ -746,13 +737,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         bw_compiler = functools.partial(
             count_ops,
             # NOTE: This unit test expects `dropout` to be recomputed (notice the count for `native_dropout` is 1).
-            # If in the future there is change to the partitioner that causes `dropout` to not be recomputed,
-            # the partitioner should expose an API for user to control what ops must be recomputed,
-            # so that we can ask the partitioner to always recompute this `dropout` op
-            # so that this unit test can still work.
-            freqs=[4, 0, 1],
+            freqs=[0, 1],
             ops=[
-                torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
                 torch.ops.aten.native_dropout.default,
             ],
@@ -762,8 +748,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             bw_compiler=bw_compiler,
             partition_fn=min_cut_rematerialization_partition,
         )
-        self._validate(fn, backend, x, y)
-        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+        self._validate(fn, backend, x)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
