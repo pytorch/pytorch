@@ -1,6 +1,6 @@
 import functools
 
-from typing import Callable, Dict, Set, Tuple
+from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
