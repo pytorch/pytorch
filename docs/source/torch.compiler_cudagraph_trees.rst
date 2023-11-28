@@ -57,12 +57,12 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
         # GRAPH 4
         return z * torch.rand_like(z)
 
-        # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
-        foo(torch.arange(0, 10), device="cuda")
-        # The second run does a CUDA Graph recording, and replays it
-        foo(torch.arange(0, 10), device="cuda")
-        # Finally we hit the optimized, CUDA Graph replay path
-        foo(torch.arange(0, 10), device="cuda")
+    # the first run warms up each graph, which does things like CuBlas or Triton benchmarking
+    foo(torch.arange(0, 10, device="cuda"))
+    # The second run does a CUDA Graph recording, and replays it
+    foo(torch.arange(0, 10, device="cuda"))
+    # Finally we hit the optimized, CUDA Graph replay path
+    foo(torch.arange(0, 10, device="cuda"))
 
 
 In this example, there are two separate paths that we make through the function: 1 -> 2 -> 4, or 1 -> 3 -> 4.
