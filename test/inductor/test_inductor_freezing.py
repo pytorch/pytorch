@@ -375,7 +375,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-    
+
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16

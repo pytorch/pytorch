@@ -345,7 +345,9 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     log.debug("Conv inputs meta not found")
 
-            # average benchmarked speedup / slowdown, < 1 is speedup
+            # average benchmarked channels last speedup / slowdown, < 1 is speedup.
+            # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
+            # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
             GROUPED_MULTIPLIER = 1.358
             DEFAULT_MULTIPLIER = 0.823
             IN_OUT_MULTIPLIER = 0.725
