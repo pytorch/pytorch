@@ -339,13 +339,28 @@ class DeviceMesh:
 
         return submesh
 
-    def get_dim_groups(
-        self, mesh_dim: Optional[int] = None
+    def get_group(
+        self, mesh_dim: Optional[Union[int, str]] = None
     ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        """
+        Returns a list of ProcessGroups corresponding to the mesh dimensions, or
+        returns a single ProcessGroup if mesh_dim is specified or a given mesh has
+        only one mesh dimension.
+
+        Optional Args:
+            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+            of the mesh dimension. Default is None.
+        Returns:
+            A list of :class:`ProcessGroup` object or a single :class:`ProcessGroup` object.
+        """
         if not hasattr(self, "_dim_group_infos"):
             raise RuntimeError("DeviceMesh process groups not initialized!")
         if mesh_dim is not None:
+            if isinstance(mesh_dim, str):
+                mesh_dim = self.mesh_dim_names.index(mesh_dim)
             return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+        elif self.mesh.ndim == 1:
+            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[0])
         else:
             dim_groups = []
             for mesh_dim in range(self.mesh.ndim):

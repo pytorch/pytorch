@@ -737,7 +737,7 @@ class DistributedDataParallel(Module, Joinable):
                     f"Only 1D device mesh is supported, but got {device_mesh}."
                 )
             self.device_mesh = device_mesh
-            self.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+            self.process_group = device_mesh.get_group(mesh_dim=0)
 
         self.static_graph = False
         self.dim = dim
