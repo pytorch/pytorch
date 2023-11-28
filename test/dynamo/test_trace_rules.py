@@ -13,9 +13,9 @@ from torch._dynamo.skipfiles import (
 )
 from torch._dynamo.trace_rules import (
     load_object,
-    torch_C_binding_in_graph_functions,
+    torch_c_binding_in_graph_functions,
     torch_ctx_manager_classes,
-    torch_non_C_binding_in_graph_functions,
+    torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import istype
 
@@ -66,9 +66,9 @@ ignored_ctx_manager_class_names = {
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
-ignored_C_binding_in_graph_function_names = set()
+ignored_c_binding_in_graph_function_names = set()
 if torch._C._llvm_enabled():
-    ignored_C_binding_in_graph_function_names |= {
+    ignored_c_binding_in_graph_function_names |= {
         "torch._C._te.set_llvm_aot_workflow",
         "torch._C._te.set_llvm_target_cpu",
         "torch._C._te.set_llvm_target_attrs",
@@ -125,7 +125,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
-        objs = gen_allowed_objs_and_ids(record=True, C_binding_only=True)
+        objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
         # Test ctx manager classes are updated in torch_name_rule_map.
         generated = objs.ctx_mamager_classes
         used = set()
@@ -142,11 +142,11 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "ignored_ctx_manager_class_names",
         )
         # Test C binding in graph functions are updated in torch_name_rule_map.
-        generated = objs.C_binding_in_graph_functions
+        generated = objs.c_binding_in_graph_functions
         used = set()
         for x in (
-            set(torch_C_binding_in_graph_functions.keys())
-            | ignored_C_binding_in_graph_function_names
+            set(torch_c_binding_in_graph_functions.keys())
+            | ignored_c_binding_in_graph_function_names
         ):
             obj = load_object(x)
             if obj is not None:
@@ -154,11 +154,11 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         self._check_set_equality(
             generated,
             used,
-            "torch_C_binding_in_graph_functions",
-            "ignored_C_binding_in_graph_function_names",
+            "torch_c_binding_in_graph_functions",
+            "ignored_c_binding_in_graph_function_names",
         )
         # For non C binding in graph functions, we only test if they can be loaded successfully.
-        for f in torch_non_C_binding_in_graph_functions:
+        for f in torch_non_c_binding_in_graph_functions:
             self.assertTrue(
                 isinstance(
                     load_object(f),

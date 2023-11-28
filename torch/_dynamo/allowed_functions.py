@@ -152,7 +152,7 @@ def _disallowed_function_ids() -> Set[int]:
 # Helper function to dump the torch name rule map generated based on
 # the heuristic defined in gen_allowed_objs_and_ids.
 def dump_allowed_torch_name_rule_map() -> None:
-    m = gen_allowed_objs_and_ids(record=True, C_binding_only=False).name_rule_map
+    m = gen_allowed_objs_and_ids(record=True, c_binding_only=False).name_rule_map
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
@@ -168,12 +168,12 @@ class AllowedObjects:
 
     object_ids: Dict[int, str]
     ctx_mamager_classes: Set[Any]
-    C_binding_in_graph_functions: Set[Any]
-    non_C_binding_in_graph_functions: Set[Any]
+    c_binding_in_graph_functions: Set[Any]
+    non_c_binding_in_graph_functions: Set[Any]
     name_rule_map: Dict[str, Any]
 
 
-def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObjects:
+def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
@@ -182,8 +182,8 @@ def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObject
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
     ctx_mamager_classes = set()
-    C_binding_in_graph_functions = set()
-    non_C_binding_in_graph_functions = set()
+    c_binding_in_graph_functions = set()
+    non_c_binding_in_graph_functions = set()
     torch_name_rule_map = dict()
 
     # Add obj to ctx_mamager_classes set if it's a torch context manager class.
@@ -207,7 +207,7 @@ def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObject
             torch._C._graph_pool_handle,
         }
 
-    # Add obj to C_binding_in_graph_functions set or non_C_binding_in_graph_functions set
+    # Add obj to c_binding_in_graph_functions set or non_c_binding_in_graph_functions set
     # if it's a torch function or method.
     # This is used to generate the in graph function list based on heuristic.
     def heuristic_record_if_in_graph_function(obj, module, name):
@@ -229,14 +229,14 @@ def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObject
             torch_name_rule_map[
                 f"{module.__name__}.{name}"
             ] = TorchInGraphFunctionVariable
-            if C_binding_only:
+            if c_binding_only:
                 if not hasattr(obj, "__code__"):
-                    C_binding_in_graph_functions.add(obj)
+                    c_binding_in_graph_functions.add(obj)
             else:
                 if hasattr(obj, "__code__"):
-                    non_C_binding_in_graph_functions.add(obj)
+                    non_c_binding_in_graph_functions.add(obj)
                 else:
-                    C_binding_in_graph_functions.add(obj)
+                    c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -408,8 +408,8 @@ def gen_allowed_objs_and_ids(record=False, C_binding_only=True) -> AllowedObject
     return AllowedObjects(
         torch_object_ids,
         ctx_mamager_classes,
-        C_binding_in_graph_functions,
-        non_C_binding_in_graph_functions,
+        c_binding_in_graph_functions,
+        non_c_binding_in_graph_functions,
         torch_name_rule_map,
     )
 
