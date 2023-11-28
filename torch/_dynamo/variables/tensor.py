@@ -30,6 +30,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 
+from torch._dynamo import compiled_autograd
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
@@ -713,10 +714,11 @@ class TensorVariable(VariableTracker):
                 ):
                     src = fn_var.func.source
 
-                if src:
-                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                if not src:
+                    unimplemented("No source for register_hook target fn")
+                    # tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
-                # if not compiled_autograd.compiled_autograd_enabled:
+                if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):
                     # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                     # python state.
@@ -732,9 +734,9 @@ class TensorVariable(VariableTracker):
                     # would have no recourse - their forward traces just fine, but will fail at backwards unless
                     # compiled_autograd is enabled. If compiled_autograd fails (there are a lot of failures today)
                     # then they have nothing they can do except disable compile.
-                    # unimplemented(
-                    #     "Compilation of intermediate hooks requires compiled autograd"
-                    # )
+                    unimplemented(
+                        "Compilation of intermediate hooks requires compiled autograd"
+                    )
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
@@ -754,8 +756,6 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
-            else:
-                print("HOOKED SOURCE??", self.source.name(), name)
             tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[

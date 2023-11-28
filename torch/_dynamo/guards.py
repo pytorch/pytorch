@@ -406,12 +406,10 @@ class GuardBuilder(GuardBuilderBase):
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
             )
         else:
-            if not istype(
+            assert istype(
                 val,
                 ok_types,
-            ):
-                # Gross hack because of tensor slipping here, during some grad bullshit, need to check
-                return
+            ), f"Unexpected type {type(val)}, {val}, {type(val) in ok_types}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -690,7 +688,7 @@ class GuardBuilder(GuardBuilderBase):
                 value = value()
 
             value = value if value is not None else self.get(guard.name)
-            assert isinstance(value, torch.Tensor), breakpoint()
+            assert isinstance(value, torch.Tensor)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]

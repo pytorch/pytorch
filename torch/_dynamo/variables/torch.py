@@ -595,20 +595,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # This is slower and less canonical, so only use it if we
                     # have to
                     fn_ = torch._refs.tensor
-                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
-                    unimplemented("torch.tensor call with list of unspec")
 
-                # args[0]._typed_storage()._resize_(args[1].value)
-                # return ConstantVariable(None)
-                # self.value(args[0].as_proxy().node.meta['example_value'], args[1].value)
-
-            print("RUNNING OP", self.value)
-            tensor_var_to_grad = {}
-            for arg in args:
-                if isinstance(arg, TensorVariable):
-                    grad = arg.as_proxy().node.meta['example_value'].grad
-                    print("GRAD FOR ARG PRE", grad)
-                    tensor_var_to_grad[arg] = grad
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(

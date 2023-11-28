@@ -10,7 +10,6 @@
 #include <ATen/ops/set_native.h>
 #endif
 
-#include <iostream>
 namespace at::native {
 
 // this needs to be split along CPU/CUDA lines because we don't have a consistent

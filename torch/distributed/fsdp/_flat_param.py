@@ -1323,7 +1323,7 @@ class FlatParamHandle:
         self._check_sharded_strategy()
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        # self._check_storage_freed(unsharded_flat_param)
+        self._check_storage_freed(unsharded_flat_param)
         _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
         return unsharded_flat_param
 
@@ -2534,10 +2534,12 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
-        _p_assert(
-            torch._same_storage_size(tensor, 0),
-            "Expects storage to be freed but got storage with size > 0",
-        )
+        # Compile does not resize during trace
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            _p_assert(
+                torch._same_storage_size(tensor, 0),
+                "Expects storage to be freed but got storage with size > 0",
+            )
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):

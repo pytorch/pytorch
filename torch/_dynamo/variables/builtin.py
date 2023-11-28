@@ -1112,7 +1112,6 @@ class BuiltinVariable(VariableTracker):
             return obj.var_getattr(tx, name)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
             if source:
-                print("Grad accessed on ", source.name())
                 # We are going to be raising this tensor as grapharg. So, ensure
                 # that we have real grad value instead of fake tensor value.
                 # Walk through the inputs of the subgraph and find if we already
@@ -1154,7 +1153,8 @@ class BuiltinVariable(VariableTracker):
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
 
-                    # No match?
+                    # No match for real value in inputs, fall back to
+                    # var_getattr, which is sound (May produce a GetAttrVariable)
                     try:
                         return obj.var_getattr(tx, name).clone(source=source)
                     except NotImplementedError:
@@ -1162,10 +1162,8 @@ class BuiltinVariable(VariableTracker):
                 unimplemented("tensor grad")
             else:
                 from .builder import wrap_fx_proxy
-                # Intermediaries grad, should be okay?
-                print("GRAD ACCESS NO SOURCE?", obj.as_proxy().node.meta["example_value"].grad)
+                # Intermediaries grad, None is sound.
                 return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
-                # unimplemented("tensor grad w/o source")
         elif isinstance(
             obj,
             (
