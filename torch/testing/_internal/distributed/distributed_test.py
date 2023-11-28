@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
+import unittest
 import numpy as np
 import torch
 import torch.cuda
@@ -877,6 +878,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(BACKEND == "ucc", "broken, see https://github.com/pytorch/pytorch/pull/113620")
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
@@ -4159,233 +4161,6 @@ class DistributedTest:
         def test_barrier_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_barrier_helper(group, group_id, rank)
-
-        def _test_broadcast_multigpu_helper(self, group, group_id, rank, rank_to_GPU):
-            for src in group:
-                expected_tensor = _build_tensor(src + 1)
-                tensors = [
-                    _build_tensor(src + 1, -1).cuda(device=i) for i in rank_to_GPU[rank]
-                ]
-                if rank == src:
-                    tensors[0] = expected_tensor.cuda(device=rank_to_GPU[rank][0])
-
-                dist.broadcast_multigpu(tensors, src, group_id)
-                for tensor in tensors:
-                    self.assertEqual(tensor, expected_tensor)
-            self._barrier()
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't support broadcast multigpu"
-        )
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl", "NCCL broadcast multigpu skipped"
-        )
-        @skip_if_no_gpu
-        def test_broadcast_multigpu(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            self._test_broadcast_multigpu_helper(group, group_id, rank, rank_to_GPU)
-
-        def _test_all_reduce_multigpu_helper(
-            self,
-            group,
-            group_id,
-            rank,
-            rank_to_GPU,
-            op,
-            master_value,
-            worker_value,
-            expected_value,
-            dtype=torch.float,
-        ):
-            for src in group:
-                curr_value = master_value if rank == src else worker_value
-                tensors = [
-                    _build_tensor(src + 1, curr_value, dtype=dtype).cuda(device=i)
-                    for i in rank_to_GPU[rank]
-                ]
-                self.call_dist_op(
-                    ":all_reduce",
-                    False,
-                    dist.all_reduce_multigpu,
-                    tensors,
-                    op,
-                    group_id,
-                )
-                expected_tensor = _build_tensor(src + 1, expected_value, dtype=dtype)
-                for tensor in tensors:
-                    self.assertEqual(tensor, expected_tensor)
-
-            self._barrier()
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't support broadcast multigpu"
-        )
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL"
-        )
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
-        )
-        @skip_if_no_gpu
-        def test_all_reduce_multigpu(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            self._test_all_reduce_multigpu_helper(
-                group,
-                group_id,
-                rank,
-                rank_to_GPU,
-                dist.ReduceOp.SUM,
-                2,
-                10,
-                (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),
-            )
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't support broadcast multigpu"
-        )
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL"
-        )
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
-        )
-        @skip_if_no_gpu
-        def test_all_reduce_multigpu_complex(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            self._test_all_reduce_multigpu_helper(
-                group,
-                group_id,
-                rank,
-                rank_to_GPU,
-                dist.ReduceOp.SUM,
-                complex(2, 3),
-                complex(10, 11),
-                (complex(2, 3) + complex(10, 11) * (len(group) - 1))
-                * len(rank_to_GPU[0]),
-                dtype=torch.cfloat,
-            )
-
-        def _test_reduce_multigpu_helper(
-            self,
-            group,
-            group_id,
-            rank,
-            rank_to_GPU,
-            op,
-            master_value,
-            worker_value,
-            expected_value,
-        ):
-            for src in group:
-                tensor_value = master_value if rank == src else worker_value
-                tensors = [
-                    _build_tensor(src + 1, tensor_value).cuda(device=i)
-                    for i in rank_to_GPU[rank]
-                ]
-                self.call_dist_op(
-                    ":reduce",
-                    False,
-                    dist.reduce_multigpu,
-                    tensors,
-                    src,
-                    op,
-                    group_id,
-                    expect_event=len(tensors) == 1,
-                    tensor_shapes=[tensors[0].shape],
-                )
-                if rank == src:
-                    expected_tensor = _build_tensor(src + 1, expected_value)
-                    self.assertEqual(tensors[0], expected_tensor)
-
-            self._barrier()
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only Nccl backend supports reduce multigpu"
-        )
-        @skip_if_no_gpu
-        def test_reduce_multigpu(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            device_id = rank_to_GPU[rank][0]
-            torch.cuda.set_device(device_id)
-            self._test_reduce_multigpu_helper(
-                group,
-                group_id,
-                rank,
-                rank_to_GPU,
-                dist.ReduceOp.SUM,
-                2,
-                10,
-                (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),
-            )
-
-        def _test_all_gather_multigpu_helper(
-            self, group, group_id, rank, rank_to_GPU, dtype=torch.float
-        ):
-            for dest in group:
-                tensors = [
-                    _build_tensor(dest + 1, dtype=dtype).cuda(device=i)
-                    for i in rank_to_GPU[rank]
-                ]
-
-                # construct expected output along with
-                # a place holder to receive all gather results
-                output_tensors = []
-                expected_output = []
-                output_per_gpu = (
-                    [_build_tensor(dest + 1, -1, dtype=dtype)]
-                    * len(rank_to_GPU[0])
-                    * len(group)
-                )
-                expected_per_gpu = (
-                    [_build_tensor(dest + 1, dtype=dtype)]
-                    * len(rank_to_GPU[0])
-                    * len(group)
-                )
-                for gpu in rank_to_GPU[rank]:
-                    output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
-                    expected_output.append(
-                        [t.cuda(device=gpu) for t in expected_per_gpu]
-                    )
-                self.call_dist_op(
-                    ":all_gather",
-                    False,
-                    dist.all_gather_multigpu,
-                    output_tensors,
-                    tensors,
-                    group_id,
-                    expect_event=len(expected_output) == 1,
-                )
-                self.assertEqual(output_tensors, expected_output)
-
-            self._barrier()
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only Nccl backend supports allgather multigpu"
-        )
-        @skip_if_no_gpu
-        def test_all_gather_multigpu(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            device_id = rank_to_GPU[rank][0]
-            torch.cuda.set_device(device_id)
-            self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
-
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only Nccl backend supports allgather multigpu"
-        )
-        @skip_if_no_gpu
-        def test_all_gather_multigpu_complex(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            device_id = rank_to_GPU[rank][0]
-            torch.cuda.set_device(device_id)
-            self._test_all_gather_multigpu_helper(
-                group, group_id, rank, rank_to_GPU, dtype=torch.cfloat
-            )
 
         def _model_step(self, model):
             for param in model.parameters():
@@ -7713,6 +7488,7 @@ class DistributedTest:
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
         @with_dist_debug_levels(levels=["DETAIL"])
+        @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
         def test_broadcast_object_list(self):
             return self._test_broadcast_object_list()
 
@@ -9204,6 +8980,7 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
+        @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -9702,6 +9479,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
+        @unittest.skip("Test is failing, tracking issue at https://github.com/pytorch/pytorch/issues/102751")
         def test_ddp_has_finalized(self):
 
             @dataclass
@@ -9788,6 +9566,78 @@ class DistributedTest:
                 running = False
                 t.join()
 
+        @skip_if_lt_x_gpu(4)
+        @require_world_size(4)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_update_process_group(self):
+            def get_num_torch_recompiles():
+                guard_failures = torch._dynamo.utils.guard_failures
+                num_recompiles = [len(guard_failures[code]) for code in guard_failures]
+                return 0 if len(num_recompiles) == 0 else max(num_recompiles)
+
+            input = torch.rand(10, 10).cuda(self.rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(10, 10).cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            model = torch.compile(ddp)
+
+            def run_iteration():
+                out = model(input)
+                out.sum().backward()
+                torch.cuda.synchronize()
+
+            # Run regular iteration.
+            run_iteration()
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
+
+            # Now reduce world_size and run iteration.
+            group_size_2 = dist.new_group(ranks=[0, 1])
+            ddp._update_process_group(group_size_2)
+            if self.rank in [0, 1]:
+                run_iteration()
+
+            # Increase the world size and run iteration.
+            group_size_3 = dist.new_group(ranks=[1, 2, 3])
+            ddp._update_process_group(group_size_3)
+            if self.rank in [1, 2, 3]:
+                run_iteration()
+
+            # Back to default size.
+            ddp._update_process_group(_get_default_group())
+            run_iteration()
+
+            # Now create default pg of smaller size.
+            dist.destroy_process_group()
+
+            if self.rank in [1, 2, 3]:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=BACKEND,
+                    world_size=3,
+                    rank=self.rank - 1,
+                    timeout=timedelta(seconds=default_pg_timeout),
+                )
+                ddp._update_process_group(_get_default_group())
+                run_iteration()
+                dist.destroy_process_group()
+
+            # Need to init pg again for "_barrier" to succeed.
+            dist.init_process_group(
+                init_method=self.init_method,
+                backend=BACKEND,
+                world_size=4,
+                rank=self.rank,
+                timeout=timedelta(seconds=default_pg_timeout),
+            )
+
+            # Validate no more recompiles.
+            num_compiles = get_num_torch_recompiles()
+            assert 0 == num_compiles
 
 
         @skip_if_lt_x_gpu(2)

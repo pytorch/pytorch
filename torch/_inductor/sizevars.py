@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -344,13 +344,11 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
-            return self.guard_equals(left, right)
-        elif lv < rv:
-            self.guard_lt(left, right)
+        if lv <= rv:
+            self.guard_leq(left, right)
             return left
         else:
-            self.guard_lt(right, left)
+            self.guard_leq(right, left)
             return right
 
     def evaluate_static_shape(self, left: Expr) -> int:
@@ -395,7 +393,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: List[Expr],
+        exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
     ) -> Tuple[int, ...]:
