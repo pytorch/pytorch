@@ -455,6 +455,97 @@ def forward(self, primals_1):
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
 
+    def test_input_mutation_set__input_mutation(self):
+        def f(a):
+            b = torch.arange(9, dtype=a.dtype).reshape(3, 3)
+            with torch.no_grad():
+                a.set_(b)
+            return a * b
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_set__steals_view_chain(self):
+        def f(a, b):
+            a_ = a.mul(2)
+            b_ = b.mul(2)
+            b_slice = b_[1].view(3, 3)
+            # a_clone should inherit the view chain from b_slice
+            a_.set_(b_slice)
+            # Also mutates b_,
+            a_.view(-1).mul_(2)
+            return a_ * b_slice
+        inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 9, requires_grad=False)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_set__and_data_mutation_good(self):
+        def f(a, b):
+            # The data mutation happens *after* the set_(). This is ok (see the graph below)
+            with torch.no_grad():
+                a.set_(b)
+            b.mul_(2)
+            return a + b
+        inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        # Important things to note:
+        # - "return a.set_(b)" desugars into "return b"
+        # - Both a and b are recorded as experiencing mutations,
+        #   which is why we see "b_updated" (output of the mul) twice in the graph outputs.
+        #   a is recorded as both a data mutation and a metadata mutation (due to set_ swapping its storage).
+        # - the runtime epilogue for a is "a.set_(mul)"
+        # - the runtime epilogue for b is "b.copy_(mul)"
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+    mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
+    add = torch.ops.aten.add.Tensor(mul, mul)
+    return [mul, mul, add]""")
+
+    # This is a (hopefully) extremely rare case that is difficult to handle,
+    # so we ban it.
+    def test_set__and_data_mutation_bad(self):
+        def f(a):
+            a_view = a.view(-1)
+            tmp = torch.ones(3, 3, requires_grad=True)
+            # Now, any mutations on either tmp
+            # will be tracked as graph input mutations.
+            with torch.no_grad():
+                a.set_(tmp)
+            # BAD: a_view is now detached from every graph input,
+            # so we won't recognize that this caused an input mutation!
+            a_view.mul_(2)
+            return a + tmp
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
+            self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_input_mutation_set__nop(self):
+        def f(a):
+            b = torch.arange(9, dtype=a.dtype)
+            a_old = torch.ops.aten.alias.default(a)
+            with torch.no_grad():
+                a.set_(b)
+                a.set_(a_old)
+            return a + b.reshape(3, 3)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+        # Things to note:
+        # - There are no set_() calls in the graph (we functionalize a.set_(b) into "b")
+        # - There is only **1** graph output. We properly realized that the two set_() calls
+        #   undo each other, and so effectively no inputs are mutated.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    alias = torch.ops.aten.alias.default(primals_1);  primals_1 = None
+    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
+    add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
+    return [add]""")
+
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
         def f(a, b, c):
@@ -1624,10 +1715,9 @@ def forward(self, primals_1, primals_2):
         # Expectation: fwd() takes in 2 args, and we don't construct a synthetic base.
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
-    t = torch.ops.aten.t.default(view);  view = None
-    add = torch.ops.aten.add.Tensor(t, primals_2);  primals_2 = None
-    return [t, add]""")
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    add = torch.ops.aten.add.Tensor(t, primals_2);  t = primals_2 = None
+    return [add]""")
 
     def test_input_mutation_aliases_and_none_require_gradients(self):
         def f(a, b, c):
@@ -1666,7 +1756,7 @@ def forward(self, primals_1, primals_2):
         # So we don't need to do the base construction / deconstruction
         def f(a, b, c, d):
             b.add_(1)
-            d.t_()
+            d.unsqueeze_(0)
             return a + c + d, b.view(-1)
 
         def inp_callable(req_grad):
@@ -1695,11 +1785,11 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
     as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    t_1 = torch.ops.aten.t.default(as_strided_3);  as_strided_3 = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_3, 0);  as_strided_3 = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
     as_strided_11 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
-    return [as_strided_scatter, add_2, view_1, t_1]""")  # noqa: B950
+    view_2 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
+    return [as_strided_scatter, add_2, view_2, unsqueeze_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
@@ -1937,7 +2027,7 @@ def forward(self, tangents_1):
     def test_dupe_arg_torture(self):
         def f(x, y):
             x.t_()
-            y.t_()
+            y.unsqueeze_(0)
             return x + y
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -1998,8 +2088,8 @@ def forward(self, tangents_1):
     def _test_invalid_dupe(self, counter, fake):
         class F(torch.nn.Module):
             def forward(self, x, y):
-                x.t_()
-                y.t_()
+                x.unsqueeze_(0)
+                y.unsqueeze_(0)
                 return (x + y,)
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -2018,6 +2108,8 @@ def forward(self, tangents_1):
             fxy = aot_module_simplified(F(), (x, y), nop)
 
         fxy(x, y)
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         fxy(x, x)  # is ok!
 
         if fake:
@@ -2025,9 +2117,13 @@ def forward(self, tangents_1):
         else:
             fxx = aot_module_simplified(F(), (x, x), nop)
 
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         fxx(x, x)
         # Note This should not raise! Once we have guards in place here,
         # we will have this working correctly, as it should recompile.
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
@@ -2648,7 +2744,7 @@ class <lambda>(torch.nn.Module):
             x.t_()
             return (x * 2,)
         mod = TestMod(fn)
-        inp = torch.randn(2)
+        inp = torch.randn(2, 4)
         with self.assertRaisesRegex(
             RuntimeError, "Found an input that received a metadata mutation"
         ):
@@ -3357,7 +3453,7 @@ def forward(self, tangents_1, tangents_2):
     def test_aot_dispatch_input_metadata_mutation(self):
         def f(a, b):
             a.t_()
-            b.t_()
+            b.unsqueeze_(0)
             return a + b
 
         b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
@@ -3402,7 +3498,7 @@ def forward(self, tangents_1, tangents_2):
     def test_aot_dispatch_input_data_and_metadata_mutation(self):
         def f(a, b):
             a.t_()
-            b.t_()
+            b.unsqueeze_(0)
             a.mul_(2)
             b.mul_(3)
             return a + b
