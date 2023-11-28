@@ -4,91 +4,26 @@
 #include <semaphore.h>
 
 #include <ATen/ATen.h>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d {
 
-static constexpr size_t kMaxDevices = 8;
-static constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
-
-class SharedMemoryPtrBase {
- public:
-  SharedMemoryPtrBase(
-      const std::string& rdzvId,
-      size_t rank,
-      size_t worldSize,
-      size_t allocSize,
-      std::function<void(void*)> initializer,
-      std::function<void(void*)> destructor);
-
-  ~SharedMemoryPtrBase();
-
- private:
-  std::string shmName_;
-  std::string initSemName_;
-  std::string tearDownSemName_;
-  size_t rank_;
-  size_t worldSize_;
-  size_t allocSize_;
-  std::function<void(void*)> destructor_;
-
-  sem_t* initSem_;
-  sem_t* tearDownSem_;
-  int shmFd_;
-
- protected:
-  void* shared_;
-};
-
-template <typename T>
-class SharedMemoryPtr : public SharedMemoryPtrBase {
- public:
-  template <typename... ConstructorArgs>
-  SharedMemoryPtr(
-      const std::string& rdzvId,
-      size_t rank,
-      size_t worldSize,
-      ConstructorArgs... args)
-      : SharedMemoryPtrBase(
-            rdzvId,
-            rank,
-            worldSize,
-            sizeof(T),
-            [args...](void* ptr) { new (ptr) T(args...); },
-            [](void* ptr) { static_cast<T*>(ptr)->~T(); }) {}
-
-  SharedMemoryPtr(const SharedMemoryPtr&) = delete;
-  SharedMemoryPtr& operator=(const SharedMemoryPtr&) = delete;
-
-  T* operator->() const {
-    return static_cast<T*>(shared_);
-  }
-
-  T& operator*() const {
-    return *static_cast<T*>(shared_);
-  }
-};
-
-class TwoPhaseGather {
- public:
-  TwoPhaseGather(size_t worldSize);
-  ~TwoPhaseGather();
-
-  void run(std::function<void()> writeFn, std::function<void()> gatherFn);
-
- private:
-  size_t worldSize_;
-  size_t barrierCnt_;
-  pthread_mutex_t mutex_;
-  pthread_cond_t cond_;
-};
+constexpr const char* ENABLE_INTRA_NODE_COMM = "ENABLE_INTRA_NODE_COMM";
+constexpr size_t kMaxDevices = 8;
+constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
+
+enum class Topology { UNKNOWN = 0, FULLY_CONNECTED = 1, HYBRID_CUBE_MESH = 2 };
+
+enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
 
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
+      Topology topology,
+      std::array<void*, kMaxDevices> p2pStates,
       std::array<void*, kMaxDevices> buffers,
-      std::array<uint32_t*, kMaxDevices> barriers,
       size_t rank,
       size_t worldSize);
 
@@ -99,16 +34,21 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       size_t rank,
       size_t worldSize);
 
+  static c10::intrusive_ptr<IntraNodeComm> rendezvousViaStore(
+      c10::intrusive_ptr<c10d::Store> store,
+      const std::string& prefix,
+      size_t rank,
+      size_t worldSize);
+
+  bool shouldUseIntraNodeAllReduce(const at::Tensor& input);
   at::Tensor allReduce(const at::Tensor& input);
 
  private:
+  Topology topology_;
+  std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;
-  std::array<uint32_t*, kMaxDevices> barriers_;
   size_t rank_;
   size_t worldSize_;
-  uint32_t generation_;
-  NvlMesh nvlMesh_;
-  bool isHybridCubeMesh_ = false;
 };
 
 } // namespace c10d

@@ -9,6 +9,7 @@
 #include <nvml.h>
 
 #include <iostream>
+#include <random>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -16,6 +17,82 @@
 #include <unistd.h>
 
 namespace c10d {
+
+////////////////////////////////////////////////////////////////////////////////
+// Rendezvous Utilities
+////////////////////////////////////////////////////////////////////////////////
+
+class SharedMemoryPtrBase {
+ public:
+  SharedMemoryPtrBase(
+      const std::string& rdzvId,
+      size_t rank,
+      size_t worldSize,
+      size_t allocSize,
+      std::function<void(void*)> initializer,
+      std::function<void(void*)> destructor);
+
+  ~SharedMemoryPtrBase();
+
+ private:
+  std::string shmName_;
+  std::string initSemName_;
+  std::string tearDownSemName_;
+  size_t rank_;
+  size_t worldSize_;
+  size_t allocSize_;
+  std::function<void(void*)> destructor_;
+
+  sem_t* initSem_;
+  sem_t* tearDownSem_;
+  int shmFd_;
+
+ protected:
+  void* shared_;
+};
+
+template <typename T>
+class SharedMemoryPtr : public SharedMemoryPtrBase {
+ public:
+  template <typename... ConstructorArgs>
+  SharedMemoryPtr(
+      const std::string& rdzvId,
+      size_t rank,
+      size_t worldSize,
+      ConstructorArgs... args)
+      : SharedMemoryPtrBase(
+            rdzvId,
+            rank,
+            worldSize,
+            sizeof(T),
+            [args...](void* ptr) { new (ptr) T(args...); },
+            [](void* ptr) { static_cast<T*>(ptr)->~T(); }) {}
+
+  SharedMemoryPtr(const SharedMemoryPtr&) = delete;
+  SharedMemoryPtr& operator=(const SharedMemoryPtr&) = delete;
+
+  T* operator->() const {
+    return static_cast<T*>(shared_);
+  }
+
+  T& operator*() const {
+    return *static_cast<T*>(shared_);
+  }
+};
+
+class TwoPhaseExchange {
+ public:
+  TwoPhaseExchange(size_t worldSize);
+  ~TwoPhaseExchange();
+
+  void run(std::function<void()> writeFn, std::function<void()> gatherFn);
+
+ private:
+  size_t worldSize_;
+  size_t barrierCnt_;
+  pthread_mutex_t mutex_;
+  pthread_cond_t cond_;
+};
 
 SharedMemoryPtrBase::SharedMemoryPtrBase(
     const std::string& rdzvId,
@@ -79,7 +156,7 @@ SharedMemoryPtrBase::~SharedMemoryPtrBase() {
   }
 }
 
-TwoPhaseGather::TwoPhaseGather(size_t worldSize)
+TwoPhaseExchange::TwoPhaseExchange(size_t worldSize)
     : worldSize_(worldSize), barrierCnt_(0) {
   pthread_mutexattr_t mutexAttr;
   pthread_condattr_t condAttr;
@@ -111,13 +188,12 @@ TwoPhaseGather::TwoPhaseGather(size_t worldSize)
   pthread_condattr_destroy(&condAttr);
 }
 
-TwoPhaseGather::~TwoPhaseGather() {
+TwoPhaseExchange::~TwoPhaseExchange() {
   pthread_mutex_destroy(&mutex_);
   pthread_cond_destroy(&cond_);
 }
 
-// TODO: maybe call it TwoPhaseExchange?
-void TwoPhaseGather::run(
+void TwoPhaseExchange::run(
     std::function<void()> writeFn,
     std::function<void()> gatherFn) {
   // Phase 1: write
@@ -143,19 +219,27 @@ void TwoPhaseGather::run(
   pthread_mutex_unlock(&mutex_);
 }
 
-// TODO: determine via GPU model
-static constexpr size_t kMaxNvLinks = 12;
+////////////////////////////////////////////////////////////////////////////////
+// Topology Detection
+////////////////////////////////////////////////////////////////////////////////
 
-static NvlMesh getNvlMesh() {
+// TODO: determine via GPU model
+// static constexpr size_t kMaxNvLinks = 12;
+static constexpr size_t kMaxNvLinks = 16;
+
+static NvlMesh getNvlMesh(size_t worldSize) {
   using namespace c10::cuda;
 
-  nvmlDevice_t devices[kMaxDevices];
+  nvmlDevice_t devices[worldSize];
   std::unordered_map<std::string, size_t> busIdToIdx;
   NvlMesh nvlMesh = {};
 
-  for (size_t idx = 0; idx < kMaxDevices; ++idx) {
+  // TODO: handle num_gpus < 8
+  for (size_t idx = 0; idx < worldSize; ++idx) {
     cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, idx));
+    if (cudaGetDeviceProperties(&prop, idx) == cudaErrorInvalidDevice) {
+      continue;
+    }
     char busId[80];
     snprintf(
         busId,
@@ -170,12 +254,14 @@ static NvlMesh getNvlMesh() {
     busIdToIdx.emplace(std::make_pair(busId, idx));
   }
 
-  for (size_t idx = 0; idx < kMaxDevices; ++idx) {
+  for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxNvLinks; ++link) {
       nvmlPciInfo_t pciInfo;
-      TORCH_CHECK(
-          DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
-              devices[idx], link, &pciInfo) == NVML_SUCCESS);
+      auto res = DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
+          devices[idx], link, &pciInfo);
+      if (res != NVML_SUCCESS) {
+        break;
+      }
       auto it = busIdToIdx.find(pciInfo.busId);
       if (it != busIdToIdx.end()) {
         if (idx != it->second) {
@@ -187,7 +273,7 @@ static NvlMesh getNvlMesh() {
   return nvlMesh;
 }
 
-static bool isHybridCubeMesh(NvlMesh nvlMesh) {
+static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
   std::array<size_t, kMaxDevices> numNeighbors = {};
   for (size_t i = 0; i < kMaxDevices; ++i) {
     for (size_t j = 0; j < kMaxDevices; ++j) {
@@ -204,124 +290,278 @@ static bool isHybridCubeMesh(NvlMesh nvlMesh) {
   return true;
 }
 
+Topology detectTopology(const NvlMesh nvlMesh, std::vector<int> deviceIds) {
+  TORCH_CHECK(deviceIds.size() >= 2);
+  bool fullyConnected = true;
+  for (size_t i = 0; i < deviceIds.size() - 1; ++i) {
+    for (size_t j = i + 1; j < deviceIds.size(); ++j) {
+      if (nvlMesh[deviceIds[i]][deviceIds[j]] == 0) {
+        fullyConnected = false;
+      }
+    }
+  }
+  if (fullyConnected) {
+    std::cout << "Fully connected" << std::endl;
+    return Topology::FULLY_CONNECTED;
+  }
+  if (deviceIds.size() == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
+    std::cout << "Hybrid cube mesh" << std::endl;
+    return Topology::HYBRID_CUBE_MESH;
+  }
+  return Topology::UNKNOWN;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Rendezvous and Initialization
+////////////////////////////////////////////////////////////////////////////////
+
 IntraNodeComm::IntraNodeComm(
+    Topology topology,
+    std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
     size_t rank,
     size_t worldSize)
-    : buffers_(buffers),
-      barriers_(barriers),
+    : topology_(topology),
+      p2pStates_(p2pStates),
+      buffers_(buffers),
       rank_(rank),
-      worldSize_(worldSize),
-      generation_(0),
-      nvlMesh_(getNvlMesh()) {
-  if (worldSize_ == kMaxDevices) {
-    isHybridCubeMesh_ = isHybridCubeMesh(nvlMesh_);
-  }
-}
+      worldSize_(worldSize) {}
 
 IntraNodeComm::~IntraNodeComm() {
   // TODO
+}
+
+void* initFcP2pState();
+void* initHcmP2pState(NvlMesh nvlMesh, size_t rank);
+
+void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank) {
+  if (topology == Topology::FULLY_CONNECTED) {
+    return initFcP2pState();
+  } else if (topology == Topology::HYBRID_CUBE_MESH) {
+    return initHcmP2pState(nvlMesh, rank);
+  } else {
+    LOG(FATAL) << "Invalid topology";
+    return nullptr;
+  }
 }
 
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
-  // Impose this constraint to avoid confusion
-  TORCH_CHECK(rank == static_cast<size_t>(at::cuda::current_device()));
+  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize > kMaxDevices) {
+    return nullptr;
+  }
 
+  // Data structure for handshaking
   struct Shared {
-    std::array<int, kMaxDevices> devices;
-    std::array<cudaIpcMemHandle_t, kMaxDevices> barrierHandles;
+    std::array<int, kMaxDevices> deviceIds;
+    std::array<cudaIpcMemHandle_t, kMaxDevices> p2pStateHandles;
     std::array<cudaIpcMemHandle_t, kMaxDevices> bufferHandles;
-    TwoPhaseGather twoPhaseGather;
+    TwoPhaseExchange twoPhaseExchange;
 
-    Shared(size_t worldSize) : twoPhaseGather(worldSize) {}
+    Shared(size_t worldSize) : twoPhaseExchange(worldSize) {
+      deviceIds.fill(-1);
+    }
   };
+
+  // Initialize shared memory for handshaking
   SharedMemoryPtr<Shared> peerInfo(rdzvId, rank, worldSize, worldSize);
 
-  void* buffer = nullptr;
-  // TODO: explain * 2
-  C10_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
-  cudaIpcMemHandle_t bufferHandle;
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
-
-  uint32_t* barrier = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&barrier, sizeof(uint32_t) * kMaxDevices));
-  C10_CUDA_CHECK(cudaMemset(barrier, 0, sizeof(uint32_t) * kMaxDevices));
-  cudaIpcMemHandle_t barrierHandle;
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&barrierHandle, barrier));
-
-  std::array<int, kMaxDevices> devices;
-  std::array<cudaIpcMemHandle_t, kMaxDevices> bufferHandles;
-  std::array<cudaIpcMemHandle_t, kMaxDevices> barrierHandles;
-  peerInfo->twoPhaseGather.run(
+  // Gether peer device Ids
+  std::vector<int> deviceIds;
+  peerInfo->twoPhaseExchange.run(
+      [&]() { peerInfo->deviceIds[rank] = at::cuda::current_device(); },
       [&]() {
-        peerInfo->devices[rank] = at::cuda::current_device();
-        peerInfo->bufferHandles[rank] = bufferHandle;
-        peerInfo->barrierHandles[rank] = barrierHandle;
-      },
-      [&]() {
-        bufferHandles = peerInfo->bufferHandles;
-        barrierHandles = peerInfo->barrierHandles;
-        devices = peerInfo->devices;
+        for (const auto& deviceId : peerInfo->deviceIds) {
+          if (deviceId != -1) {
+            deviceIds.push_back(deviceId);
+          }
+        }
       });
-
-  // Check for device uniqueness
-  std::unordered_set<int> uniqueDevices(devices.begin(), devices.end());
   TORCH_CHECK(
-      uniqueDevices.size() == worldSize,
+      deviceIds.size() == worldSize,
       "More than one rank is using the same device. "
       "Make sure every rank is assigned with a unique device. ");
 
-  std::array<void*, kMaxDevices> buffers;
-  std::array<uint32_t*, kMaxDevices> barriers;
+  // Query nvlink connection
+  auto nvlMesh = getNvlMesh(worldSize);
+
+  // Detect topology. This will be used for algo selection.
+  Topology topology = detectTopology(nvlMesh, deviceIds);
+  if (topology == Topology::UNKNOWN) {
+    return nullptr;
+  }
+
+  // Initialize p2p state
+  auto p2pState = initP2pState(topology, nvlMesh, rank);
+
+  // Allocate buffer
+  void* buffer = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
+
+  // Make p2p state and buffer available for IPC
+  cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
+  AT_CUDA_CHECK(cudaIpcGetMemHandle(&p2pStateHandle, p2pState));
+  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
+
+  // Exchange IPC handles for p2p state and buffer
+  std::array<cudaIpcMemHandle_t, kMaxDevices> p2pStateHandles, bufferHandles;
+  peerInfo->twoPhaseExchange.run(
+      [&]() {
+        peerInfo->p2pStateHandles[rank] = p2pStateHandle;
+        peerInfo->bufferHandles[rank] = bufferHandle;
+      },
+      [&]() {
+        p2pStateHandles = peerInfo->p2pStateHandles;
+        bufferHandles = peerInfo->bufferHandles;
+      });
+
+  // Map peers' p2p state and buffer to process address space
+  std::array<void*, kMaxDevices> p2pStates, buffers;
   for (size_t r = 0; r < worldSize; ++r) {
     if (r == rank) {
+      p2pStates[r] = p2pState;
       buffers[r] = buffer;
-      barriers[r] = barrier;
     } else {
       AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &buffers[r], bufferHandles[r], cudaIpcMemLazyEnablePeerAccess));
-
+          &p2pStates[r], p2pStateHandles[r], cudaIpcMemLazyEnablePeerAccess));
       AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          reinterpret_cast<void**>(&barriers[r]),
-          barrierHandles[r],
-          cudaIpcMemLazyEnablePeerAccess));
+          &buffers[r], bufferHandles[r], cudaIpcMemLazyEnablePeerAccess));
     }
   }
-  return c10::make_intrusive<IntraNodeComm>(buffers, barriers, rank, worldSize);
+  return c10::make_intrusive<IntraNodeComm>(
+      topology, p2pStates, buffers, rank, worldSize);
+}
+
+std::string generateUUID() {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(0, 15);
+  std::uniform_int_distribution<> dis2(8, 11);
+
+  std::stringstream ss;
+  int i;
+
+  ss << std::hex;
+  for (i = 0; i < 8; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  for (i = 0; i < 4; i++) {
+    ss << dis(gen);
+  }
+  ss << "-4"; // Version 4 : Random
+  for (i = 0; i < 3; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  ss << dis2(gen);
+
+  for (i = 0; i < 3; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  for (i = 0; i < 12; i++) {
+    ss << dis(gen);
+  }
+
+  return ss.str();
+}
+
+c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
+    c10::intrusive_ptr<c10d::Store> store,
+    const std::string& prefix,
+    size_t rank,
+    size_t worldSize) {
+  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize > kMaxDevices) {
+    return nullptr;
+  }
+  std::array<char, HOST_NAME_MAX + 1> buf = {};
+  gethostname(buf.data(), buf.size());
+  std::string hostname(buf.data());
+
+  std::vector<std::string> hostnameKeys;
+  for (size_t r = 0; r < worldSize; ++r) {
+    std::ostringstream oss;
+    oss << prefix << "-" << rank << "-hostname";
+    hostnameKeys.push_back(oss.str());
+  }
+  store->set(hostnameKeys[rank], hostname);
+
+  std::vector<std::string> hostnames;
+  for (size_t r = 0; r < worldSize; ++r) {
+    if (r == rank) {
+      hostnames.push_back(hostname);
+      continue;
+    }
+    store->wait({hostnameKeys[r]});
+    hostnames.push_back(store->get_to_str(hostnameKeys[r]));
+  }
+
+  for (const auto& hn : hostnames) {
+    if (hn != hostname) {
+      return nullptr;
+    }
+  }
+
+  std::string uuid;
+  std::string rdzvIdKey = prefix + "-IntraHostCommRdzvId";
+  if (rank == 0) {
+    uuid = generateUUID();
+    store->set(rdzvIdKey, uuid);
+  } else {
+    store->wait({rdzvIdKey});
+    uuid = store->get_to_str(rdzvIdKey);
+  }
+  return rendezvous(uuid, rank, worldSize);
+}
+
+AllReduceAlgo selectAllReduceAlgo(
+    const at::Tensor& input,
+    Topology topology,
+    size_t worldSize);
+
+bool IntraNodeComm::shouldUseIntraNodeAllReduce(const at::Tensor& input) {
+  auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
+  return algo != AllReduceAlgo::NONE;
 }
 
 at::Tensor oneShotAllReduce(
     const at::Tensor& input,
     std::array<void*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
+    std::array<void*, kMaxDevices> p2pStates,
     size_t rank,
     size_t worldSize);
 
-at::Tensor hybridCubeOneShotAllReduce(
+at::Tensor twoShotAllReduce(
     const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
     size_t rank,
-    size_t worldSize,
-    NvlMesh nvlMesh_);
+    size_t worldSize);
+
+at::Tensor hybridCubeMeshAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize);
 
 at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
-  TORCH_CHECK(static_cast<size_t>(input.numel()) < kMaxIntraNodeSize);
-  if (isHybridCubeMesh_ && parseEnvVarFlag("ENABLE_HCM_ALLREDUCE")) {
-    // The hybrid cube mesh algorithm uses the barrier twice
-    generation_ = (generation_ + 2) % 93187;
-    return hybridCubeOneShotAllReduce(
-        input, buffers_, barriers_, generation_, rank_, worldSize_, nvlMesh_);
+  auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
+  switch (algo) {
+    case AllReduceAlgo::ONE_SHOT:
+      return oneShotAllReduce(input, p2pStates_, buffers_, rank_, worldSize_);
+    case AllReduceAlgo::TWO_SHOT:
+      return twoShotAllReduce(input, p2pStates_, buffers_, rank_, worldSize_);
+    case AllReduceAlgo::HCM:
+      return hybridCubeMeshAllReduce(
+          input, p2pStates_, buffers_, rank_, worldSize_);
+    default:
+      LOG(FATAL) << "FOOBAR";
+      return input;
   }
-  generation_ = (generation_ + 1) % 93187;
-  return oneShotAllReduce(
-      input, buffers_, barriers_, generation_, rank_, worldSize_);
 }
 
 } // namespace c10d

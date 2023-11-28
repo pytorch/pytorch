@@ -10,6 +10,15 @@
 
 namespace c10d {
 
+static constexpr size_t kBytesPerThread = 16;
+static constexpr size_t kMaxAllReduceBlocks = 24;
+static constexpr size_t kThreadsPerBlock = 1024;
+static constexpr size_t kWarpSize = 32;
+static constexpr uint32_t kNumelPerThread =
+    kBytesPerThread / sizeof(at::BFloat16);
+;
+static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
+
 #define DEVICE_INLINE __device__ inline __attribute__((always_inline))
 
 struct __align__(16) bf16x8 {
@@ -39,256 +48,176 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
   return c;
 }
 
+DEVICE_INLINE void sendSignal(uint32_t* addr) {
+  atomicInc_system(addr, 1);
+}
+
+DEVICE_INLINE void recvSignal(uint32_t* addr) {
+  volatile uint32_t* signal = addr;
+  uint32_t val;
+  do {
+    val = *signal;
+  } while (val == 0 || atomicCAS_system(addr, val, val - 1) != val);
+}
+
 #define LOAD_16(a, b) \
   *reinterpret_cast<uint4*>(a) = reinterpret_cast<const uint4*>(b)[0]
-
-static constexpr size_t kMaxAllReduceBlocks = 24;
-static constexpr size_t kThreadsPerBlock = 1024;
-static constexpr size_t kWarpSize = 32;
-
-template <uint32_t kWorldSize>
-static __global__ void oneShotAllReduceKernel(
-    at::BFloat16* output,
-    size_t N,
-    at::BFloat16* input,
-    size_t M,
-    std::array<at::BFloat16*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
-    size_t rank) {
-  for (size_t i = blockDim.x * blockIdx.x + threadIdx.x; i < M;
-       i += blockDim.x * gridDim.x) {
-    buffers[rank][i] = input[i];
-  }
-
-  // Synchronize the ranks.
-  volatile uint32_t* barrier = barriers[rank];
-  if (threadIdx.x < kWorldSize) {
-    // The 1st block notifies the other ranks.
-    if (blockIdx.x == 0) {
-      assert(barriers[threadIdx.x][rank] < barrierFlag);
-      barriers[threadIdx.x][rank] = barrierFlag;
-    }
-
-    // Busy-wait until all ranks are ready.
-    while (barrier[threadIdx.x] < barrierFlag) {
-    }
-  }
-
-  // Make sure we can move on...
-  __syncthreads();
-
-  // The source pointers. Distributed round-robin for the different warps.
-  const at::BFloat16* src_d[kWorldSize];
-#pragma unroll kWorldSize
-  for (int ii = 0; ii < kWorldSize; ++ii) {
-    int srcRank = (rank + ii) % kWorldSize;
-    src_d[ii] = buffers[srcRank];
-  }
-
-  // Load 8 fp16s
-  constexpr size_t numelPerThread = 8;
-  const size_t offset =
-      (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
-  const size_t stride = blockDim.x * gridDim.x * numelPerThread;
-
-  // Each block accumulates the values from the different GPUs on the same
-  // node.
-  for (size_t i = offset; i < N; i += stride) {
-    // Iterate over the different ranks/devices on the node to load the
-    // values.
-    bf16x8 vals[kWorldSize];
-#pragma unroll kWorldSize
-    for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      LOAD_16(&vals[ii], &src_d[ii][i]);
-    }
-
-    // Sum the values from the different ranks.
-    bf16x8 sums;
-    memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
-
-#pragma unroll kWorldSize
-    for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      sums = add_bf16x8(sums, vals[ii]);
-    }
-
-    // Store to the destination buffer.
-    LOAD_16(&output[i], &sums);
-  }
-}
 
 static inline size_t divUp(uint32_t a, uint32_t b) {
   return (a + b - 1) / b;
 }
 
-at::Tensor oneShotAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
-    size_t rank,
-    size_t worldSize) {
-  constexpr uint32_t numelPerThread = 8;
-  constexpr uint32_t numelPerWarp = numelPerThread * kWarpSize;
-  TORCH_CHECK(
-      input.dtype() == at::kBFloat16,
-      "oneShotAllReduce only supports bf16 for now");
-
-  TORCH_CHECK(worldSize == 2 || worldSize == 4 || worldSize == 8);
-  TORCH_CHECK(input.is_non_overlapping_and_dense());
-  TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(static_cast<size_t>(input.numel()) < kMaxIntraNodeSize);
-
-  // Potentially over allocate the output buffer to align with warp size.
-  size_t M = input.numel();
-  size_t N = divUp(M, numelPerWarp) * numelPerWarp;
-  TORCH_CHECK(N % numelPerWarp == 0);
-  TORCH_CHECK(N <= kMaxIntraNodeSize / 2);
-  auto output = input.new_zeros(N);
-
-  dim3 threads(0, 1, 1);
-  dim3 blocks(0, 1, 1);
-
-  if (N < numelPerThread * kThreadsPerBlock) {
-    threads.x = divUp(N, numelPerWarp) * kWarpSize;
-    blocks.x = 1;
-  } else {
-    auto warpsRequired = divUp(N, numelPerWarp);
-    auto threadsRequired = divUp(N, numelPerThread);
-    blocks.x =
-        std::min(divUp(threadsRequired, kThreadsPerBlock), kMaxAllReduceBlocks);
-    auto warpsPerBlock = divUp(warpsRequired, blocks.x);
-    threads.x = std::min(kThreadsPerBlock, warpsPerBlock * kWarpSize);
-  }
-
-  std::array<at::BFloat16*, kMaxDevices> bf16Buffers;
-  for (size_t i = 0; i < kMaxDevices; ++i) {
-    bf16Buffers[i] = static_cast<at::BFloat16*>(buffers[i]);
-  }
-
-  TORCH_CHECK(input.get_device() == rank);
-  at::cuda::OptionalCUDAGuard guard(input.get_device());
-
-// TODO: maybe not specialize if unrolling doesn't provide much perf gain
-#define X(kWorldSize)                                               \
-  if (worldSize == kWorldSize) {                                    \
-    oneShotAllReduceKernel<kWorldSize>                              \
-        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
-            output.data_ptr<at::BFloat16>(),                        \
-            N,                                                      \
-            input.data_ptr<at::BFloat16>(),                         \
-            M,                                                      \
-            bf16Buffers,                                            \
-            barriers,                                               \
-            barrierFlag,                                            \
-            rank);                                                  \
-  }
-  X(2);
-  X(4);
-  X(8);
-#undef X
-  return output.as_strided(input.sizes(), input.strides());
+static inline size_t alignUp(uint32_t a, uint32_t b) {
+  return divUp(a, b) * b;
 }
 
-static __global__ void hybridCubeAllReduceKernel(
-    at::BFloat16* output,
-    size_t N,
+////////////////////////////////////////////////////////////////////////////////
+// Fully Connected Algos
+////////////////////////////////////////////////////////////////////////////////
+
+struct FcP2pState {
+  uint32_t signals[kMaxAllReduceBlocks][kMaxDevices];
+  uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
+  uint32_t flags[kMaxAllReduceBlocks];
+};
+
+void* initFcP2pState() {
+  void* state = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&state, sizeof(FcP2pState)));
+  C10_CUDA_CHECK(cudaMemset(state, 0, sizeof(FcP2pState)));
+  return state;
+}
+
+template <uint32_t kWorldSize>
+static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
-    size_t M,
+    size_t N,
+    size_t N_aligned,
+    std::array<FcP2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
-    size_t neighbors[5],
     size_t rank) {
-  for (size_t i = blockDim.x * blockIdx.x + threadIdx.x; i < M;
-       i += blockDim.x * gridDim.x) {
-    buffers[rank][i] = input[i];
+  const size_t offset =
+      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+
+  // Wait for all other ranks to enter the kernel
+  if (threadIdx.x < kWorldSize) {
+    auto targetRank = threadIdx.x;
+    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
   }
-
-  // Synchronize the ranks.
-  volatile uint32_t* barrier = barriers[rank];
-  if (threadIdx.x < kMaxDevices) {
-    // The 1st block notifies the other ranks.
-    if (blockIdx.x == 0) {
-      assert(barriers[threadIdx.x][rank] != barrierFlag);
-      barriers[threadIdx.x][rank] = barrierFlag;
-    }
-
-    // Busy-wait until all ranks are ready.
-    while (barrier[threadIdx.x] < barrierFlag) {
-    }
-  }
-
-  // Make sure we can move on...
   __syncthreads();
 
-  const at::BFloat16* src_d[4];
-#pragma unroll 4
-  for (int ii = 0; ii < 4; ++ii) {
-    src_d[ii] = buffers[neighbors[ii]];
+  // The source pointers. Distributed round-robin for the different warps
+  const at::BFloat16* srcs[kWorldSize];
+#pragma unroll kWorldSize
+  for (int ii = 0; ii < kWorldSize; ++ii) {
+    int srcRank = (rank + ii) % kWorldSize;
+    srcs[ii] = buffers[srcRank];
   }
 
-  // Load 8 fp16s
-  constexpr size_t numelPerThread = 8;
-  constexpr size_t relayOffset = kMaxIntraNodeSize / 2;
-  const size_t offset =
-      (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
-  const size_t stride = blockDim.x * gridDim.x * numelPerThread;
-
-  // Each block accumulates the values from the different GPUs on the same
-  // node.
-  for (size_t i = offset; i < N; i += stride) {
-    // Iterate over the different ranks/devices on the node to load the
-    // values.
-    bf16x8 vals[4];
-#pragma unroll 4
-    for (size_t ii = 0; ii < 4; ++ii) {
-      LOAD_16(&vals[ii], &src_d[ii][i]);
+  for (size_t i = offset; i < N_aligned; i += stride) {
+    bf16x8 vals[kWorldSize];
+#pragma unroll kWorldSize
+    for (size_t ii = 0; ii < kWorldSize; ++ii) {
+      LOAD_16(&vals[ii], &srcs[ii][i]);
     }
-
-    // Sum the values from the different ranks.
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
 
-#pragma unroll 4
-    // Sum up local and non-opposite vertex neighbors buffers.
-    // Write to both output buffer and relay buffer.
-    for (size_t ii = 0; ii < 4; ++ii) {
+#pragma unroll kWorldSize
+    for (size_t ii = 0; ii < kWorldSize; ++ii) {
       sums = add_bf16x8(sums, vals[ii]);
     }
-    at::BFloat16* relay = buffers[rank] + relayOffset;
-    LOAD_16(&relay[i], &sums);
-    LOAD_16(&output[i], &sums);
-  }
-
-  barrierFlag += 1;
-  if (threadIdx.x < kMaxDevices) {
-    // The 1st block notifies the other ranks.
-    if (blockIdx.x == 0) {
-      barriers[threadIdx.x][rank] = barrierFlag;
+    for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
+      if (i + ii < N) {
+        input[i + ii] = reinterpret_cast<at::BFloat16*>(&sums)[ii];
+      }
     }
-
-    // Busy-wait until all ranks are ready.
-    while (barrier[threadIdx.x] < barrierFlag) {
-    }
-  }
-
-  __syncthreads();
-
-  // Sum up output buffer and the opposite vertex neighbors's relay buffer.
-  at::BFloat16* relay = buffers[neighbors[4]] + relayOffset;
-  for (size_t i = offset; i < N; i += stride) {
-    bf16x8 a, b;
-    LOAD_16(&a, &output[i]);
-    LOAD_16(&b, &relay[i]);
-    a = add_bf16x8(a, b);
-    LOAD_16(&output[i], &a);
   }
 }
 
-std::array<size_t, 5> initHybridOneShotAllReduceConfig(
-    NvlMesh nvlMesh,
+template <uint32_t kWorldSize>
+static __global__ void twoShotAllReduceKernel(
+    at::BFloat16* input,
+    size_t N_aligned,
+    std::array<FcP2pState*, kMaxDevices> p2pStates,
+    std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
+  const size_t offset =
+      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+  const size_t N_per_rank = N_aligned / kWorldSize;
+  const size_t N_start = N_per_rank * rank;
+
+  // Wait for all other ranks to enter the kernel
+  if (threadIdx.x < kWorldSize) {
+    auto targetRank = threadIdx.x;
+    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+  }
+  __syncthreads();
+
+  at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
+
+  // The source pointers. Distributed round-robin for the different warps
+  at::BFloat16* srcs[kWorldSize];
+  size_t distRank[kWorldSize];
+#pragma unroll kWorldSize
+  for (int ii = 0; ii < kWorldSize; ++ii) {
+    int srcRank = (rank + ii) % kWorldSize;
+    srcs[ii] = buffers[srcRank];
+    distRank[ii] = srcRank;
+  }
+
+  for (size_t i = offset; i < N_per_rank; i += stride) {
+    bf16x8 vals[kWorldSize];
+#pragma unroll kWorldSize
+    for (size_t ii = 0; ii < kWorldSize; ++ii) {
+      LOAD_16(&vals[ii], &srcs[ii][N_start + i]);
+    }
+    bf16x8 sums;
+    memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
+
+#pragma unroll kWorldSize
+    for (size_t ii = 0; ii < kWorldSize; ++ii) {
+      sums = add_bf16x8(sums, vals[ii]);
+    }
+    auto relayBuf = srcs[0] + kMaxIntraNodeSize / 2;
+    LOAD_16(&relayBuf[N_start + i], &sums);
+  }
+
+  __threadfence_system();
+
+  if (threadIdx.x < kWorldSize) {
+    auto targetRank = threadIdx.x;
+    sendSignal(&p2pStates[targetRank]->signals1[blockIdx.x][rank]);
+    recvSignal(&p2pStates[rank]->signals1[blockIdx.x][targetRank]);
+  }
+  __syncthreads();
+
+  for (size_t i = offset; i < N_per_rank; i += stride) {
+    for (size_t ii = 0; ii < kWorldSize; ++ii) {
+      size_t i_r = N_start + i + (distRank[ii] - rank) * N_per_rank;
+      auto relayBuf = srcs[ii] + kMaxIntraNodeSize / 2;
+      LOAD_16(&input[i_r], &relayBuf[i_r]);
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Hybrid Cube Mesh Algos
+////////////////////////////////////////////////////////////////////////////////
+
+struct HcmP2pState {
+  uint32_t signals[kMaxAllReduceBlocks][kMaxDevices];
+  size_t neighborRanks[3];
+  size_t relayRank;
+};
+
+using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
+
+HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
   std::array<std::unordered_set<size_t>, kMaxDevices> neighbors = {};
   std::array<size_t, kMaxDevices> neighborMasks = {};
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -299,106 +228,317 @@ std::array<size_t, 5> initHybridOneShotAllReduceConfig(
       }
     }
   }
-  std::array<size_t, kMaxDevices> opposite = {};
+  HybridCubeMesh hcm = {};
+  for (auto& row : hcm) {
+    row.fill(-1);
+  }
   for (size_t i = 0; i < kMaxDevices; ++i) {
     TORCH_CHECK(neighbors[i].size() == 4);
     for (size_t j = 0; j < kMaxDevices; ++j) {
       if ((neighborMasks[i] & neighborMasks[j]) == 0) {
         neighbors[i].erase(j);
-        opposite[i] = j;
+        hcm[i][3] = j;
       }
     }
-    TORCH_CHECK(neighbors[i].size() == 3);
   }
-  // The first 3 values are non-opposite vertex neighbor devices.
-  // The 4th values is the local device.
-  // The 5th values is the opposite vertex neighbor device.
-  std::array<size_t, 5> conf = {};
-  std::copy(neighbors[rank].begin(), neighbors[rank].end(), conf.begin());
-  conf[3] = rank;
-  conf[4] = opposite[rank];
-  return conf;
+
+  for (size_t i = 0; i < kMaxDevices; ++i) {
+    for (size_t k = 0; k < 3; ++k) {
+      // We can only fill hcm[i][k] with j hcm[j][k] is not filled
+      for (size_t j : neighbors[i]) {
+        if (hcm[j][k] == -1) {
+          hcm[i][k] = j;
+          hcm[j][k] = i;
+          break;
+        }
+      }
+      TORCH_CHECK(hcm[i][k] != -1);
+      neighbors[i].erase(hcm[i][k]);
+    }
+  }
+  return hcm;
 }
 
-at::Tensor hybridCubeOneShotAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> buffers,
-    std::array<uint32_t*, kMaxDevices> barriers,
-    uint32_t barrierFlag,
-    size_t rank,
-    size_t worldSize,
-    NvlMesh nvlMesh_) {
-  TORCH_CHECK(
-      worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
+void* initHcmP2pState(NvlMesh nvlMesh, size_t rank) {
+  HcmP2pState state;
+  memset(&state, 0, sizeof(state));
 
-  static size_t* conf = nullptr;
-  if (conf == nullptr) {
-    auto confHost = initHybridOneShotAllReduceConfig(nvlMesh_, rank);
-    C10_CUDA_CHECK(cudaMalloc(&conf, sizeof(confHost)));
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        conf,
-        confHost.data(),
-        sizeof(confHost),
-        cudaMemcpyHostToDevice,
-        at::cuda::getCurrentCUDAStream()));
+  auto hcm = getHybridCubeMesh(nvlMesh);
+  std::copy(hcm[rank].begin(), hcm[rank].begin() + 3, state.neighborRanks);
+  state.relayRank = hcm[rank][3];
+
+  void* stateDev = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&stateDev, sizeof(state)));
+  AT_CUDA_CHECK(
+      cudaMemcpy(stateDev, &state, sizeof(state), cudaMemcpyHostToDevice));
+  return stateDev;
+}
+
+static __global__ void hybridCubeMeshAllReduceKernel(
+    at::BFloat16* input,
+    size_t M,
+    size_t N,
+    std::array<HcmP2pState*, kMaxDevices> p2pStates,
+    std::array<at::BFloat16*, kMaxDevices> buffers,
+    size_t rank) {
+  const size_t offset =
+      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+
+  // Wait for HCM neigbors to enter the kernel
+  if (threadIdx.x < 3) {
+    auto targetRank = p2pStates[rank]->neighborRanks[threadIdx.x];
+    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+  }
+  __syncthreads();
+
+  const auto neighborRanks = p2pStates[rank]->neighborRanks;
+  const auto relayRank = p2pStates[rank]->relayRank;
+  const at::BFloat16* srcs[4] = {
+      buffers[rank],
+      buffers[neighborRanks[0]],
+      buffers[neighborRanks[1]],
+      buffers[neighborRanks[2]],
+  };
+  at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
+  at::BFloat16* remoteRelay = buffers[relayRank] + kMaxIntraNodeSize / 2;
+
+  // During the first stage, every rank loads data from non-relay HCM
+  // neighbors, sums up with local data, and store in local relay buffer
+  for (size_t i = offset; i < N; i += stride) {
+    bf16x8 vals[4];
+
+#pragma unroll 4
+    for (size_t ii = 0; ii < 4; ++ii) {
+      LOAD_16(&vals[ii], &srcs[ii][i]);
+    }
+    bf16x8 sums;
+    memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
+
+#pragma unroll 4
+    for (size_t ii = 0; ii < 4; ++ii) {
+      sums = add_bf16x8(sums, vals[ii]);
+    }
+    LOAD_16(&localRelay[i], &sums);
   }
 
-  constexpr uint32_t numelPerThread = 8;
-  constexpr uint32_t numelPerWarp = numelPerThread * kWarpSize;
+  // Make prior writes visible to the system
+  __threadfence_system();
+
+  // Each block syncs with the same block on the relay rank
+  if (threadIdx.x == 0) {
+    sendSignal(&p2pStates[relayRank]->signals[blockIdx.x][rank]);
+    recvSignal(&p2pStates[rank]->signals[blockIdx.x][relayRank]);
+  }
+  __syncthreads();
+
+  for (size_t i = offset; i < N; i += stride) {
+    bf16x8 localSum, remoteSum;
+    LOAD_16(&localSum, &localRelay[i]);
+    LOAD_16(&remoteSum, &remoteRelay[i]);
+    localSum = add_bf16x8(localSum, remoteSum);
+    for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
+      if (i + ii < M) {
+        input[i + ii] = reinterpret_cast<at::BFloat16*>(&localSum)[ii];
+      }
+    }
+  }
+}
+
+static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
       "oneShotAllReduce only supports bf16 for now");
-
-  TORCH_CHECK(worldSize == 2 || worldSize == 4 || worldSize == 8);
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(static_cast<size_t>(input.numel()) < kMaxIntraNodeSize);
+  TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
+  TORCH_CHECK(
+      static_cast<size_t>(input.numel() * input.element_size()) <
+      kMaxIntraNodeSize);
+}
 
-  // Potentially over allocate the output buffer to align with warp size.
-  size_t M = input.numel();
-  size_t N = divUp(M, numelPerWarp) * numelPerWarp;
-  TORCH_CHECK(N % numelPerWarp == 0);
-  TORCH_CHECK(N <= kMaxIntraNodeSize / 2);
-  auto output = input.new_zeros(N);
-
-  dim3 threads(0, 1, 1);
-  dim3 blocks(0, 1, 1);
-
-  if (N < numelPerThread * kThreadsPerBlock) {
-    threads.x = divUp(N, numelPerWarp) * kWarpSize;
+static void getLaunchConfig(size_t N, dim3& blocks, dim3& threads) {
+  blocks = dim3(0, 1, 1);
+  threads = dim3(0, 1, 1);
+  if (N < kNumelPerThread * kThreadsPerBlock) {
+    threads.x = divUp(N, kNumelPerWarp) * kWarpSize;
     blocks.x = 1;
   } else {
-    auto warpsRequired = divUp(N, numelPerWarp);
-    auto threadsRequired = divUp(N, numelPerThread);
+    auto warpsRequired = divUp(N, kNumelPerWarp);
+    auto threadsRequired = divUp(N, kNumelPerThread);
     blocks.x =
         std::min(divUp(threadsRequired, kThreadsPerBlock), kMaxAllReduceBlocks);
     auto warpsPerBlock = divUp(warpsRequired, blocks.x);
     threads.x = std::min(kThreadsPerBlock, warpsPerBlock * kWarpSize);
   }
+}
 
-  std::array<at::BFloat16*, kMaxDevices> bf16Buffers;
+template <typename T>
+auto castArr(std::array<void*, kMaxDevices> arr) {
+  std::array<T, kMaxDevices> arr_;
   for (size_t i = 0; i < kMaxDevices; ++i) {
-    bf16Buffers[i] = static_cast<at::BFloat16*>(buffers[i]);
+    arr_[i] = reinterpret_cast<T>(arr[i]);
   }
+  return arr_;
+}
 
-  TORCH_CHECK(input.get_device() == rank);
+at::Tensor oneShotAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize) {
+  checkInput(input, rank);
+
+  size_t N_aligned = alignUp(input.numel(), kNumelPerWarp);
+  TORCH_CHECK(N_aligned % kNumelPerWarp == 0);
+  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+
+  dim3 blocks, threads;
+  getLaunchConfig(N_aligned, blocks, threads);
+
+  TORCH_WARN_ONCE("blocks: ", blocks.x, " threads: ", threads.x);
+
   at::cuda::OptionalCUDAGuard guard(input.get_device());
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      buffers[rank],
+      input.data_ptr(),
+      input.numel() * input.element_size(),
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
 
-  hybridCubeAllReduceKernel<<<
+#define X(kWorldSize)                                               \
+  if (worldSize == kWorldSize) {                                    \
+    oneShotAllReduceKernel<kWorldSize>                              \
+        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
+            input.data_ptr<at::BFloat16>(),                         \
+            input.numel(),                                          \
+            N_aligned,                                              \
+            castArr<FcP2pState*>(p2pStates),                        \
+            castArr<at::BFloat16*>(buffers),                        \
+            rank);                                                  \
+  }
+  X(2);
+  X(4);
+  X(8);
+#undef X
+  return input;
+}
+
+at::Tensor twoShotAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize) {
+  checkInput(input, rank);
+
+  size_t N_aligned = alignUp(input.numel(), worldSize * kNumelPerWarp);
+  size_t N_per_rank = N_aligned / worldSize;
+  TORCH_CHECK(N_per_rank % kNumelPerWarp == 0);
+  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+
+  dim3 blocks, threads;
+  getLaunchConfig(N_per_rank, blocks, threads);
+
+  TORCH_WARN_ONCE("two shot: blocks: ", blocks.x, " threads: ", threads.x);
+
+  auto output = N_aligned == input.numel() ? input : input.new_empty(N_aligned);
+
+  at::cuda::OptionalCUDAGuard guard(input.get_device());
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      buffers[rank],
+      input.data_ptr(),
+      input.numel() * input.element_size(),
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+
+#define X(kWorldSize)                                               \
+  if (worldSize == kWorldSize) {                                    \
+    twoShotAllReduceKernel<kWorldSize>                              \
+        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
+            output.data_ptr<at::BFloat16>(),                        \
+            N_aligned,                                              \
+            castArr<FcP2pState*>(p2pStates),                        \
+            castArr<at::BFloat16*>(buffers),                        \
+            rank);                                                  \
+  }
+  X(2);
+  X(4);
+  X(8);
+#undef X
+
+  if (output.data_ptr() != input.data_ptr()) {
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        input.data_ptr(),
+        output.data_ptr(),
+        input.numel() * input.element_size(),
+        cudaMemcpyDeviceToDevice,
+        at::cuda::getCurrentCUDAStream()));
+  }
+  return input;
+}
+
+at::Tensor hybridCubeMeshAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize) {
+  checkInput(input, rank);
+
+  size_t N = alignUp(input.numel(), kNumelPerWarp);
+  TORCH_CHECK(N % kNumelPerWarp == 0);
+  TORCH_CHECK(N <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+
+  dim3 blocks, threads;
+  getLaunchConfig(N, blocks, threads);
+
+  TORCH_WARN_ONCE("blocks: ", blocks.x, " threads: ", threads.x);
+
+  at::cuda::OptionalCUDAGuard guard(input.get_device());
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      buffers[rank],
+      input.data_ptr(),
+      input.numel() * input.element_size(),
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+
+  hybridCubeMeshAllReduceKernel<<<
       blocks,
       threads,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      output.data_ptr<at::BFloat16>(),
-      N,
       input.data_ptr<at::BFloat16>(),
-      M,
-      bf16Buffers,
-      barriers,
-      barrierFlag,
-      conf,
+      input.numel(),
+      N,
+      castArr<HcmP2pState*>(p2pStates),
+      castArr<at::BFloat16*>(buffers),
       rank);
-  return output.as_strided(input.sizes(), input.strides());
+  return input;
+}
+
+AllReduceAlgo selectAllReduceAlgo(
+    const at::Tensor& input,
+    Topology topology,
+    size_t worldSize) {
+  size_t sz = input.numel() * input.element_size();
+  // TODO: world size even
+  if (topology == Topology::HYBRID_CUBE_MESH) {
+    TORCH_CHECK(
+        worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
+    if (alignUp(sz, kNumelPerWarp) <= 256 * 1024) {
+      return AllReduceAlgo::HCM;
+    }
+  } else if (topology == Topology::FULLY_CONNECTED) {
+    if (alignUp(sz, kNumelPerWarp) <= 256 * 1024) {
+      return AllReduceAlgo::ONE_SHOT;
+    } else if (alignUp(sz, kNumelPerWarp * worldSize) <= 10 * 1024 * 1024) {
+      return AllReduceAlgo::TWO_SHOT;
+    }
+  }
+  return AllReduceAlgo::NONE;
 }
 
 } // namespace c10d

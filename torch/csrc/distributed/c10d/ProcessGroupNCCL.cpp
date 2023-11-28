@@ -1062,12 +1062,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 }
 
 c10::intrusive_ptr<c10d::IntraNodeComm> ProcessGroupNCCL::initIntraNodeComm() {
-  // TODO: this is just for convenience for now
-  auto rdzvId = parseEnvVarString("INTRA_NODE_COMM_RDZV_ID", nullptr);
-  if (static_cast<size_t>(size_) <= kMaxDevices && rdzvId != nullptr) {
-    return c10d::IntraNodeComm::rendezvous(rdzvId, rank_, size_);
-  }
-  return nullptr;
+  return c10d::IntraNodeComm::rendezvousViaStore(
+      store_, std::to_string(uid_), rank_, size_);
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2746,15 +2742,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (intraNodeComm_ != nullptr) {
-    auto thresh = parseEnvVarIntDefault("INTRA_NODE_COMM_THRESHOLD", kMaxIntraNodeSize);
-    TORCH_CHECK(tensors.size() == 1);
-      if (tensors[0].numel() * tensors[0].element_size() < thresh) {
-      auto output = intraNodeComm_->allReduce(tensors[0]);
-      tensors[0].set_(output);
-      // Assume default stream for now
-      return c10::make_intrusive<DummyWork>();
-    }
+  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
+      intraNodeComm_->shouldUseIntraNodeAllReduce(tensors[0])) {
+    intraNodeComm_->allReduce(tensors[0]);
+    return c10::make_intrusive<DummyWork>();
   }
 
   check_gpu_tensors_different_devices(tensors);

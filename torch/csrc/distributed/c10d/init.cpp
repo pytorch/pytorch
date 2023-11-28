@@ -2297,7 +2297,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
   py::class_<::c10d::IntraNodeComm, c10::intrusive_ptr<::c10d::IntraNodeComm>>(
       module, "_IntraNodeComm")
-      // .def(py::init<>())
       .def_static(
           "rendezvous",
           &::c10d::IntraNodeComm::rendezvous,
