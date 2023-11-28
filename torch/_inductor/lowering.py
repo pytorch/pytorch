@@ -445,7 +445,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
-                        device = t.data.get_device()  # type: ignore[attr-defined]
+                        device = t.data.get_device()
                         break
                 assert (
                     device is not None
