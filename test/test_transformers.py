@@ -39,6 +39,7 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    GFX90A_Exact,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION
 )
@@ -71,6 +72,11 @@ default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e
 isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9)]
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
+
+print(f"{PLATFORM_SUPPORTS_FLASH_ATTENTION=}")
+print(f"{TEST_WITH_ROCM=} {GFX90A_Exact=}")
+print(f"{bool(PLATFORM_SUPPORTS_FLASH_ATTENTION)=}")
+print(f"{bool(GFX90A_Exact)=}")
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
     deviation = true_value - computed_value
@@ -127,7 +133,7 @@ def get_platform_specific_sdpa():
         return [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
     if TEST_CUDA:
         return [SDPBackend.EFFICIENT_ATTENTION]
-    return [SDPBackend.MATH] # Should be empty, but an empty list causes "An empty arg_values was passed to @parametrize"
+    return [SDPBackend.MATH]  # Should be empty, but an empty list causes "An empty arg_values was passed to @parametrize"
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
@@ -1225,7 +1231,7 @@ class TestTransformers(NNTestCase):
                         _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
-    @skipIfRocm # Missing EFFICIENT_ATTENTION
+    @skipIfRocm  # Missing EFFICIENT_ATTENTION
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
     )
@@ -1473,7 +1479,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @skipIfRocm # Missing EFFICIENT_ATTENTION
+    @skipIfRocm  # Missing EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_error_cases(self, device):
         # one of k,v needs to be broadcasted and other has non consistent seq_len dim
@@ -1964,7 +1970,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @skipIfRocm # Missing nested and EFFICIENT_ATTENTION
+    @skipIfRocm  # Missing nested and EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -2077,7 +2083,7 @@ class TestSDPACudaOnly(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
-    @skipIfRocm # Small matrices
+    @skipIfRocm  # Small matrices
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
@@ -2130,7 +2136,7 @@ class TestSDPACudaOnly(NNTestCase):
         rtol = 7e-4 if dtype == torch.float16 else 7e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
-    @skipIfRocm # Missing nested and EFFICIENT_ATTENTION
+    @skipIfRocm  # Missing nested and EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
@@ -2581,7 +2587,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-    @skipIfRocm # FIXME: "capturing stream has unjoined work"
+    @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [256, 512, 1024])
@@ -2744,7 +2750,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-    @skipIfRocm # Nested Tensor
+    @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
@@ -2779,7 +2785,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
 
-    @skipIfRocm # Nested tensor
+    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
@@ -2903,7 +2909,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
     @onlyCUDA
-    @skipIfRocm # Nested tensor
+    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
