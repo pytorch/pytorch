@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
+    TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
 
@@ -207,7 +208,6 @@ cannot specify additional metadata in keyword arguments"""
             f"input={formatter(self.input)}",
             f"args={formatter(self.args)}",
             f"kwargs={formatter(self.kwargs)}",
-            f"output_process_fn_grad={self.output_process_fn_grad}",
             f"broadcasts_input={self.broadcasts_input}",
             f"name={repr(self.name)}",
         ]
@@ -227,8 +227,15 @@ cannot specify additional metadata in keyword arguments"""
             # by Tensor[TensorShape]
             # Eg. Tensor with shape (3, 4) is formatted as Tensor[3, 4]
             if isinstance(arg, torch.Tensor):
-                shape = str(tuple(arg.shape)).replace("(", "").replace(")", "")
-                return f"Tensor[{shape}]"
+                shape = str(tuple(arg.shape))
+                dtype = str(arg.dtype)
+                device = str(arg.device)
+                contiguity_suffix = ""
+                # NB: sparse CSR tensors annoyingly return is_sparse=False
+                is_sparse = arg.is_sparse or arg.layout == torch.sparse_csr
+                if not is_sparse and not arg.is_contiguous():
+                    contiguity_suffix = ", contiguous=False"
+                return f'Tensor[size={shape}, device="{device}", dtype={dtype}{contiguity_suffix}]'
             elif isinstance(arg, dict):
                 return {k: formatter(v) for k, v in arg.items()}
             elif is_iterable_of_tensors(arg):
@@ -1155,7 +1162,7 @@ class OpInfo:
             else:
                 sample.input[0] = conjugate(sample.input[0])
 
-        return tuple(conj_samples)
+        return TrackedInputIter(iter(conj_samples), "conjugate sample input")
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1174,7 +1181,7 @@ class OpInfo:
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
 
-        return samples
+        return TrackedInputIter(iter(samples), "sample input")
 
     def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1185,18 +1192,27 @@ class OpInfo:
         the sample inputs.
         """
         if self.reference_inputs_func is None:
-            return self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
+            samples = self.sample_inputs_func(
+                self, device, dtype, requires_grad, **kwargs
+            )
+            return TrackedInputIter(iter(samples), "sample input")
 
         if kwargs.get("include_conjugated_inputs", False):
             raise NotImplementedError
 
-        return self.reference_inputs_func(self, device, dtype, requires_grad, **kwargs)
+        references = self.reference_inputs_func(
+            self, device, dtype, requires_grad, **kwargs
+        )
+        return TrackedInputIter(iter(references), "reference input")
 
     def error_inputs(self, device, **kwargs):
         """
         Returns an iterable of ErrorInputs.
         """
-        return self.error_inputs_func(self, device, **kwargs)
+        errs = self.error_inputs_func(self, device, **kwargs)
+        return TrackedInputIter(
+            iter(errs), "error input", callback=lambda e: e.sample_input
+        )
 
     def error_inputs_sparse(self, device, layout, **kwargs):
         """
