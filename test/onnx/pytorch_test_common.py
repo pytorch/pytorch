@@ -10,6 +10,7 @@ from typing import Optional
 
 import numpy as np
 import packaging.version
+import pytest
 
 import torch
 from torch.autograd import function
@@ -327,6 +328,64 @@ def skipDtypeChecking(func):
         return func(self, *args, **kwargs)
 
     return wrapper
+
+
+def xfail_if_model_type_is_exportedprogram(reason: str):
+    """xfail test with models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for xfail the ONNX export test.
+
+    Returns:
+        A decorator for xfail tests.
+    """
+
+    import onnx_test_common
+
+    def xfail_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                pytest.xfail(
+                    reason=f"Xfail model_type==torch.export.ExportedProgram. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return xfail_dec
+
+
+def xfail_if_model_type_is_not_exportedprogram(reason: str):
+    """xfail test without models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for xfail the ONNX export test.
+
+    Returns:
+        A decorator for xfail tests.
+    """
+
+    import onnx_test_common
+
+    def xfail_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                self.model_type
+                != onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            ):
+                pytest.xfail(
+                    reason=f"Xfail model_type!=torch.export.ExportedProgram. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return xfail_dec
 
 
 def flatten(x):

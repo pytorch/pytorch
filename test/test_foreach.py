@@ -48,7 +48,7 @@ class ForeachFuncWrapper:
         # Some foreach functions don't have in-place implementations.
         self.is_inplace = False if func is None else func.__name__.endswith('_')
 
-    def __call__(self, inputs, is_cuda, is_fastpath, **kwargs):
+    def __call__(self, inputs, is_cuda, expect_fastpath, **kwargs):
         actual = None
         zero_size = kwargs.pop("zero_size", False)
         if (
@@ -60,7 +60,7 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert mta_called == (is_fastpath and (not zero_size))
+            assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
@@ -127,9 +127,9 @@ class TestForeach(TestCase):
 
         for sample in op.sample_zero_size_inputs(device, dtype):
             if not op.has_no_out_of_place:
-                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
             with InplaceForeachVersionBumpCheck(self, sample.input):
-                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
     @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     @ops(
@@ -150,7 +150,9 @@ class TestForeach(TestCase):
         for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
             ref_kwargs = sample.kwargs
             kwargs = ref_kwargs.copy()
-            expect_fastpath = not (noncontiguous or sample.disable_fastpath)
+            # div promotes ints to floats, so we cannot go on the fastpath there
+            div_slowpath = dtype in integral_types_and(torch.bool) and op.name == '_foreach_div'
+            expect_fastpath = not (noncontiguous or sample.disable_fastpath or div_slowpath)
             if op in foreach_pointwise_op_db:
                 values = kwargs.pop("values", None)
                 if values is not None:
@@ -242,7 +244,7 @@ class TestForeach(TestCase):
                     (rhs_arg,) = transformed_sample.args
                     ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
                     sum(wrapped_op(
-                        [rhs_arg, tensors], is_cuda=False, is_fastpath=False
+                        [rhs_arg, tensors], is_cuda=False, expect_fastpath=False
                     )).mean().backward()
                     sum([ref.func(ref_rhs_arg, t) for t in ref_tensors]).mean().backward()
                     self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
@@ -628,7 +630,7 @@ class TestForeach(TestCase):
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
-        actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord, zero_size=False)
+        actual = fn(inputs, is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
         expect = ref_fn(inputs, ord=ord)
 
         if dtype == torch.float16:
@@ -692,7 +694,7 @@ class TestForeach(TestCase):
         self.assertTrue(all(t.requires_grad for t in sample.input))
         if func.func in foreach_pointwise_op_db:
             sample.kwargs.pop("values", None)
-        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
+        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, expect_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
@@ -710,7 +712,7 @@ class TestForeach(TestCase):
             class Foo:
                 pass
 
-            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
+            out = func((sample.input, *sample.args), is_cuda=False, expect_fastpath=False, **sample.kwargs)
             foo = Foo()
             meta_dict = out[0].grad_fn.metadata
             meta_dict[0] = foo
@@ -773,11 +775,23 @@ class TestForeach(TestCase):
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
     @onlyCUDA
+    def test_0dim_tensor_overload_cpu_ok(self):
+        tensors = [torch.ones((), device="cuda", dtype=torch.float32) for _ in range(2)]
+        scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
+
+        # For mul and div, the scalar is allowed to be on CPU too
+        actual = torch._foreach_mul(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
+        actual = torch._foreach_div(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
+
+
+    @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
-            torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
+            torch._foreach_add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
 
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):

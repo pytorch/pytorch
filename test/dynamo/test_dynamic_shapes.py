@@ -3,19 +3,32 @@ import unittest
 import warnings
 
 from torch._dynamo import config
-from torch._dynamo.testing import load_test_module, make_test_cls_with_patches
+from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
 from torch.testing._internal.common_utils import TEST_Z3
 
-test_aot_autograd = load_test_module(__file__, "dynamo.test_aot_autograd")
-test_ctx_manager = load_test_module(__file__, "dynamo.test_ctx_manager")
-test_export = load_test_module(__file__, "dynamo.test_export")
-test_functions = load_test_module(__file__, "dynamo.test_functions")
-test_higher_order_ops = load_test_module(__file__, "dynamo.test_higher_order_ops")
-test_misc = load_test_module(__file__, "dynamo.test_misc")
-test_modules = load_test_module(__file__, "dynamo.test_modules")
-test_repros = load_test_module(__file__, "dynamo.test_repros")
-test_subgraphs = load_test_module(__file__, "dynamo.test_subgraphs")
+try:
+    from . import (
+        test_aot_autograd,
+        test_ctx_manager,
+        test_export,
+        test_functions,
+        test_higher_order_ops,
+        test_misc,
+        test_modules,
+        test_repros,
+        test_subgraphs,
+    )
+except ImportError:
+    import test_aot_autograd
+    import test_ctx_manager
+    import test_export
+    import test_functions
+    import test_higher_order_ops
+    import test_misc
+    import test_modules
+    import test_repros
+    import test_subgraphs
 
 
 test_classes = {}

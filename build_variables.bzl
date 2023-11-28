@@ -463,19 +463,11 @@ lazy_tensor_core_python_sources = [
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
-inductor_core_resources = [
-    "torch/csrc/inductor/aoti_model_runner.cpp",
-    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
-    "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
-    "torch/csrc/inductor/inductor_ops.cpp",
-]
-
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
-    inductor_core_resources +
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )
@@ -652,7 +644,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
-    "torch/csrc/inductor/aoti_model_runner_cuda.cpp",
+    "torch/csrc/inductor/aoti_model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
