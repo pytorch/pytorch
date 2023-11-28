@@ -290,7 +290,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._utils",
             "torch._utils_internal",
             "torch._vmap_internals",
-            # "torch.ao",
             "torch.compiler",
             "torch.distributed",
             "torch.export",
