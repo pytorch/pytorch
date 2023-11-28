@@ -407,9 +407,16 @@ def meta_sparse_structured_linear(
         assert weight.size(0) == bias.size(0), "output size mismatch"
     assert weight.size(1) == input.size(-1) / 2
     output_sizes[-1] = weight.size(0)
-    return input.new_empty(
-        output_sizes, dtype=input.dtype if input.dtype != torch.int8 else torch.int32
-    )
+
+    # See: https://github.com/pytorch/pytorch/pull/114477 for details
+    transposed_strides = (1, input.size(0))
+
+    output = input.new_empty(
+        output_sizes,
+        dtype=input.dtype if input.dtype != torch.int8 else torch.int32,
+    ).as_strided(output_sizes, transposed_strides)
+
+    return output
 
 
 @register_meta(aten.index_reduce.default)
