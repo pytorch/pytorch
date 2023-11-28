@@ -411,8 +411,13 @@ class AOTInductorModelBase {
     }
   }
 
-  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
+  void update_constants_map(
+      std::shared_ptr<ConstantMap> constants_map,
+      bool remap_constants_array = true) {
     constants_map_ = std::move(constants_map);
+    if (remap_constants_array) {
+      update_constants_array_from_map();
+    }
   }
 
   // This function allows us to update the constants_ that is used to look up

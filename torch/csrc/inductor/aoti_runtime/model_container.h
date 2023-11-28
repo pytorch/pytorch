@@ -61,7 +61,6 @@ class AOTInductorModelContainer {
 
     for (auto& model : models_) {
       model->update_constants_map(constants_map_);
-      model->update_constants_array(constants_array_);
     }
 
     in_spec_ = model->get_in_spec();
