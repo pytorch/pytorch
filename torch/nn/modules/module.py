@@ -1517,7 +1517,6 @@ class Module:
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
-            print(f"module.py:_call_impl: args={args}, kwargs={kwargs}")
             return forward_call(*args, **kwargs)
 
         try:

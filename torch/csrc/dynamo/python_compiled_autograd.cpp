@@ -432,6 +432,10 @@ variable_list compiled_autograd(
         saved.hack_use_compiled_apply = true;
       }
       outputs = call.node->apply_with_saved(inputs, saved);
+      if (call.node->name() == "MyFnBackward") {
+        compiler_call.backward_ctx = saved.hack_backward_obj;
+      }
+
       std::cout << "done apply_with_saved" << std::endl;
 
       saved.debug_asserts();
@@ -487,8 +491,13 @@ variable_list compiled_autograd(
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+  PyObject* pybackwards = PyTuple_New(static_cast<Py_ssize_t>(1));
+  PyTuple_SET_ITEM(pybackwards, 0, compiler_call.backward_ctx);
+  THPObjectPtr backwards(pybackwards);
+  std::cout << "calling compiled_fn (graph) start" << std::endl;
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
+  std::cout << "calling compiled_fn (graph) done" << std::endl;
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

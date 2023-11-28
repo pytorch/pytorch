@@ -114,15 +114,17 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
     throw_python_error();
 
   /* START */
-  // Compiled autograd: call backward with fake context and inputs
-  std::cout << "lifting backward obj" << std::endl;
+  // this function is only called when tracing
+  // call into python compiled autograd to insert node into graph
+  // does not execute backward yet
+  int idx = 0; // do we need support for multiple custom autograd functions in the same graph?
   THPObjectPtr r(PyObject_CallMethod(
     saved.get_py_compiler(),
     "proxy_call_backward",
-    "OO",
-    obj,
-    pyInputs.get()));
-  std::cout << "lifting backward obj" << std::endl;
+    "Oi",
+    pyInputs.get(),
+    idx));
+  saved.hack_backward_obj = obj;
   /* END */
   if (!r)
     throw_python_error();
@@ -1170,6 +1172,7 @@ static PyObject* get_base_setup_context() {
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
+  std::cout << "THPFunction_apply called" << std::endl;
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
   auto info_pair = unpack_input<false>(inputs);

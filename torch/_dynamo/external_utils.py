@@ -28,8 +28,5 @@ def call_hook(hook, *args):
         return args[0]
     return result
 
-def call_backward(backward_obj, ctx, *inputs):
-    """
-    Here just to make the graph call_function logs look identical to hook's implementation
-    """
-    return backward_obj.apply(ctx, inputs)
+def call_backward(backward, *args):
+    return backward(*args)

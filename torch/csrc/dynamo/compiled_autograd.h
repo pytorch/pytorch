@@ -176,6 +176,7 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  PyObject* backward_ctx;
 };
 
 class CompiledNodeArgs {
@@ -695,6 +696,7 @@ class SwapSavedVariables {
   StashedVars<c10::SymInt> stashed_symints;
   public:
   bool hack_use_compiled_apply = false;
+  PyObject* hack_backward_obj;
 };
 
 } // namespace torch::dynamo::autograd

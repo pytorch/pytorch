@@ -92,31 +92,15 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
-    """
-    python_compiled_autograd.cpp
-    - traces a Graph
-    - goes over every node
-    - calls apply_with_saved
-    - calls into python method here
-
-    for hooks, we created a subclass to "lift" them
-    - swapping them with proxies before executing the hook
-
-    for backwards, we need to do the same
-    - swap with a proxy before executing the backward_cls apply method
-    - needs to happen for both the input and the gradients
-    """
-
-    def proxy_call_backward(self, backward_obj, inputs):
+    def proxy_call_backward(self, inputs, backward_id: int):
         print("hello from proxy_call_backward")
         assert self.backward_proxy is not None
-        backward = self.backward_proxy[0]
+        backward = self.backward_proxy[backward_id]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
             args=(
-                backward_obj,
-                backward,
+                backward.apply,
                 *[self.to_proxy(x) for x in inputs],
             ),
             kwargs={},

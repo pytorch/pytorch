@@ -73,7 +73,7 @@ class TestCompiledAutograd(TestCase):
             for i in [10]: # [10, 100, 10]:
                 x = torch.randn((i), requires_grad=True)
                 out = MyFn.apply(x)
-                out.sum().backward()
+                out.sum().backward(retain_graph=True)
                 yield x.grad
 
         self.check_output_and_recompiles(fn, 1)
