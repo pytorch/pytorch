@@ -3,8 +3,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-#include <ATen/ATen.h>
-
 #include <memory>
 #include <vector>
 

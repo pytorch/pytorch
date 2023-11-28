@@ -2,6 +2,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/AsmUtils.cuh>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
@@ -131,7 +132,7 @@ struct TopKTypeConfig<at::Half> {
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
 #else
-    assert(false);
+    CUDA_KERNEL_ASSERT(false);
     return 0u;
 #endif
   }
@@ -141,7 +142,7 @@ struct TopKTypeConfig<at::Half> {
     RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     return __ushort_as_half(v ^ mask);
 #else
-    assert(false);
+    CUDA_KERNEL_ASSERT(false);
     return static_cast<at::Half>(0);
 #endif
   }
@@ -296,7 +297,7 @@ __device__ scalar_t findPattern(
   }
 
   // should not get here
-  assert(false);
+  CUDA_KERNEL_ASSERT(false);
   return static_cast<scalar_t>(0);
 }
 
