@@ -13,11 +13,49 @@ from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
+    tree_flatten,
     UnflattenFunc,
 )
 
 
 SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
+
+
+@torch._dynamo.disable
+def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    flat_args, _ = tree_flatten(args)
+    return _check_input_constraints_for_graph(
+        self.graph,
+        range_constraints=self.range_constraints,
+        equality_constraints=self.equality_constraints,
+    )(*flat_args)
+
+
+def _check_input_constraints_for_graph(
+    graph: torch.fx.Graph, range_constraints, equality_constraints
+):
+    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+        _AddRuntimeAssertionsForConstraintsPass,
+    )
+
+    def inner(*args):
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
+        for p in graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            range_constraints,
+            equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
+
+    return inner
 
 
 def register_dataclass_as_pytree_node(

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAContextLight.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/flash.h>
 #include <ATen/native/transformers/cuda/flash_attn/static_switch.h>

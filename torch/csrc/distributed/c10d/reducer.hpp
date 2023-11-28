@@ -189,6 +189,14 @@ class TORCH_API Reducer {
   // iteration.
   void check_finalized();
 
+  // Updates the underlying process group used by DDP with the new process
+  // group.
+  void update_process_group(
+      c10::intrusive_ptr<c10d::ProcessGroup> new_process_group);
+
+  // Resets reducer state.
+  void reset_state();
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -200,7 +208,7 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<at::Tensor> params_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> expect_sparse_gradients_;
 

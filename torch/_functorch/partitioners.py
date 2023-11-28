@@ -886,7 +886,7 @@ def min_cut_rematerialization_partition(
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
     # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
+    saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(

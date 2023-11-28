@@ -368,12 +368,13 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
   if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
-    map.emplace(kInSplit, fmt::format("[{}]", fmt::join(inSplitSizes, ", ")));
+    map.emplace(
+        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
   } else if (inSplitSizes.size() > kTruncatLength) {
     map.emplace(
         kInSplit,
         fmt::format(
-            "[{}, ...]",
+            "\"[{}, ...]\"",
             fmt::join(
                 inSplitSizes.begin(),
                 inSplitSizes.begin() + kTruncatLength,
@@ -381,12 +382,13 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   }
   auto& outSplitSizes = debugInfo->getOutputSplitSizes();
   if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
-    map.emplace(kOutSplit, fmt::format("[{}]", fmt::join(outSplitSizes, ", ")));
+    map.emplace(
+        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
   } else if (outSplitSizes.size() > kTruncatLength) {
     map.emplace(
         kOutSplit,
         fmt::format(
-            "[{}, ...]",
+            "\"[{}, ...]\"",
             fmt::join(
                 outSplitSizes.begin(),
                 outSplitSizes.begin() + kTruncatLength,

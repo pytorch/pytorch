@@ -7,7 +7,7 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 try:
-    from torch.utils._pytree.api.cxx import tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         tree_map_only,
@@ -257,6 +257,12 @@ class OpSchema:
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
         )
+
+    def return_type_tensor(self) -> bool:
+        return_types = self.op._schema.returns
+        # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
+        # return types, so this check is enough for tensor like types
+        return isinstance(return_types[0].type, torch.TensorType)
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
