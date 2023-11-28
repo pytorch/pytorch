@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import sys
 
 import torch
@@ -228,33 +229,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
         model = Model().cuda()
-        model.layer1[1] = (
-            FSDP(model.layer1[1], use_orig_params=use_orig_params)
-            if not composable
-            else fully_shard(model.layer1[1])
+        fsdp_fn = (
+            fully_shard
+            if composable
+            else functools.partial(FSDP, use_orig_params=use_orig_params)
         )
+        model.layer1[1] = fsdp_fn(model.layer1[1])
         if ignore_modules:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    ignored_modules=[model.layer1],
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(model, ignored_modules=[model.layer1])
-            )
+            wrapped_model = fsdp_fn(model, ignored_modules=[model.layer1])
         else:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    ignored_states=[model.layer1],
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(
-                    model,
-                    ignored_states=[model.layer1],
-                )
+            wrapped_model = fsdp_fn(
+                model, ignored_states=list(model.layer1.parameters())
             )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
