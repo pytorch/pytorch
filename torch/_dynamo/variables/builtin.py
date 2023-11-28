@@ -1160,9 +1160,7 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                var = obj.var_getattr(tx, name)
-                var.source = source
-                return var
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
@@ -1191,9 +1189,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                var = obj.var_getattr(tx, name)
-                var.source = source
-                return var
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 
