@@ -8166,6 +8166,32 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
+        def test_numpy_autograd(self):
+            def my_torch(x):
+                y = torch.cat([torch.sin(x) ** 2, torch.max(x)[None]])
+                return y.sum()
+
+            def my_np(x):
+                y = np.concatenate([np.sin(x) ** 2, np.max(x)[None]])
+                return np.sum(y)
+
+            @torch.compile
+            def wrapper(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.as_tensor(y)
+
+            x_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            x = torch.arange(8, dtype=torch.float32, requires_grad=True)
+
+            out_np = wrapper(x_np)
+            out = my_torch(x)
+            self.assertEqual(out, out_np)
+
+            out_np.backward()
+            out.backward()
+            self.assertEqual(x.grad, x_np.grad)
+
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
         @patch.object(config, "joint_graph_constant_folding", False)
