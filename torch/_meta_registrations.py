@@ -5239,12 +5239,14 @@ def meta__scaled_dot_product_efficient_backward(
     )
     grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
-        grad_bias = torch.empty_strided(
-            attn_bias.size(),
-            attn_bias.stride(),
-            dtype=attn_bias.dtype,
-            device=attn_bias.device,
+        lastDim = attn_bias.size(-1)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
+        new_sizes = list(attn_bias.size())
+        new_sizes[-1] = lastDimAligned
+        grad_bias = torch.empty(
+            new_sizes, dtype=attn_bias.dtype, device=attn_bias.device
         )
+        grad_bias = grad_bias[..., :lastDim]
 
     return grad_q, grad_k, grad_v, grad_bias
 
@@ -5321,12 +5323,12 @@ def meta__efficient_attention_backward(
     grad_value = torch.empty_like(value)
 
     if bias is not None:
-        assert bias is not None
         lastDim = bias.size(-1)
-        lastDimAligned = 16 * ((lastDim + 15) // 16)
+        lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
         new_sizes = list(bias.size())
         new_sizes[-1] = lastDimAligned
         grad_bias = torch.empty(new_sizes, dtype=bias.dtype, device=bias.device)
+        grad_bias = grad_bias[..., :lastDim]
     else:
         grad_bias = torch.empty((), device=query.device)
 
@@ -5791,6 +5793,20 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
+
+
+# From aten/src/ATen/native/mps/operations/Linear.mm
+@register_meta(aten.linear_backward.default)
+def linear_backward(input_, grad_output_, weight_, output_mask):
+    grad_input = None
+    grad_weight = None
+    grad_bias = None
+    if output_mask[0]:
+        grad_input = grad_output_.new_empty(input_.size())
+    if output_mask[1] or output_mask[2]:
+        grad_weight = grad_output_.new_empty((grad_output_.size(-1), input_.size(-1)))
+        grad_bias = grad_output_.new_empty(grad_output_.size(-1))
+    return (grad_input, grad_weight, grad_bias)
 
 
 @register_meta(aten.pixel_shuffle.default)
