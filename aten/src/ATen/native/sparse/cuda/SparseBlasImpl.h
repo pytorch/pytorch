@@ -11,6 +11,7 @@ namespace impl {
 namespace cuda {
 
 void addmm_out_sparse_csr(
+    const Tensor& input,
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
