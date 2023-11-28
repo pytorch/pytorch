@@ -15,6 +15,7 @@
 #include <hipsolver/hipsolver.h>
 #endif
 
+#include <ATen/cuda/tunable/Tunable.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
@@ -72,6 +73,8 @@ TORCH_CUDA_CPP_API bool canDeviceAccessPeer(
     int64_t peer_device);
 
 TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
+
+TORCH_CUDA_CPP_API tunable::TuningContext* getTuningContext();
 
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();

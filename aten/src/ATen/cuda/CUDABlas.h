@@ -44,6 +44,8 @@ private:
       const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, at::opmath_type<Dtype> beta,\
       Dtype *c, int64_t ldc
 
+#define CUDABLAS_GEMM_ARGS(Dtype) transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc
+
 template <typename Dtype>
 inline void gemm(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   AT_ERROR("at::cuda::blas::gemm: not implemented for ", typeid(Dtype).name());
@@ -61,6 +63,24 @@ template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
+
+template <typename Dtype>
+inline void gemm_internal(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::gemm_internal: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double));
+template <>
+void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float));
+template <>
+void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+template <>
+void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+template <>
+void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
+template <>
+void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
 enum GEMMAndBiasActivationEpilogue {

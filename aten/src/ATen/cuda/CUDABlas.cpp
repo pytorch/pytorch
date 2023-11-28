@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/tunable/TunableGemm.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
@@ -402,7 +403,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 }
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -415,7 +416,7 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 }
 
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -428,7 +429,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 }
 
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+void gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -443,7 +444,7 @@ void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
 }
 
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+void gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -458,7 +459,7 @@ void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
 }
 
 template <>
-void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -554,7 +555,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 }
 
 template <>
-void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -591,6 +592,93 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_32F,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+}
+
+template <typename DType>
+inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
+  tunable::GemmParams<DType> params;
+  params.transa = transa;
+  params.transb = transb;
+  params.m = m;
+  params.n = n;
+  params.k = k;
+  params.alpha = alpha;
+  params.a = a;
+  params.lda = lda;
+  params.b = b;
+  params.ldb = ldb;
+  params.beta = beta;
+  params.c = c;
+  params.ldc = ldc;
+
+  tunable::GemmTunableOp<DType> gemm{};
+  gemm(&params);
+}
+
+template <>
+void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double));
+  }
+  else {
+    gemm_internal<double>(CUDABLAS_GEMM_ARGS(double));
+  }
+}
+
+template <>
+void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float));
+  }
+  else {
+    gemm_internal<float>(CUDABLAS_GEMM_ARGS(float));
+  }
+}
+
+template <>
+void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+  }
+  else {
+    gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+  }
+}
+
+template <>
+void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+  }
+  else {
+    gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+  }
+}
+
+template <>
+void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+  else {
+    gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+}
+
+template <>
+void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  auto tuning_ctx = at::cuda::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
+  else {
+    gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
 }
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
