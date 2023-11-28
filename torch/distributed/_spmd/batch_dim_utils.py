@@ -20,9 +20,9 @@ aten = torch.ops.aten
 
 
 class BatchDimAnalyzer:
-    """
-    This class is used to analyze the batch dimension of each tensor/node in the
-    graph. We need to know the batch dimension of each tensor/node so that we know
+    """This class is used to analyze the batch dimension of each tensor/node in the graph.
+
+    We need to know the batch dimension of each tensor/node so that we know
     exactly the sharding layout of intermediate tensors.
 
     We possibly should evaluate using symbolic shapes to track the batch dimension.
@@ -54,9 +54,7 @@ class BatchDimAnalyzer:
         }
 
     def init_batch_dim_size(self, batch_dim_size: int) -> None:
-        """
-        initialize batch dim size base on the first input batch size
-        """
+        """Initialize batch dim size base on the first input batch size."""
         if self.batch_dim_size != -1 and self.batch_dim_size != batch_dim_size:
             raise RuntimeError(
                 f"batch dim size is already initialized! "
@@ -74,9 +72,7 @@ class BatchDimAnalyzer:
         return self.batch_dim_map[node]
 
     def compute_batch_dim(self, node: fx.Node, full_reduction=False) -> int:
-        """
-        compute the batch dimension for the `node`
-        """
+        """Compute the batch dimension for the `node`."""
         assert self.batch_dim_size != -1, "batch dim size is not initialized!"
 
         if node in self.batch_dim_map:
@@ -168,10 +164,7 @@ class BatchDimAnalyzer:
                 return -2
 
     def compute_act_spec(self, node: fx.Node, mesh: DeviceMesh) -> DTensorSpec:
-        """
-        This function first compute the batch dimension for the current node,
-        then generate the sharding spec that shards on the batch dimension.
-        """
+        """Compute the batch dimension for the current node, then generate the sharding spec that shards on the batch dimension."""
         node_batch_dim = self.compute_batch_dim(node)
         if node_batch_dim == -1:
             # indicate this activation is replicated

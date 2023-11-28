@@ -87,6 +87,8 @@ namespace torch {
 struct NoInferSchemaTag {};
 #endif
 
+#define HAS_PT2_COMPLIANT_TAG
+
 // For multipy/torchdeploy use case
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
