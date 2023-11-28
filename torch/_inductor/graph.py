@@ -221,6 +221,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
+        self.name_to_workspace_buffer : Dict[str, ir.WorkspaceBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
@@ -452,6 +453,21 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         return name
+
+    def get_workspace_buffer_for(self, buffer : ir.Buffer):
+        if not hasattr(buffer, 'get_workspace_size'):
+            return None
+        workspace_size = buffer.get_workspace_size()
+        if workspace_size<=0:
+            return None
+        workspace_name = f"workspace_of_{buffer.get_name()}"
+        if workspace_name in self.name_to_buffer:
+            return self.name_to_buffer[workspace_name]
+        workspace_buffer = ir.WorkspaceBuffer.create(workspace_size, buffer)
+        workspace_buffer.name = workspace_name
+        self.buffers.append(workspace_buffer)
+        self.name_to_buffer[workspace_name] = workspace_buffer
+        return workspace_buffer
 
     def register_list(self, buffer_names: List[str]):
         name = "list_" + "_".join(buffer_names)
