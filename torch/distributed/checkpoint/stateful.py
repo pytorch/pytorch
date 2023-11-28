@@ -11,6 +11,7 @@ class Stateful(Protocol):
     """
     Stateful protocol for objects that can be checkpointed and restored.
     """
+
     def state_dict(self) -> Dict[str, Any]:
         """
         Objects should return their state_dict representation as a dictionary.
@@ -25,6 +26,7 @@ class Stateful(Protocol):
         Returns:
             Dict: The objects state dict
         """
+
         ...
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
@@ -34,6 +36,7 @@ class Stateful(Protocol):
         Args:
             state_dict: The state dict to restore from
         """
+
         ...
 
 
