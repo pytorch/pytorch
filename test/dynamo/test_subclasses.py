@@ -857,9 +857,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             else:
                 return nt1.sin()
 
-        # Basic binary
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
+        # This causes a recompile later on when it realizes the batch and last dim
+        # should not always be equal. To avoid that, we use (3, j0, 5) here.
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, offsets = self._get_jagged_tensor(((3, 4, 5), 4), None)
         nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
@@ -872,9 +874,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 return nt1.sin()
 
         # Binary recompiles because singleton ints no longer match
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
     # TODO: cannot parametrize this test class with device for some reason
@@ -910,7 +912,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._test_autograd("inductor")
 
     def test_unbind(self):
-        nt, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
+        # This causes a recompile later on when it realizes the batch and last dim
+        # should not always be equal. To avoid that, we use (3, j0, 5) here.
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
 
