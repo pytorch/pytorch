@@ -1582,6 +1582,10 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raise _UnhashableDispatchArg
         for any situation that precludes caching.
         """
+        # ???
+        if func.name().startswith("_torch_testing"):
+            raise _UnhashableDispatchArg("testing op")
+
         # In-place view ops mutate metadata; avoid that complexity.
         if torch.Tag.inplace_view in func._tags:
             raise _UnhashableDispatchArg("inplace view")
@@ -1619,8 +1623,6 @@ class FakeTensorMode(TorchDispatchMode):
                 raise _UnhashableDispatchArg("not our fake")
             if arg._has_symbolic_sizes_strides:
                 raise _UnhashableDispatchArg("symbolic shape")
-            if arg.is_sparse:
-                raise _UnhashableDispatchArg("sparse tensor")
             if arg.constant is not None:
                 raise _UnhashableDispatchArg("constant attribute")
             return extract_tensor_metadata(arg)
@@ -1657,10 +1659,10 @@ class FakeTensorMode(TorchDispatchMode):
         metadata = entry.metadata
         if metadata.is_quantized:
             raise UnsupportedFakeTensorException("is_quantized nyi")
-        if metadata.is_conj:
-            raise UnsupportedFakeTensorException("is_conj nyi")
-        if metadata.is_neg:
-            raise UnsupportedFakeTensorException("is_neg nyi")
+        #if metadata.is_conj:
+        #    raise UnsupportedFakeTensorException("is_conj nyi")
+        #if metadata.is_neg:
+        #    raise UnsupportedFakeTensorException("is_neg nyi")
         if metadata.is_sparse:
             raise UnsupportedFakeTensorException("is_sparse nyi")
 
@@ -1672,6 +1674,9 @@ class FakeTensorMode(TorchDispatchMode):
             device="meta",
             requires_grad=metadata.requires_grad,
         )
+
+        torch._C._set_conj(empty, metadata.is_conj)
+        torch._C._set_neg(empty, metadata.is_neg)
 
         if func.is_view or metadata.storage_offset != 0:
             if func.is_view:
