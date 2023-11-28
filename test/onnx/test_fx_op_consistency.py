@@ -451,6 +451,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
     ),
     xfail(
+        # NOTE: this is a temporary skip, see https://github.com/pytorch/pytorch/issues/113808.
+        "nn.functional.celu",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Celu", "float16"),
+    ),
+    xfail(
         "nn.functional.conv1d",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
@@ -780,6 +786,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
 
     fp16_low_precision_list = [
+        "baddbmm",
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",

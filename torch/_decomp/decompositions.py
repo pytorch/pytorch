@@ -2331,6 +2331,7 @@ def uniform(
     x: Tensor,
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
+    generator: Optional[torch.Generator] = None,
 ):
     return prims._uniform_helper(
         x.shape,
@@ -2338,13 +2339,13 @@ def uniform(
         high=sym_float(high),
         dtype=x.dtype,
         device=x.device,
+        generator=generator,
     )
 
 
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
-    assert generator is None
-    return self.copy_(uniform(self, low, high))
+    return self.copy_(uniform(self, low, high, generator))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size

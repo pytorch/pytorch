@@ -46,6 +46,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
     with_tf32_off,
@@ -598,7 +599,8 @@ class CommonTemplate:
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
 
-        self.common(fn, (torch.randn(32),))
+        for dtype in [torch.float32, torch.int32, torch.int64]:
+            self.common(fn, (torch.arange(32, dtype=dtype),))
 
     def test_add_const_float(self):
         def fn(a):
@@ -1944,29 +1946,31 @@ class CommonTemplate:
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
-                ),
-                check_lowp=True,
-            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+            ),
+            check_lowp=True,
+        )
 
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
-                    torch.randn(8),
-                    torch.randn(8),
-                ),
-                check_lowp=True,
-            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                torch.randn(8),
+                torch.randn(8),
+            ),
+            check_lowp=True,
+        )
 
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
@@ -2511,6 +2515,20 @@ class CommonTemplate:
             (torch.randn([2, 5, 16, 16]),),
             atol=6e-5,
             rtol=0.001,
+        )
+
+    @skipIfRocm
+    def test_convolution4(self):
+        def fn(x, w):
+            x = F.conv2d(x, w, groups=w.shape[0])
+            return x.sum()
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 20]),
+                torch.randn([3, 1, 5, 5]),
+            ),
         )
 
     def test_conv2d_channels_last(self):
@@ -6829,7 +6847,6 @@ class CommonTemplate:
         def fn(a, b):
             r = 1 / math.sqrt(a.size(1))
             return torch.bmm(a, b) / r
-            return (r,)
 
         self.common(
             fn,
@@ -7091,6 +7108,52 @@ class CommonTemplate:
         self.common(
             foo,
             (query, key, value, bias, weights),
+            atol=0.02,
+            rtol=1e4,
+        )
+
+    @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    @skipIfRocm
+    def test_sdpa_unaligned_mask(self):
+        def foo(
+            arg0_1: "f32[8, 8, 16, 16]",
+            arg1_1: "f32[8, 8, 15, 16]",
+            arg2_1: "f32[8, 8, 15, 16]",
+            arg3_1: "f32[1, 1, 16, 15]",
+        ):
+            constant_pad_nd: "f32[1, 1, 16, 16]" = (
+                torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
+            )
+            arg3_1 = None
+            slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                constant_pad_nd, -1, 0, 15
+            )
+            constant_pad_nd = None
+            expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
+                slice_1, [8, 8, 16, 15]
+            )
+            slice_1 = None
+            _scaled_dot_product_efficient_attention = (
+                torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                    arg0_1, arg1_1, arg2_1, expand, False
+                )
+            )
+            arg0_1 = arg1_1 = arg2_1 = expand = None
+            getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[0]
+            _scaled_dot_product_efficient_attention = None
+            return (getitem,)
+
+        query = torch.rand(8, 8, 16, 16, device="cuda")
+        key = torch.rand(8, 8, 15, 16, device="cuda")
+        value = torch.rand(8, 8, 15, 16, device="cuda")
+        bias = torch.rand(1, 1, 16, 15, device="cuda")
+        self.common(
+            foo,
+            (query, key, value, bias),
             atol=0.02,
             rtol=1e4,
         )
@@ -7711,6 +7774,24 @@ class CommonTemplate:
         a = torch.randn(2**24, 65, device=self.device)
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
+
+    def test_fuse_large_params(self):
+        def pt2_optimizer_step(optimizer):
+            @torch.compile()
+            def f():
+                optimizer.step()
+
+            f()
+
+        params = [
+            torch.rand(10, 10, dtype=torch.float32, device=self.device)
+            for _ in range(194)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        o = torch.optim.AdamW(params)
+        pt2_optimizer_step(o)
 
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
