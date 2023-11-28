@@ -1986,7 +1986,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            dtype_str = str(dtype).split('.')[-1]
+            dtype_str = str(dtype).split(".")[-1]
             self.used_cached_dtypes.add(dtype_str)
             return f"cached_torch_dtype_{dtype_str}"
         else:
