@@ -73,11 +73,6 @@ isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capabilit
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 
-print(f"{PLATFORM_SUPPORTS_FLASH_ATTENTION=}")
-print(f"{TEST_WITH_ROCM=} {GFX90A_Exact=}")
-print(f"{bool(PLATFORM_SUPPORTS_FLASH_ATTENTION)=}")
-print(f"{bool(GFX90A_Exact)=}")
-
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
     deviation = true_value - computed_value
     deviation = torch.abs(deviation / true_value)
