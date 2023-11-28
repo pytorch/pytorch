@@ -690,7 +690,7 @@ def jagged_scaled_dot_product_attention(
             offset,
             max_seqlen_q,
             max_seqlen_batch_kv,
-        ) = torch._efficient_attention_forward(  # type: ignore[attr-defined]
+        ) = torch.ops.aten._efficient_attention_forward(
             query_reshaped.unsqueeze(0),
             key_reshaped.unsqueeze(0),
             value_reshaped.unsqueeze(0),
