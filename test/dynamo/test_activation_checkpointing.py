@@ -751,7 +751,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
             # NOTE: when `preserve_rng_state` is False, gradient will mismatch between torch.compile and eager,
             # because eager version doesn't preserve RNG state while torch.compile still does.
-            # Hence when `preserve_rng_state` is False, we skip the output and gradient comparision
+            # Hence when `preserve_rng_state` is False, we skip the output and gradient comparison
             # between torch.compile and eager.
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
