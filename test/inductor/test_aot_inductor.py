@@ -187,7 +187,6 @@ def check_model(
             constraints,
             disable_constraint_solver,
         )
-
     self.assertTrue(same(actual, expected))
 
 
@@ -1385,6 +1384,20 @@ class AOTInductorTestsTemplate:
 
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
+
+    def test_no_args(self):
+        class Model(torch.nn.Module):
+            def __init__(self, m, n):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(m, n),
+                )
+                self.alpha = torch.nn.Parameter(torch.randn(m, n))
+
+            def forward(self):
+                return self.weight * self.alpha
+
+        self.check_model(Model(6, 4), ())
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
