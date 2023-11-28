@@ -169,10 +169,17 @@ def generate_pattern_with_binary(
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
-        return CallFunction(
-            unary_post_op,
-            computation_call,
-        )
+        if unary_post_op == aten.hardtanh.default:
+            return CallFunction(
+                aten.clamp_max,
+                CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
+                KeywordArg("max_value"),
+            )
+        else:
+            return CallFunction(
+                unary_post_op,
+                computation_call,
+            )
     return computation_call
 
 
@@ -286,6 +293,11 @@ def _register_quantized_conv_lowering(
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
+        if unary_attr.op_name == "hardtanh":
+            min_value = kwargs.get("min_value")
+            max_value = kwargs.get("max_value")
+            unary_attr.scalars_attr = [min_value, max_value]
+
         computation_args = (
             x,
             x_scale,
@@ -506,6 +518,12 @@ def _register_quantization_unary_fusion():
                 ),
                 dtype=original_pattern_output_dtype,
             ),
+            UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
+                generate_pattern_with_unary(
+                    dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                ),
+                dtype=original_pattern_output_dtype,
+            ),
         }
 
         for unary_attr, patterns in conv_unary_replace_patterns.items():
@@ -523,6 +541,9 @@ def _register_quantization_unary_fusion():
         conv_unary_replace_float_out_patterns = {
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 dequantize_qconv_pt2e_pattern, aten.relu.default
+            ),
+            UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
+                dequantize_qconv_pt2e_pattern, aten.hardtanh.default
             ),
         }
 
