@@ -14269,11 +14269,6 @@ op_db: List[OpInfo] = [
                          device_type='cuda', active_if=TEST_WITH_ROCM),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
                          device_type='cuda', active_if=TEST_WITH_ROCM),
-            # Skip on ROCM if FlashAttention is not supported on the GPU
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta',
-                         device_type='cuda', active_if=TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor',
-                         device_type='cuda', active_if=TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
                          device_type='cpu'),
