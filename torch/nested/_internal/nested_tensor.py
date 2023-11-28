@@ -101,9 +101,8 @@ class NestedTensor(torch.Tensor):
         self._lengths = lengths
 
         # collapsed ragged dim must always be dynamic
-        torch._dynamo.mark_dynamic(self, 0)
+        torch._dynamo.mark_dynamic(self, self._ragged_idx)
         torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
-        torch._dynamo.mark_dynamic(self._offsets, 0)
 
     def values(self):
         return self._values
