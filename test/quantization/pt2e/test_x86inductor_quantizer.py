@@ -358,8 +358,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
-        Currently, only relu as unary post op is supported.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, relu6) with X86InductorQuantizer.
         """
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
