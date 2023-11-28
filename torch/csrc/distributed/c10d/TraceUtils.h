@@ -266,6 +266,8 @@ inline std::string retrieveDesyncReport(
 /* Note: this is only used by PGNCCL (could be generalized in an ideal world but
  * wasn't done that way, so isn't expected to be fully general at the moment) */
 
+#ifdef USE_C10D_NCCL
+
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
       {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
@@ -516,4 +518,5 @@ struct NCCLTraceBuffer {
   }
 };
 
+#endif
 } // namespace c10d

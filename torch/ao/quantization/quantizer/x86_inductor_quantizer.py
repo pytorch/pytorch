@@ -53,23 +53,21 @@ class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
     _is_output_of_quantized_pattern: bool = False
 
 
-# Ops support int8 data type and excludes ops like conv, linear.
-quantizable_ops_pt2e: Set = {
-    torch.ops.aten.max_pool2d.default,
-    torch.ops.aten.cat.default,
-    torch.ops.aten.avg_pool2d.default,
-}
-
-
-# Ops that:
-# 1. Ops prefer to run with int8 when int8 input is given.
-# 2. Ops don't support int8 in and fp32 out.
+# Operations that:
+# 1. Operations are optimized to run with int8 when int8 input provided.
+# 2. Operations do not support int8 input and produce fp32 output.
 int8_in_int8_out_ops_pt2e: Set = {
     torch.ops.aten.max_pool2d.default,
     torch.ops.aten.cat.default,
     torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.adaptive_avg_pool2d.default,
+    torch.ops.aten.flatten.using_ints,
 }
 
+
+# Operations support the int8 data type and exclude operations such as conv and linear.
+# A superset of int8_in_int8_out_ops_pt2e incorporating additional operators.
+quantizable_ops_pt2e = copy.deepcopy(int8_in_int8_out_ops_pt2e)
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
