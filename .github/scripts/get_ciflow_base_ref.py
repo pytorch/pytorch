@@ -53,7 +53,7 @@ def find_base_branch() -> Any:
     GITHUB_REF_NAME = os.environ.get("GITHUB_REF_NAME", "")
     pull = ""
     if GITHUB_REF_NAME != "" and "ciflow" in GITHUB_REF_NAME:
-        pull = GITHUB_REF_NAME.rsplit('/', 1)[-1]
+        pull = GITHUB_REF_NAME.rsplit("/", 1)[-1]
     else:
         return "main"
 
