@@ -53,6 +53,10 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   tail = this->register_module("tail", ModuleList());
 
   for (const auto i : c10::irange(n_clusters)) {
+    TORCH_CHECK(
+        static_cast<int64_t>(std::pow(options.div_value(), (i + 1))) != 0,
+        "the intermediate value calculated from div_value should not be equal to 0");
+
     int64_t hsz = options.in_features() /
         static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
