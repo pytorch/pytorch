@@ -1537,9 +1537,11 @@ class TritonKernel(Kernel):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = self.cse.generate(
-                    self.compute,
-                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                accumulator_index = str(
+                    self.cse.generate(
+                        self.compute,
+                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                    )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
@@ -1583,7 +1585,7 @@ class TritonKernel(Kernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"  # type: ignore[assignment]
+                accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
@@ -2890,7 +2892,8 @@ class TritonScheduling(BaseScheduling):
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
         def load_cache():
             path = cache_file_path()
