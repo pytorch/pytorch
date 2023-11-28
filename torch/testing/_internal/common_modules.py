@@ -273,7 +273,7 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
                     forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
-                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
+                    reference_fn=bilinear_reference_fn),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
                     forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     desc='no_bias',

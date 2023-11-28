@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/impl/Common.h>
 #include <ATen/native/vulkan/impl/Packing.h>
 
@@ -281,6 +282,71 @@ bool record_buffer_to_nchw_op(
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_src.buffer_metadata());
+}
+
+vTensor channel_image_repacking(
+    const vTensor& v_input,
+    api::GPUMemoryLayout target_layout,
+    const api::ShaderInfo& shader_descriptor) {
+  api::Context* const context = api::context();
+
+  vTensor v_output{
+      context,
+      v_input.sizes(),
+      v_input.dtype(),
+      v_input.storage_type(),
+      target_layout,
+  };
+
+  // Required to determine how to insert memory barriers in the command buffer
+  api::PipelineBarrier pipeline_barrier{};
+
+  // The shader assumes a 4d nchw to calculate the lookup coordinate.
+  // If the input is not 4d, we need to pad it with 1's on the front.
+  const struct Block final {
+    api::utils::ivec4 sizes;
+  } block{
+      api::utils::make_ivec4_prepadded1(v_input.sizes()),
+  };
+
+  api::UniformParamsBuffer params(context, block);
+
+  context->submit_compute_job(
+      // shader descriptor
+      // VK_KERNEL(packing_channel_to_height),
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
+
+  return v_output;
+}
+
+vTensor convert_image_channels_packed_to_height_packed(const vTensor& v_input) {
+  return channel_image_repacking(
+      v_input,
+      api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED,
+      VK_KERNEL(convert_channels_to_height_packed));
+}
+
+vTensor convert_image_channels_packed_to_width_packed(const vTensor& v_input) {
+  return channel_image_repacking(
+      v_input,
+      api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      VK_KERNEL(convert_channels_to_width_packed));
 }
 
 } // namespace packing

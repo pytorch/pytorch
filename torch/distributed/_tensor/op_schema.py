@@ -258,6 +258,12 @@ class OpSchema:
             return_types[0].type, torch.TensorType
         )
 
+    def return_type_tensor(self) -> bool:
+        return_types = self.op._schema.returns
+        # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
+        # return types, so this check is enough for tensor like types
+        return isinstance(return_types[0].type, torch.TensorType)
+
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
         if not self.schema_info:
