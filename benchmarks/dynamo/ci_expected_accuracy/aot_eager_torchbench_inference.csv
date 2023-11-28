@@ -6,7 +6,7 @@ BERT_pytorch,pass,0
 
 
 
-Background_Matting,fail_accuracy,0
+Background_Matting,pass,0
 
 
 
@@ -106,7 +106,7 @@ hf_GPT2,pass,0
 
 
 
-hf_GPT2_large,pass_due_to_skip,0
+hf_GPT2_large,pass,0
 
 
 
