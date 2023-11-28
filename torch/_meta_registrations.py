@@ -402,8 +402,6 @@ def meta_sparse_structured_linear(
     bias: Optional[Tensor] = None,
     _activation_opt: Optional[str] = None,
 ):
-    import operator
-    from functools import reduce
 
     output_sizes = list(input.shape)
     if bias is not None:
@@ -412,7 +410,11 @@ def meta_sparse_structured_linear(
     output_sizes[-1] = weight.size(0)
 
     # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
-    transposed_strides = (1, reduce(operator.mul, input.size()[:-1], 1))
+    # We assume that we have already squashed the inputs into a 2-D tensor
+    # Then, as the output is transposed, we need to propagate the transposed
+    # stride information to the output tensor
+    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    transposed_strides = (1, input.size(0))
 
     output = input.new_empty(
         output_sizes,
