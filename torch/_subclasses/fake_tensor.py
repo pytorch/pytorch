@@ -1388,7 +1388,7 @@ class _DispatchCacheEntry:
 
 
 @dataclass(frozen=True)
-class _UnhashableDispatchArg(Exception):
+class _BypassDispatchCache(Exception):
     """
     Signals when a dispatch arg prevents FakeTensor caching.
     """
@@ -1556,8 +1556,8 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result.
         """
         try:
-            key = self._make_cache_key(func, args, kwargs)
-        except _UnhashableDispatchArg as e:
+            key = self._cache_key(func, args, kwargs)
+        except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
             return self._dispatch_impl(func, types, args, kwargs)
 
@@ -1568,27 +1568,28 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             FakeTensorMode.cache_misses += 1
             output = self._dispatch_impl(func, types, args, kwargs)
-            if isinstance(output, FakeTensor):
-                # Some ops return simple data types or tuples of Tensors, but
-                # it's rare, so skip the complexity of caching other types.
+            # Some ops return simple data types or tuples of Tensors, but
+            # it's rare, so avoid the complexity of caching other types.
+            # TODO: support caching sparse outputs?
+            if isinstance(output, FakeTensor) and not output.is_sparse:
                 FakeTensorMode.cache[key] = self._make_cache_entry(args, output)
 
         return output
 
-    def _make_cache_key(
+    def _cache_key(
         self, func: OpOverload, args: Tuple[Any], kwargs: Dict[str, Any]
     ) -> _DispatchCacheKey:
         """
-        Create a cache key given the dispatch args. Raise _UnhashableDispatchArg
+        Create a cache key given the dispatch args. Raise _BypassDispatchCache
         for any situation that precludes caching.
         """
         # ???
         if func.name().startswith("_torch_testing"):
-            raise _UnhashableDispatchArg("testing op")
+            raise _BypassDispatchCache("testing op")
 
         # In-place view ops mutate metadata; avoid that complexity.
         if torch.Tag.inplace_view in func._tags:
-            raise _UnhashableDispatchArg("inplace view")
+            raise _BypassDispatchCache("inplace view")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -1596,11 +1597,11 @@ class FakeTensorMode(TorchDispatchMode):
         if func.is_view and torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.CompositeImplicitAutograd
         ):
-            raise _UnhashableDispatchArg("CompositeImplicitAutograd op")
+            raise _BypassDispatchCache("CompositeImplicitAutograd op")
 
         # Even though func.is_view says otherwise, this seems to be a view op:
         if func == torch.ops.aten._unsafe_view.default:
-            raise _UnhashableDispatchArg("unsafe view")
+            raise _BypassDispatchCache("unsafe view")
 
         key = (func, self._translate_arg(args), self._translate_arg(kwargs))
         return _DispatchCacheKey(key)
@@ -1609,7 +1610,7 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Translate the provided arg into a form suitable for caching at FakeTensor
         dispatch, i.e., convert unhashable types like lists & dicts into tuples and
-        convert FakeTensors into metadata. Raises _UnhashableDispatchArg to signal
+        convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
         if isinstance(arg, (list, tuple)):
@@ -1617,17 +1618,17 @@ class FakeTensorMode(TorchDispatchMode):
         elif isinstance(arg, dict):
             return tuple((k, self._translate_arg(v)) for k, v in arg.items())
         elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
-            raise _UnhashableDispatchArg("symbolic shape")
+            raise _BypassDispatchCache("symbolic shape")
         elif isinstance(arg, FakeTensor):
             if not self.is_our_fake(arg):
-                raise _UnhashableDispatchArg("not our fake")
+                raise _BypassDispatchCache("not our fake")
             if arg._has_symbolic_sizes_strides:
-                raise _UnhashableDispatchArg("symbolic shape")
+                raise _BypassDispatchCache("symbolic shape")
             if arg.constant is not None:
-                raise _UnhashableDispatchArg("constant attribute")
+                raise _BypassDispatchCache("constant attribute")
             return extract_tensor_metadata(arg)
         elif isinstance(arg, torch.Tensor):
-            raise _UnhashableDispatchArg("non-fake tensor")
+            raise _BypassDispatchCache("non-fake tensor")
         else:
             return arg
 
@@ -1659,10 +1660,6 @@ class FakeTensorMode(TorchDispatchMode):
         metadata = entry.metadata
         if metadata.is_quantized:
             raise UnsupportedFakeTensorException("is_quantized nyi")
-        #if metadata.is_conj:
-        #    raise UnsupportedFakeTensorException("is_conj nyi")
-        #if metadata.is_neg:
-        #    raise UnsupportedFakeTensorException("is_neg nyi")
         if metadata.is_sparse:
             raise UnsupportedFakeTensorException("is_sparse nyi")
 
@@ -1716,6 +1713,17 @@ class FakeTensorMode(TorchDispatchMode):
         elif func is torch.ops.aten.storage_offset.default:
             return int(args[0].storage_offset())
 
+        # Some attribute queries that can be serviced directly
+        # See Note [is_coalesced is dispatched]
+        if func in {
+            torch.ops.aten.is_coalesced.default,
+            torch.ops.aten.dense_dim.default,
+            torch.ops.aten.sparse_dim.default,
+        }:
+            # NB: no_dispatch is ok here too, this func is very simple
+            with in_kernel_invocation_manager(self):
+                return func(*args, **kwargs)
+
         if FakeTensorMode.cache_enabled:
             return self._cached_dispatch_impl(func, types, args, kwargs)
         else:
@@ -1727,17 +1735,6 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             incr = IncrementRecursionCount()
-
-        # Some attribute queries that can be serviced directly
-        # See Note [is_coalesced is dispatched]
-        if func in {
-            torch.ops.aten.is_coalesced.default,
-            torch.ops.aten.dense_dim.default,
-            torch.ops.aten.sparse_dim.default,
-        }:
-            # NB: no_dispatch is ok here too, this func is very simple
-            with in_kernel_invocation_manager(self):
-                return func(*args, **kwargs)
 
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
