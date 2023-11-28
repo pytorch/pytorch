@@ -143,10 +143,16 @@ class CUDACPPScheduling(BaseScheduling):
             )
 
             CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-                cast(str, cuda_template_buffer.name), "anything", [additional_node]
+                cast(str, cuda_template_buffer.name),
+                "anything",
+                [additional_node],
+                gemm_output_layout=cuda_template_buffer.layout,
             )
             CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                cast(str, cuda_template_buffer.name), [additional_node], dry_run=True
+                cast(str, cuda_template_buffer.name),
+                [additional_node],
+                dry_run=True,
+                gemm_output_layout=cuda_template_buffer.layout,
             )
         except CUTLASSEVTOpNotImplementedError as e:
             not_implemented_op = str(e)

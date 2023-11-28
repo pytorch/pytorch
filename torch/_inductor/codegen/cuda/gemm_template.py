@@ -417,6 +417,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
         Bias: Optional[Buffer] = None,
+        gemm_output_layout: Layout = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
         if len(self.input_nodes) > 2:  # if no bias arg passed in at construction
@@ -431,6 +432,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             epilogue_nodes,
             pre_fused_addmm_evt,
             Bias.get_name() if Bias is not None else None,
+            gemm_output_layout=gemm_output_layout
         )
 
     def define_gemm_instance(
@@ -439,6 +441,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         output_buffer_name: str,
         epilogue_nodes: Optional[List[IRNode]] = None,
         Bias: Optional[Buffer] = None,
+        gemm_output_layout: Optional[Layout] = None,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -457,11 +460,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             )
             if use_evt:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
+                assert gemm_output_layout is not None
                 op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
                     output_buffer_name,
                     epilogue_functor_type_name,
                     epilogue_nodes,
                     Bias=Bias,
+                    gemm_output_layout=gemm_output_layout
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -911,6 +916,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         epilogue_nodes,
                         pre_fused_evt_args,
                         Bias.get_name() if Bias is not None else None,
+                        gemm_output_layout=self.output_node.get_layout()
                     )
                 )
             epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
@@ -924,6 +930,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             cast(str, template_output_node_name),
             epilogue_nodes,
             Bias=Bias,
+            gemm_output_layout = template_buffer_node.get_layout() if template_buffer_node is not None else None
         )
 
         options = dict(
