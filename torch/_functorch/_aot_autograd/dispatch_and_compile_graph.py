@@ -1,3 +1,8 @@
+"""
+This module dispatches the graphs to either the forward-only or joint compilation
+pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
+"""
+
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
