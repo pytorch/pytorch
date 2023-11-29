@@ -1,4 +1,4 @@
-# Owner(s): ["module: decomposition"]
+# Owner(s): ["module: decompositions"]
 
 from functools import partial
 from itertools import product

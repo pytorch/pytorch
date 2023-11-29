@@ -1,4 +1,4 @@
-# Owner(s): ["module: decomposition"]
+# Owner(s): ["module: decompositions"]
 
 import itertools
 import torch
