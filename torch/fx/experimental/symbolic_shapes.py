@@ -60,11 +60,11 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "guard_int", "guard_float", "guard_scalar",
+    "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols", "sym_eq", "CreateSymbolicPolicy", "FreshCreateSymbolicPolicy",
-    "SubclassCreateSymbolicPolicy"
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
+    "StatefulSymbolicContext", "SubclassSymbolicContext"
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -138,6 +138,54 @@ def is_concrete_int(a: Union[int, SymInt]):
         return True
 
     return False
+
+def canonicalize_bool_expr(expr: sympy.Expr):
+    r""" Canonicalize a boolean expression by transforming it into a lt / le
+    inequality and moving all the non-constant terms to the rhs.
+    We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
+    recursively
+    nb. sympy.Rel.canonical is not good enough https://github.com/sympy/sympy/issues/25924
+
+    Args:
+        expr (sympy.Expr): Expression to canonicalize
+    """
+    # Canonicalise an inequality by transforming it into a lt / le
+    # inequality and moving all the non-constant terms to the rhs
+    # We canonicalise And / Ors / Not via cnf
+    # nb. Relational.canonical in sympy is broken
+    # https://github.com/sympy/sympy/issues/25924
+
+    if not isinstance(expr, (sympy.Rel, sympy.And, sympy.Or, sympy.Not, sympy.Eq, sympy.Ne)):
+        return expr
+
+    if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
+        expr = sympy.logic.boolalg.to_cnf(expr)
+    return _canonicalize_bool_expr_impl(expr)
+
+def _canonicalize_bool_expr_impl(expr: sympy.Expr):
+    if isinstance(expr, (sympy.And, sympy.Or)):
+        return type(expr)(*map(canonicalize_bool_expr, expr.args))
+
+    opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
+    if isinstance(expr, tuple(opposite.keys())):
+        lhs = expr.rhs - expr.lhs
+        t = opposite[type(expr)]
+    else:
+        assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
+        lhs = expr.lhs - expr.rhs
+        t = type(expr)
+    rhs = 0
+    if isinstance(lhs, sympy.Add):
+        cts = []
+        variables = []
+        for term in lhs.args:
+            if term.is_number:
+                cts.append(term)
+            else:
+                variables.append(term)
+        lhs = sympy.Add(*variables)
+        rhs = -sympy.Add(*cts)
+    return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]):
     r""" Utility to check if underlying object
@@ -737,8 +785,14 @@ class EqualityConstraint(Constraint):
     def is_equal(self, source1, source2):
         return self._find(source1) == self._find(source2)
 
+
+def _assert_symbol_context(symbolic_context):
+    assert isinstance(symbolic_context, SymbolicContext), "Invalid symbolic_context object"
+    assert type(symbolic_context) is not SymbolicContext, "Illegal usage of symbolic_context ABC"
+
+
 @dataclass(frozen=True)
-class CreateSymbolicPolicy:
+class SymbolicContext:
     """
     Data structure specifying how we should create symbols in
     ``create_symbolic_sizes_strides_storage_offset``; e.g., should
@@ -752,30 +806,79 @@ class CreateSymbolicPolicy:
 
 
 @dataclass(frozen=True)
-class FreshCreateSymbolicPolicy(CreateSymbolicPolicy):
+class StatelessSymbolicContext(SymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
-    a policy determination as given by ``DimDynamic`` and ``DimConstraint``.
+    a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
     constraint_sizes: DimList[DimConstraint] = None
-    # TODO: add storage offset and stride policy
+    # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
 
 
+# note [Tensor Fakification and Symbol Caching]
+#
+# As of the time of this note, dynamo creates a fresh fake tensor mode for backends.
+# The reason we do this is because there are certain classes of operations, namely,
+# metadata mutations, that change tensor size, stride, etc. This means that the fake tensor
+# state at the end of a dynamo trace is different than the fake tensor state at the beginning
+# of a trace. Backends like aot_autograd need a fresh fake tensor to correctly track metadata mutation,
+# view relationships, etc.
+#
+# As we create a new fake mode, we also lose the memoization that comes with it. Rather than
+# transfer the memoization cache, we instead transfer the shape env. However, with this
+# comes nuance - as dynamo is selective in how it makes symbolic shapes. Due to strategies in
+# automatic dynamic and constraints, the policy for which dims are dynamic is nuanced and varies across
+# recompilations.
+#
+# In order to preserve the symbolic decisions made during dynamo tensor fakification, we pass
+# a StatefulSymbolicContext at creation time. This object is tracked, per tensor, on the TracingContext.
+# The lifecycle of this object should match the lifecycle of the original dynamo tracked tensor, and it is
+# safe to reuse this object as many times as necessary to create a fake tensor. Fake tensors
+# created with new fake modes should produce the same exact symbols as the original, providing the same shape_env
+# is used.
+# TODO(voz): Shape env validation
 @dataclass(frozen=True)
-class SubclassCreateSymbolicPolicy(CreateSymbolicPolicy):
+class StatefulSymbolicContext(StatelessSymbolicContext):
     """
-    The correct policy for a given inner tensor of a traceable tensor subclass
-    may differ from that of the outer policy. This structure allows for this
-    flexibility, with inner policies mapped via attr -> policy.
+    Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
+    a symbolic_context determination as given by a cache of Source:Symbol. A cache hit
+    will reuse a stored symbol, and a cache miss will write to this cache.
+
+    This behaves like StatelessSymbolicContext, except the cache supersedes the
+    other values - dynamic_sizes and constraint_sizes will not be read if we cache
+    hit.
+
+    It is the cache owners responsibility to maintain the lifecycle of the cache
+    w/r/t different shape_envs, clearing, etc.
     """
-    outer_policy: CreateSymbolicPolicy
-    inner_policies: Dict[str, CreateSymbolicPolicy]
+    tensor_source: Source = None
+    source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
+
+    def __post_init__(self):
+        # The None default is annoying, but required because of dataclass limitations
+        assert self.tensor_source is not None
+        if not self.source_to_symint_node_cache:
+            object.__setattr__(self, 'source_to_symint_node_cache', {})
+
+
+@dataclass(frozen=True)
+class SubclassSymbolicContext(StatefulSymbolicContext):
+    """
+    The correct symbolic context for a given inner tensor of a traceable tensor subclass
+    may differ from that of the outer symbolic context. This structure allows for this
+    flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
+    """
+    inner_contexts: Dict[str, SymbolicContext] = None
+
+    def __post_init__(self):
+        if self.inner_contexts is None:
+            self.inner_contexts = {}
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -1791,7 +1894,7 @@ class ShapeEnv:
             # FakeTensorMeta for two reasons:
             #   1. this is all the information we need when recording ShapeEnvEvents.
             #   2. it works even if each TrackedFake changes its metadata.
-            return TrackedFake(inner_fake, fake.source, fake.policy)  # type: ignore[arg-type]
+            return TrackedFake(inner_fake, fake.source, fake.symbolic_context)  # type: ignore[arg-type]
 
         return [maybe_transform_fake(fake) for fake in self.tracked_fakes]
 
@@ -1950,20 +2053,20 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex_size: Sequence[int],
                            source: Source,
-                           policy: CreateSymbolicPolicy
+                           symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, policy)
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
                                           source: Source,
-                                          policy: CreateSymbolicPolicy,
+                                          symbolic_context: SymbolicContext,
                                           ) -> List[sympy.Expr]:
         assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        assert isinstance(policy, FreshCreateSymbolicPolicy)
-        dynamic_dims = policy.dynamic_sizes
-        constraint_dims = policy.constraint_sizes
+        _assert_symbol_context(symbolic_context)
+        dynamic_dims = symbolic_context.dynamic_sizes
+        constraint_dims = symbolic_context.constraint_sizes
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
@@ -1976,7 +2079,7 @@ class ShapeEnv:
         ex: torch.Tensor,
         source: Source,
         *,
-        policy: Optional[CreateSymbolicPolicy] = None,
+        symbolic_context: Optional[SymbolicContext] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -2036,7 +2139,7 @@ class ShapeEnv:
             ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
-            policy=policy,
+            symbolic_context=symbolic_context,
         )
 
     @record_shapeenv_event()
@@ -2048,12 +2151,12 @@ class ShapeEnv:
         is_dim_dynamic: Sequence[bool],
         source: Source,
         *,
-        policy: Optional[CreateSymbolicPolicy] = None,
+        symbolic_context: Optional[SymbolicContext] = None,
     ):
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
-        if policy is None:
+        if symbolic_context is None:
             constraint_dims = [None] * dim
             dynamic_dims = []
             for i in range(dim):
@@ -2067,13 +2170,14 @@ class ShapeEnv:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
-            policy = FreshCreateSymbolicPolicy(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+            # symbolic_context is None - set one
+            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+        # We got a StatelessSymbolicContext
+        _assert_symbol_context(symbolic_context)
+        constraint_dims = symbolic_context.constraint_sizes
+        dynamic_dims = symbolic_context.dynamic_sizes
 
-        assert isinstance(policy, FreshCreateSymbolicPolicy)
-        constraint_dims = policy.constraint_sizes
-        dynamic_dims = policy.dynamic_sizes
-
-        # TODO: make this configurable from outside policy; we made a policy
+        # TODO: make this configurable from outside symbolic_context; we made a symbolic_context
         # decision here where if all sizes are static, we are going to
         # specialize all of the inner strides/offset too. We don't have to
         # do this.
@@ -2084,7 +2188,7 @@ class ShapeEnv:
         assert len(constraint_dims) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, policy)
+        size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, symbolic_context)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex_stride):
             if val in (0, 1):
@@ -2128,7 +2232,12 @@ class ShapeEnv:
         assert all(x is not None for x in stride)
 
         sym_sizes = [
-            self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i))
+            self.create_symintnode(
+                sym,
+                hint=hint,
+                source=TensorPropertySource(source, TensorProperty.SIZE, i),
+                symbolic_context=symbolic_context
+            )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
         sym_stride = []
@@ -2137,14 +2246,17 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)
-            ))
-        sym_storage_offset = self.create_symintnode(self.create_symbol(
-            ex_storage_offset,
-            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=DimDynamic.DYNAMIC,
-            constraint_dim=None,
-        ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                symbolic_context=symbolic_context))
+        sym_storage_offset = self.create_symintnode(
+            self.create_symbol(
+                ex_storage_offset,
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            ),
+            hint=ex_storage_offset,
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), symbolic_context=symbolic_context)
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
@@ -2157,7 +2269,10 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
+            symbolic_context: Optional[SymbolicContext] = None,
     ):
+        source_name = source.name() if source else None
+
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -2171,11 +2286,20 @@ class ShapeEnv:
         else:
             fx_node = None
 
+        # see note [Tensor Fakification and Symbol Caching]
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            if source_name in symbolic_context.source_to_symint_node_cache:
+                return symbolic_context.source_to_symint_node_cache[source_name]
+
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
-            return int(sym)
-        return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            out = int(sym)
+        else:
+            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            symbolic_context.source_to_symint_node_cache[source_name] = out
+        return out
 
     @record_shapeenv_event()
     def create_unspecified_symint_and_symbol(self, value, source, dynamic_dim):
@@ -2270,7 +2394,7 @@ class ShapeEnv:
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
-        # constrained the symbol, force the policy to DYNAMIC, because our
+        # constrained the symbol, force the symbolic_context to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped
         if constraint_dim is not None:
             dynamic_dim = DimDynamic.DYNAMIC
@@ -2398,7 +2522,7 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
-        input_policies: Optional[DimList[CreateSymbolicPolicy]] = None,
+        input_contexts: Optional[DimList[SymbolicContext]] = None,
         equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
@@ -2423,28 +2547,28 @@ class ShapeEnv:
         assert len(placeholders) == len(sources)
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
-        def _create_no_constraints_policy(t):
-            return FreshCreateSymbolicPolicy(
+        def _create_no_constraints_context(t):
+            return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
                 constraint_sizes=[None] * t.dim()
             )
 
         # Expand optional inputs, or verify invariants are upheld
-        if input_policies is None:
-            input_policies = [
-                _create_no_constraints_policy(t) if isinstance(t, Tensorlike)
+        if input_contexts is None:
+            input_contexts = [
+                _create_no_constraints_context(t) if isinstance(t, Tensorlike)
                 else None for t in placeholders
             ]
         else:
-            assert len(input_policies) == len(placeholders)
-            for i, (t, policy) in enumerate(zip(placeholders, input_policies)):
+            assert len(input_contexts) == len(placeholders)
+            for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
-                    if policy is None:
-                        policy_inputs[i] = _create_no_constraints_policy(t)
+                    if context is None:
+                        input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int))
-                    assert not isinstance(policy, list)
+                    assert not isinstance(context, list)
 
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -2627,7 +2751,7 @@ class ShapeEnv:
                     )
                     record_constraint_violation(constraint.warn_only, self.debug_name(source), msg)
 
-        for t, source, policy in zip(placeholders, sources, input_policies):
+        for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
@@ -2641,29 +2765,24 @@ class ShapeEnv:
             if is_traceable_wrapper_subclass(t):
                 from torch._dynamo.source import AttrSource
 
-                assert isinstance(policy, SubclassCreateSymbolicPolicy)
+                assert isinstance(context, SubclassSymbolicContext)
 
                 # For subclasses, we need to track symints on BOTH the outer
                 # and inner tensors.
                 sources_tensors_constraints = [
-                    (source, t, policy.outer_policy.constraint_sizes)
+                    (source, t, context.constraint_sizes)
                 ]
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
                     inner_t = getattr(t, attr)
-                    inner_policy = policy.inner_policies[attr]
-
-                    # TODO: If we ever support subclasses as inner tensors, this will
-                    # have to change.
-                    assert isinstance(inner_policy, FreshCreateSymbolicPolicy)
-
+                    inner_context = context.inner_contexts[attr]
                     sources_tensors_constraints.append((
                         AttrSource(source, attr),
                         inner_t,
-                        inner_policy.constraint_sizes
+                        inner_context.constraint_sizes
                     ))
             else:
-                sources_tensors_constraints = [(source, t, policy.constraint_sizes)]
+                sources_tensors_constraints = [(source, t, context.constraint_sizes)]
 
             for src, curr_t, constraint in sources_tensors_constraints:
                 for i, ss in enumerate(curr_t.size()):
@@ -3010,6 +3129,8 @@ class ShapeEnv:
         if compute_hint:
             expr = expr.xreplace(self.var_to_val)
 
+        expr = canonicalize_bool_expr(expr)
+
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3018,17 +3139,20 @@ class ShapeEnv:
             if s in self.var_to_val:
                 continue
             subst = {}
-            if s in self.deferred_runtime_asserts:
-                for ra in self.deferred_runtime_asserts[s]:
-                    if compute_hint:
-                        e = ra.expr.xreplace(self.var_to_val)
-                    else:
-                        e = ra.expr
-                    subst[e] = sympy.true
-                    subst[sympy.Not(e)] = sympy.false
-                    # NB: this doesn't match relations if they're flipped; e.g.,
-                    # if you have x < 5, we won't get 5 > x.  Holler if this is
-                    # a problem
+            for ra in self.deferred_runtime_asserts.get(s, ()):
+                if compute_hint:
+                    e = canonicalize_bool_expr(ra.expr.xreplace(self.var_to_val))
+                else:
+                    e = ra.expr
+                # e is already canonical
+                subst[e] = sympy.true
+                subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
+                if isinstance(e, sympy.Eq):
+                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
+                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
+                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
+                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
+
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
 
@@ -3594,6 +3718,8 @@ class ShapeEnv:
             self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
+            # canonicalise to remove equations that are trivially equal
+            expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
