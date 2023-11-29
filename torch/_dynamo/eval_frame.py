@@ -42,7 +42,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tenso
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
-    StatelessSymbolicContext,
+    FreshCreateSymbolicPolicy,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -903,7 +903,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
                     arg.node.meta["val"] = fake_mode.from_tensor(
                         flat_args[i],
-                        symbolic_context=StatelessSymbolicContext(
+                        policy=FreshCreateSymbolicPolicy(
                             dynamic_sizes=[
                                 DimDynamic.DYNAMIC
                                 if d in flat_args_dynamic_dims[i]
