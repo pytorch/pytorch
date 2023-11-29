@@ -50,7 +50,7 @@ accumulated_cache_size_limit = 64
 specialize_int = False
 
 # legacy config, does nothing now!
-constant_functions = {}
+constant_functions: Dict[Any, bool] = {}
 
 # legacy config, does nothing now!
 dynamic_shapes = True
