@@ -40,6 +40,7 @@ from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
+    _disable_prexisiting_fake_mode,
 )
 from torch.export.graph_signature import (
     _sig_to_specs,
@@ -639,16 +640,6 @@ def _unwrap_user_inputs(
         replaces[o] if o in replaces else o for o in graph_signature.user_outputs
     ]
     return user_inputs_to_mutate  # type: ignore[return-value]
-
-
-def _disable_prexisiting_fake_mode(fn):
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        with maybe_disable_fake_tensor_mode():
-            return fn(*args, **kwargs)
-
-    return wrapper
 
 
 @_disable_prexisiting_fake_mode
