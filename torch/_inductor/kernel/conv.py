@@ -310,8 +310,6 @@ def convolution(
     padding = tuple(padding)
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
-    if not isinstance(groups, int):
-        groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
     kwargs: ConvLayoutParams = {
         "stride": stride,
