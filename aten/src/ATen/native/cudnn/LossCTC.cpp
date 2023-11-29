@@ -88,6 +88,7 @@ bool _use_cudnn_ctc_loss(
     int64_t BLANK) {
   auto& ctx = at::globalContext();
 
+<<<<<<< HEAD
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) && (ctx.userForceCuDNN() || 
       (ctx.userEnabledCuDNN() && ((BLANK == 0) &&
@@ -95,6 +96,12 @@ bool _use_cudnn_ctc_loss(
       (targets.scalar_type() == at::kInt) &&
       (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
       (log_probs.dim() == 3))));
+=======
+  bool use_cudnn = ctx.userEnabledCuDNN() && (((BLANK == 0) &&
+      (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
+      (targets.scalar_type() == at::kInt)) || ctx.userForceCuDNN()) &&
+      (log_probs.device().type() == at::kCUDA);
+>>>>>>> aa4d7cd7c3e (clarify condition ordering)
 
   if (use_cudnn) {
     // we don't know that input_lengths and target_lengths have the same size
