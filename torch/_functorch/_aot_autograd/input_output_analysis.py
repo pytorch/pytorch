@@ -3,21 +3,34 @@ This module is one of the analysis modules - it takes as input a function or gra
 and some preexisting properties, and returns some data that is useful for deciding
 how to further proceed with compilation or construct runtime wrappers.
 
-In particular, the analysis here attempts to refine the view and mutation metadata
-collected previously - removing duplicate inputs or mapping views to their bases.
+In particular, the following analyses are provided:
+1. Refine the view and mutation metadata collected previously - removing duplicate
+   inputs or mapping views to their bases.
+2. Based on view base analysis, it may merge inputs of different views into a single
+   input corresponding to a common base.
+3. We also analyze the function signature for export graphs.
 """
 
 import collections
+import itertools
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from .functional_utils import _get_mutation_type
-from .schemas import InputAliasInfo, OutputAliasInfo, OutputType, ViewAndMutationMeta
+from .schemas import (
+    BackwardSignature,
+    GraphSignature,
+    InputAliasInfo,
+    OutputAliasInfo,
+    OutputType,
+    ViewAndMutationMeta,
+)
 from .utils import strict_zip
 
 zip = strict_zip
@@ -562,3 +575,89 @@ def merge_view_inputs(
         for x in post_processed_calling_convention_meta:
             assert x != -1
         return args_to_functionalization, post_processed_calling_convention_meta
+
+
+def _graph_input_names(gm):
+    return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+
+
+def _graph_output_names(gm):
+    output_node = next(iter(reversed(gm.graph.nodes)))
+    assert output_node.op == "output" and len(output_node.args) == 1
+    return_args = output_node.args[0]
+    return [getattr(return_arg, "name", None) for return_arg in return_args]
+
+
+def create_graph_signature(
+    fx_g: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+    in_spec: pytree.TreeSpec,
+    out_spec: pytree.TreeSpec,
+    *,
+    user_args_flat: List[Tensor],
+    params_and_buffers_flat: List[Tensor],
+    param_names: List[str],
+    buffer_names: List[str],
+    trace_joint: bool,
+    num_user_fw_outs: Optional[int],
+    loss_index: Optional[int],
+) -> GraphSignature:
+    # Retrieve graph input names
+    graph_input_names = _graph_input_names(fx_g)
+    # Retrieve graph output names
+    graph_output_names = _graph_output_names(fx_g)
+
+    num_params_buffers = len(param_names) + len(buffer_names)
+    # We have enough restrictions on the graph (no de-duping, synthetic bases, etc),
+    # Such that # graph inps = # user inps + # params + # buffers
+    num_user_args = len(graph_input_names) - num_params_buffers
+
+    if trace_joint:
+        assert num_user_fw_outs is not None
+        num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
+        backward_output_names = graph_output_names[num_fw_outs:]
+
+        grad_index = itertools.count(0)
+        gradients_to_parameters = {
+            backward_output_names[next(grad_index)]: param_names[i]
+            for i, param in enumerate(params_and_buffers_flat)
+            if param.requires_grad
+        }
+
+        gradients_to_user_inputs = {
+            backward_output_names[next(grad_index)]: graph_input_names[
+                i + len(params_and_buffers_flat)
+            ]
+            for i, user_input in enumerate(user_args_flat)
+            if user_input.requires_grad
+        }
+
+        assert len(gradients_to_parameters) + len(gradients_to_user_inputs) == len(
+            backward_output_names
+        )
+
+        # Check that we have fully accounted for all graph outputs
+        backward_signature = BackwardSignature(
+            gradients_to_parameters,
+            gradients_to_user_inputs,
+            graph_output_names[loss_index],
+        )
+    else:
+        backward_signature = None
+        num_user_fw_outs = (
+            len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
+        )
+
+    return GraphSignature.from_tracing_metadata(
+        in_spec=in_spec,
+        out_spec=out_spec,
+        graph_input_names=graph_input_names,
+        graph_output_names=graph_output_names,
+        view_mutation_metadata=fw_metadata,
+        named_parameters=param_names,
+        named_buffers=buffer_names,
+        num_user_inputs=num_user_args,
+        num_user_outputs=num_user_fw_outs,
+        loss_index=loss_index,
+        backward_signature=backward_signature,
+    )
