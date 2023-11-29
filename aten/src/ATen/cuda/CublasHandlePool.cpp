@@ -40,9 +40,7 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
-      cublas_handle_stream_to_workspace().clear();
-  #endif
+  cublas_handle_stream_to_workspace().clear();
 }
 
 size_t parseChosenWorkspaceSize() {
@@ -107,10 +105,8 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
-  // cuBLAS should not need an explicitly allocated workspace after CUDA 12.2
-  // to avoid increasing memory usage during graph captures
-  // original issue: https://github.com/pytorch/pytorch/pull/83461
+#if !defined(USE_ROCM)
+  // cublasSetWorkspace not available on CUDA 10.2
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = cublas_handle_stream_to_workspace().find(key);

@@ -184,6 +184,7 @@ class DummyContextManager:
 
 
 class TestModuleHooks(TestCase):
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
         fired_hooks: List[int] = []
@@ -206,6 +207,7 @@ class TestModuleHooks(TestCase):
         model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     @parametrize_test("named_tuple", (True, False))
     def test_forward_pre_hooks(self, named_tuple):
         fired_hooks: List[int] = []
@@ -232,6 +234,7 @@ class TestModuleHooks(TestCase):
         model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     @parametrize_test("named_tuple", (True, False))
     def test_full_backward_hooks(self, named_tuple):
         fired_hooks: List[int] = []
@@ -254,6 +257,7 @@ class TestModuleHooks(TestCase):
         model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     @parametrize_test("named_tuple", (True, False))
     def test_full_backward_pre_hooks(self, named_tuple):
         fired_hooks: List[int] = []
@@ -293,6 +297,7 @@ class TestModuleHooks(TestCase):
         out.sum().backward()
         self.assertEqual(a.grad, torch.zeros_like(a))
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     @parametrize_test("named_tuple", (True, False))
     def test_mixed_hooks(self, named_tuple):
         fired_hooks: List[int] = []
@@ -320,6 +325,7 @@ class TestModuleHooks(TestCase):
         model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, [0, 1, 2, 3, 0, 1, 2, 3])
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_kwarg_hooks(self):
         # 1. test forward pre hook
         fired_hooks: List[int] = []
@@ -376,6 +382,7 @@ class TestModuleHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_remove_kwarg_hooks(self):
         # test forward pre and forward hooks
         fired_hooks: List[int] = []
@@ -421,6 +428,7 @@ class TestModuleHooks(TestCase):
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_always_called_forward_hooks(self):
         x: torch.Tensor = torch.ones(10, 10)
         model = FailsInForwardModel()
@@ -508,6 +516,7 @@ class TestModuleHooks(TestCase):
             model(x)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_bw_hook_warning_for_non_tensor_or_tuple(self):
         # Test to verify that backward hook raises warning
         # if result is not a Tensor or tuple of Tensors.
@@ -862,6 +871,7 @@ class TestModuleGlobalHooks(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -901,6 +911,7 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_preforward_hook_removable(self):
         """
         This test is to test when multiple pre-forward hook functions can be
@@ -936,6 +947,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
@@ -1119,6 +1131,7 @@ class TestModuleHookNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
@@ -1136,6 +1149,7 @@ class TestModuleHookNN(NNTestCase):
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_backward_hooks_interaction(self):
         # Test to make sure that the grad_outputs
         # updated by full_backward_pre_hook are received by
@@ -1210,6 +1224,7 @@ class TestModuleHookNN(NNTestCase):
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_no_requires_grad(self):
         mod = nn.Linear(2, 3)
 
@@ -1403,6 +1418,7 @@ class TestModuleHookNN(NNTestCase):
         with module.register_full_backward_hook(bw_hook):
             module(inp1, inp2).sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1420,6 +1436,7 @@ class TestModuleHookNN(NNTestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_forward_preforward_writable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
