@@ -1,6 +1,5 @@
 import itertools
 import logging
-import warnings
 import pprint
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -10,7 +9,6 @@ from unittest.mock import patch
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -22,12 +20,10 @@ from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv, fx_placeholder_vals
 )
-from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
@@ -90,11 +86,9 @@ from ._aot_autograd.schemas import (  # noqa: F401
     FQN,
     GraphSignature,
     AOTConfig,
-    SubclassTracingInfo,
 )
 from ._aot_autograd.subclass_utils import (  # noqa: F401
     requires_subclass_dispatch,
-    create_subclass_meta,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
@@ -122,6 +116,8 @@ from ._aot_autograd.traced_function_transforms import (  # noqa: F401
     create_joint,
     create_functionalized_fn,
     create_functionalized_rng_ops_wrapper,
+    aot_dispatch_subclass,
+    create_functional_call,
 )
 
 zip = strict_zip
@@ -916,113 +912,6 @@ fw_metadata={str(fw_metadata)}
         return outs
 
     return wrapped_compiled_fn
-
-
-# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
-# Also returns:
-# - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
-# - the updated ViewAndMutationMeta for this dense -> dense function.
-# The other important arguments are:
-# - flat_fn_maybe_joint: when is_joint_structure=True, this is the joint fw-bw function.
-#                        when is_joint_structure=False, this is just the forward function.
-# - fw_only: this is *always* the forward-only function.
-#   Why do we need this? We need to collect updated ViewAndMutationMeta on our new dense -> dense functions.
-#   In particular, we need this to tell the partitioner how many dense forward outputs there are.
-def aot_dispatch_subclass(
-    flat_fn_maybe_joint,
-    args: List[Any],
-    *,
-    is_joint_structure: bool,
-    meta: ViewAndMutationMeta,
-    fw_only: Callable,
-) -> "SubclassTracingInfo":
-    # Skip logic if we don't need to trace through any subclasses
-    req_subclass_dispatch = requires_subclass_dispatch(args, meta)
-    if not req_subclass_dispatch:
-        return SubclassTracingInfo(
-            plain_tensor_trace_fn=flat_fn_maybe_joint,
-            plain_tensor_args=args,
-            maybe_subclass_meta=None,
-        )
-
-    # TODO: add subclass guards (later PR).
-
-    # What's going on here? We need to compute subclass metadata about the outputs of the joint (grad_inputs).
-    # Annoying: we don't know the grad input metas until we're in the middle of tracing the joint,
-    # so we set it later, while we're tracing the joint (see inner_fn() below).
-    # Another option would be to run our run_functionalized_fw_and_collect_metadata() function
-    # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
-    subclass_meta = SubclassMeta()
-
-    def inner_fn(fn, args, *, use_trace_joint: bool):
-        # Step 1: wrap tensor inputs into subclasses if necessary
-        all_args = wrap_tensor_subclasses_maybe_joint(args, is_joint_structure=use_trace_joint, meta=meta)
-
-        # Step 2: call the inner function, with our (maybe subclass) inputs
-        wrapped_outs = fn(*all_args)
-
-        if use_trace_joint:
-            # See Note: [Computing Subclass Metadata about grad_inputs]
-            # We also stash subclass info on our grad_inputs, if we're tracing the joint.
-            nonlocal subclass_meta
-            assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
-            # Don't need fw outs since we already have subclass metadata on them
-            grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
-
-        # Step 3: Unwrap any subclass outputs back into dense tensors
-        unwrapped_outs = unwrap_tensor_subclasses(wrapped_outs, is_joint_structure=use_trace_joint)
-        return unwrapped_outs
-
-    def joint_fn(primals, tangents):
-        return inner_fn(flat_fn_maybe_joint, (primals, tangents), use_trace_joint=True)
-
-    def fw_fn(*primals):
-        return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
-
-    def metadata_fn(*primals):
-        return inner_fn(fw_only, primals, use_trace_joint=False)
-
-    args_unwrapped = unwrap_tensor_subclasses(args, is_joint_structure=is_joint_structure)
-
-    if is_joint_structure:
-        primals_unwrapped = args_unwrapped[0]
-        fn_to_trace = joint_fn
-    else:
-        primals_unwrapped = args_unwrapped
-        fn_to_trace = fw_fn
-
-    # Note: [Partitioner handling for Subclasses, Part 1]
-    # The way the partitioner works is that:
-    # (1) we pass is a single graph containing the joint fw/bw,
-    #     where the # of graph outputs corresponds to # fw_outputs + # grad_inputs
-    # (2) The partitioner accepts an arguments, num_fwd_outputs,
-    #     and assumes that the first "num_fwd_outputs" graph outputs correspond
-    #     to outputs of the forward graph.
-    # How do tensor subclasses enter the picture?
-    # the num_fwd_outputs in the final graph is actually non-trivial to compute,
-    # because it can be influenced by input mutations and intermediate bases.
-    # So we compute it by inspecting the current ViewAndMutationMeta object.
-    # However, the original ViewAndMutationMeta that we computed was created
-    # on the subclass -> subclass graph,
-    # which can have a different number of outputs than the dense -> dense graph.
-    # That's why we createa a fresh metadata object on the dense -> dense function here,
-    # and plumb it back up to the partitioner.
-    # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
-    meta_updated = run_functionalized_fw_and_collect_metadata(
-        metadata_fn,
-        keep_input_mutations=meta.keep_input_mutations,
-        is_train=meta.is_train,
-        requires_subclass_dispatch=True,
-    )(*primals_unwrapped)
-
-    subclass_meta.fw_metadata = meta_updated
-
-    return SubclassTracingInfo(
-        plain_tensor_trace_fn=fn_to_trace,
-        plain_tensor_args=args_unwrapped,
-        maybe_subclass_meta=subclass_meta,
-    )
 
 
 # Has the precondition that there
@@ -1883,35 +1772,6 @@ fw_metadata={str(fw_metadata)}""")
             compiled_fn = make_boxed_func(compiled_fn)
 
         return compiled_fn
-
-
-
-def create_functional_call(mod, params_spec, params_len):
-    # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
-    # https://github.com/pytorch/pytorch/issues/103569
-
-    def functional_call(*args, **kwargs):
-        with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
-            if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore", "Anomaly Detection has been enabled."
-                    )
-                    with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
-            else:
-                out = mod(*args[params_len:], **kwargs)
-
-        if not isinstance(out, (tuple, list)):
-            raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
-                "pytree processing of the outputs. Please change the module to "
-                "have tuple outputs or use aot_module instead."
-            )
-        return out
-    return functional_call
 
 
 def aot_function(
