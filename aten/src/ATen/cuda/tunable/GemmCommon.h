@@ -9,10 +9,30 @@
 //
 #pragma once
 
+#include <string>
+
 #include <ATen/cuda/tunable/TunableOp.h>
+#include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
 
 namespace at::cuda::tunable {
+
+enum class BlasOp {
+  N = 0,
+  T = 1
+};
+
+inline std::string BlasOpToString(BlasOp op) {
+  switch (op) {
+    case BlasOp::N:
+      return "N";
+    case BlasOp::T:
+      return "T";
+    // following is unreachable, compiler is producing false-positive warning, unfortunately.
+    default:
+      AT_ASSERT("unreachable");
+  }
+}
 
 template <typename T>
 struct GemmParams : OpParams {

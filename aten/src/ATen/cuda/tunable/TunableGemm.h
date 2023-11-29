@@ -61,7 +61,7 @@ bool IsZero(c10::complex<float> v) {
   return v == 0.0f;
 }
 
-template <typename T>
+template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
   GemmTunableOp() {
@@ -78,7 +78,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     if constexpr (
         !std::is_same_v<T, c10::complex<float>> &&
         !std::is_same_v<T, c10::complex<double>>) {
-      for (auto&& [_, op] : GetHipBlasLtGemmTypeStringAndOps<T>()) {
+      for (auto&& [_, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
         this->RegisterOp(std::move(op));
       }
     }

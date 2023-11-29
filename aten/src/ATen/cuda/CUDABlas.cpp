@@ -611,8 +611,28 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
   params.c = c;
   params.ldc = ldc;
 
-  static tunable::GemmTunableOp<DType> gemm{};
-  gemm(&params);
+  bool transa_ = ((transa != 'n') && (transa != 'N'));
+  bool transb_ = ((transb != 'n') && (transb != 'N'));
+
+  if (transa_ && transb_) {
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (transa_ && !transb_) {
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && transb_) {
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && !transb_) {
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else {
+    TORCH_CHECK(false, "unreachable");
+  }
 }
 
 template <>
