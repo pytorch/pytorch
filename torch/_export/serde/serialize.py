@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import operator
+import pickle
 import typing
 
 from contextlib import contextmanager
@@ -165,7 +166,7 @@ _SYM_BOOL_OPS = {
 class SerializedArtifact:
     exported_program: Union[ExportedProgram, bytes]
     state_dict: bytes
-    constants: bytes
+    tensor_constants: bytes
 
 
 def deserialize_device(d: Device) -> torch.device:
@@ -229,8 +230,6 @@ def serialize_torch_artifact(artifact) -> bytes:
     def _tensor_to_cpu(t: torch.Tensor):
         if t.is_meta:
             return t
-        elif isinstance(t, torch.nn.Parameter):
-            return torch.nn.Parameter(t.cpu())
         else:
             return t.cpu()
     artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
@@ -304,6 +303,7 @@ class GraphState:
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
     is_single_tensor_return: bool = False
+    constants: Dict[str, torch.Tensor] = field(default_factory=dict)
 
 
 class GraphModuleSerializer:
@@ -315,7 +315,6 @@ class GraphModuleSerializer:
         self.graph_state = GraphState()
         self.graph_signature = graph_signature
         self.module_call_graph = module_call_graph
-        self.custom_objs: Dict[str, torch._C.ScriptObject] = {}
 
     @contextmanager
     def save_graph_state(self):
@@ -641,20 +640,19 @@ class GraphModuleSerializer:
             return Argument.create(as_layout=_TORCH_TO_SERIALIZE_LAYOUT[arg])
         elif isinstance(arg, torch._C.ScriptObject):
             if not (
-                arg._has_method("__getstate__") and  # type: ignore[attr-defined]
-                arg._has_method("__setstate__")  # type: ignore[attr-defined]
+                hasattr(type(arg), "__getstate__") and
+                hasattr(type(arg), "__setstate__")
             ):
                 raise SerializeError(
-                    f"Unable to serialize custom class {arg}. Please define "
+                    f"Unable to serialize ScriptObject {arg}. Please define "
                     "serialization methods via def_pickle()."
                 )
             # Custom objects through torchind are serializable with pickle,
             # through implementing the .def_pickle function.  This should result
             # in the object containing a __getstate__ and __setstate__
             # serialize/deserialize function.
-            custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
-            self.custom_objs[custom_obj_name] = arg
-            return Argument.create(as_custom_obj=CustomObjArgument(custom_obj_name))
+            blob = pickle.dumps(arg)
+            return Argument.create(as_custom_obj=CustomObjArgument(blob))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
 
@@ -951,22 +949,13 @@ class ExportedProgramSerializer:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
     def serialize(self, exported_program: ep.ExportedProgram) -> SerializedArtifact:
-        gm_serializer = GraphModuleSerializer(
-            exported_program.graph_signature,
-            exported_program.module_call_graph
+        serialized_graph_module = (
+            GraphModuleSerializer(
+                exported_program.graph_signature,
+                exported_program.module_call_graph
+            ).serialize(exported_program.graph_module)
         )
-        serialized_graph_module = gm_serializer.serialize(exported_program.graph_module)
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
-
-        # TODO: Directly serialize exported_program.constants once
-        # CustomClassHolders get stored in the ExportedProgram rather than in
-        # the graph
-        constants = {}
-        for n, c in gm_serializer.custom_objs.items():
-            constants[n] = c
-        for n, t in exported_program.tensor_constants.items():
-            assert n not in constants
-            constants[n] = t
 
         return SerializedArtifact(
             ExportedProgram(
@@ -977,7 +966,7 @@ class ExportedProgramSerializer:
                 dialect=exported_program.dialect,
             ),
             serialize_torch_artifact(exported_program.state_dict),
-            serialize_torch_artifact(constants),
+            serialize_torch_artifact(exported_program.tensor_constants),
         )
 
 
@@ -1262,7 +1251,6 @@ class GraphModuleDeserializer:
         self,
         serialized_graph_module: GraphModule,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
-        constants: Optional[Dict[str, Any]] = None,
     ) -> Result:
         self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
         self.fake_tensor_mode = FakeTensorMode(
@@ -1272,7 +1260,6 @@ class GraphModuleDeserializer:
         )
         self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
         self.symbol_name_to_range = {} if symbol_name_to_range is None else symbol_name_to_range
-        self.constants = {} if constants is None else constants
 
         self.deserialize_graph(serialized_graph_module.graph)
 
@@ -1370,7 +1357,10 @@ class GraphModuleDeserializer:
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
         elif isinstance(value, CustomObjArgument):
-            return self.constants[value.name]
+            # Custom objects through torchind are deserializable with pickle,
+            # through implementing the .def_pickle function.
+            blob = base64.b64decode(value.blob)
+            return pickle.loads(blob)
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
@@ -1559,19 +1549,12 @@ class ExportedProgramDeserializer:
             k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in serialized_artifact.exported_program.range_constraints.items()
         }
-        constants = deserialize_torch_artifact(serialized_artifact.constants)
-
-        # TODO: No need to do this once CustomClassHolders are lifted to the ExportedProgram
-        tensor_constants = {
-            k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
-        }
 
         res = (
             GraphModuleDeserializer()
             .deserialize(
                 serialized_artifact.exported_program.graph_module,
                 symbol_name_to_range,
-                constants,
             )
         )
         range_constraints = self.deserialize_range_constraints(
@@ -1583,6 +1566,7 @@ class ExportedProgramDeserializer:
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
         state_dict = deserialize_torch_artifact(serialized_artifact.state_dict)
+        tensor_constants = deserialize_torch_artifact(serialized_artifact.tensor_constants)
 
         exported_program = ep.ExportedProgram(
             res.graph_module,
@@ -1664,7 +1648,7 @@ def serialize(
     artifact = SerializedArtifact(
         json_bytes,
         serialized_artifact.state_dict,
-        serialized_artifact.constants
+        serialized_artifact.tensor_constants
     )
     return artifact
 
@@ -1721,7 +1705,7 @@ def deserialize(
             SerializedArtifact(
                 serialized_exported_program,
                 artifact.state_dict,
-                artifact.constants
+                artifact.tensor_constants
             )
         )
     )
