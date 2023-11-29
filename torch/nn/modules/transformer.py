@@ -170,19 +170,19 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
-                ..note::
-                    [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+                .. note::
+                    [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend to the unmasked
                     positions. If a BoolTensor is provided, positions with ``True``
-                    are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+                    are not allowed to attend while positions with ``False`` will attend. If a FloatTensor
                     is provided, it will be added to the attention weight.
                     [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
                     the attention. If a BoolTensor is provided, the positions with the
-                    value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
+                    value of ``True`` will be ignored while the positions with ``False`` will attend.
 
             - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if ``batch_first=False` or
               :math:`(N, T, E)` if ``batch_first=True``.
 
-                ..note::
+                .. note::
                     Due to the multi-head attention architecture in the transformer model,
                     the output sequence length of a transformer is same as the input sequence
                     (i.e. target) length of the decoder.
