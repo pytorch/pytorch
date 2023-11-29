@@ -4,11 +4,16 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -65,6 +70,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             else RowwiseParallel(),
         }
         model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
+        if recompute_activation:
+            model_tp = input_reshard(
+                checkpoint_wrapper(
+                    model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+                ),
+                device_mesh,
+                None if is_seq_parallel else 0,
+            )
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
@@ -122,7 +135,9 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
+    # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
     @parametrize("recompute_activation", [True, False])
+    # @parametrize("recompute_activation", [False])
     def test_mlp_training(self, is_seq_parallel, recompute_activation):
         self._test_mlp_training_e2e(
             is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation

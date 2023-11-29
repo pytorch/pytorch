@@ -3,7 +3,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.random as random
 
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -51,8 +51,8 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 model,
                 device_mesh,
                 {
-                    "net1": ColwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
-                    "net2": ColwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                    "net1": ColwiseParallel(output_layouts=Replicate()),
+                    "net2": ColwiseParallel(output_layouts=Replicate()),
                 },
             )
             # in most cases, the random number generator states is set by data loader

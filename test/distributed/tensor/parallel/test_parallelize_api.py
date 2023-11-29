@@ -154,12 +154,8 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "net1": ColwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
-                "net2": ColwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
+                "net1": ColwiseParallel(output_layouts=Replicate()),
+                "net2": ColwiseParallel(output_layouts=Replicate()),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)

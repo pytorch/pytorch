@@ -479,6 +479,7 @@ class InputAliasInfo:
     mutations_hidden_from_autograd: bool
     # This can only happen from a call to aten.set_() on a graph input.
     mutates_storage_metadata: bool
+    mutations_under_no_grad_or_inference_mode: bool
     requires_grad: bool
     mutation_type: MutationType
 
@@ -944,6 +945,14 @@ def are_all_mutations_hidden_from_autograd(t):
     else:
         return False
 
+def are_all_mutations_under_no_grad_or_inference_mode(t):
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        return all(are_all_mutations_under_no_grad_or_inference_mode(getattr(t, attr)) for attr in attrs)
+    else:
+        assert isinstance(t, FunctionalTensor)
+        return torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode(t.elem)
+
 # f_arg here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
@@ -1131,6 +1140,7 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=True)
             mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
+            mutations_under_no_grad_or_inference_mode = mutates_data and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
 
             # Here, we're saying that if an input experienced a set call, inp.set_(other),
             # then we can effectively not have to worry about whether its data was mutated.
@@ -1157,12 +1167,14 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 mutates_storage_metadata=mutates_storage_metadata,
+                mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                 requires_grad=requires_grad,
                 mutation_type=_get_mutation_type(
                     keep_input_mutations,
                     mutates_data,
                     mutates_metadata,
                     mutations_hidden_from_autograd,
+                    mutations_under_no_grad_or_inference_mode,
                     requires_grad
                 )
             ))
@@ -1435,6 +1447,7 @@ from a multi-output view call")
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
                 mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -1910,43 +1923,6 @@ def create_functionalized_fn(
             # Run the joint
             f_outs = fn(*f_args)
 
-        if trace_joint:
-            # We support a limited amount of mutation of graph inputs during the backward pass.
-            # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
-            # Here, we perform extra checks for primals that were mutated in the **backward**
-            # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
-            # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
-            #   during the forward, because the handling is different: some input mutations from the the forward
-            #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
-            #   types of mutations in the backward we would need a bw-only runtime epilogue.
-            # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
-            #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
-            #   require an extra round of tracing though, so it's more efficient to do in-line here.
-            assert isinstance(args, tuple) and len(args) == 2 and isinstance(args[0], (list, tuple))
-            # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
-            primals_before = args[0]
-            primals_after = pytree.tree_map(from_fun, f_args[0])
-            for before, after, inpt_info in zip(primals_before, primals_after, meta.input_info):
-                # Ban metadata mutations on fw inputs during the bw
-                if not inpt_info.mutates_metadata:
-                    assert not was_metadata_updated(before, after), \
-                        "Found a graph input that had its metadata mutated in the backward. This is not supported"
-                # Allow data mutations on fw inputs during the bw, but only if they do not require grad
-                # So we can guarantee that we can keep the mutations in the graph
-                if was_updated(before, after) and not inpt_info.mutates_data:
-                    assert not inpt_info.requires_grad, \
-                        "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
-                    before.copy_(after)
-            # Now that we covered mutations to *forward* inputs during the backward,
-            # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
-            # Today, we will just error in all cases of this happening unless someone needs us to support it.
-            tangents_before = args[1]
-            tangents_after = pytree.tree_map(from_fun, f_args[1])
-            for before, after in zip(tangents_before, tangents_after):
-                assert not was_metadata_updated(before, after) and not was_updated(before, after), \
-                    "Found an input to the backward that was mutated during the backward pass. This is not supported"
-
         if aot_config.keep_inference_input_mutations:
             # Note: This is a bit annoying. There's a layering issue here, where:
             # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
@@ -1982,7 +1958,14 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     if meta.input_info[i].mutations_hidden_from_autograd:
+                        # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
+                            inpt_old.copy_(inpt_new)
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                        # Under no_grad = run under no_grad (we still bump the VC though)
+                        # (inference_mode will also bump the VC, as long as the tensor in question
+                        # was created outside of inference_mode)
+                        with torch.no_grad():
                             inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)
@@ -2230,7 +2213,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is aten.copy_.default:
+            if n.target is aten.copy_.default and allow_input_mutations:
                 suffix = True
                 # Can only copy_ into an input, and can only do so once
                 assert n.args[0] in placeholders
@@ -2348,10 +2331,15 @@ def _check_if_mutation_can_be_in_graph(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if keep_input_mutations:
-        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
+        return mutates_data and (
+            (not mutates_metadata and not requires_grad) or
+            mutations_hidden_from_autograd or
+            mutations_under_no_grad_or_inference_mode
+        )
     return False
 
 
@@ -2360,6 +2348,7 @@ def _get_mutation_type(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if (not mutates_data) and (not mutates_metadata):
@@ -2370,6 +2359,7 @@ def _get_mutation_type(
         mutates_data,
         mutates_metadata,
         mutations_hidden_from_autograd,
+        mutations_under_no_grad_or_inference_mode,
         requires_grad
     ):
         return MutationType.MUTATED_IN_GRAPH
@@ -2686,11 +2676,14 @@ def create_synthetic_base_metadata(
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
+        mutations_under_no_grad_or_inference_mode = all(
+            m.input_info[x].mutations_under_no_grad_or_inference_mode for x in outer_indices)
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,
             mutates_metadata,
             mutations_hidden_from_autograd,
+            mutations_under_no_grad_or_inference_mode,
             requires_grad
         )
 
@@ -2703,6 +2696,7 @@ def create_synthetic_base_metadata(
             mutates_metadata=mutates_metadata,
             mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
             mutates_storage_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             mutation_type=mutation_type,
