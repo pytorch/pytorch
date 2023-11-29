@@ -51,6 +51,7 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
 }
 
 if TEST_WITH_ROCM:

@@ -386,25 +386,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
             if not np:
                 unimplemented("torch.from_numpy. NumPy is not available")
-            assert len(args) == 1, f"Got arguments {args}"
-            assert not kwargs
-            t = args[0]
-            from .tensor import NumpyNdarrayVariable
-
-            if isinstance(t, NumpyNdarrayVariable):
-                # TODO: mark the tensor as non-resizable
-                return wrap_fx_proxy_cls(
-                    target_cls=TensorVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.detach,
-                        *proxy_args_kwargs(args, {}),
-                    ),
-                    example_value=None,
-                )
-            else:
-                unimplemented(f"torch.from_numpy(<{type(t)}>)")
+            return wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.as_tensor,
+                    *proxy_args_kwargs(args, {}),
+                ),
+                example_value=None,
+            )
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.autograd._profiler_enabled:
