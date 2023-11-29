@@ -373,7 +373,6 @@ class TritonTemplateKernel(TritonKernel):
                 grid=grid,
             )
         else:
-            call_args = ", ".join(call_args)  # type: ignore[assignment]
             stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -386,7 +385,7 @@ class TritonTemplateKernel(TritonKernel):
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
-                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
             )
 
 
