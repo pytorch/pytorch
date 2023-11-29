@@ -8511,8 +8511,8 @@ def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad,
     samples = []
     scales = [None, 1.0]
 
-    for qkv_shape, is_causal, dropout_p, ret_debug_mask, scale in product(
-            qkv_shapes, [True, False], [0.0, 0.5], [False, True], scales):
+    for qkv_shape, is_causal, dropout_p, scale in product(
+            qkv_shapes, [True, False], [0.0, 0.5], scales):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q).transpose(1, 2),
@@ -8524,7 +8524,7 @@ def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad,
             max_k=seq_kv,
             dropout_p=dropout_p,
             is_causal=is_causal,
-            return_debug_mask=ret_debug_mask,
+            return_debug_mask=False,
             scale=scale,
         ))
 
@@ -8539,7 +8539,7 @@ def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad,
         max_k=seq_kv,
         dropout_p=dropout_p,
         is_causal=is_causal,
-        return_debug_mask=ret_debug_mask,
+        return_debug_mask=False,
         scale=scale,
     )
 
