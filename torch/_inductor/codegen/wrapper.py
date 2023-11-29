@@ -611,6 +611,7 @@ class WrapperCodeGen(CodeGen):
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
@@ -711,6 +712,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
                 )
+
+    def finalize_prefix(self):
+        pass
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -1238,6 +1242,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_dtypes = set()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1600,6 +1605,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
+    def finalize_prefix(self):
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.aot_inductor.abi_compatible:
+            for dtype in self.used_cached_dtypes:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
+
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
@@ -1907,7 +1920,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
+            dtype_str = str(dtype).split(".")[-1]
+            self.used_cached_dtypes.add(dtype_str)
+            return f"cached_torch_dtype_{dtype_str}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
