@@ -34,7 +34,7 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: List[Any],
+    curr_args: Union[List[Any], Tuple[Any, ...]],
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
