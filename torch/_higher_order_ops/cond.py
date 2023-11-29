@@ -422,10 +422,6 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     ), "Cond inputs must be a list of tensors"
 
     pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
-    # tensors = tuple([get_unwrapped(t) for t in inputs if is_batchedtensor(t)])
-    # # TODO: correctly place closures in the list of args
-    # closures = tuple([t for t in inputs if not is_batchedtensor(t)])
-    # in_dims = tuple([maybe_get_bdim(t) for t in inputs if is_batchedtensor(t)])
 
     # unbatched tensors are not vmapped
     tensors, in_dims = zip(
@@ -445,20 +441,10 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
             f = false_fn(*args)
             return torch.where(p, t, f)
 
-        # def fn(p, *args):
-        #     t = true_fn(*args + closures)
-        #     f = false_fn(*args + closures)
-        #     return torch.where(p, t, f)
-
         with interpreter.lower():
             result = torch.vmap(fn, in_dims=in_dims)(*tensors)
     else:
-        # def fn(*args):  # type: ignore[misc]
-        #     t = true_fn(*args + closures)
-        #     f = false_fn(*args + closures)
-        #     return torch.where(pred, t, f)
-
-        # ideally, PyTorch should vmap true_fn/false_fn and call cond again:
+        # Ideally, PyTorch should vmap true_fn/false_fn and call cond again:
         #    torch.cond(pred, true_fn_vmap, false_fn_vmap, tensors)
         # but this doesn't work as "cond" internally tries to compile each
         # function using torch.compile, and there are some odd corner cases
