@@ -81,7 +81,7 @@ class _MeshEnv:
             ), "The child mesh can only be a 1D mesh."
             child_mesh_dim_name = child_mesh_dim_names[0]
             if parent_mesh.mesh_dim_names:
-                return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
+                return parent_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
         return None
 
     @staticmethod
@@ -324,17 +324,7 @@ class DeviceMesh:
             raise RuntimeError(
                 f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
             )
-        if self.mesh_dim_names is None:
-            raise KeyError(
-                "No `mesh_dim_names` found.",
-                "To slice the device mesh, please call `init_device_mesh` with `mesh_dim_names`.",
-            )
-        if mesh_dim_name not in self.mesh_dim_names:
-            raise KeyError(
-                f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                f"Available mesh dimensions are: {self.mesh_dim_names}",
-            )
-        mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+        mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
         submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
         return submesh
@@ -344,24 +334,27 @@ class DeviceMesh:
     ) -> Union[ProcessGroup, List[ProcessGroup]]:
         """
         Returns a list of ProcessGroups corresponding to the mesh dimensions, or
-        returns a single ProcessGroup if mesh_dim is specified or a given mesh has
+        returns a single ProcessGroup if mesh_dim is specified or the given mesh has
         only one mesh dimension.
 
         Optional Args:
             mesh_dim (str/int): it can be the name of the mesh dimension or the index
             of the mesh dimension. Default is None.
-
         Returns:
-            A list of :class:`ProcessGroup` object or a single :class:`ProcessGroup` object.
+            A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
+            a DeviceMesh with more than 1 dimension; otherwise, returns a single
+            :class:`ProcessGroup` object.
         """
         if not hasattr(self, "_dim_group_infos"):
             raise RuntimeError("DeviceMesh process groups not initialized!")
+
+        if self.mesh.ndim == 1:
+            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[0])
+
         if mesh_dim is not None:
             if isinstance(mesh_dim, str):
-                mesh_dim = self.mesh_dim_names.index(mesh_dim)
+                mesh_dim = self._get_mesh_dim_by_name(mesh_dim)
             return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
-        elif self.mesh.ndim == 1:
-            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[0])
         else:
             dim_groups = []
             for mesh_dim in range(self.mesh.ndim):
@@ -375,22 +368,15 @@ class DeviceMesh:
 
     @property
     def ndim(self) -> int:
-        """
-        Returns the number of dimensions in the mesh tensor of the current DeviceMesh.
-        """
         return self.mesh.ndim
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """
-        Returns the shape of the mesh tensor of the current DeviceMesh.
-        """
         return tuple(self.mesh.shape)
 
     def get_rank(self) -> int:
         """
-        Returns the current global rank, which is the index of the rank relative to all
-        devices in the current mesh.
+        Returns the current global rank.
         """
         return get_rank()
 
@@ -398,12 +384,7 @@ class DeviceMesh:
         self, mesh_dim: Optional[Union[int, str]] = None
     ) -> int:
         """
-        Returns the local rank of the given mesh_dim based on the given mesh_dim, or returns
-        the local rank of a 1D DeviceMesh.
-
-        .. note::
-            User need to specify the mesh_dim when calling get_local_rank() on a DeviceMesh
-            with more than 1 dimension.
+        Returns the local rank of the given mesh_dim.
 
         Optional Args:
             mesh_dim (str/int): it can be the name of the mesh dimension or the index
@@ -429,6 +410,18 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+    def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+        if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
+            raise KeyError(
+                "No `mesh_dim_names` found.",
+            )
+        if mesh_dim_name not in self.mesh_dim_names:
+            raise KeyError(
+                f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                f"Available mesh dimensions are: {self.mesh_dim_names}",
+            )
+        return self.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
 
 
 def init_device_mesh(
@@ -466,7 +459,7 @@ def init_device_mesh(
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> from torch.distributed._tensor.device_mesh import init_device_mesh
         >>>
         >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
         >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
