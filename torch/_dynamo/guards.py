@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -110,6 +110,7 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
+    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -210,7 +211,7 @@ class GuardBuilder(GuardBuilderBase):
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
@@ -367,7 +368,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         if np:
-            np_types = (
+            np_types: Tuple[Type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -381,7 +382,7 @@ class GuardBuilder(GuardBuilderBase):
                 np.float64,
             )
         else:
-            np_types = ()  # type: ignore[assignment]
+            np_types = ()
         ok_types = (
             int,
             float,
@@ -609,6 +610,13 @@ class GuardBuilder(GuardBuilderBase):
         assert guard.source is GuardSource.GLOBAL
         code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
         self.config_hash = config_hash
+        self._produce_guard_code(guard, code)
+
+    def HAS_GRAPH_BREAK(self, guard: Guard):
+        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
+        # if the compiled object needs nopython. We only need to install this guard if
+        # there is a graph break.
+        code = ["not ___needs_nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1023,15 +1031,15 @@ class CheckFunctionManager:
 
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
             extra = ""
             if guard.user_stack:
                 for fs in reversed(guard.user_stack):
                     if fs.filename not in uninteresting_files():
+                        extra = f"  # {format_frame(fs, line=True)}"
                         break
-                else:
-                    extra = f"  # {format_frame(fs, line=True)}"
             elif guard.stack:
                 extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
@@ -1056,6 +1064,7 @@ class CheckFunctionManager:
 
             if not log_only:
                 code_parts.append(code)
+                verbose_code_parts.append(f"{code:<60}{extra}")
 
         seen = set()
         for gcl in builder.code:
@@ -1105,6 +1114,7 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
+            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
             tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
@@ -1175,6 +1185,7 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
+        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
             "G": builder.scope["G"],
@@ -1274,7 +1285,7 @@ def get_guard_fail_reason(
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
     reasons: List[str] = []
-    for part in guard_fn.code_parts:
+    for part in guard_fn.verbose_code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
@@ -1304,9 +1315,8 @@ def get_guard_fail_reason(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
-        log.error(
+        log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
-            exc_info=True,
         )
 
     return reason_str
