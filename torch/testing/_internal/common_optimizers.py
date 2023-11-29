@@ -1,6 +1,5 @@
 import functools
 import itertools
-import math
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
@@ -88,7 +87,7 @@ class OptimizerInfo:
         optim_inputs_func,
         # Implementation specific kwargs the optimizer supports, e.g., fused, foreach, differentiable
         # We consider capturable to be a base constructor flag since it is implemented across the board.
-        supported_impl_kwargs: Tuple[str] = ("foreach", "differentiable"),
+        supported_impls: Tuple[str] = ("foreach", "differentiable"),
         # the devices on which the optim supports sparse tensors for params and grads, see SGD
         supports_sparse_on: Tuple[str] = (),
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
@@ -105,7 +104,7 @@ class OptimizerInfo:
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
-        self.supported_impl_kwargs = supported_impl_kwargs
+        self.supported_impls = supported_impls
         self.supports_sparse_on = supports_sparse_on
         self.only_supports_sparse_grads = only_supports_sparse_grads
         self.step_requires_closure = step_requires_closure
@@ -184,34 +183,6 @@ class optims(_TestParametrizer):
                 raise ex
 
 
-# ----------------------------------------------------------------------------------------------------------------
-# NOTE: The following optim_inputs_func_* sampling functions only return constructor combinations of NON-IMPLEMENTATION
-# -CHANGING flags, i.e., flags that are not foreach, fused, or differentiable. The idea is that
-# OptimizerInput.kwargs is editable, and these implementation flags can be added to kwargs during testing.
-
-
-def optim_inputs_func_adadelta(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(
-            params=params, kwargs={"lr": 0.01}, desc="non-default lr"
-        ),  # TODO: Move out to testing in param_group?
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=params, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
-        ),  # TODO: Move out to testing in param_group?
-    ]
-
-
 def optim_error_inputs_func_adadelta(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -235,32 +206,6 @@ def optim_error_inputs_func_adadelta(device, dtype):
     ]
 
 
-def optim_inputs_func_adagrad(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"initial_accumulator_value": 0.1, "weight_decay": 0.9},
-            desc="initial_accumulator_value",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"lr": 0.1, "lr_decay": 0.5, "weight_decay": 0.9},
-            desc="lr_decay",
-        ),  # TODO: Move out to testing in param_group?
-    ]
-
-
 def optim_error_inputs_func_adagrad(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -280,34 +225,6 @@ def optim_error_inputs_func_adagrad(device, dtype):
             ),
             error_type=TypeError,
             error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
-
-
-# TODO: consider tensor LR! See multi_tensor_optimizer_configs in test_optim.py --> tensor LR should work
-# with all implementation code paths...
-def optim_inputs_func_adam(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 0.01}, desc="non-default lr"),
-        OptimizerInput(params=params, kwargs={"capturable": True}, desc="capturable"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9, "amsgrad": True}, desc="amsgrad"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "amsgrad": True, "capturable": True},
-            desc="capturable, amsgrad",
         ),
     ]
 
@@ -353,23 +270,6 @@ def optim_error_inputs_func_adam(device, dtype):
     ]
 
 
-def optim_inputs_func_adamax(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 0.001}, desc="non-default lr"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-    ]
-
-
 def optim_error_inputs_func_adamax(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -389,32 +289,6 @@ def optim_error_inputs_func_adamax(device, dtype):
             ),
             error_type=TypeError,
             error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
-
-
-def optim_inputs_func_adamw(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 0.01}, desc="non-default lr"),
-        OptimizerInput(params=params, kwargs={"capturable": True}, desc="capturable"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9, "amsgrad": True}, desc="amsgrad"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "amsgrad": True, "capturable": True},
-            desc="amsgrad, capturable",
         ),
     ]
 
@@ -451,25 +325,6 @@ def optim_error_inputs_func_adamw(device, dtype):
     ]
 
 
-def optim_inputs_func_asgd(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 0.02}, desc="non-default lr"),
-        OptimizerInput(params=params, kwargs={"t0": 100}, desc="t0"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(params=params, kwargs={"capturable": True}, desc="capturable"),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-    ]
-
-
 def optim_error_inputs_func_asgd(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -493,23 +348,6 @@ def optim_error_inputs_func_asgd(device, dtype):
     ]
 
 
-def optim_inputs_func_lbfgs(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 0.01}, desc="non-default lr"),
-        OptimizerInput(
-            params=params, kwargs={"tolerance_grad": math.inf}, desc="tolerance_grad"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"line_search_fn": "strong_wolfe"},
-            desc="strong_wolfe",
-        ),
-    ]
-
-
 def optim_error_inputs_func_lbfgs(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -520,36 +358,6 @@ def optim_error_inputs_func_lbfgs(device, dtype):
             ),
             error_type=TypeError,
             error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
-
-
-# Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_nadam(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 1e-3}, desc="non-default lr"),
-        OptimizerInput(
-            params=params,
-            kwargs={"momentum_decay": 6e-3},
-            desc="non-zero momentum_decay",
-        ),
-        OptimizerInput(params=params, kwargs={"capturable": True}, desc="capturable"),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "momentum_decay": 6e-3},
-            desc="weight_decay",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={
-                "weight_decay": 0.9,
-                "momentum_decay": 6e-3,
-                "decoupled_weight_decay": True,
-            },
-            desc="decoupled_weight_decay",
         ),
     ]
 
@@ -586,25 +394,6 @@ def optim_error_inputs_func_nadam(device, dtype):
     ]
 
 
-# Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_radam(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 2e-3}, desc="non-default lr"),
-        OptimizerInput(params=params, kwargs={"eps": 1e-6}, desc="non-default eps"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "decoupled_weight_decay": True},
-            desc="decoupled_weight_decay",
-        ),
-    ]
-
-
 def optim_error_inputs_func_radam(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -637,38 +426,6 @@ def optim_error_inputs_func_radam(device, dtype):
     ]
 
 
-def optim_inputs_func_rmsprop(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 1e-3}, desc="non-default lr"),
-        OptimizerInput(
-            params=params, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "centered": True},
-            desc="centered",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"weight_decay": 0.9, "centered": True, "momentum": 0.1},
-            desc="momentum",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={
-                "weight_decay": 0.9,
-                "centered": True,
-                "momentum": 0.1,
-                "maximize": True,
-            },
-            desc="maximize",
-        ),
-    ]
-
-
 def optim_error_inputs_func_rmsprop(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -689,24 +446,6 @@ def optim_error_inputs_func_rmsprop(device, dtype):
             error_type=TypeError,
             error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
         ),
-    ]
-
-
-def optim_inputs_func_rprop(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(params=params, kwargs={"lr": 2e-4}, desc="non-default lr"),
-        OptimizerInput(
-            params=params, kwargs={"etas": (0.5, 1.5)}, desc="non-default etas"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"step_sizes": (2e-6, 100)},
-            desc="non-default step_sizes",
-        ),
-        OptimizerInput(params=params, kwargs={"maximize": True}, desc="maximize"),
     ]
 
 
@@ -733,35 +472,6 @@ def optim_error_inputs_func_rprop(device, dtype):
     ]
 
 
-def optim_inputs_func_sgd(params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]):
-    return [
-        OptimizerInput(params=params, kwargs={"lr": 1e-2}, desc="default"),
-        OptimizerInput(
-            params=params, kwargs={"lr": 1e-2, "momentum": 0.9}, desc="momentum"
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "dampening": 0.5},
-            desc="dampening",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "weight_decay": 0.9},
-            desc="non-zero weight_decay",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"lr": 1e-2, "momentum": 0.9, "nesterov": True, "weight_decay": 0.9},
-            desc="nesterov",
-        ),
-        OptimizerInput(
-            params=params,
-            kwargs={"lr": 1e-2, "weight_decay": 0.9, "maximize": True},
-            desc="maximize",
-        ),
-    ]
-
-
 def optim_error_inputs_func_sgd(device, dtype):
     return [
         ErrorOptimizerInput(
@@ -782,18 +492,6 @@ def optim_error_inputs_func_sgd(device, dtype):
             error_type=TypeError,
             error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
         ),
-    ]
-
-
-def optim_inputs_func_sparseadam(
-    params: Union[List[Parameter], List[Tensor], Dict[Any, Any]]
-):
-    return [
-        OptimizerInput(params=params, kwargs={}, desc="default"),
-        OptimizerInput(
-            params=params, kwargs={"lr": 0.01}, desc="non-default lr"
-        ),  # TODO: Move out to testing in param_group?
-        OptimizerInput(params=params, kwargs={"maximize": True}, desc="maximize"),
     ]
 
 
@@ -843,86 +541,86 @@ def optim_error_inputs_func_sparseadam(device, dtype):
 optim_db: List[OptimizerInfo] = [
     OptimizerInfo(
         Adadelta,
-        optim_inputs_func=optim_inputs_func_adadelta,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         Adagrad,
-        optim_inputs_func=optim_inputs_func_adagrad,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
     ),
     OptimizerInfo(
         Adam,
-        optim_inputs_func=optim_inputs_func_adam,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_adam,
-        supported_impl_kwargs=("foreach", "differentiable", "fused"),
+        supported_impls=("foreach", "differentiable", "fused"),
     ),
     OptimizerInfo(
         Adamax,
-        optim_inputs_func=optim_inputs_func_adamax,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         AdamW,
-        optim_inputs_func=optim_inputs_func_adamw,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
-        supported_impl_kwargs=("foreach", "differentiable", "fused"),
+        supported_impls=("foreach", "differentiable", "fused"),
     ),
     OptimizerInfo(
         ASGD,
-        optim_inputs_func=optim_inputs_func_asgd,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         LBFGS,
-        optim_inputs_func=optim_inputs_func_lbfgs,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_lbfgs,
-        supported_impl_kwargs=(),
+        supported_impls=(),
         step_requires_closure=True,
         supports_param_groups=False,
         supports_multiple_devices=False,
     ),
     OptimizerInfo(
         NAdam,
-        optim_inputs_func=optim_inputs_func_nadam,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         RAdam,
-        optim_inputs_func=optim_inputs_func_radam,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_radam,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         RMSprop,
-        optim_inputs_func=optim_inputs_func_rmsprop,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         Rprop,
-        optim_inputs_func=optim_inputs_func_rprop,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_rprop,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
     ),
     OptimizerInfo(
         SGD,
-        optim_inputs_func=optim_inputs_func_sgd,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_sgd,
-        supported_impl_kwargs=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu", "cuda"),
     ),
     OptimizerInfo(
         SparseAdam,
-        optim_inputs_func=optim_inputs_func_sparseadam,
+        optim_inputs_func=None,
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
-        supported_impl_kwargs=(),
+        supported_impls=(),
         only_supports_sparse_grads=True,
     ),
 ]
