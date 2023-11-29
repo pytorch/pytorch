@@ -266,6 +266,8 @@ inline std::string retrieveDesyncReport(
 /* Note: this is only used by PGNCCL (could be generalized in an ideal world but
  * wasn't done that way, so isn't expected to be fully general at the moment) */
 
+#ifdef USE_C10D_NCCL
+
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
       {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
@@ -323,6 +325,7 @@ struct NCCLTraceBuffer {
   }
   NCCLTraceBuffer() {
     max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
   using EventList = std::vector<at::cuda::CUDAEvent>;
@@ -349,6 +352,7 @@ struct NCCLTraceBuffer {
   };
 
   bool enabled_ = false;
+  bool capture_cpp_stack_ = false;
   std::mutex mutex_;
   std::vector<Entry> entries_;
   size_t max_entries_ = 0;
@@ -366,7 +370,8 @@ struct NCCLTraceBuffer {
     if (!enabled_) {
       return c10::nullopt;
     }
-    auto traceback = torch::CapturedTraceback::gather(true, true, true);
+    auto traceback =
+        torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
     std::lock_guard<std::mutex> guard(mutex_);
 
     auto te = Entry{
@@ -516,4 +521,5 @@ struct NCCLTraceBuffer {
   }
 };
 
+#endif
 } // namespace c10d
