@@ -988,9 +988,7 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
 
 
 class ConstructorMoverPass:
-    def __init__(
-        self, target: str, allow_outputs: bool = False
-    ) -> None:
+    def __init__(self, target: str, allow_outputs: bool = False) -> None:
         """
         Move constructors from cpu to the target_device.
 
@@ -1012,7 +1010,6 @@ class ConstructorMoverPass:
             "target should be a string representing the device type. "
             f"Got: {type(target).__name__}"
         )
-
 
     def allow_cpu_device(self, node: fx.Node) -> bool:
         """
@@ -1108,8 +1105,9 @@ class ConstructorMoverPass:
             kwargs["device"] = next(iter(target_devices))
             node.kwargs = kwargs
 
-
-    def find_movable_constructors(self, graph: fx.Graph, constructors: List[fx.Node]) -> Set[fx.Node]:
+    def find_movable_constructors(
+        self, graph: fx.Graph, constructors: List[fx.Node]
+    ) -> Set[fx.Node]:
         """
         Starting from the cpu constructors, iterate through the graph and test that all of their
         downstream uses can safely be moved to cpu.
@@ -1125,7 +1123,9 @@ class ConstructorMoverPass:
         # if a cpu node has a dependency on two different cpu constructors,
         # then if either constructor cannot be moved to cuda, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
-        equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {c: {c} for c in constructors}
+        equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
+            c: {c} for c in constructors
+        }
 
         def make_dependencies_equivalent(
             set1: Set[fx.Node], set2: Set[fx.Node]
