@@ -67,16 +67,12 @@ def run(model, optim):
         inp = torch.randn((2, 3), device="cuda")
         torch.storage.resize_count_and_loc = {}
         torch_log.warning("FORWARD")
-        for p in model.parameters():
-            torch_log.warning(f"PRE STATE: {p.shape}")
         out = model(inp)
         torch_log.warning("END FORWARD")
         # torch.storage.resize_count_and_loc = {}
         loss = out.sum()
         losses.append(loss)
         torch.storage.resize_count_and_loc = {}
-        for p in model.parameters():
-            torch_log.warning(f"POST STATE: {p.shape}")
         torch_log.warning("BACKWARD")
         from torchviz import make_dot
         torch_log.warning("OUT GRAPH\n%s", make_dot(loss))
