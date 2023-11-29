@@ -349,8 +349,8 @@ struct NCCLTraceBuffer {
     c10::SmallVector<int, 4> input_dims_;
     c10::SmallVector<int, 4> output_dims_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
-    bool retired_ = false; // is this work entry still in the workMetaList_?
-                           // a retired by not completed event has timed out
+    bool retired_ = false; // is this work entry no longer in the workMetaList_?
+                           // a retired but not completed event has timed out
   };
 
   bool enabled_ = false;
