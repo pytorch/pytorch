@@ -588,7 +588,7 @@ def gather_docstrs() -> Dict[str, str]:
     docstrs = {}
 
     def mock_add_docstr(func: Mock, docstr: str) -> None:
-        docstrs[func._extract_mock_name()] = docstr
+        docstrs[func._extract_mock_name()] = docstr.strip()
 
     sys.path.append("torch")
     patch_dict = {
@@ -606,12 +606,11 @@ def gather_docstrs() -> Dict[str, str]:
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
-    docstr = docstr.strip().replace("\ ", " ").replace("\\", "\\\\")
     if "..." in hint:  # function or method
-        assert hint.endswith("...")
-        return "\n    ".join([hint[:-3], '"""'] + docstr.split("\n") + ['"""', "..."])
+        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        return "\n    ".join([hint[:-3], 'r"""'] + docstr.split("\n") + ['"""', "..."])
     else:  # attribute or property
-        return f'{hint}\n"""{docstr}"""\n'
+        return f'{hint}\nr"""{docstr}"""\n'
 
 
 def gen_pyi(
