@@ -1502,7 +1502,7 @@ class CppKernel(Kernel):
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "TORCH_CHECK"
 
     def decide_parallel_depth(self, ranges, threads):

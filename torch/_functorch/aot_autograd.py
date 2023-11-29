@@ -71,7 +71,9 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     from_fun,
     sync_functional_tensor,
     has_metadata_mutation,
+    has_data_mutation,
     are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     gen_alias_from_base,
     has_same_metadata,
     was_tensor_updated,
@@ -468,18 +470,28 @@ def run_functionalized_fw_and_collect_metadata(
                 new_arg = arg
             else:
                 new_arg = from_fun(f_arg)
-            if was_tensor_updated(arg, new_arg):
-                if was_tensor_metadata_updated(arg, new_arg):
-                    mutates_data = False
-                    mutates_metadata = True
-                else:
-                    mutates_data = True
-                    mutates_metadata = has_metadata_mutation(f_arg)
-                mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
-            else:
+            mutates_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=False)
+            mutates_storage_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=True)
+            mutates_data = has_data_mutation(f_arg)
+            mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
+            mutations_under_no_grad_or_inference_mode = mutates_data and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
+
+            # Here, we're saying that if an input experienced a set call, inp.set_(other),
+            # then we can effectively not have to worry about whether its data was mutated.
+            # There are 3 cases:
+            # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+            #     In this case, we're not really mutating the input storage of "inp";
+            #     we're mutating the storage of an intermdiate value (other),
+            #     and slamming that storage into the input tensor. So no data mutation is necessary.
+            # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+            #     In this case, the data mutation will be properly handled in the runtime
+            #     epilogue during the processing of "other"
+            # (3) We mutate inp *before* the set_() call.
+            #     This case is *not* currently handled.
+            #     TODO: discuss this in the PR. Both supporting this, and detecting + erroring out,
+            #     seem painful to get working.
+            if mutates_storage_metadata:
                 mutates_data = False
-                mutates_metadata = False
-                mutations_hidden_from_autograd = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
 
@@ -488,12 +500,15 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+                mutates_storage_metadata=mutates_storage_metadata,
+                mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                 requires_grad=requires_grad,
                 mutation_type=_get_mutation_type(
                     keep_input_mutations,
                     mutates_data,
                     mutates_metadata,
                     mutations_hidden_from_autograd,
+                    mutations_under_no_grad_or_inference_mode,
                     requires_grad
                 )
             ))
@@ -766,6 +781,7 @@ from a multi-output view call")
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
                 mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -1091,7 +1107,14 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     if meta.input_info[i].mutations_hidden_from_autograd:
+                        # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
+                            inpt_old.copy_(inpt_new)
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                        # Under no_grad = run under no_grad (we still bump the VC though)
+                        # (inference_mode will also bump the VC, as long as the tensor in question
+                        # was created outside of inference_mode)
+                        with torch.no_grad():
                             inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)
@@ -1344,10 +1367,15 @@ def _check_if_mutation_can_be_in_graph(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if keep_input_mutations:
-        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
+        return mutates_data and (
+            (not mutates_metadata and not requires_grad) or
+            mutations_hidden_from_autograd or
+            mutations_under_no_grad_or_inference_mode
+        )
     return False
 
 
@@ -1356,6 +1384,7 @@ def _get_mutation_type(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if (not mutates_data) and (not mutates_metadata):
@@ -1366,6 +1395,7 @@ def _get_mutation_type(
         mutates_data,
         mutates_metadata,
         mutations_hidden_from_autograd,
+        mutations_under_no_grad_or_inference_mode,
         requires_grad
     ):
         return MutationType.MUTATED_IN_GRAPH
@@ -1674,11 +1704,14 @@ def create_synthetic_base_metadata(
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
+        mutations_under_no_grad_or_inference_mode = all(
+            m.input_info[x].mutations_under_no_grad_or_inference_mode for x in outer_indices)
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,
             mutates_metadata,
             mutations_hidden_from_autograd,
+            mutations_under_no_grad_or_inference_mode,
             requires_grad
         )
 
@@ -1689,7 +1722,9 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
-            mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+            mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
+            mutates_storage_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             mutation_type=mutation_type,
@@ -2231,6 +2266,22 @@ def create_runtime_wrapper(
                     continue
                 original_inpt = args[inpt_idx]
                 updated_inpt = updated_inputs[i]
+                if meta.mutates_storage_metadata:
+                    # mutates_storage_metadata means our input saw a x.set_(y) call.
+                    # What if x **also** saw a data and/or a metadata mutation?
+                    # (1) If the [meta]data mutation occurred after the set_(),
+                    #     then there is no need to copy_() the data.
+                    #     When we perform x.set_(x_updated), we are guaranteed that
+                    #     x_updated already has the final version of the data/metadata
+                    # (2) If a data mutation occurred before the set_().
+                    #     This case seems very difficult to support.
+                    #     TODO: discuss on the PR and decide if we want to tr to
+                    #     either support it, or detect and ban it.
+                    if trace_joint:
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
+                    original_inpt.set_(updated_inpt)
+                    continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
