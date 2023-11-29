@@ -625,7 +625,6 @@ class FunctoolsPartialVariable(VariableTracker):
         for arg in self.args:
             codegen(arg)
         codegen.extend_output(create_call_function(3, True))
-        print(codegen._output)
         return []
 
     def as_python_constant(self):

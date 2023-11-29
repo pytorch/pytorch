@@ -593,8 +593,6 @@ class StreamVariable(VariableTracker):
         codegen.extend_output(create_call_function(1, False))
         return []
 
-    def rename(self, tx, name):
-        print("Renaming stream?", name)
 
 
 class EventVariable(VariableTracker):

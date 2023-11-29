@@ -1277,16 +1277,13 @@ class BuiltinVariable(VariableTracker):
                     return tx.replace_all(obj, out)
                 elif name_var.value == "grad":
                     def update_grad(x, grad):
-                        print("Updating grad")
                         x.grad = grad
                         return x
 
 
                     if isinstance(val, ConstantVariable):
-                        print("Setting grad", obj.source, obj.as_proxy().node.meta["example_value"].grad, "->", val.value)
                         obj.as_proxy().node.meta["example_value"].grad = val.value
                     else:
-                        print("Setting grad", obj.source, obj.as_proxy().node.meta["example_value"].grad, "->", val.as_proxy().node.meta['example_value'])
                         tx.output.create_proxy(
                             "call_function",
                             update_grad,
