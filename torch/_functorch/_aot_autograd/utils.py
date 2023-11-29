@@ -1,3 +1,7 @@
+"""
+Contains various utils for AOTAutograd, including those for handling collections.
+"""
+
 import dataclasses
 import warnings
 from contextlib import nullcontext
@@ -6,7 +10,6 @@ from typing import Any, Callable, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx import immutable_collections
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
 KNOWN_TYPES = tuple(
@@ -14,17 +17,6 @@ KNOWN_TYPES = tuple(
 )
 
 original_zip = zip
-
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(dict(zip(c, x))),
-)
 
 
 def strict_zip(*iterables, strict=True, **kwargs):

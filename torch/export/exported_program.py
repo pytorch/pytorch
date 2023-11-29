@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import functools
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
+from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -66,6 +68,15 @@ class ModuleCallSignature:
 class ModuleCallEntry:
     fqn: str
     signature: Optional[ModuleCallSignature] = None
+
+
+def _disable_prexisiting_fake_mode(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with maybe_disable_fake_tensor_mode():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class ExportedProgram:
@@ -348,6 +359,7 @@ class ExportedProgram:
         else:
             return unflatten(self)
 
+    @_disable_prexisiting_fake_mode
     def run_decompositions(
         self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
     ) -> "ExportedProgram":
