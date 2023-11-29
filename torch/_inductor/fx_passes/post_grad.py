@@ -996,7 +996,7 @@ class ConstructorMoverPass:
         to the target_device.
 
         A constructor node can be moved to the target_device iff all of its users
-        can also be moved (tested by cannot_be_moved). Otherwise, all dependant
+        can also be moved (tested by cannot_be_moved). Otherwise, all dependent
         constructor nodes won't be moved.
 
         - target: target device type
