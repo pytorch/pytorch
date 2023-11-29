@@ -444,7 +444,12 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     const optional<Tensor>& atol_opt,
     const optional<Tensor>& rtol_opt,
     const c10::string_view function_name) {
-  auto options = input.options().dtype(ScalarType::Double);
+  auto options = input.options();
+  if (input.device().type() == kMetal || input.device().type() == kMPS) {
+    options = options.dtype(ScalarType::Float);
+  } else {
+    options = options.dtype(ScalarType::Double);
+  }
   auto atol = atol_opt.has_value() ? atol_opt.value() : at::zeros({}, options);
   checkNotComplexTolerance(atol, function_name, "atol");
   Tensor rtol;
@@ -545,7 +550,12 @@ Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   // For NumPy compatibility the rcond argument is used as relative tolerance
   checkNotComplexTolerance(rcond, "torch.linalg.pinv", "rcond");
-  auto options = input.options().dtype(ScalarType::Double);
+  auto options = input.options();
+  if (input.device().type() == kMetal || input.device().type() == kMPS) {
+    options = options.dtype(ScalarType::Float);
+  } else {
+    options = options.dtype(ScalarType::Double);
+  }
   return at::linalg_pinv(input, at::zeros({}, options), rcond, hermitian);
 }
 
