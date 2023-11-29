@@ -1784,6 +1784,68 @@ torch.cuda.synchronize()
         self.assertTrue(b.sum().item() == 11000.)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_set_get_rng_state_index(self):
+        
+        # Registers the current state of the generator and returns the indices of the original and new states.
+        def register_state(generator):
+            original_state_index = generator.get_state_index()
+            new_state_index = generator.register_state_with_index(generator.get_state())
+            return original_state_index, new_state_index
+
+        # Performs random number generation steps to increment the offset of the original state once and the new state twice.
+        def perform_random_generation_steps(original_state_index, new_state_index, generator):
+            generator.set_state_index(original_state_index)
+            torch.rand(5, device='cuda', generator=generator)
+
+            generator.set_state_index(new_state_index)
+            torch.rand(5, device='cuda', generator=generator)
+            torch.rand(5, device='cuda', generator=generator)
+
+            generator.set_state_index(original_state_index)
+
+
+        # Retrieves the final offsets of the original and new states.
+        def get_final_offsets_of_states(original_state_index, new_state_index, generator):
+            generator.set_state_index(original_state_index)
+            original_state_offset = generator.get_offset()
+
+            generator.set_state_index(new_state_index)
+            new_state_offset = generator.get_offset()
+
+            return original_state_offset, new_state_offset
+
+        # Test with a new CUDA generator
+        new_generator = torch.Generator(device='cuda')
+        new_generator.manual_seed(0)
+
+        orig_state_index, new_state_index = register_state(new_generator)
+        perform_random_generation_steps(orig_state_index, new_state_index, new_generator)
+
+        # Test with the default CUDA generator within a CUDA Graph
+        # States are not allowed to change (get/set) under CUDAGraph
+        # State indecies are allowed to change under CUDAGraph
+        s = torch.cuda.Stream()
+        default_generator = torch.cuda.default_generators[0]
+        default_generator.manual_seed(0)
+
+        orig_state_index, new_state_index = register_state(default_generator)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            perform_random_generation_steps(orig_state_index, new_state_index, default_generator)
+            g.capture_end()
+
+        torch.cuda.current_stream().wait_stream(s)
+        g.replay()
+
+        # Comparing the final offsets of states for both generators
+        offset = get_final_offsets_of_states(orig_state_index, new_state_index, new_generator)
+        graph_offset = get_final_offsets_of_states(orig_state_index, new_state_index, default_generator)
+
+        self.assertTrue(offset == graph_offset, "Offsets for new_generator and default_generator should be equal.")
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_reset_recapture(self):
         s = torch.cuda.Stream()
 
