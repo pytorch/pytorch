@@ -167,6 +167,16 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# Be able to skip gemm so that
+# 1. it's more stable to test triton matmul template in unit test. Otherwise we rely
+#    on the triton template out performing the aten kernel to properly test the
+#    triton template
+# 2. make it easier to repro some max-autotune issue. E.g., we found some max
+#    autotune issue very flaky to repro because the bad triton config get picked
+#    with certain probability. Skipping aten gemm and reducing the config pool
+#    can greatly help reproducing those issues.
+skip_aten_gemm = os.environ.get("TORCHINDUCTOR_SKIP_ATEN_GEMM") == "1"
+
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192

@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import textwrap
 from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -856,6 +857,9 @@ class TritonKernel(Kernel):
             return index
 
         self.simplify_indexing = simplify_indexing
+
+    def need_numel_args(self):
+        return True
 
     def should_use_persistent_reduction(self) -> bool:
         """
@@ -1801,7 +1805,12 @@ class TritonKernel(Kernel):
 
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
-                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+
+                if self.need_numel_args():
+                    extra_args_str = ", ".join(map(str, extra_args)) + ", "
+                else:
+                    extra_args_str = ""
+
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
@@ -1838,6 +1847,16 @@ class TritonKernel(Kernel):
             )
 
         return result
+
+    def imports_for_benchmark_kernel(self):
+        return textwrap.dedent(
+            """
+            from torch._dynamo.testing import rand_strided
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            import torch
+            from torch._inductor.triton_heuristics import grid
+        """
+        )
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -1885,14 +1904,7 @@ class TritonKernel(Kernel):
                 """
             )
             if config.benchmark_kernel:
-                code.splice(
-                    """
-                        from torch._dynamo.testing import rand_strided
-                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                        import torch
-                        from torch._inductor.triton_heuristics import grid
-                    """
-                )
+                code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -2630,7 +2642,7 @@ class TritonScheduling(BaseScheduling):
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_path(code_hash(src_code), "py")
+            basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
@@ -2668,6 +2680,10 @@ class TritonScheduling(BaseScheduling):
                 else partial_code.finalize()
             )
             node_schedule = [template_node, *epilogue_nodes]
+
+            if config.benchmark_kernel:
+                src_code = f"{kernel.imports_for_benchmark_kernel()}\n{src_code}\n{kernel.codegen_kernel_benchmark().getvalue()}"
+
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
