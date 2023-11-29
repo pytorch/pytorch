@@ -5596,6 +5596,19 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
             for shape, pad in cases:
                 yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
+def sample_inputs_nn_pad_replicate_negative(op_info, device, dtype, requires_grad, **kwargs):
+    cases: tuple = (
+        ((5, 3, 4, 4), (-4, 5, 0, 0)),
+        ((6, 2, 4, 4), (0, 0, 2, -4)),
+        ((5, 6, 4, 4), (5, -4, -4, 3)),
+        ((4, 2, 5, 5), (-2, -1, 4, 6)),
+        ((2, 6, 5, 5), (8, -1, -1, -3)),
+        ((8, 1, 5, 5), (-2, -1, -1, -3)),
+    )
+    make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    for shape, pad in cases:
+        yield SampleInput(make_inp(shape), args=(pad, 'replicate'))
 
 def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
     # Inherit sample inputs from nn.pad, but transform them to fit
@@ -13407,6 +13420,23 @@ op_db: List[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='replicate_negative',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_nn_pad_replicate_negative,
+           skips=(
+               # Doesn't have a corresponding aten operator.
+               # RuntimeError: falseINTERNAL ASSERT FAILED at
+               # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # Some negative padding cases cause a segfault on MPS
+               DecorateInfo(unittest.skip("Not fully supported on MPS"), 'TestConsistency'),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
