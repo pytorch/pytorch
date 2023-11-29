@@ -606,11 +606,10 @@ def gather_docstrs() -> Dict[str, str]:
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    docstr = docstr.strip().replace("\ ", " ").replace("\\", "\\\\")
     if "..." in hint:  # function or method
         assert hint.endswith("...")
-        return "\n    ".join(
-            [hint[:-3], 'r"""'] + docstr.strip().split("\n") + ['"""', "..."]
-        )
+        return "\n    ".join([hint[:-3], '"""'] + docstr.split("\n") + ['"""', "..."])
     else:  # attribute or property
         return f'{hint}\n"""{docstr}"""\n'
 
