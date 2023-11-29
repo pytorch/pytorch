@@ -3878,6 +3878,79 @@ class TestSparseCompressedTritonKernels(TestCase):
         # but key is still valid:
         self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
+    @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm'])
+    @parametrize("blocksize", [16, '16x32', 32])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_kernel(self, op, device, dtype, blocksize):
+        from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm
+        from torch.sparse._triton_ops_meta import (create_blocked_tensor, get_meta,
+                                                   optimize_bsr_dense_addmm, optimize_bsr_dense_mm, dump)
+
+        operation = dict(bsr_dense_addmm=bsr_dense_addmm, bsr_dense_mm=bsr_dense_mm)[op]
+
+        def reference(input, mat1, mat2, beta=1, alpha=1):
+            assert mat1.layout is torch.strided
+            assert mat2.layout is torch.strided
+            return beta * input + alpha * (mat1 @ mat2)
+
+        if isinstance(blocksize, str):
+            BM, BK = tuple(map(int, blocksize.split('x')))
+        else:
+            BM, BK = (blocksize,) * 2
+
+        if op == "bsr_dense_mm" and BM != BK:
+            # todo: eliminate this skip by calling addmm from mm
+            self.skipTest(f"{op} does not support non-square blocks")
+
+        beta_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[0])[op]
+        alpha_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[1])[op]
+        sparsity_lst = [0, 0.5, 1]
+        # todo: eliminate `[:1]`
+        blocks_per_row_lst = dict(bsr_dense_addmm=[1, 2], bsr_dense_mm=[1, 2][:1])[op]
+        blocks_per_col_lst = [1, 2]
+        # todo: eliminate `[1:]`
+        result_cols_lst = dict(bsr_dense_addmm=[16, 32, 64], bsr_dense_mm=[16, 32, 64][1:])[op]
+        for beta, alpha, sparsity, blocks_per_row, blocks_per_col, N in itertools.product(
+                beta_lst, alpha_lst, sparsity_lst, blocks_per_row_lst, blocks_per_col_lst, result_cols_lst):
+            M = BM * blocks_per_row
+            K = BK * blocks_per_col
+            mat1 = create_blocked_tensor(0, M, K, (BM, BK), sparsity, dtype, device=device)
+            bsr = mat1.to_sparse_bsr((BM, BK))
+            mat2 = make_tensor(K, N, dtype=dtype, device=device, low=0.5, high=1.5)
+            input = make_tensor(M, N, dtype=dtype, device=device, low=0.5, high=1.5)
+
+            if 0:
+                # Find optimal kernel parameters, the speed-up is
+                # about 10x for running this test.
+                #
+                # Enable this if-block when the test method is
+                # updated, run the test, and finally, disable the
+                # if-block.
+                key = dict(bsr_dense_addmm=(M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1),
+                           bsr_dense_mm=(M, K, N, BM, BK))[op]
+                meta = get_meta(op, key, version=(0, dtype, 0.5))
+                if meta is None:
+                    if op == 'bsr_dense_addmm':
+                        optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
+                    elif op == 'bsr_dense_mm':
+                        optimize_bsr_dense_mm(M, K, N, BM, BK, dtype=dtype, sparsity=0.5)
+                    else:
+                        raise NotImplementedError(op)
+                    meta = get_meta(op, key, version=(0, dtype, 0.5))
+                    assert meta is not None
+                    dump()  # this will update torch/sparse/_triton_ops_meta.py
+
+            args = dict(bsr_dense_addmm=(input, bsr, mat2), bsr_dense_mm=(bsr, mat2))[op]
+            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha), bsr_dense_mm=dict())[op]
+            result = operation(*args, **kwargs)
+            expected = reference(input, mat1, mat2, beta=beta, alpha=alpha)
+
+            self.assertEqual(result, expected)
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())

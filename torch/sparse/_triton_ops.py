@@ -80,7 +80,7 @@ def make_triton_contiguous(t):
     # TODO: Why do we need "triton contiguity" that is not defined by
     # triton itself? It looks like it is required until
     # openai/triton#1291 fixed a bug in processing triton kernel
-    # arguments. Unless triton comntiguity is required for
+    # arguments. Unless triton contiguity is required for
     # performance, remove this function.
     if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
         return t.contiguous()
