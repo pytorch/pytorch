@@ -273,17 +273,28 @@ def _init_streams(
     """
     assert state._is_root
     assert state._device_handle.is_available()
-    # Stream for unshard logic, including allocating the all-gather destination
-    # tensors and the all-gathers themselves.
-    state._unshard_stream = state._device_handle.Stream()
-    # Stream for overlapping gradient reduction with the backward pass gradient
-    # computation.
-    state._post_backward_stream = state._device_handle.Stream()
-    # Stream for pre-unshard logic, namely allocations and writes for CPU
-    # offloading (H2D copy) and mixed precision (low precision cast).
-    state._pre_unshard_stream = state._device_handle.Stream()
+    uses_hybrid_sharding = any(
+        fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+        for fsdp_state in state._all_fsdp_states
+    )
+    # Prioritize all-gathers/reduce-scatters over async all-reduce for HSDP and
+    # preserve the default priority of 0 otherwise
+    high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves
+    state._unshard_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation
+    state._post_backward_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast)
+    state._pre_unshard_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream to run HSDP's all-reduce as async (if using HSDP)
+    state._all_reduce_stream = (
+        state._device_handle.Stream() if uses_hybrid_sharding else state._default_stream
+    )
 
 
 @no_type_check
@@ -303,20 +314,20 @@ def _unshard(
     """
     if not handle:
         return
-    # with state._device_handle.stream(pre_unshard_stream):
-    ran_pre_unshard = handle.pre_unshard()
-    # if ran_pre_unshard:
-    # unshard_stream.wait_stream(pre_unshard_stream)
-    # if state.limit_all_gathers:
-    #     event = state._free_event_queue.dequeue_if_needed()
-    #     if event:
-    #         with torch.profiler.record_function(
-    #             "FullyShardedDataParallel.rate_limiter"
-    #         ):
-    #             event.synchronize()
-    # with state._device_handle.stream(unshard_stream):
-    handle.unshard()
-    handle.post_unshard()
+    with state._device_handle.stream(pre_unshard_stream):
+        ran_pre_unshard = handle.pre_unshard()
+    if ran_pre_unshard:
+        unshard_stream.wait_stream(pre_unshard_stream)
+    if state.limit_all_gathers:
+        event = state._free_event_queue.dequeue_if_needed()
+        if event:
+            with torch.profiler.record_function(
+                "FullyShardedDataParallel.rate_limiter"
+            ):
+                event.synchronize()
+    with state._device_handle.stream(unshard_stream):
+        handle.unshard()
+        handle.post_unshard()
 
 
 @no_type_check
@@ -431,7 +442,7 @@ def _pre_forward_unshard(
     # If the handles have been prefetched, then there is no need to call
     # `_unshard()` again
     if not handle._prefetched:
-        _unshard(state, handle, None, None)
+        _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
     # state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
