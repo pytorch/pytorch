@@ -1630,7 +1630,23 @@ static at::Tensor _quantized_convolution_onednn(
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
   } else {
-    op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+    if (has_unary_post_op && unary_attr.value()=="relu") {
+      op_attr = ideep::attr_t::fuse_relu();
+    } else if (has_unary_post_op && unary_attr.value()=="hardtanh") {
+      TORCH_CHECK(
+          unary_scalars.size() == 2 &&
+              unary_scalars[0].get().toOptional<at::Scalar>().has_value() &&
+              unary_scalars[1].get().toOptional<at::Scalar>().has_value(),
+          "hardtanh is expected to have two scalar input: min_val and max_val");
+
+      auto lower_bound_value =
+          unary_scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+      auto upper_bound_value =
+          unary_scalars[1].get().toOptional<at::Scalar>().value().to<float>();
+      op_attr = ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+    } else {
+      op_attr = ideep::attr_t();
+    }
   }
 
   // Weight Reorder
@@ -1821,8 +1837,8 @@ class QConvoneDNN final {
     } else {
       // Conv2D post op check
       TORCH_CHECK(
-        attr == "none" || attr == "relu",
-        "none post_op or post_op relu is supported for quantized pointwise conv2d. Got unary_post_op: ",
+        attr == "none" || attr == "relu" || attr == "hardtanh",
+        "none post_op or post_op relu/hardtanh is supported for quantized pointwise conv2d. Got unary_post_op: ",
         attr,
         ".")
     }
