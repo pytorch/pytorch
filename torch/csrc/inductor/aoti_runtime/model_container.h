@@ -78,6 +78,7 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
+    std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
@@ -178,6 +179,10 @@ class AOTInductorModelContainer {
     }
   }
 
+  void swap_constants_buffer() {
+    std::lock_guard unique_lk(model_exec_mutex_);
+  }
+
   size_t num_inputs() const {
     return input_names_.size();
   }
@@ -260,6 +265,13 @@ class AOTInductorModelContainer {
     available_models_.pop_back();
     return result;
   }
+
+  // This mutex is used to protect execution of model.
+  // We acquire the mutex in shared mode if we allow concurrent execution.
+  // We acquire the mutex in unique mode when we want exclusive access of the model.
+  // One such case is when we want to do a weight swapping. We want to make sure
+  // no one is executing the model.
+  std::shared_mutex model_exec_mutex_;
 
 #ifdef USE_CUDA
   CUDAPtr get_inactive_blob() {
