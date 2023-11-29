@@ -45,6 +45,11 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
+static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
+    "TORCH_NCCL_DESYNC_DEBUG"};
+
+// Environment Variable to control whether Desync Debug is enabled.
+// This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
     "TORCH_NCCL_DESYNC_DEBUG",
     "NCCL_DESYNC_DEBUG"};
@@ -865,6 +870,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
