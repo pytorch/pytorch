@@ -350,11 +350,11 @@ class ExportedProgram:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
         from torch._export.unflatten import unflatten
+        from ._unlift import _unlift_exported_program_lifted_states
 
         if flat:
-            return unlift_exported_program_lifted_states(self)
+            return _unlift_exported_program_lifted_states(self)
         else:
             return unflatten(self)
 
