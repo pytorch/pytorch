@@ -7,7 +7,6 @@ from os.path import abspath, dirname
 from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
-from . import external_utils
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
