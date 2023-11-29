@@ -94,6 +94,18 @@ class TorchExport(exporter.FXGraphExtractor):
             diagnostic_context, fx_module, options.onnxfunction_dispatcher
         ).analyze(infra.levels.ERROR)
 
+        # ONNX does not support complex inputs. During graph building, all complex inputs
+        # are converted to real representation inputs. Here we register this step to
+        # input/output adapter.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationInputStep()
+        )
+
+        # Output post-processing steps should happen after `FlattenOutputStep`.
+        options.fx_tracer.output_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationOutputStep()
+        )
+
         # TODO: Disabled this pass until "Segmentation fault (core dumped)" is fixed
         # This operation should be invoked as the last pre export pass.
         # See [NOTE: Modularize pass ordering]
