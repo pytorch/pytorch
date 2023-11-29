@@ -1,4 +1,4 @@
-# Owner(s): ["module: decompositions"]
+# Owner(s): ["module: primTorch"]
 
 from functools import partial
 from itertools import product
