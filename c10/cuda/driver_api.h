@@ -31,6 +31,7 @@
 #define C10_NVML_DRIVER_API(_)           \
   _(nvmlInit_v2)                         \
   _(nvmlDeviceGetHandleByPciBusId_v2)    \
+  _(nvmlDeviceGetNvLinkRemoteDeviceType) \
   _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
 

@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/driver_api.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <cuda_runtime.h>
@@ -12,6 +13,8 @@
 #include <random>
 
 #include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -224,17 +227,31 @@ void TwoPhaseExchange::run(
 ////////////////////////////////////////////////////////////////////////////////
 
 // TODO: determine via GPU model
-// static constexpr size_t kMaxNvLinks = 12;
-static constexpr size_t kMaxNvLinks = 16;
+static constexpr size_t kMaxNvLinks = 20;
 
+static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
+  std::ostringstream oss;
+  for (size_t i = 0; i < kMaxDevices; ++i) {
+    for (size_t j = 0; j < kMaxDevices; ++j) {
+      oss << nvlMesh[i][j] << " ";
+    }
+    oss << std::endl;
+  }
+  os << oss.str();
+  return os;
+}
+
+/**
+ * Query the nvlink connection among devices.
+ */
 static NvlMesh getNvlMesh(size_t worldSize) {
   using namespace c10::cuda;
 
   nvmlDevice_t devices[worldSize];
   std::unordered_map<std::string, size_t> busIdToIdx;
+  size_t switchLinkCount[worldSize] = {};
   NvlMesh nvlMesh = {};
 
-  // TODO: handle num_gpus < 8
   for (size_t idx = 0; idx < worldSize; ++idx) {
     cudaDeviceProp prop{};
     if (cudaGetDeviceProperties(&prop, idx) == cudaErrorInvalidDevice) {
@@ -256,23 +273,49 @@ static NvlMesh getNvlMesh(size_t worldSize) {
 
   for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxNvLinks; ++link) {
-      nvmlPciInfo_t pciInfo;
-      auto res = DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
-          devices[idx], link, &pciInfo);
-      if (res != NVML_SUCCESS) {
+      nvmlReturn_t ret;
+      nvmlIntNvLinkDeviceType_t deviceType;
+      ret = DriverAPI::get()->nvmlDeviceGetNvLinkRemoteDeviceType_(
+          devices[idx], link, &deviceType);
+      if (ret != NVML_SUCCESS) {
         break;
       }
-      auto it = busIdToIdx.find(pciInfo.busId);
-      if (it != busIdToIdx.end()) {
-        if (idx != it->second) {
-          nvlMesh[idx][it->second] += 1;
+      // Remote device is GPU
+      if (deviceType == NVML_NVLINK_DEVICE_TYPE_GPU) {
+        nvmlPciInfo_t pciInfo;
+        ret = DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
+            devices[idx], link, &pciInfo);
+        if (ret != NVML_SUCCESS) {
+          break;
         }
+        auto it = busIdToIdx.find(pciInfo.busId);
+        if (it != busIdToIdx.end()) {
+          if (idx != it->second) {
+            nvlMesh[idx][it->second] += 1;
+          }
+        }
+        // Remote device is NVSwitch
+      } else if (deviceType == NVML_NVLINK_DEVICE_TYPE_SWITCH) {
+        switchLinkCount[idx] += 1;
       }
+    }
+  }
+  // Process NVSwitch connections
+  for (size_t i = 0; i < worldSize; ++i) {
+    for (size_t j = 0; j < worldSize; ++j) {
+      if (i == j) {
+        continue;
+      }
+      nvlMesh[i][j] = std::min(switchLinkCount[i], switchLinkCount[j]);
     }
   }
   return nvlMesh;
 }
 
+/**
+ * Determine if the devices form a hybrid cube mesh
+ * topology given a NvlMesh.
+ */
 static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
   std::array<size_t, kMaxDevices> numNeighbors = {};
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -290,7 +333,12 @@ static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
   return true;
 }
 
-Topology detectTopology(const NvlMesh nvlMesh, std::vector<int> deviceIds) {
+/**
+ * Detech topology given a NvlMesh.
+ */
+static Topology detectTopology(
+    const NvlMesh nvlMesh,
+    std::vector<int> deviceIds) {
   TORCH_CHECK(deviceIds.size() >= 2);
   bool fullyConnected = true;
   for (size_t i = 0; i < deviceIds.size() - 1; ++i) {
@@ -301,13 +349,16 @@ Topology detectTopology(const NvlMesh nvlMesh, std::vector<int> deviceIds) {
     }
   }
   if (fullyConnected) {
-    std::cout << "Fully connected" << std::endl;
+    std::cout << "IntraNodeComm: Topology::FULLY_CONNECTED" << std::endl;
+    LOG(INFO) << "IntraNodeComm: Topology::FULLY_CONNECTED";
     return Topology::FULLY_CONNECTED;
   }
   if (deviceIds.size() == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
-    std::cout << "Hybrid cube mesh" << std::endl;
+    std::cout << "IntraNodeComm: Topology::HYBRID_CUBE_MESH" << std::endl;
+    LOG(INFO) << "IntraNodeComm: Topology::HYBRID_CUBE_MESH";
     return Topology::HYBRID_CUBE_MESH;
   }
+  std::cout << "IntraNodeComm: Topology::UNKNOWN" << std::endl;
   return Topology::UNKNOWN;
 };
 
@@ -345,15 +396,21 @@ void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank) {
   }
 }
 
+/**
+ * Rendezvous via shared memory given a rendezvous ID.
+ *
+ * Use this if we know all participants are from the same host.
+ */
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
-  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize > kMaxDevices) {
+  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize == 1 ||
+      worldSize > kMaxDevices) {
     return nullptr;
   }
 
-  // Data structure for handshaking
+  // Data structure for rendezvous
   struct Shared {
     std::array<int, kMaxDevices> deviceIds;
     std::array<cudaIpcMemHandle_t, kMaxDevices> p2pStateHandles;
@@ -365,7 +422,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     }
   };
 
-  // Initialize shared memory for handshaking
+  // Initialize shared memory for rendezvous
   SharedMemoryPtr<Shared> peerInfo(rdzvId, rank, worldSize, worldSize);
 
   // Gether peer device Ids
@@ -387,7 +444,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   // Query nvlink connection
   auto nvlMesh = getNvlMesh(worldSize);
 
-  // Detect topology. This will be used for algo selection.
+  // Detect topology
   Topology topology = detectTopology(nvlMesh, deviceIds);
   if (topology == Topology::UNKNOWN) {
     return nullptr;
@@ -417,7 +474,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
         bufferHandles = peerInfo->bufferHandles;
       });
 
-  // Map peers' p2p state and buffer to process address space
+  // Map peer p2p states and buffers to the process address space
   std::array<void*, kMaxDevices> p2pStates, buffers;
   for (size_t r = 0; r < worldSize; ++r) {
     if (r == rank) {
@@ -469,12 +526,20 @@ std::string generateUUID() {
   return ss.str();
 }
 
+/**
+ * Rendezvous via c10::Store.
+ *
+ * Use this if we don't know if all participants are from the same host. This
+ * function returns nullptr for all participants if not all of them are from
+ * the same host.
+ */
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     c10::intrusive_ptr<c10d::Store> store,
     const std::string& prefix,
     size_t rank,
     size_t worldSize) {
-  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize > kMaxDevices) {
+  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize == 1 ||
+      worldSize > kMaxDevices) {
     return nullptr;
   }
   std::array<char, HOST_NAME_MAX + 1> buf = {};

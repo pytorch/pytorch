@@ -1,9 +1,5 @@
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
-// TODO
-#include <iostream>
-#include <sstream>
-
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -48,11 +44,13 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
   return c;
 }
 
-DEVICE_INLINE void sendSignal(uint32_t* addr) {
+// releaseSignal and acquireSignal also enforces memory ordering
+// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-synchronization-domains
+DEVICE_INLINE void releaseSignal(uint32_t* addr) {
   atomicInc_system(addr, 1);
 }
 
-DEVICE_INLINE void recvSignal(uint32_t* addr) {
+DEVICE_INLINE void acquireSignal(uint32_t* addr) {
   volatile uint32_t* signal = addr;
   uint32_t val;
   do {
@@ -103,8 +101,8 @@ static __global__ void oneShotAllReduceKernel(
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
     auto targetRank = threadIdx.x;
-    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -138,7 +136,7 @@ static __global__ void oneShotAllReduceKernel(
 }
 
 template <uint32_t kWorldSize>
-static __global__ void twoShotAllReduceKernel(
+static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     at::BFloat16* input,
     size_t N_aligned,
     std::array<FcP2pState*, kMaxDevices> p2pStates,
@@ -153,8 +151,8 @@ static __global__ void twoShotAllReduceKernel(
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
     auto targetRank = threadIdx.x;
-    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -186,17 +184,17 @@ static __global__ void twoShotAllReduceKernel(
     auto relayBuf = srcs[0] + kMaxIntraNodeSize / 2;
     LOAD_16(&relayBuf[N_start + i], &sums);
   }
-
-  __threadfence_system();
+  __syncthreads();
 
   if (threadIdx.x < kWorldSize) {
     auto targetRank = threadIdx.x;
-    sendSignal(&p2pStates[targetRank]->signals1[blockIdx.x][rank]);
-    recvSignal(&p2pStates[rank]->signals1[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals1[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals1[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
+#pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
       size_t i_r = N_start + i + (distRank[ii] - rank) * N_per_rank;
       auto relayBuf = srcs[ii] + kMaxIntraNodeSize / 2;
@@ -288,8 +286,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   // Wait for HCM neigbors to enter the kernel
   if (threadIdx.x < 3) {
     auto targetRank = p2pStates[rank]->neighborRanks[threadIdx.x];
-    sendSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    recvSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -322,14 +320,12 @@ static __global__ void hybridCubeMeshAllReduceKernel(
     }
     LOAD_16(&localRelay[i], &sums);
   }
-
-  // Make prior writes visible to the system
-  __threadfence_system();
+  __syncthreads();
 
   // Each block syncs with the same block on the relay rank
   if (threadIdx.x == 0) {
-    sendSignal(&p2pStates[relayRank]->signals[blockIdx.x][rank]);
-    recvSignal(&p2pStates[rank]->signals[blockIdx.x][relayRank]);
+    releaseSignal(&p2pStates[relayRank]->signals[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][relayRank]);
   }
   __syncthreads();
 
@@ -420,7 +416,11 @@ at::Tensor oneShotAllReduce(
             rank);                                                  \
   }
   X(2);
+  X(3);
   X(4);
+  X(5);
+  X(6);
+  X(7);
   X(8);
 #undef X
   return input;
@@ -444,7 +444,9 @@ at::Tensor twoShotAllReduce(
 
   TORCH_WARN_ONCE("two shot: blocks: ", blocks.x, " threads: ", threads.x);
 
-  auto output = N_aligned == input.numel() ? input : input.new_empty(N_aligned);
+  auto output = N_aligned == static_cast<size_t>(input.numel())
+      ? input
+      : input.new_empty(N_aligned);
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
@@ -463,9 +465,14 @@ at::Tensor twoShotAllReduce(
             castArr<FcP2pState*>(p2pStates),                        \
             castArr<at::BFloat16*>(buffers),                        \
             rank);                                                  \
+    AT_CUDA_CHECK(cudaGetLastError());                              \
   }
   X(2);
+  X(3);
   X(4);
+  X(5);
+  X(6);
+  X(7);
   X(8);
 #undef X
 
@@ -523,18 +530,25 @@ AllReduceAlgo selectAllReduceAlgo(
     const at::Tensor& input,
     Topology topology,
     size_t worldSize) {
-  size_t sz = input.numel() * input.element_size();
-  // TODO: world size even
+  // Only supports bf16 for now
+  if (input.dtype() != at::kBFloat16) {
+    return AllReduceAlgo::NONE;
+  }
+  const size_t numel = input.numel();
+  const size_t elem_sz = input.element_size();
   if (topology == Topology::HYBRID_CUBE_MESH) {
     TORCH_CHECK(
         worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
-    if (alignUp(sz, kNumelPerWarp) <= 256 * 1024) {
+    if (alignUp(numel, kNumelPerWarp) * elem_sz <= 256 * 1024) {
       return AllReduceAlgo::HCM;
     }
-  } else if (topology == Topology::FULLY_CONNECTED) {
-    if (alignUp(sz, kNumelPerWarp) <= 256 * 1024) {
+  }
+  if (topology == Topology::FULLY_CONNECTED) {
+    if (alignUp(numel, kNumelPerWarp) * elem_sz <= 256 * 1024) {
       return AllReduceAlgo::ONE_SHOT;
-    } else if (alignUp(sz, kNumelPerWarp * worldSize) <= 10 * 1024 * 1024) {
+    }
+    if (alignUp(numel, kNumelPerWarp * worldSize) * elem_sz <=
+        10 * 1024 * 1024) {
       return AllReduceAlgo::TWO_SHOT;
     }
   }

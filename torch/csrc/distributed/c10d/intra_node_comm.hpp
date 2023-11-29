@@ -1,8 +1,5 @@
 #pragma once
 
-#include <pthread.h>
-#include <semaphore.h>
-
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
