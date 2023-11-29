@@ -1336,37 +1336,32 @@ TORCH_IMPL_FUNC(mean_out)
       }
     }
     auto& result_mut = const_cast<Tensor&>(result);
-    switch(dtype) {
-      case kHalf:
-      case kBFloat16:
-        // For accuracy reasons, BF16/FP16 mean should be computed via the
-        // following approach:
-        //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
-        //
-        // Such an approach is necessary because if we were to choose the same
-        // approach for BF16/FP16 as FP32 here, then it would have resulted in
-        // the following code-flow -
-        // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16,
-        // which, in turn, does not produce as accurate results.
-        result_mut = result_mut.to(ScalarType::Float);
-
-        // self (input tensor) will initially be cast to FP32 in sum_out.
-        // This results in having to read that FP32 tensor again, but maybe in
-        // the future, we could revise the implementation to not materialize
-        // that intermediate FP32 tensor. That approach would probably require
-        // some modifications in binary_kernel_reduce_vec(),
-        // TensorIteratorBase::for_each(), and
-        // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
-        at::sum_out(
-            result_mut, self, opt_dim, keepdim, ScalarType::Float).div_(dim_prod);
-
-        // Cast result_mut back to BF16 or FP16.
-        result_mut = result_mut.to(dtype);
-        break;
-      default:
-        // floating point or complex types
-        at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
+    // For accuracy reasons, BF16/FP16 mean should be computed via the
+    // following approach:
+    //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
+    //
+    // Such an approach is necessary because if we were to choose the same
+    // approach for BF16/FP16 as FP32 here, then it would have resulted in
+    // the following code-flow -
+    // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16,
+    // which, in turn, does not produce as accurate results.
+    bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
+    auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
+    if (is_half_type) {
+      result_mut = result_mut.to(ScalarType::Float);
+      // self (input tensor) will initially be cast to FP32 in sum_out.
+      // This results in having to read that FP32 tensor again, but maybe in
+      // the future, we could revise the implementation to not materialize
+      // that intermediate FP32 tensor. That approach would probably require
+      // some modifications in binary_kernel_reduce_vec(),
+      // TensorIteratorBase::for_each(), and
+      // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
     }
+    // Common code-flow for all output dtypes
+    // After sum & div, cast result_mut back to BF16 or FP16, if required.
+    // TensorBase::to is (sort of a) no-op for other dtypes.
+    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod)
+                                                                  .to(dtype);
   } else {
     // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
