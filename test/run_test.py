@@ -699,6 +699,13 @@ def run_test_continue_through_error(
             sc_command = f"--sc={stepcurrent_key}"
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    if len(flaky_failures) > 0:
+        print(
+            f"The following tests failed flakily (nonexhaustive): {flaky_failures}",
+            file=output,
+            flush=True,
+        )
     if len(consistent_failures) > 0:
         print(
             f"The following tests failed consistently: {consistent_failures}",
