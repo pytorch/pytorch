@@ -82,6 +82,10 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "xcit_large_24_p8_224",
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    "xcit_large_24_p8_224",
+}
+
 
 def refresh_model_names():
     import glob
@@ -179,6 +183,12 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
     @download_retry_decorator
