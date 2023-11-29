@@ -23,6 +23,7 @@ class AOTInductorModelContainer {
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<AtenTensorHandle>>();
+    use_secondary = false;
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
@@ -93,6 +94,90 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
+  // This function updates the inactive buffer for storing constants.
+  // It will update the buffer, the mapping and the array mapping.
+  // We can later change the inactive buffer to active with corresponding
+  // function calls (TODO.)
+  void update_inactive_constants_buffer(
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
+#ifdef USE_CUDA
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No model available in container!");
+    }
+    auto num_constants = models_[0]->num_constants();
+
+    // auto constants_map = get_inactive_map();
+    // auto constants_array = get_inactive_array();
+    auto constants_blob = get_inactive_blob();
+    auto* constants_blob_ptr = static_cast<uint8_t*>(constant_blob.get());
+
+    auto constants_map = get_inactive_map();
+
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      auto constant_name = std::string(models_[0]->constant_name(idx));
+      auto it = constants_map.find(constant_name);
+      if (it == constants_map.end()) {
+        throw std::runtime_error(
+            std::string("Cannot find constants ") + constant_name +
+            std::string(" in constants_map!"));
+      }
+
+      // Move the data to container handled blob.
+      auto* internal_constants_ptr =
+          constants_blob_ptr + constants_internal_offset_[idx];
+      void* user_constant_ptr;
+      int64_t* constant_size;
+      aoti_torch_get_data_ptr(it->second, &user_constant_ptr);
+      aoti_torch_get_sizes(it->second, &constant_size);
+
+      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+          internal_constants_ptr,
+          user_constant_ptr,
+          *constant_size,
+          cudaMemcpyDeviceToDevice));
+
+      // Generate Tensor from container handled blob.
+      // We extract stride and offset from provided Tensor since we do not
+      // guarantee that the tensor is contiguous.
+      AtenTensorHandle tensor_handle;
+      int64_t* stride;
+      size_t offset;
+      int device_idx = -1;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(it->second, &stride));
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_storage_offset(it->second, &offset));
+      AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx));
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+          internal_constants_ptr,
+          model_[0]->constant_ndim(idx),
+          model_[0]->constant_shape(idx),
+          stride,
+          offset,
+          model_[0]->constant_type(idx),
+          aoti_torch_device_type_cuda(),
+          device_idx,
+          &tensor_handle));
+
+      // Now place the tensor to constants_map. Note at this point the ownership
+      // of the tensor_handle will be taken over.
+      constants_map->emplace(constant_name, tensor_handle);
+    }
+
+    // Update the inactive constant array.
+    update_array_from_map(get_inactive_array(), constants_map);
+#endif // USE_CUDA
+  }
+
+  void update_array_from_map(
+      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+      std::shared_ptr<ConstantMap> constants_map) {
+    auto num_constants = models_[0]->num_constants();
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      constants_array->at(idx) =
+          constants_map->find(models_[0]->constant_name(idx))->second;
+    }
+  }
+
   size_t num_inputs() const {
     return input_names_.size();
   }
@@ -130,9 +215,11 @@ class AOTInductorModelContainer {
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
+  CUDAPtr constant_blob_secondary_;
 
   // Let's place this within USE_CUDA at the moment before we fully support
   // update for CPU cases.
+  bool use_secondary;
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
 #endif // USE_CUDA
@@ -141,9 +228,11 @@ class AOTInductorModelContainer {
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
   // or _binary_constants_bin_start (for CPU).
   std::shared_ptr<ConstantMap> constants_map_;
+  std::shared_ptr<ConstantMap> constants_map_secondary_;
 
   // Holds the indexed array of constant for faster lookup during runtime.
   std::shared_ptr<std::vector<AtenTensorHandle>> constants_array_;
+  std::shared_ptr<std::vector<AtenTensorHandle>> constants_array_secondary_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;
@@ -170,6 +259,43 @@ class AOTInductorModelContainer {
     auto* result = available_models_.back();
     available_models_.pop_back();
     return result;
+  }
+
+#ifdef USE_CUDA
+  CUDAPtr get_inactive_blob() {
+    if (use_secondary) {
+      return constant_blob_;
+    } else {
+      if (!constant_blob_secondary_) {
+        constant_blob_secondary_ = RAII_cudaMalloc(blob_size_);
+      }
+      return constant_blob_secondary_;
+    }
+  }
+#endif // USE_CUDA
+
+  std::shared_ptr<ConstantMap> get_inactive_map() {
+    if (use_secondary) {
+      return constants_map_;
+    } else {
+      if (!constants_map_secondary_) {
+        constants_map_secondary_ = std::make_shared<ConstantMap>();
+      }
+      return constants_map_secondary_;
+    }
+  }
+
+  std::shared_ptr<std::vector<AtenTensorHandle>> get_inactive_array() {
+    if (use_secondary) {
+      return constants_array_;
+    } else {
+      if (!constants_array_secondary_) {
+        constants_array_secondary_ =
+            std::make_shared<std::vector<AtenTensorHandle>>(
+                models_[0]->num_constants());
+      }
+      return constants_array_secondary_;
+    }
   }
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
