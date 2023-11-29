@@ -1315,7 +1315,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        NCCLTraceBuffer::get()->complete(work.trace_id_);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
