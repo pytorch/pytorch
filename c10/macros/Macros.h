@@ -396,7 +396,7 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-// ROCm disable kernel assert by default 
+// ROCm disable kernel assert by default
 #if defined(TORCH_DISABLE_GPU_ASSERTS) && defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
