@@ -78,7 +78,7 @@ class AutotuneHint(Enum):
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint], size_hints, block_size
+    hints: Set[AutotuneHint], size_hints, block_size: int
 ) -> List[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
@@ -89,15 +89,15 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[Any, ...], ...]
+    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
 
     for hint in hints:
         if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
             if len(size_hints) == 1:
-                xyz_options = ((block_size // 4,),)
+                xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+                xyz_options = ((block_size // 4, 1, None), (1, block_size // 4, None))
             elif len(size_hints) == 3:
                 xyz_options = (
                     (block_size // 4, 1, 1),
@@ -106,7 +106,7 @@ def autotune_hints_to_configs(
                 )
             for xyz in xyz_options:
                 configs.append(
-                    triton_config(  # type: ignore[misc]
+                    triton_config(
                         size_hints,
                         *xyz,
                         num_elements_per_warp=32,
