@@ -2682,10 +2682,10 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
   {
     // test div_value
     auto options =
-        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.25);
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.);
     ASSERT_THROWS_WITH(
         AdaptiveLogSoftmaxWithLoss(options),
-        "the intermediate value calculated from div_value should not be equal to 0");
+        "div_value should not be equal to 0");
   }
 }
 
