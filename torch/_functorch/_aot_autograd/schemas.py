@@ -1,3 +1,8 @@
+"""
+The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
+input/output types, metadata, config, function signatures etc.
+"""
+
 import collections
 from dataclasses import dataclass
 from enum import Enum
@@ -92,8 +97,18 @@ class InputAliasInfo:
     mutates_data: bool
     mutates_metadata: bool
     mutations_hidden_from_autograd: bool
+    mutations_under_no_grad_or_inference_mode: bool
+    mutates_storage_metadata: bool
     requires_grad: bool
     mutation_type: MutationType
+
+    def __post_init__(self):
+        if self.mutates_storage_metadata:
+            # For convenience, we guarantee that this is always true.
+            # In practice, If we call .set_(), then at runtime there is no need
+            # to additionally fix  up the tensor metadata, since our runtime
+            # call to inp.set_(updated_inp) will already have the right metadata
+            assert self.mutates_metadata
 
 
 @dataclass
