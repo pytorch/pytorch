@@ -485,6 +485,24 @@ class TestDeserialize(TestCase):
 
         self.check_graph(f, (torch.tensor([1, 1]),))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_device(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
+        model = MyModule().eval().cuda()
+        self.check_graph(model, (inp,))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
