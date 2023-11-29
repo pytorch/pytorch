@@ -18,12 +18,8 @@ import builtins
 import math
 import warnings
 import inspect
-import logging
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
@@ -1445,7 +1441,7 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self, enable_logging: bool = False):
+    def eliminate_dead_code(self):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
@@ -1491,9 +1487,6 @@ class Graph:
         changed = False
         for node in reversed(self.nodes):
             if not node.is_impure() and len(node.users) == 0:
-                if enable_logging:
-                    s = f"Eliminate dead node {node.format_node()}."
-                    logger.info(s)
                 self.erase_node(node)
                 changed = True
 
