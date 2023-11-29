@@ -5,6 +5,7 @@ import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
 from ._triton_ops_meta import get_meta
+from typing import Optional, Tuple
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
 
@@ -557,6 +558,24 @@ def bsr_dense_mm_meta(M, K, N, Ms, Ks,
     return dict(GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
 
 
+def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
+                         SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, dtype=None, **extra):
+    if dtype is None:
+        dtype = torch.float16
+    if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
+        device_name = torch.cuda.get_device_name()
+        meta = get_meta('bsr_dense_addmm', (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1),
+                        device_name, version=(0, dtype, 0.5))
+        if meta is not None:
+            meta.update(**extra)
+            return meta
+    SPLIT_N = SPLIT_N or 1
+    GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
+    num_stages = num_stages or 1
+    num_warps = num_warps or 4
+    return dict(SPLIT_N=SPLIT_N, GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
+
+
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
     keys with efficient memory reference based comparision as an
@@ -779,10 +798,105 @@ def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     return out.view(out_shape)
 
 
+def bsr_dense_addmm(
+        input: torch.Tensor,
+        bsr: torch.Tensor,
+        dense: torch.Tensor,
+        *,
+        beta=1,
+        alpha=1,
+        out: Optional[torch.Tensor] = None,
+        skip_checks: bool = False,
+        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        meta: Optional[dict] = None):
+    f_name = 'bsr_dense_addmm'
+    values = bsr.values()
+    crow_indices = bsr.crow_indices()
+    col_indices = bsr.col_indices()
+    batch_ndim = crow_indices.dim() - 1
+    M, K = bsr.shape[batch_ndim:batch_ndim + 2]
+    blocksize = values.shape[batch_ndim + 1:batch_ndim + 3]
+    N = dense.shape[-1]
+
+    # todo: implement checks
+
+    original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
+
+    if out is None:
+        out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
+
+    if bsr._nnz() == 0 or alpha == 0:
+        if beta == 0:
+            out.zero_()
+        else:
+            out.copy_(input)
+            if beta != 1:
+                out.mul_(beta)
+        return out
+
+    if meta is None:
+        meta = bsr_dense_addmm_meta(M, K, N, blocksize[0], blocksize[1], beta, alpha, dtype=out.dtype)
+
+    out_backup = out
+
+    crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out)
+
+    BM, BK = blocksize
+    SPLIT_N = meta.get('SPLIT_N', N // BM)
+    BN = N // SPLIT_N
+
+    dense = tile_to_blocksize(dense, (BK, BN))
+    input = tile_to_blocksize(input, (BM, BN))
+    out = tile_to_blocksize(out, (BM, BN))
+
+    dot_out_dtype = {torch.float16: tl.float32,
+                     torch.bfloat16: tl.float32,
+                     torch.float32: tl.float64,
+                     torch.float64: tl.float64}[out.dtype]
+
+    n_batches = dense.size(0)
+    n_block_rows = crow_indices.size(-1) - 1
+    n_block_cols = dense.size(-3)
+
+    full_grid = (n_batches, n_block_cols, n_block_rows)
+    if max_grid is not None:
+        grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+    else:
+        grid_blocks = None
+
+    tensor_dims_map = {
+        values: (0, None, None),
+        crow_indices: (0, None, -1),
+        col_indices: (0, None, None),
+        input: (0, -3, -4),
+        dense: (0, -3, None),
+        out: (0, -3, -4),
+    }
+
+    assert alpha != 0
+
+    def kernel(grid, *sliced_tensors):
+        _bsr_strided_addmm_kernel[grid](
+            *ptr_stride_extractor(*sliced_tensors),
+            beta, alpha,
+            beta_is_one=beta == 1,
+            beta_is_nonzero=beta != 0,
+            alpha_is_one=alpha == 1,
+            BLOCKSIZE_ROW=BM,
+            BLOCKSIZE_INNER=BK,
+            BLOCKSIZE_COL=BN,
+            allow_tf32=dot_out_dtype == tl.float32,
+            acc_dtype=dot_out_dtype,
+            **meta)
+
+    launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+    return out_backup
+
+
 if has_triton():
     import triton
     import triton.language as tl
-    from typing import Optional, Tuple
 
     @triton.jit
     def _sampled_addmm_kernel(
@@ -1016,7 +1130,7 @@ if has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
 
@@ -1718,6 +1832,165 @@ if has_triton():
         if force_contiguous and not accumulators.is_contiguous():
             accumulators.copy_(accumulators_)
 
+    @triton.jit
+    def _bsr_strided_addmm_kernel(
+        # values prologue
+        values_ptr,
+        values_batch_stride,
+        values_nnz_stride,
+        values_row_block_stride,
+        values_col_block_stride,
+        # values epilogue
+        # crow_indices prologue
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        # crow_indices epilogue
+        # col_indices prologue
+        col_indices_ptr,
+        col_indices_batch_stride,
+        col_indices_stride,
+        # col_indices epilogue
+        # input prologue
+        input_ptr,
+        input_batch_stride,
+        input_tiled_row_stride,
+        input_tiled_col_stride,
+        input_row_block_stride,
+        input_col_block_stride,
+        # input epilogue
+        # dense prologue
+        dense_ptr,
+        dense_batch_stride,
+        dense_tiled_row_stride,
+        dense_tiled_col_stride,
+        dense_row_block_stride,
+        dense_col_block_stride,
+        # dense epilogue
+        # output prologue
+        output_ptr,
+        output_batch_stride,
+        output_tiled_row_stride,
+        output_tiled_col_stride,
+        output_row_block_stride,
+        output_col_block_stride,
+        # output epilogue
+        beta,
+        alpha,
+        beta_is_one: tl.constexpr,
+        beta_is_nonzero: tl.constexpr,
+        alpha_is_one: tl.constexpr,
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
+        BLOCKSIZE_INNER: tl.constexpr,
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
+        GROUP_SIZE_ROW: tl.constexpr,
+        SPLIT_N: tl.constexpr
+    ):
+
+        batch_pid = tl.program_id(axis=2)
+        row_block_pid = tl.program_id(axis=0)
+        col_block_pid = tl.program_id(axis=1)
+        n_block_rows = tl.num_programs(axis=0)
+        n_block_cols = tl.num_programs(axis=1)
+
+        row_block_pid, col_block_pid = tl.swizzle2d(
+            row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
+        )
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        row_nnz = nnz_offset_next - nnz_offset
+
+        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+        inner_block_arange = tl.arange(0, BLOCKSIZE_INNER)
+        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+
+        # Pointers are set to exact write-to locations
+        input_ptrs = (
+            input_ptr
+            + input_batch_stride * batch_pid
+            + input_tiled_row_stride * row_block_pid
+            + input_tiled_col_stride * col_block_pid
+            + input_row_block_stride * row_block_arange[:, None]
+            + input_col_block_stride * col_block_arange[None, :]
+        )
+
+        # Pointers are set to the first block of the current row.
+        values_block_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_nnz_stride * nnz_offset
+            + values_row_block_stride * row_block_arange[:, None]
+            + values_col_block_stride * inner_block_arange[None, :]
+        )
+
+        # NOTE: dense is advanced into all dimensions but the tiled row one.
+        # That will be advanced in the loop according to values in col_indices.
+        dense_block_ptrs = (
+            dense_ptr
+            + dense_batch_stride * batch_pid
+            + dense_tiled_col_stride * col_block_pid
+            + dense_row_block_stride * inner_block_arange[:, None]
+            + dense_col_block_stride * col_block_arange[None, :]
+        )
+
+        # Pointers are set to exact write-to locations
+        output_ptrs = (
+            output_ptr
+            + output_batch_stride * batch_pid
+            + output_tiled_row_stride * row_block_pid
+            + output_tiled_col_stride * col_block_pid
+            + output_row_block_stride * row_block_arange[:, None]
+            + output_col_block_stride * col_block_arange[None, :]
+        )
+
+        # Set pointer to the first nonzero element in the current row
+        col_index_nnz_ptr = (
+            col_indices_ptr
+            + col_indices_batch_stride * batch_pid
+            + col_indices_stride * nnz_offset
+        )
+
+        # alpha is never 0
+        if beta_is_nonzero:
+            output_acc_block = tl.load(input_ptrs).to(acc_dtype)
+            if not (beta_is_one and alpha_is_one):
+                beta_alpha = beta / alpha
+                output_acc_block *= beta_alpha
+        else:
+            output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+
+        for _ in range(row_nnz):
+            values_block = tl.load(values_block_ptrs)
+
+            # find which row of dense needs to get loaded
+            # for multiplication with values_block.
+            dense_row_idx = tl.load(col_index_nnz_ptr)
+            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+
+            # do block mm
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
+
+            # move val/col_index ptrs to the next block in the row
+            values_block_ptrs += values_nnz_stride
+            col_index_nnz_ptr += col_indices_stride
+
+        if not alpha_is_one:
+            output_acc_block *= alpha
+
+        # write back the result
+        tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
+
+
 else:
     bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
@@ -1725,3 +1998,4 @@ else:
     _scaled_dot_product_attention = None  # type: ignore[assignment]
     _scatter_mm2 = None  # type: ignore[assignment]
     _scatter_mm6 = None  # type: ignore[assignment]
+    _bsr_strided_addmm_kernel = None  # type: ignore[assignment]

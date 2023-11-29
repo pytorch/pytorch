@@ -161,11 +161,19 @@ def is_traceable_wrapper_subclass(t):
                 instance should have. Note that this arg is useful for certain subclasses
                 that require the shape info to be constructed. In most cases, this arg can be
                 safely ignored.
+            outer_stride: expected (possibly symbolic) stride that the returned subclass
+                instance should have. Note that this arg is useful for certain subclasses
+                that require the stride info to be constructed. In most cases, this arg can be
+                safely ignored.
+            outer_storage_offset: expected (possibly symbolic) storage offset that the returned
+                subclass instance should have. Note that this arg is useful for certain subclasses
+                that require the storage offset info to be constructed. In most cases, this arg can
+                be safely ignored.
     """
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback, outer_size):
+def transform_subclass(t, callback, outer_size=None, outer_stride=None, outer_storage_offset=None):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -179,18 +187,32 @@ def transform_subclass(t, callback, outer_size):
     gets the same (autograd, and aliasing) metadata as the original tensor.
     This is generally handled in other subsystems like AOTAutograd.
     """
+    outer_size = outer_size if outer_size is not None else t.size()
+    outer_stride = outer_stride if outer_stride is not None else t.stride()
+    outer_storage_offset = (
+        outer_storage_offset if outer_storage_offset is not None else t.storage_offset()
+    )
+
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
     for attr in attrs:
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
-    sub = type(t).__tensor_unflatten__(transformed_tensors_dict, ctx, outer_size)
+    sub = type(t).__tensor_unflatten__(
+        transformed_tensors_dict, ctx, outer_size, outer_stride, outer_storage_offset
+    )
 
     # NB: Purposefully guard here to simplify the inner / outer symbols.
     # Using sym_eq() for symbolic comparison can result in an expression that's too
     # difficult to guard on, so we use == here.
     assert sub.shape == outer_size, \
         f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
-        f"shape equal to outer_size={outer_size}, but got: {sub.shape}"
+        f"shape equal to {outer_size}, but got: {sub.shape}"
+    assert sub.stride() == outer_stride, \
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
+        f"stride equal to {outer_stride}, but got: {sub.stride()}"
+    assert sub.storage_offset() == outer_storage_offset, \
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
+        f"storage_offset equal to {outer_storage_offset}, but got: {sub.storage_offset()}"
 
     return sub
 
