@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -211,7 +211,7 @@ class GuardBuilder(GuardBuilderBase):
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
@@ -368,7 +368,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         if np:
-            np_types = (
+            np_types: Tuple[Type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -382,7 +382,7 @@ class GuardBuilder(GuardBuilderBase):
                 np.float64,
             )
         else:
-            np_types = ()  # type: ignore[assignment]
+            np_types = ()
         ok_types = (
             int,
             float,
