@@ -50,7 +50,7 @@ DebertaForQuestionAnswering,pass,6
 
 
 
-DebertaV2ForMaskedLM,pass_due_to_skip,0
+DebertaV2ForMaskedLM,OOM,4
 
 
 
