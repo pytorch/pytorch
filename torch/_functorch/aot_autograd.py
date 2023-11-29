@@ -55,6 +55,10 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     to_fun,
     from_fun,
     sync_functional_tensor,
+    has_metadata_mutation,
+    has_data_mutation,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     gen_alias_from_base,
     assert_functional_graph,
     _get_mutation_type,
@@ -90,8 +94,7 @@ from ._aot_autograd.input_output_analysis import (  # noqa: F401
     remove_dupe_metadata,
     create_synthetic_base_metadata,
     _tensors_definitely_do_not_overlap,
-    _compute_overlapping_inputs,
-    merge_view_inputs,
+    compute_overlapping_inputs,
     create_graph_signature,
 )
 from ._aot_autograd.traced_function_transforms import (  # noqa: F401
@@ -107,10 +110,9 @@ from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     create_runtime_wrapper,
     functionalized_rng_runtime_epilogue,
     aot_dispatch_subclass_wrapper,
-)
-from ._aot_autograd.alias_runtime_wrappers import (  # noqa: F401
     aot_wrapper_dedupe,
     aot_wrapper_synthetic_base,
+    merge_view_inputs,
 )
 from ._aot_autograd.dispatch_and_compile_graph import (  # noqa: F401
     aot_dispatch_base_graph,
