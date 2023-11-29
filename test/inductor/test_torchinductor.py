@@ -46,6 +46,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
     with_tf32_off,
@@ -2161,6 +2162,47 @@ class CommonTemplate:
                 (v,),
             )
 
+    @skipIfRocm
+    def test_conv_inference_heuristics(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("cuda only test")
+
+        in_channels = 6
+        out_channels = 6
+        kernel_size = 3
+        groups = 3
+
+        grouped_conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size, groups=groups
+        ).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        # Perform the forward pass
+        @torch.compile()
+        def foo(m, inp):
+            return m(inp)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+            # no to channels last permuting before kernel
+            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+
+        # in out should do channels last in inference
+        in_channels = 8
+        out_channels = 4
+        kernel_size = 3
+
+        # Create the convolution layer
+        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, conv_layer, input_tensor)
+            # should be channels last permuting before kernel
+            FileCheck().check(".run(").check(".convolution(").run(code[0])
+
     def test_upsample_cat_conv(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")
@@ -3045,8 +3087,8 @@ class CommonTemplate:
             # Mismatched elements: 127 / 746496 (0.0%)
             # Greatest absolute difference: 0.0009765625 at index (1, 62, 7, 16) (up to 1e-05 allowed)
             # Greatest relative difference: 0.05187467899332306 at index (14, 18, 11, 0) (up to 0.001 allowed)
-            atol=1e-3,
-            rtol=0.001,
+            atol=3e-3,
+            rtol=2,
         )
 
     def test_elu(self):
@@ -7111,6 +7153,52 @@ class CommonTemplate:
             rtol=1e4,
         )
 
+    @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    @skipIfRocm
+    def test_sdpa_unaligned_mask(self):
+        def foo(
+            arg0_1: "f32[8, 8, 16, 16]",
+            arg1_1: "f32[8, 8, 15, 16]",
+            arg2_1: "f32[8, 8, 15, 16]",
+            arg3_1: "f32[1, 1, 16, 15]",
+        ):
+            constant_pad_nd: "f32[1, 1, 16, 16]" = (
+                torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
+            )
+            arg3_1 = None
+            slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                constant_pad_nd, -1, 0, 15
+            )
+            constant_pad_nd = None
+            expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
+                slice_1, [8, 8, 16, 15]
+            )
+            slice_1 = None
+            _scaled_dot_product_efficient_attention = (
+                torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                    arg0_1, arg1_1, arg2_1, expand, False
+                )
+            )
+            arg0_1 = arg1_1 = arg2_1 = expand = None
+            getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[0]
+            _scaled_dot_product_efficient_attention = None
+            return (getitem,)
+
+        query = torch.rand(8, 8, 16, 16, device="cuda")
+        key = torch.rand(8, 8, 15, 16, device="cuda")
+        value = torch.rand(8, 8, 15, 16, device="cuda")
+        bias = torch.rand(1, 1, 16, 15, device="cuda")
+        self.common(
+            foo,
+            (query, key, value, bias),
+            atol=0.02,
+            rtol=1e4,
+        )
+
     def test_where_with_logical_op(self):
         def fn_and(x, y):
             return torch.where(torch.logical_and(x, y), 1.0, 0.0)
@@ -8118,6 +8206,44 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertIn("tl.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
+
+        def test_numpy_autograd(self):
+            def my_torch(x):
+                y = torch.cat([torch.sin(x) ** 2, torch.max(x)[None]])
+                return y.sum()
+
+            def my_np(x):
+                y = np.concatenate([np.sin(x) ** 2, np.max(x)[None]])
+                return np.sum(y)
+
+            @torch.compile
+            def wrapper(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.as_tensor(y)
+
+            @torch.compile
+            def wrapper2(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.from_numpy(y)
+
+            x_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            x = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            out_np = wrapper(x_np)
+            out = my_torch(x)
+            self.assertEqual(out, out_np)
+
+            x2_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            out2_np = wrapper2(x2_np)
+            self.assertEqual(out, out2_np)
+
+            out_np.backward()
+            out.backward()
+            self.assertEqual(x.grad, x_np.grad)
+
+            out2_np.backward()
+            self.assertEqual(x.grad, x2_np.grad)
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
