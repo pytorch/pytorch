@@ -43,13 +43,13 @@ TP_DEGREE = 2
 LR = 3e-5
 
 
-class SimpleModel(torch.nn.Module):
+class SimpleModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.net1 = torch.nn.Linear(5, 8)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(8, 4)
-        self.net3 = torch.nn.Linear(4, 12)
+        self.net1 = nn.Linear(5, 8)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(8, 4)
+        self.net3 = nn.Linear(4, 12)
 
     def forward(self, x):
         x = F.relu(self.net1(x))
@@ -63,15 +63,15 @@ class SimpleModel(torch.nn.Module):
 
 # TODO: Temporarily disabled tests related SimpleModelUneven due to size mismatch problem.
 # TODO: Let's change back the tests after corresponding fixes are made.
-class SimpleModelUneven(torch.nn.Module):
+class SimpleModelUneven(nn.Module):
     def __init__(self):
         super().__init__()
         torch.manual_seed(0)
-        self.net1 = torch.nn.Linear(5, 10)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(10, 15)
-        self.net3 = torch.nn.Linear(15, 30)
-        self.net4 = torch.nn.Linear(30, 5)
+        self.net1 = nn.Linear(5, 10)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(10, 15)
+        self.net3 = nn.Linear(15, 30)
+        self.net4 = nn.Linear(30, 5)
 
     def forward(self, x):
         x = F.relu(self.net1(x))
