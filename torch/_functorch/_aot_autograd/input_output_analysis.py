@@ -1,3 +1,16 @@
+"""
+This module is one of the analysis modules - it takes as input a function or graph
+and some preexisting properties, and returns some data that is useful for deciding
+how to further proceed with compilation or construct runtime wrappers.
+
+In particular, the following analyses are provided:
+1. refine the view and mutation metadata collected previously - removing duplicate
+   inputs or mapping views to their bases.
+2. Based on view base analysis, it may merge inputs of different views into a single
+   input corresponding to a common base.
+3. We also analyze the function signature for export graphs.
+"""
+
 import collections
 import itertools
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -82,6 +95,16 @@ def remove_dupe_metadata(
 # that will need to be updated in the synthetic base epilogue
 
 
+# Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
+# after adding synthetic base arguments to the function.
+# Most of the work in this fn is slogging through all of the metadata corresponding to inputs,
+# and updating it with our synthetic base calling convention.
+#
+# When config.debug_assert is set, we automatically regenerate the metadata
+# and compare it to this output for sanity.
+#
+# In addition to the updated metadata, also return the list of input indices
+# that will need to be updated in the synthetic base epilogue
 def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
@@ -128,11 +151,16 @@ def create_synthetic_base_metadata(
         mutations_hidden_from_autograd = all(
             m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
         )
+        mutations_under_no_grad_or_inference_mode = all(
+            m.input_info[x].mutations_under_no_grad_or_inference_mode
+            for x in outer_indices
+        )
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,
             mutates_metadata,
             mutations_hidden_from_autograd,
+            mutations_under_no_grad_or_inference_mode,
             requires_grad,
         )
 
@@ -143,7 +171,13 @@ def create_synthetic_base_metadata(
             # mutations, they will be hidden from the rest of aot autograd.
             mutates_data=mutates_data,
             mutates_metadata=mutates_metadata,
-            mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+            mutations_hidden_from_autograd=all(
+                m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
+            ),
+            mutates_storage_metadata=False
+            if len(outer_indices) > 1
+            else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             mutation_type=mutation_type,

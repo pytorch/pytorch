@@ -66,6 +66,10 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     to_fun,
     from_fun,
     sync_functional_tensor,
+    has_metadata_mutation,
+    has_data_mutation,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     gen_alias_from_base,
     assert_functional_graph,
     _get_mutation_type,
@@ -381,6 +385,7 @@ AOT_COUNTER = itertools.count()
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 
 def create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
