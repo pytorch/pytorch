@@ -265,7 +265,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             local_tensor,
             spec.mesh,
             spec.placements,
-            shape=spec.tensor_meta.shape,
+            shape=outer_size,
             dtype=spec.tensor_meta.dtype,
             requires_grad=requires_grad,
             stride=spec.tensor_meta.stride,

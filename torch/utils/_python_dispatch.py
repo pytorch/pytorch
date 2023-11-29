@@ -142,9 +142,14 @@ def is_traceable_wrapper_subclass(t):
     is 'traceable' with torch.compile.
     In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
     It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
-    It is also expected to obey some restrictions around traceability and aliasing.
+    It is also expected to obey some restrictions around traceability and aliasing:
+        * The subclass's __torch_dispatch__() implementation should desugar into pytorch
+            dispatcher operations that can be traced into a graph.
+        * The subclass should use return_and_correct_aliasing(). This is needed today to make
+            sure that torch.compile does the right thing in a few cases around input mutation
+            and output aliasing.
 
-    Expected signatures:
+    Expected magic method signatures:
         attrs, ctx = t.__tensor_flatten__()
             attrs: list of attribute name strings for inner tensors
             ctx: dict containing any other subclass-specific metadata needed for unflattening

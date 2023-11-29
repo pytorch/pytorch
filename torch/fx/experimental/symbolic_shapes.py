@@ -2651,10 +2651,16 @@ class ShapeEnv:
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
                     inner_t = getattr(t, attr)
+                    inner_policy = policy.inner_policies[attr]
+
+                    # TODO: If we ever support subclasses as inner tensors, this will
+                    # have to change.
+                    assert isinstance(inner_policy, FreshCreateSymbolicPolicy)
+
                     sources_tensors_constraints.append((
                         AttrSource(source, attr),
                         inner_t,
-                        policy.inner_policies[attr].constraint_sizes
+                        inner_policy.constraint_sizes
                     ))
             else:
                 sources_tensors_constraints = [(source, t, policy.constraint_sizes)]
