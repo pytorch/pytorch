@@ -32,7 +32,7 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
-from .functions import invoke_and_store_as_constant
+from .functions import invoke_and_store_as_constant, NestedUserFunctionVariable
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -483,7 +483,9 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "_named_members":
             print("NAMED MEMBERS??")
-            raise AssertionError()
+            # The get_members_fn fails a const check, but this is a private internal lambda
+            # passed in nn_module, and so can be safely non-const, as it will not execute arbitrary user code
+            return wrap_values(module._named_members(**get_kwargs("get_members_fn", "prefix", "recurse", "remove_duplicates", assert_const=False)))
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -850,12 +852,19 @@ def _gen_source(source, name):
     return source
 
 
-def _get_kwargs(*names, mod, name, args, kwargs):
-    _assert_all_args_kwargs_const(args, kwargs)
+def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
+    if assert_const:
+        _assert_all_args_kwargs_const(name, args, kwargs)
     fn = getattr(mod, name)
+
+    def _get(x):
+        if isinstance(x, NestedUserFunctionVariable):
+            return x.get_function()
+        return x.as_python_constant()
+
     bound_args = inspect.signature(fn).bind(
-        *([x.as_python_constant() for x in args]),
-        **{k: v.as_python_constant() for k, v in kwargs.items()},
+        *([_get(x) for x in args]),
+        **{k: _get(v) for k, v in kwargs.items()},
     )
     bound_args.apply_defaults()
     bound_args = bound_args.arguments
@@ -902,6 +911,7 @@ def _named_embed(name, obj, *, tx, key, source_cls, source, options):
     )
 
 
-def _assert_all_args_kwargs_const(args, kwargs):
-    if not all(x.is_python_constant() for x in itertools.chain(args, kwargs.values())):
-        raise unimplemented(f"non-const NNModule method {name}")
+def _assert_all_args_kwargs_const(name, args, kwargs):
+    for x in itertools.chain(args, kwargs.values()):
+        if not x.is_python_constant():
+            raise unimplemented(f"non-const NNModule method {name}, {x}")
