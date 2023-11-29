@@ -8744,7 +8744,9 @@ get_out().sum().backward()
         self.assertEqual(y_expected, y2_expected)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_gradcheck_rng_generator_device_placement(self):
+    def test_gradcheck_fastmode_rng_generator_device_placement(self):
+        # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
+        # This test ensures that this still works when the default device is set to something else by the user.
         with torch.device('cuda'):
             x = torch.randn(3, dtype=torch.double, requires_grad=True)
 
