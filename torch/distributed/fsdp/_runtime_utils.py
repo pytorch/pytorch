@@ -444,7 +444,9 @@ def _pre_forward_unshard(
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
-    # state._device_handle.current_stream().wait_stream(state._unshard_stream)
+    # Don't wait during trace
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -493,7 +495,6 @@ def _post_forward(
         # Register pre-backward hooks to unshard the flat parameters for the
         # gradient computation (if needed)
         output = _register_pre_backward_hooks(state, module, output, handle)
-        # print("SET STATE TO IDLE")
         state.training_state = TrainingState.IDLE
         if handle:
             handle._training_state = HandleTrainingState.IDLE
@@ -644,10 +645,6 @@ def _pre_backward_hook(
     grad,
     *unused: Any,
 ) -> Any:
-    # if gpu_id == 0:
-    # print(id(state), "Running pre backward!")
-    # import traceback
-    # traceback.print_stack()
     """
     Prepares ``_handle`` 's ``FlatParameter`` s for gradient computation.
 
@@ -677,8 +674,6 @@ def _pre_backward_hook(
             if _is_composable(state):
                 allowed_states.append(TrainingState.FORWARD_BACKWARD)
             _assert_in_training_states(state, allowed_states)
-        # if gpu_id == 0:
-        # print(id(state), "SET STATE TO FORWARD_BACKWARD - PRE_BACKWARD")
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -697,7 +692,9 @@ def _pre_backward_hook(
                     state._unshard_stream,
                     state._pre_unshard_stream,
                 )
-            # state._device_handle.current_stream().wait_stream(state._unshard_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -751,11 +748,8 @@ def _post_backward_hook(
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
         if flat_param.grad is None:
-        #     # print("GRAD NONE?")
-            # print("No bwd grad")
-            assert False
             return
-        # print("Bwd grad?", flat_param.grad)
+
         if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
 
@@ -1087,9 +1081,6 @@ def _post_backward_final_callback(
     state: _FSDPState,
     module: nn.Module,
 ):
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
-    # print("Post backward final")
     """
     This waits for the post-backward to finish and performs some final cleanup.
     This runs at the end of the entire backward pass and should only be called
@@ -1175,20 +1166,19 @@ def _catch_all_reshard(
 def _finalize_params(
     state: _FSDPState,
 ) -> None:
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
-    # print(id(state), "Finalizing")
     """Finalizes the parameters before the next iteration."""
     handle = state._handle
     if not handle:
         return
     flat_param = handle.flat_param
     if hasattr(flat_param, "_post_backward_hook_handle"):
-        # if gpu_id == 0:
-        pbhs_handle = flat_param._post_backward_hook_handle
-        # if gpu_id == 0:
-        # print(id(state), "Removing handle", id(pbhs_handle))
-        pbhs_handle.remove()
+        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+        _p_assert(
+            post_backward_hook_state_len == expected_post_backward_hook_state_len,
+            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+        )
+        flat_param._post_backward_hook_state[-1].remove()
         delattr(flat_param, "_post_backward_hook_handle")
     if flat_param.requires_grad:
         if not state._sync_gradients:
