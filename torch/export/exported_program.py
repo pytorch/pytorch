@@ -604,3 +604,8 @@ def _get_updated_range_constraints(
         if k not in shape_env.replacements
     }
     return range_constraints
+
+
+def combine_args_kwargs(args, kwargs):
+    kwargs = kwargs or {}
+    return (args, kwargs)
