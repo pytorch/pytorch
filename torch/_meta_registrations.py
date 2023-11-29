@@ -423,6 +423,40 @@ def meta_sparse_structured_linear(
     return output
 
 
+@register_meta(aten._cslt_sparse_mm)
+def meta__cslt_sparse_mm(
+    compressed_A: torch.Tensor,
+    dense_B: torch.Tensor,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    transpose_result: bool = False,
+):
+    assert dense_B.dtype in {
+        torch.float16,
+        torch.bfloat16,
+        torch.int8,
+    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
+    assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
+    assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
+
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    k = dense_B.size(0)
+    n = dense_B.size(1)
+    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    if bias is not None:
+        assert m == bias.size(0)
+
+    mixed_dtype = out_dtype is not None and (is_int8_input_type != out_dtype)
+    if mixed_dtype:
+        assert (
+            is_int8_input_type and mixed_dtype is torch.float16
+        ), "out_dtype is only supported for i8i8->fp16 matmul"
+    output_shape = (n, m) if transpose_result else (m, n)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype if mixed_dtype else None)
+    return result
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
