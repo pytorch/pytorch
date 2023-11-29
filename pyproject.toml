@@ -86,7 +86,10 @@ select = [
     "PIE807",
     "PIE810",
     "PLE",
+    "PLR0133", # constant comparison
+    "PLR0206", # property with params
     "PLR1722", # use sys exit
+    "PLR6201", # set membership test
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
     "PT022",
@@ -104,9 +107,16 @@ select = [
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
 "test/jit/**" = [
+    "PLR0133", # tests require this for JIT
     "PYI",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
+"test/test_jit.py" = [
+    "PLR0133", # tests require this for JIT
+    "PYI",
+    "UP", # We don't want to modify the jit test as they test specify syntax
+]
+
 "torch/onnx/**" = [
     "UP037", # ONNX does runtime type checking
 ]
