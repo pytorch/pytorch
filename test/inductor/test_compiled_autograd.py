@@ -66,7 +66,6 @@ class TestCompiledAutograd(TestCase):
 
                 @staticmethod
                 def backward(ctx, gO):
-                    print("PYTHON BACKWARD")
                     (x,) = ctx.saved_tensors
                     return gO * x + x.shape[0]
 

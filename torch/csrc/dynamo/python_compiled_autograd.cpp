@@ -499,7 +499,9 @@ variable_list compiled_autograd(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
   std::cout << "calling compiled_fn (graph) done" << std::endl;
   variable_list outputs = THPVariable_UnpackList(pyresult);
+  std::cout << "unpacking outputs" << std::endl;
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  std::cout << "returning to engine" << std::endl;
   return outputs;
 }
 

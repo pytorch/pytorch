@@ -29,4 +29,4 @@ def call_hook(hook, *args):
     return result
 
 def call_backward(backward, *args):
-    return backward(*args)
+    return backward._forward_cls.backward(backward, *args)

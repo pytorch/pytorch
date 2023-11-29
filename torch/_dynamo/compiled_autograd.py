@@ -100,7 +100,7 @@ class AutogradCompilerInstance:
             kind="call_function",
             target=call_backward,
             args=(
-                backward.apply,
+                backward,
                 *[self.to_proxy(x) for x in inputs],
             ),
             kwargs={},
