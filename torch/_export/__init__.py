@@ -116,7 +116,7 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
-    from torch.export._tracer import _export
+    from torch.export._trace import _export
 
     constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
     return _export(
@@ -166,7 +166,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._tracer import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
+    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
 
     decomp_table = {
         torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
@@ -227,7 +227,7 @@ def _export_to_torch_ir(
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
 ) -> torch.fx.GraphModule:
-    from torch.export._tracer import _export_to_torch_ir
+    from torch.export._trace import _export_to_torch_ir
     return _export_to_torch_ir(
         f,
         args,
@@ -246,7 +246,7 @@ def export(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
-    from torch.export._tracer import _export
+    from torch.export._trace import _export
 
     if constraints is not None:
         warnings.warn(
@@ -295,7 +295,7 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-    from torch.export._tracer import _export
+    from torch.export._trace import _export
 
     return _export(
         f,

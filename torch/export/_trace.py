@@ -30,7 +30,6 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
     _disable_prexisiting_fake_mode,
-    combine_args_kwargs,
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
@@ -475,7 +474,7 @@ def _export(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs or {}))
     _, orig_in_spec = pytree.tree_flatten((args, kwargs))
     index = 0
     total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)

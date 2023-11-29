@@ -16,7 +16,7 @@ from torch.export import (
     dynamic_dim,
     export,
 )
-from torch.export._tracer import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
