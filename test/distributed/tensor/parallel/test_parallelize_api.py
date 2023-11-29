@@ -190,12 +190,8 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "dummy_encoder.net1": ColwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
-                "dummy_encoder.net2": ColwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
+                "dummy_encoder.net1": ColwiseParallel(output_layouts=Replicate()),
+                "dummy_encoder.net2": ColwiseParallel(output_layouts=Replicate()),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
@@ -223,7 +219,7 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_linear_col_wise_parallel(self):
         # test ColwiseParallel
         inp_size = [8, 10]
-        colwise = ColwiseParallel(input_layouts=Replicate(), output_layouts=Replicate())
+        colwise = ColwiseParallel(output_layouts=Replicate())
 
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)
