@@ -3298,6 +3298,50 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
+@register_decomposition([aten.upsample_linear1d.default, aten.upsample_linear1d.out])
+@aten.upsample_linear1d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_linear1d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(input, output_size, align_corners, [scales_w])
+
+
+@register_decomposition([aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out])
+@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_bilinear2d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(input, output_size, align_corners, [scales_h, scales_w])
+
+
+@register_decomposition([aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out])
+@aten.upsample_trilinear3d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_trilinear3d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(
+        input, output_size, align_corners, [scales_d, scales_h, scales_w]
+    )
+
+
 def _compute_scale(in_size, out_size, align_corners, scale=None):
     if align_corners:
         return (in_size - 1.0) / (out_size - 1.0) if out_size > 1 else 0
@@ -3312,66 +3356,64 @@ def _compute_source_index(scale, dst_index, align_corners):
         return scale * (dst_index + 0.5) - 0.5
 
 
-@register_decomposition(aten.upsample_bilinear2d.default)
-@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
-def upsample_bilinear2d(
+def _upsample_linear(
     input: Tensor,
     output_size: List[int],
     align_corners: bool,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    _, n_channels, in_h, in_w = input.shape
+    n_batch, n_channels = input.shape[:2]
+    inp_size = input.shape[2:]
+    d = len(inp_size)
 
-    # Calculate horizontal and vertical scaling factor
-    h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scales_h)
-    w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scales_w)
+    def get_values(inp, out, scales, nsqueeze):
+        # First Calculate scaling factor
+        scale_factor = _compute_scale(inp, out, align_corners, scales)
+        _, dtype = utils.elementwise_dtypes(
+            input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+        # We have to create arange with int64 dtype and use .to in order to avoid
+        # additional kernels creation in inductor and get a perf slowdown
+        i = torch.arange(out, device=input.device).to(dtype=dtype)
 
-    _, dtype = utils.elementwise_dtypes(
-        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    )
-    # We have to create arange with int64 dtype and use .to in order to avoid
-    # additional kernels creation in inductor and get a perf slowdown
-    i = torch.arange(output_size[0], device=input.device).to(dtype=dtype)
-    j = torch.arange(output_size[1], device=input.device).to(dtype=dtype)
+        x_f32 = _compute_source_index(scale_factor, i, align_corners).clamp(min=0.0)
+        x_f32 = x_f32.reshape(len(x_f32), *[1]*(nsqueeze))
+        x = x_f32.to(torch.int64)
 
-    x_f32 = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
-    y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
-    y_f32 = y_f32.unsqueeze(-1)
-
-    x = x_f32.to(torch.int64)
-    y = y_f32.to(torch.int64)
-
-    # We are using torch.where instead of torch.clamp below due to an expected failure
-    # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
-    # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
-    # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
-    # RuntimeError: _unsafe_index found unexpected index type Float
-    # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
-    xp1 = torch.where(x < in_w - 1, x + 1, x)
-    yp1 = torch.where(y < in_h - 1, y + 1, y)
-
-    v1 = aten._unsafe_index(input, [None, None, y, x])
-    v2 = aten._unsafe_index(input, [None, None, y, xp1])
-    v3 = aten._unsafe_index(input, [None, None, yp1, x])
-    v4 = aten._unsafe_index(input, [None, None, yp1, xp1])
+        # We are using torch.where instead of torch.clamp below due to an expected failure
+        # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
+        # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
+        # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
+        # RuntimeError: _unsafe_index found unexpected index type Float
+        # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
+        xp1 = torch.where(x < inp - 1, x + 1, x)
+        return x_f32, x, xp1
 
     dtype = torch.float32 if not input.is_floating_point() else input.dtype
-    if not input.is_floating_point():
-        v1 = v1.to(dtype)
-        v2 = v2.to(dtype)
-        v3 = v3.to(dtype)
-        v4 = v4.to(dtype)
+    values = [get_values(inp, out, scales, d - 1 - i) for i, (inp, out, scales) in enumerate(zip(inp_size, output_size, scales))]
+    xs_f32, xs, xp1s = list(zip(*values))
 
-    yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
-    xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
+    vs = []
+    for a in product(*[[0, 1]]*d):
+        idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
+        v = aten._unsafe_index(input, idx)
+        if not input.is_floating_point():
+            v = v.to(dtype)
+        vs.append(v)
 
-    # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
-    q1 = v1 + torch.mul(v2 - v1, xscale)
-    q2 = v3 + torch.mul(v4 - v3, xscale)
-    result = q1 + torch.mul(q2 - q1, yscale)
+    for i in reversed(range(d)):
+        xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
+        qs = []
+        for j in range(len(vs)//2):
+            v1, v2 = vs[2*j], vs[2*j + 1]
+            # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
+            q = v1 + torch.mul(v2 - v1, xscale)
+            qs.append(q)
+        vs = qs
+
+    assert len(vs) == 1
+    result = vs[0]
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -3379,6 +3421,8 @@ def upsample_bilinear2d(
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
         memory_format = torch.contiguous_format
+
+    assert isinstance(result, torch.Tensor)
 
     result = result.contiguous(memory_format=memory_format)
 
