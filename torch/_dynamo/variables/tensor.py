@@ -712,7 +712,6 @@ class TensorVariable(VariableTracker):
 
             if not self.source:
                 # Intermediary
-                print("HOOK NO SOURCE?", name)
                 src = fn_var.source
                 if (
                     not src

@@ -482,7 +482,6 @@ class NNModuleVariable(VariableTracker):
         elif name == "buffers":
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "_named_members":
-            print("NAMED MEMBERS??")
             # The get_members_fn fails a const check, but this is a private internal lambda
             # passed in nn_module, and so can be safely non-const, as it will not execute arbitrary user code
             return wrap_values(module._named_members(**get_kwargs("get_members_fn", "prefix", "recurse", "remove_duplicates", assert_const=False)))

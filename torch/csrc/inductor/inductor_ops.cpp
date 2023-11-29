@@ -8,8 +8,6 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
-#include <iostream>
-
 namespace torch {
 namespace inductor {
 using namespace at;

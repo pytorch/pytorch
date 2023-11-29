@@ -748,8 +748,8 @@ def tracing(context: Optional[TracingContext]):
     try:
         yield context
     except Exception as e:
-        # if not hasattr(e, "real_stack"):
-        # e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
+        if not hasattr(e, "real_stack") and context is not None:
+            e.real_stack = context.extract_stack()  # type: ignore[attr-defined]
         raise
     finally:
         if (

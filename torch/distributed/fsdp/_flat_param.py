@@ -1740,6 +1740,7 @@ class FlatParamHandle:
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""
+        flat_param = self.flat_param
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
             skip_use_sharded_views = (
@@ -1750,14 +1751,14 @@ class FlatParamHandle:
             )
             # Only incur the extra `.data` call if needed
             if skip_use_sharded_views:
-                unsharded_flat_param = self.flat_param.data
+                unsharded_flat_param = flat_param.data
         if self._offload_params:
-            device = self.flat_param._local_shard.device  # type: ignore[attr-defined]
+            device = flat_param._local_shard.device  # type: ignore[attr-defined]
             _p_assert(
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
-        self.flat_param.data = self.flat_param._local_shard  # type: ignore[attr-defined]
+        flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             if skip_use_sharded_views:
                 self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
@@ -1777,9 +1778,9 @@ class FlatParamHandle:
                 # TODO: Change `_unpadded_unsharded_size` if we change the
                 # gradient to be computed directly with padding.
                 accumulated_grad_in_no_sync = (
-                    self.flat_param.grad is not None
+                    flat_param.grad is not None
                     and self.uses_sharded_strategy
-                    and self.flat_param.grad.shape == self.flat_param._unpadded_unsharded_size
+                    and flat_param.grad.shape == flat_param._unpadded_unsharded_size
                 )
                 if accumulated_grad_in_no_sync:
                     self._use_unsharded_grad_views()

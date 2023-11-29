@@ -274,6 +274,7 @@ static TraceState call_begin_capture(
         compiler_call.tensor_args.lookup(compiler_call.tensor_args.inputs[i]);
     arg.proxy_tensor = proxy_inputs[i];
   }
+
   return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
