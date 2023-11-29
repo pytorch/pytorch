@@ -702,7 +702,8 @@ def run_test_continue_through_error(
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print(
-            f"The following tests failed flakily (nonexhaustive): {flaky_failures}",
+            "The following tests failed flakily (had to be rerun in a new process,"
+            + f" doesn't include reruns froms same process): {flaky_failures}",
             file=output,
             flush=True,
         )
