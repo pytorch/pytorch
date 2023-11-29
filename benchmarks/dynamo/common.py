@@ -1924,7 +1924,6 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
-            print(f"Original Error: {str(e)}")
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
@@ -3478,6 +3477,30 @@ def run(runner, args, original_dir=None):
             # Go back to main branch
             repo.git.checkout(main_branch)
     elif args.only:
+        def write_csv_when_exception(name, status):
+            placeholder_batch_size = 0
+            if args.accuracy:
+                headers = ["dev", "name", "batch_size", "accuracy"]
+                rows = [
+                    [device, name, placeholder_batch_size, status]
+                    for device in args.devices
+                ]
+            elif args.performance:
+                headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+                rows = [
+                    [device, name, placeholder_batch_size, 0.0, 0.0]
+                    for device in args.devices
+                ]
+            else:
+                headers = []
+                rows = [
+                    [device, name, placeholder_batch_size, 0.0]
+                    for device in args.devices
+                ]
+
+            for row in rows:
+                output_csv(output_filename, headers, row)
+
         model_name = args.only
         for device in args.devices:
             batch_size = args.batch_size
@@ -3548,11 +3571,11 @@ def run(runner, args, original_dir=None):
                                     extra_args=extra_args,
                                 )
                 except NotImplementedError as e:
-                    print(e)
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warning("%s failed to load", args.only)
+                    print("eager_validation_fail")
+                    write_csv_when_exception(name, "eager_validation_fail")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -3637,32 +3660,8 @@ def run(runner, args, original_dir=None):
         nmodels = len(model_names)
         for i, name in enumerate(model_names):
             current_name = name
-            placeholder_batch_size = 0
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
-
-            def write_csv(status):
-                if args.accuracy:
-                    headers = ["dev", "name", "batch_size", "accuracy"]
-                    rows = [
-                        [device, name, placeholder_batch_size, status]
-                        for device in args.devices
-                    ]
-                elif args.performance:
-                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0, 0.0]
-                        for device in args.devices
-                    ]
-                else:
-                    headers = []
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0]
-                        for device in args.devices
-                    ]
-
-                for row in rows:
-                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout
@@ -3673,12 +3672,11 @@ def run(runner, args, original_dir=None):
                 )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
-                write_csv("timeout")
+                write_csv_when_exception(name, "timeout")
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
                 print("Output: ", e.output, file=sys.stderr)
                 print("Error: ", e.stderr, file=sys.stderr)
-                write_csv("infra_error")
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
