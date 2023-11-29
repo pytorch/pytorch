@@ -417,6 +417,9 @@ class cpp:
     # using atomic_add.
     fallback_scatter_reduce_sum = True
 
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
