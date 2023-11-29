@@ -12,6 +12,9 @@ from torch import Tensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import SubclassCreationMeta, ViewAndMutationMeta
+from .utils import strict_zip
+
+zip = strict_zip
 
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:

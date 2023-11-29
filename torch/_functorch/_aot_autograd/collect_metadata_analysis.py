@@ -42,7 +42,9 @@ from .schemas import (
 )
 from .subclass_utils import create_subclass_meta
 
-from .utils import _get_autocast_states, KNOWN_TYPES
+from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+
+zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
