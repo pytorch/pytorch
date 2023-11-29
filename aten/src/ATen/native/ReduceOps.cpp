@@ -1361,9 +1361,6 @@ TORCH_IMPL_FUNC(mean_out)
             result_mut, self, opt_dim, keepdim, ScalarType::Float).div_(dim_prod);
 
         // Cast result_mut back to BF16 or FP16.
-        // A digression - the copy argument to TensorBase::to would be ignored,
-        // so it might as well have been true in both the TensorBase::to calls
-        // here.
         result_mut = result_mut.to(dtype);
         break;
       default:
