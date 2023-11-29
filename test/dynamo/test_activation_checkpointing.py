@@ -702,6 +702,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     )
     def test_compile_selective_checkpoint_random_op(self):
         for preserve_rng_state in [True, False]:
+
             def selective_checkpointing_context_fn():
                 no_recompute_list = [
                     torch.ops.aten.sigmoid.default,
