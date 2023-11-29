@@ -1347,9 +1347,10 @@ TORCH_IMPL_FUNC(mean_out)
     // which, in turn, does not produce as accurate results.
     bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
     auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
-    if (is_half_type) {
-      result_mut = result_mut.to(ScalarType::Float);
-    }
+    // TensorBase::to is (sort of a) no-op for all dtypes besides FP16 & BF16.
+    // But we incur a function-call overhead at the expense of simplifying code.
+    // We could add an if condition here to avoid an unnecessary function-call.
+    result_mut = result_mut.to(sum_out_dtype);
     // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
     // FP32 in sum_out. This results in having to read that FP32 tensor again,
     // but maybe in the future, we could revise the implementation to not
@@ -1359,7 +1360,9 @@ TORCH_IMPL_FUNC(mean_out)
     // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
     at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
     // After sum & div, cast result_mut back to BF16 or FP16, if required.
-    // TensorBase::to is (sort of a) no-op for other dtypes.
+    // TensorBase::to is (sort of a) no-op for other dtypes, but we incur a
+    // function-call overhead at the expense of simplifying code. We could add
+    // an if condition here to avoid unnecessary function calls.
     result_mut = result_mut.to(dtype);
   } else {
     // device is not CPU
