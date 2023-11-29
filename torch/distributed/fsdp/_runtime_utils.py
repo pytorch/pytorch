@@ -36,6 +36,7 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.utils import _pytree as pytree
+from torch.autograd import Variable
 
 log = logging.getLogger(__name__)
 
@@ -597,6 +598,7 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
+                handle._prefetched = False
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -859,7 +861,9 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             group=pg,
         )
         if uses_hybrid_sharded_strategy:
-            # state._all_reduce_stream.wait_stream(state._post_backward_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
                 # Since the new sharded gradient is produced in the post-
                 # backward stream and consumed in the all-reduce stream,
@@ -1110,8 +1114,6 @@ def _post_backward_final_callback(
     for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
-        # if gpu_id == 0:
-        # print("SET STATE TO IDLE", id(fsdp_state))
         fsdp_state.training_state = TrainingState.IDLE
         handle = fsdp_state._handle
         if handle:
@@ -1222,7 +1224,7 @@ def _prefetch_handle(
         raise ValueError(f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}")
     # Prefetch the next set of handles without synchronizing to allow
     # the sync to happen as late as possible to maximize overlap
-    _unshard(state, handle, None, None)
+    _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._training_state = prev_training_state
     handle._prefetched = True
 
@@ -1435,7 +1437,6 @@ def _register_post_backward_hook(
     already_registered = hasattr(flat_param, "_post_backward_hook_handle")
     if already_registered or not flat_param.requires_grad:
         return
-    # Get the `AccumulateGrad` object
     hook = functools.partial(_post_backward_hook, state, handle)
     hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
     flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
@@ -1482,9 +1483,6 @@ def _register_post_backward_reshard_only_hook(
 def _register_post_backward_final_callback(
     state: _FSDPState, module: nn.Module
 ) -> None:
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
-    # print(id(state), "_register_post_backward_final_callback")
     """
     Registers the post-backward final callback that runs at the end of the
     backward pass. This should be called from the root FSDP instance at the
@@ -1495,15 +1493,14 @@ def _register_post_backward_final_callback(
         "Only the root FSDP instance should register the post-backward callback",
     )
     if state._post_backward_callback_queued:
-        # if gpu_id == 0:
-        # print(id(state), "queued, return")
         return
-    # if gpu_id == 0:
-    # print(id(state), "NOT QUEUE")
     _assert_in_training_states(state, [TrainingState.IDLE])
-    state._post_backward_callback_queued = True
-    # if gpu_id == 0:
-    # print(id(state), "_post_backward_final_callback QUEUED")
+    # Trace does not need this callback
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._post_backward_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            functools.partial(_post_backward_final_callback, state, module)
+        )
 
 
 def _wait_for_computation_stream(

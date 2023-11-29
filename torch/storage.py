@@ -16,7 +16,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-import inspect
 _share_memory_lock = threading.Lock()
 _share_memory_map: _Dict[int, threading.RLock] = {}
 
