@@ -590,11 +590,10 @@ def gather_docstrs() -> Dict[str, str]:
     def mock_add_docstr(func: Mock, docstr: str) -> None:
         docstrs[func._extract_mock_name()] = docstr.strip()
 
-    patch_dict = {
-        "torch": Mock(name="torch"),
-        "torch._C": Mock(_add_docstr=mock_add_docstr),
-    }
-    with patch.dict(sys.modules, patch_dict):
+    with patch.dict(
+        sys.modules,
+        {"torch": Mock(name="torch"), "torch._C": Mock(_add_docstr=mock_add_docstr)},
+    ):
         sys.path.append("torch")  # allows submodules of `torch` to be imported
         _torch_docs = importlib.import_module("_torch_docs")
         with patch.dict(sys.modules, {"torch._torch_docs": _torch_docs}):
