@@ -1326,6 +1326,7 @@ class TensorMetadata:
     is_quantized: bool
     is_conj: bool
     is_neg: bool
+    is_inference: bool
     is_sparse: bool
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
@@ -1352,6 +1353,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         is_quantized=t.is_quantized,
         is_conj=t.is_conj(),
         is_neg=t.is_neg(),
+        is_inference=t.is_inference(),
         is_sparse=t.is_sparse,
         is_coalesced=t.is_coalesced() if t.is_sparse else None,
         dense_dim=t.dense_dim() if t.is_sparse else None,
@@ -1568,10 +1570,15 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             FakeTensorMode.cache_misses += 1
             output = self._dispatch_impl(func, types, args, kwargs)
-            # Some ops return simple data types or tuples of Tensors, but
-            # it's rare, so avoid the complexity of caching other types.
+            # Some ops return tuples of Tensors, but it's rare, so avoid
+            # the complexity of caching other types. Also avoid caching
+            # FakeTensors with constants since they can be invalidated.
             # TODO: support caching sparse outputs?
-            if isinstance(output, FakeTensor) and not output.is_sparse:
+            if (
+                isinstance(output, FakeTensor)
+                and output.constant is None
+                and not output.is_sparse
+            ):
                 FakeTensorMode.cache[key] = self._make_cache_entry(args, output)
 
         return output
@@ -1583,13 +1590,29 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raise _BypassDispatchCache
         for any situation that precludes caching.
         """
-        # ???
+        # TODO: why are these ops causing problems?
         if func.name().startswith("_torch_testing"):
             raise _BypassDispatchCache("testing op")
 
-        # In-place view ops mutate metadata; avoid that complexity.
-        if torch.Tag.inplace_view in func._tags:
+        # Avoid caching any ops that would call for a more complicated caching
+        # solution, e.g., data dependent ops or ops that modify the inputs.
+        if torch.Tag.data_dependent_output in func.tags:
+            raise _BypassDispatchCache("data dependent output")
+
+        if torch.Tag.dynamic_output_shape in func.tags:
+            raise _BypassDispatchCache("dynamic output shape")
+
+        if torch.Tag.inplace_view in func.tags:
             raise _BypassDispatchCache("inplace view")
+
+        if func == aten._unsafe_view.default:
+            raise _BypassDispatchCache("unsafe view")
+
+        if func == aten.set_.source_Tensor:
+            raise _BypassDispatchCache("set source")
+
+        if func in self.lift_fns:
+            raise _BypassDispatchCache("lift")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -1597,14 +1620,18 @@ class FakeTensorMode(TorchDispatchMode):
         if func.is_view and torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.CompositeImplicitAutograd
         ):
-            raise _BypassDispatchCache("CompositeImplicitAutograd op")
+            raise _BypassDispatchCache("CompositeImplicitAutograd")
 
-        # Even though func.is_view says otherwise, this seems to be a view op:
-        if func == torch.ops.aten._unsafe_view.default:
-            raise _BypassDispatchCache("unsafe view")
-
-        key = (func, self._translate_arg(args), self._translate_arg(kwargs))
-        return _DispatchCacheKey(key)
+        # Hash on the op and arguments (capturing the metadata for the FakeTensors).
+        # Also capture the default_dtype since that can affect the output tensor,
+        # e.g., when operating on constant float values.
+        key_values = (
+            func,
+            self._translate_arg(args),
+            self._translate_arg(kwargs),
+            torch.get_default_dtype(),
+        )
+        return _DispatchCacheKey(key_values)
 
     def _translate_arg(self, arg: Any) -> Any:
         """
@@ -1638,7 +1665,7 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Create an entry to cache the given 'output' Tensor.
         """
-        # If this is an in-place op, we need to cache which input arg is aliased.
+        # If this is an in-place op, we need to record which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
                 return _DispatchCacheEntry(None, idx)
@@ -1658,19 +1685,18 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Create a new empty FakeTensor with the cached metadata.
         metadata = entry.metadata
-        if metadata.is_quantized:
-            raise UnsupportedFakeTensorException("is_quantized nyi")
-        if metadata.is_sparse:
-            raise UnsupportedFakeTensorException("is_sparse nyi")
+        assert not metadata.is_quantized
+        assert not metadata.is_sparse
 
-        empty = torch.empty_strided(
-            metadata.shape,
-            metadata.stride,
-            dtype=metadata.dtype,
-            layout=metadata.layout,
-            device="meta",
-            requires_grad=metadata.requires_grad,
-        )
+        with torch.inference_mode(metadata.is_inference):
+            empty = torch.empty_strided(
+                metadata.shape,
+                metadata.stride,
+                dtype=metadata.dtype,
+                layout=metadata.layout,
+                device="meta",
+                requires_grad=metadata.requires_grad,
+            )
 
         torch._C._set_conj(empty, metadata.is_conj)
         torch._C._set_neg(empty, metadata.is_neg)
