@@ -775,19 +775,18 @@ def _post_backward_hook(
                 # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
                 and not handle._force_full_precision
             ):
-                with torch.no_grad():
-                    flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
+                flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
-        if handle.uses_sharded_strategy:
-            _reduce_grad(state, handle)
-        else:
-            _reduce_grad_no_shard(state, handle)
-        # Since the unsharded gradient is produced in the computation
-        # stream and consumed in the post-backward stream, inform the
-        # caching allocator (before it goes out of scope)
-        _no_dispatch_record_stream(
-            autograd_computed_grad, state._post_backward_stream
-        )
+            if handle.uses_sharded_strategy:
+                _reduce_grad(state, handle)
+            else:
+                _reduce_grad_no_shard(state, handle)
+            # Since the unsharded gradient is produced in the computation
+            # stream and consumed in the post-backward stream, inform the
+            # caching allocator (before it goes out of scope)
+            _no_dispatch_record_stream(
+                autograd_computed_grad, state._post_backward_stream
+            )
 
 
 def _post_backward_reshard(
@@ -1508,12 +1507,14 @@ def _wait_for_computation_stream(
     unshard_stream: torch.Stream,
     pre_unshard_stream: torch.Stream,
 ):
-    return
     """
     Has the unshard and pre-unshard streams wait for the computation stream.
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
+    # Tracing does not need to wait
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
