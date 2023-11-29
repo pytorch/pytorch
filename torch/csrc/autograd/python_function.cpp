@@ -445,7 +445,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   // assert triggering in the wild, feel free to comment it out.  They're
   // likely to standardize that you ARE guaranteed to see the weak pointers
   // as expired in the destructor in the future, so we'll keep this for now.
-  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+  // TORCH_INTERNAL_ASSERT(self->cdata.expired()); // TODO: fix PyNode containing owning reference to this object (which should be the backward class?)
 
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);

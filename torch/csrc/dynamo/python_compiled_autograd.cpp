@@ -501,7 +501,7 @@ variable_list compiled_autograd(
   variable_list outputs = THPVariable_UnpackList(pyresult);
   std::cout << "unpacking outputs" << std::endl;
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-  std::cout << "returning to engine" << std::endl;
+  std::cout << "compiled autograd done, returning to engine" << std::endl;
   return outputs;
 }
 

@@ -51,6 +51,9 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
                 actual = list(fn())
+
+            print(f"expected={expected}")
+            print(f"actual={actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
@@ -72,7 +75,9 @@ class TestCompiledAutograd(TestCase):
             for i in [10]: # [10, 100, 10]:
                 x = torch.randn((i), requires_grad=True)
                 out = MyFn.apply(x)
-                out.sum().backward(retain_graph=True)
+                print("PYTHON RUNNING BACKWARD")
+                out.sum().backward(retain_graph=True) # TODO: fix saved_variables freed issue
+                print("PYTHON DONE BACKWARD")
                 yield x.grad
 
         self.check_output_and_recompiles(fn, 1)
