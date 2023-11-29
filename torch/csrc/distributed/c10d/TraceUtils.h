@@ -408,8 +408,7 @@ struct NCCLTraceBuffer {
     return id_++;
   }
 
-  void retire(Entry& r) {
-    r.retired_ = true;
+  void update_state(Entry& r) {
     if (r.start_ != nullptr) {
       bool started = true;
       for (auto& ev : *r.start_) {
@@ -421,7 +420,6 @@ struct NCCLTraceBuffer {
       if (started) {
         r.state_ = "started";
       }
-      r.start_ = nullptr;
     }
     if (r.end_ != nullptr) {
       bool completed = true;
@@ -434,7 +432,6 @@ struct NCCLTraceBuffer {
       if (completed) {
         r.state_ = "completed";
       }
-      r.end_ = nullptr;
     }
   }
 
@@ -446,7 +443,8 @@ struct NCCLTraceBuffer {
     result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
     // query any remaining events
     for (auto& r : result) {
-      retire(r);
+      update_state(r);
+      r.start_ = r.end_ = nullptr;
     }
     return result;
   }
@@ -458,7 +456,9 @@ struct NCCLTraceBuffer {
     std::lock_guard<std::mutex> guard(mutex_);
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
-      retire(entry);
+      update_state(entry);
+      entry.retired_ = true;
+      entry.start_ = entry.end_ = nullptr;
     }
   }
 
