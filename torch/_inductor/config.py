@@ -194,6 +194,10 @@ coordinate_descent_search_radius = int(
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
 
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
+
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
 
@@ -347,6 +351,9 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+# Specify a file where we print out the profiling results.
+# None means we do not dump results to a file.
+profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -413,6 +420,9 @@ class cpp:
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
     fallback_scatter_reduce_sum = True
+
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
 
 
 # config specific to codegen/triton.py
