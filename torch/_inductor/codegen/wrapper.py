@@ -13,6 +13,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
 from torch.fx.node import _get_qualified_name
@@ -611,6 +612,7 @@ class WrapperCodeGen(CodeGen):
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
@@ -711,6 +713,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
                 )
+
+    def finalize_prefix(self):
+        pass
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -1238,6 +1243,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_dtypes = set()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1600,6 +1606,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
+    def finalize_prefix(self):
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.aot_inductor.abi_compatible:
+            for dtype in self.used_cached_dtypes:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
+
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
@@ -1907,7 +1921,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
+            dtype_str = str(dtype).split(".")[-1]
+            self.used_cached_dtypes.add(dtype_str)
+            return f"cached_torch_dtype_{dtype_str}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
@@ -2350,8 +2366,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            # TODO: add abi-compatible support
-            return "c10::nullopt"
+            if config.aot_inductor.abi_compatible:
+                return "nullptr"
+            else:
+                return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
                 return "1" if val else "0"
@@ -2532,6 +2550,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 self.writeline(f"float {var_name} = {arg};")
             elif any(str(arg) == s.name for s in dynamic_symbols):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif arg == "nullptr":
+                self.writeline(f"auto {var_name} = nullptr;")
+            elif arg == "c10::nullopt":
+                self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
                 if config.aot_inductor.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
@@ -2582,7 +2604,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"cuda kernel parameters for {name} should already exist at this moment"
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
+        cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
         assert cubin_path is not None and os.path.exists(
             cubin_path
         ), f"cubin file should already exist at this moment: {cubin_path}"

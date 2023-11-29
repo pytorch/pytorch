@@ -15,8 +15,8 @@ from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
-    FreshCreateSymbolicPolicy,
     ShapeEnv,
+    StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
     jagged_from_list,
@@ -75,6 +75,21 @@ class EagerRecordGraphAndInputs:
 
 
 GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+
+
+# Returns True if the function recompiles between inputs1 and inputs2 with the
+# specified dynamic setting.
+def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
+    compile_count = [0]
+
+    def counter(gm, example_inputs):
+        compile_count[0] += 1
+        return gm
+
+    compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
+    compiled_f(*inputs1)
+    compiled_f(*inputs2)
+    return compile_count[0] == 2
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
@@ -337,13 +352,13 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
                     x,
-                    policy=FreshCreateSymbolicPolicy(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
                 x1_fake = fake_mode.from_tensor(
                     x1,
-                    policy=FreshCreateSymbolicPolicy(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[dim_dynamic for i in range(x.dim())]
                     ),
                 )
@@ -373,7 +388,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
                         inp,
-                        policy=FreshCreateSymbolicPolicy(
+                        symbolic_context=StatelessSymbolicContext(
                             [dim_dynamic for i in range(x.dim())]
                         ),
                     )
@@ -608,7 +623,9 @@ class GraphModule(torch.nn.Module):
                 return ["inner_elem"], None
 
             @staticmethod
-            def __tensor_unflatten__(inner_tensors, _, outer_size):
+            def __tensor_unflatten__(
+                inner_tensors, _, outer_size, outer_stride, outer_storage_offset
+            ):
                 return DoubleSizeMaybeAddGeThreeTensor(inner_tensors["inner_elem"])
 
             def __repr__(self):
@@ -688,6 +705,82 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
 
+    def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
+        class ScaledTensor(torch.Tensor):
+            def __new__(
+                cls,
+                data: torch.Tensor,
+                scale: torch.Tensor,
+            ):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                    device=data.device,
+                )
+
+            def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+                self._data = data
+                self._scale = scale
+
+            def __tensor_flatten__(self):
+                ctx = {}
+                return ["_data", "_scale"], ctx
+
+            @staticmethod
+            def __tensor_unflatten__(
+                inner_tensors, metadata, outer_size, outer_stride, outer_storage_offset
+            ):
+                assert len(inner_tensors) == 2
+                return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                scaled_tensor = args[0]
+                out = func(scaled_tensor._data, *args[1:], **kwargs)
+                return ScaledTensor(out, scaled_tensor._scale)
+
+            def __repr__(self):
+                return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
+
+        def func(a):
+            return a.sin()
+
+        # shouldn't recompile for different sizes when dynamic=True
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(7))
+        self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=True))
+
+        # should recompile for different data size when dynamic=False
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+        # should recompile for different scale size when dynamic=False
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
+        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+        # avoid recompile using manual mark_dynamic() for different data size
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        # NB: mark_dynamic() on outer tensor should translate to inner tensors of the same size
+        torch._dynamo.mark_dynamic(sub1, 0)
+        torch._dynamo.mark_dynamic(sub1, 1)
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
+        self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+        # still recompiles using manual mark_dynamic() on outer for different scale size
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
+        # NB: mark_dynamic() on outer tensor doesn't translate to inner tensors of different size
+        torch._dynamo.mark_dynamic(sub1, 0)
+        torch._dynamo.mark_dynamic(sub1, 1)
+        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -708,7 +801,7 @@ class GraphModule(torch.nn.Module):
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
                     x,
-                    policy=FreshCreateSymbolicPolicy(
+                    symbolic_context=StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
                     ),
                 )
@@ -832,18 +925,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         )
         return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
-    def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
-        compile_count = [0]
-
-        def counter(gm, example_inputs):
-            compile_count[0] += 1
-            return gm
-
-        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
-        out = compiled_f(*inputs1)
-        self.assertEqual(compile_count[0], 1)
-        out = compiled_f(*inputs2)
-        self.assertEqual(compile_count[0], 2 if recompiles else 1)
+    def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
+        actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
+        self.assertEqual(actual_recompiles, expected_recompiles)
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)

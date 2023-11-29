@@ -37,6 +37,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_with_optional_param,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -772,9 +773,11 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
-            torch.tensor([1, 1, 1], device="cuda"),
-            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+            torch.tensor([1, 1, 1], device=self.device),
+            torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -786,7 +789,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device=self.device) * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
@@ -1266,6 +1269,50 @@ class AOTInductorTestsTemplate:
                 return x
 
         example_inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_triton_kernel_with_none_input(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                n_elements = x.size()[0]
+                BLOCK_SIZE = 1024
+
+                x = x.clone()
+                y = y.clone()
+                output_wo_y = torch.empty_like(x)
+                output_with_y = torch.empty_like(x)
+
+                wo_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    None,
+                    output_wo_y,
+                    n_elements,
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                with_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    y,
+                    output_with_y,
+                    n_elements,
+                    ARGS_PASSED="two",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+
+                return 2.71 * output_wo_y + 3.14 * output_with_y
+
+        example_inputs = (
+            torch.randn(1023, device=self.device),
+            torch.randn(1023, device=self.device),
+        )
+
         self.check_model(Model(), example_inputs)
 
     def test_shifted_constraint_ranges(self):

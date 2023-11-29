@@ -26,11 +26,11 @@ from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
-    CreateSymbolicPolicy,
     DimDynamic,
-    FreshCreateSymbolicPolicy,
     RelaxedUnspecConstraint,
-    SubclassCreateSymbolicPolicy,
+    StatefulSymbolicContext,
+    SubclassSymbolicContext,
+    SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
@@ -1057,6 +1057,21 @@ class VariableBuilder:
             )
         )
 
+        # install guards for subclass inner tensors
+        if is_traceable_wrapper_subclass(value):
+            attrs, _ = value.__tensor_flatten__()
+            for attr in attrs:
+                inner_value = getattr(value, attr)
+                inner_source = AttrSource(self.source, attr)
+                install_guard(
+                    inner_source.make_guard(
+                        functools.partial(
+                            GuardBuilder.TENSOR_MATCH,
+                            value=TensorWeakRef(inner_value),
+                        )
+                    )
+                )
+
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
@@ -1552,7 +1567,7 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
     # Is None when fake is SymInt
-    policy: Optional[CreateSymbolicPolicy]
+    symbolic_context: Optional[SymbolicContext]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1564,34 +1579,47 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns a CreateSymbolicPolicy
+# Returns a SymbolicContext
 def _automatic_dynamic(
-    e, tx, name, static_shapes, outer_only=False
-) -> CreateSymbolicPolicy:
-    if is_traceable_wrapper_subclass(e) and not outer_only:
-        # Get policy for outer tensor
-        outer_policy = _automatic_dynamic(e, tx, name, static_shapes, outer_only=True)
+    e, tx, source, static_shapes, outer_only=False
+) -> SymbolicContext:
+    name = source.name()
+    prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
+    source_to_symint_node_cache = (
+        prior_policy.source_to_symint_node_cache if prior_policy else None
+    )
 
-        # Get policies for inner tensors
+    if is_traceable_wrapper_subclass(e) and not outer_only:
+        # Get symbolic context for outer tensor
+        outer_context = _automatic_dynamic(
+            e, tx, source, static_shapes, outer_only=True
+        )
+
+        # Get symbolic contexts for inner tensors
         attrs, _ = type(e).__tensor_flatten__(e)
-        inner_policies = {}  # mapping from attr -> policy
+        inner_contexts = {}  # mapping from attr -> symbolic context
         for attr in attrs:
             inner_tensor = getattr(e, attr)
-            inner_name = f"{name}.{attr}"
-            inner_policy = _automatic_dynamic(
-                inner_tensor, tx, inner_name, static_shapes
+            inner_source = AttrSource(source, attr)
+            inner_context = _automatic_dynamic(
+                inner_tensor, tx, inner_source, static_shapes
             )
-            inner_policies[attr] = inner_policy
+            inner_contexts[attr] = inner_context
 
-        return SubclassCreateSymbolicPolicy(
-            outer_policy=outer_policy,
-            inner_policies=inner_policies,
+        return SubclassSymbolicContext(
+            dynamic_sizes=outer_context.dynamic_sizes,
+            constraint_sizes=outer_context.constraint_sizes,
+            tensor_source=outer_context.tensor_source,
+            source_to_symint_node_cache=outer_context.source_to_symint_node_cache,
+            inner_contexts=inner_contexts,
         )
 
     if static_shapes:
-        return FreshCreateSymbolicPolicy(
+        return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -1599,12 +1627,14 @@ def _automatic_dynamic(
     from torch.fx.experimental.symbolic_shapes import is_singleton
 
     if any(isinstance(s, SymInt) and not is_singleton(s) for s in e.size()):
-        return FreshCreateSymbolicPolicy(
+        return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
                 for s in e.size()
             ],
             constraint_sizes=[None] * e.dim(),
+            tensor_source=source,
+            source_to_symint_node_cache=source_to_symint_node_cache,
         )
 
     # Prep for automatic dynamic
@@ -1728,7 +1758,7 @@ def _automatic_dynamic(
             or is_singleton(e.shape[i])
         ):
             # NB: We could assert static_shapes is False here, but it
-            # seems better to allow the user to override policy in this
+            # seems better to allow the user to override symbolic_context in this
             # case
             dynamic = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
@@ -1740,12 +1770,15 @@ def _automatic_dynamic(
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return FreshCreateSymbolicPolicy(
+    return StatefulSymbolicContext(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
+        tensor_source=source,
+        source_to_symint_node_cache=source_to_symint_node_cache,
     )
 
 
+# See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor: bool):
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -1757,31 +1790,45 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        policy = None
-        is_strided_nt = e.is_nested and e.layout == torch.strided
-        if not is_strided_nt:
-            # TODO: Support this for strided nested tensors
-            policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
+        symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
+        tx.output.tracing_context.tensor_to_context[e] = symbolic_context
 
         log.debug(
             "wrap_to_fake %s %s %s",
             source.name(),
             tuple(e.shape),
-            policy,
+            symbolic_context,
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 source=source,
-                policy=policy,
+                symbolic_context=symbolic_context,
             )
         )
-        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, policy))
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[e] = {
-            "size": fake_e.size(),
-            "stride": fake_e.stride(),
-        }
+
+        # list of (fake_tensor, real_tensor, source, symbolic_context)
+        tracking_info = [(fake_e, e, source, symbolic_context)]
+        if is_traceable_wrapper_subclass(fake_e):
+            attrs, _ = fake_e.__tensor_flatten__()
+            for attr in attrs:
+                tracking_info.append(
+                    (
+                        getattr(fake_e, attr),
+                        getattr(e, attr),
+                        AttrSource(source, attr),
+                        symbolic_context.inner_contexts[attr],
+                    )
+                )
+
+        for fake, real, source, symbolic_context in tracking_info:
+            tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+            tx.output.tracked_fakes_id_to_source[id(real)].append(source)
+            tx.output.tensor_weakref_to_sizes_strides[real] = {
+                "size": fake.size(),
+                "stride": fake.stride(),
+            }
+
         return fake_e
     else:
         return e
