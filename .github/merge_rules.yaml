@@ -74,6 +74,7 @@
 
 - name: OSS CI / pytorchbot
   patterns:
+  - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .ci/docker/ci_commit_pins/triton.txt
@@ -84,6 +85,7 @@
   - EasyCLA
   - Lint
   - pull
+  - inductor
 
 - name: OSS CI /pytorchbot / Executorch
   patterns:
