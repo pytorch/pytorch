@@ -2200,6 +2200,39 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, mod)
         self.assertTrue(same(ref, res))
 
+    def test_nested_wraps(self):
+        def foo(x, y):
+            def add(x, y):
+                return x + y
+
+            @functools.wraps(add)
+            def wrapped_call(x, y):
+                return add(x, y)
+
+            return wrapped_call(x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x + y)
+
+        def foo(x, y):
+            def nested_call(x, y):
+                def mul(x, y):
+                    return x * y
+
+                @functools.wraps(mul)
+                def double_nested_call(x, y):
+                    return mul(x, y)
+
+                return double_nested_call(x, y)
+
+            return nested_call(x, y)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x * y)
+
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
