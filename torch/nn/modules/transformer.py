@@ -79,8 +79,9 @@ class Transformer(Module):
         >>> tgt = torch.rand((20, 32, 512))
         >>> out = transformer_model(src, tgt)
 
-    Note: A full example to apply nn.Transformer module for the word language model is available in
-    https://github.com/pytorch/examples/tree/master/word_language_model
+    .. note::
+        A full example to apply nn.Transformer module for the word language model is available in
+        `here <https://github.com/pytorch/examples/tree/master/word_language_model>`_
     """
 
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
@@ -126,14 +127,14 @@ class Transformer(Module):
         r"""Take in and process masked source/target sequences.
 
         Args:
-            src: the sequence to the encoder (required).
-            tgt: the sequence to the decoder (required).
-            src_mask: the additive mask for the src sequence (optional).
-            tgt_mask: the additive mask for the tgt sequence (optional).
-            memory_mask: the additive mask for the encoder output (optional).
-            src_key_padding_mask: the Tensor mask for src keys per batch (optional).
-            tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
-            memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
+            src: the sequence to the encoder.
+            tgt: the sequence to the decoder.
+            src_mask: the additive mask for the src sequence.
+            tgt_mask: the additive mask for the tgt sequence.
+            memory_mask: the additive mask for the encoder output.
+            src_key_padding_mask: the Tensor mask for src keys per batch.
+            tgt_key_padding_mask: the Tensor mask for tgt keys per batch.
+            memory_key_padding_mask: the Tensor mask for memory keys per batch.
             src_is_causal: If specified, applies a causal mask as ``src_mask``.
                 Default: ``None``; try to detect a causal mask.
                 Warning:
@@ -158,10 +159,10 @@ class Transformer(Module):
                 forward and backward compatibility.
 
         Shape:
-            - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
-              `(N, S, E)` if `batch_first=True`.
-            - tgt: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
-              `(N, T, E)` if `batch_first=True`.
+            - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if ``batch_first=False`` or
+              :math:`(N, S, E)` if ``batch_first=True``.
+            - tgt: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if ``batch_first=False`` or
+              :math:`(N, T, E)` if ``batch_first=True``.
             - src_mask: :math:`(S, S)` or :math:`(N\cdot\text{num\_heads}, S, S)`.
             - tgt_mask: :math:`(T, T)` or :math:`(N\cdot\text{num\_heads}, T, T)`.
             - memory_mask: :math:`(T, S)`.
@@ -169,23 +170,25 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
-            Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
-            positions. If a BoolTensor is provided, positions with ``True``
-            are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-            is provided, it will be added to the attention weight.
-            [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
-            the attention. If a BoolTensor is provided, the positions with the
-            value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
+                ..note::
+                    [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+                    positions. If a BoolTensor is provided, positions with ``True``
+                    are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+                    is provided, it will be added to the attention weight.
+                    [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
+                    the attention. If a BoolTensor is provided, the positions with the
+                    value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
-            - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
-              `(N, T, E)` if `batch_first=True`.
+            - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if ``batch_first=False` or
+              :math:`(N, T, E)` if ``batch_first=True``.
 
-            Note: Due to the multi-head attention architecture in the transformer model,
-            the output sequence length of a transformer is same as the input sequence
-            (i.e. target) length of the decoder.
+                ..note::
+                    Due to the multi-head attention architecture in the transformer model,
+                    the output sequence length of a transformer is same as the input sequence
+                    (i.e. target) length of the decoder.
 
-            where S is the source sequence length, T is the target sequence length, N is the
-            batch size, E is the feature number
+            where :math:`S` is the source sequence length, :math:`T` is the target sequence length, :math:`N` is the
+            batch size, :math:`E` is the feature number
 
         Examples:
             >>> # xdoctest: +SKIP
@@ -230,15 +233,15 @@ class Transformer(Module):
 
 class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers. Users can build the
-    BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
+    `BERT <https://arxiv.org/abs/1810.04805>`_ model with corresponding parameters.
 
     Args:
-        encoder_layer: an instance of the TransformerEncoderLayer() class (required).
-        num_layers: the number of sub-encoder-layers in the encoder (required).
-        norm: the layer normalization component (optional).
+        encoder_layer: an instance of the TransformerEncoderLayer() class.
+        num_layers: the number of sub-encoder-layers in the encoder.
+        norm: the layer normalization component.
         enable_nested_tensor: if True, input will automatically convert to nested tensor
             (and convert back on output). This will improve the overall performance of
-            TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
+            TransformerEncoder when padding rate is high. Default: ``True``.
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -304,7 +307,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`Transformer` class.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -399,9 +402,9 @@ class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers
 
     Args:
-        decoder_layer: an instance of the TransformerDecoderLayer() class (required).
-        num_layers: the number of sub-decoder-layers in the decoder (required).
-        norm: the layer normalization component (optional).
+        decoder_layer: an instance of the TransformerDecoderLayer() class.
+        num_layers: the number of sub-decoder-layers in the decoder.
+        norm: the layer normalization component.
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -449,7 +452,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`Transformer` class.
         """
         output = tgt
 
@@ -605,7 +608,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`Transformer` class.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -733,8 +736,8 @@ class TransformerDecoderLayer(Module):
     in a different way during application.
 
     Args:
-        d_model: the number of expected features in the input (required).
-        nhead: the number of heads in the multiheadattention models (required).
+        d_model: the number of expected features in the input.
+        nhead: the number of heads in the multiheadattention models.
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
         activation: the activation function of the intermediate layer, can be a string
@@ -810,12 +813,12 @@ class TransformerDecoderLayer(Module):
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
-            tgt: the sequence to the decoder layer (required).
-            memory: the sequence from the last layer of the encoder (required).
-            tgt_mask: the mask for the tgt sequence (optional).
-            memory_mask: the mask for the memory sequence (optional).
-            tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
-            memory_key_padding_mask: the mask for the memory keys per batch (optional).
+            tgt: the sequence to the decoder layer.
+            memory: the sequence from the last layer of the encoder.
+            tgt_mask: the mask for the tgt sequence.
+            memory_mask: the mask for the memory sequence.
+            tgt_key_padding_mask: the mask for the tgt keys per batch.
+            memory_key_padding_mask: the mask for the memory keys per batch.
             tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
                 Default: ``False``.
                 Warning:
@@ -833,7 +836,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`Transformer` class.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
