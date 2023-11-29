@@ -202,22 +202,22 @@ class CacheBase:
 
 
 class LocalCache(CacheBase):
-    def lookup(self, *keys: Tuple[str]) -> Optional[Dict[str, Any]]:
+    def lookup(self, *keys: str) -> Optional[Dict[str, Any]]:
         cache = self.get_local_cache()
 
         sub_cache = cache
         for key in keys:
             if key in cache:
-                sub_cache = cache[key]  # type: ignore[index]
+                sub_cache = cache[key]
             else:
                 return None
 
         return sub_cache
 
-    def set_value(self, *keys: List[str], value: Any) -> None:
+    def set_value(self, *keys: str, value: Any) -> None:
         cache = self.get_local_cache()
 
-        sub_cache: Dict = cache  # type: ignore[type-arg]
+        sub_cache = cache
         for key in keys[0:-1]:
             sub_cache.setdefault(key, {})
             sub_cache = sub_cache[key]
@@ -1183,6 +1183,8 @@ def cpp_wrapper_flags() -> str:
 def optimization_flags() -> str:
     base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
     base_flags += " -ffast-math -fno-finite-math-only"
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        base_flags += " -fno-unsafe-math-optimizations"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
@@ -2275,6 +2277,8 @@ def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
 
 
 class TritonFuture:
+    kernel: ModuleType
+
     def __init__(
         self,
         kernel_name: str,
@@ -2289,7 +2293,7 @@ class TritonFuture:
     def result(self) -> ModuleType:
         t0 = time()
         if hasattr(self, "kernel"):
-            return self.kernel  # type: ignore[has-type]
+            return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
         kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
