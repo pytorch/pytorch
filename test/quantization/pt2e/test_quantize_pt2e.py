@@ -1657,7 +1657,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = capture_pre_autograd_graph(m, example_inputs)
 
-        # Assert that dropout op exists and is in train mode
+        # Assert that bn op exists and is in train mode
         batch_norm_node = None
         for n in m.graph.nodes:
             if n.target == torch.ops.aten._native_batch_norm_legit.default:
@@ -1669,7 +1669,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Do the subgraph rewriting
         torch.ao.quantization.move_exported_model_to_eval(m)
 
-        # Assert that dropout op is now replaced with a clone op
+        # Assert that bn op is now in eval mode
         targets = [n.target for n in m.graph.nodes]
         self.assertTrue(torch.ops.aten._native_batch_norm_legit.default not in targets)
         self.assertTrue(torch.ops.aten._native_batch_norm_legit_no_training.default in targets)
