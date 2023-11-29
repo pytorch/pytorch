@@ -67,6 +67,10 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     to_fun,
     from_fun,
     sync_functional_tensor,
+    has_metadata_mutation,
+    has_data_mutation,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     gen_alias_from_base,
     assert_functional_graph,
     _get_mutation_type,
@@ -625,7 +629,14 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     if meta.input_info[i].mutations_hidden_from_autograd:
+                        # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
+                            inpt_old.copy_(inpt_new)
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                        # Under no_grad = run under no_grad (we still bump the VC though)
+                        # (inference_mode will also bump the VC, as long as the tensor in question
+                        # was created outside of inference_mode)
+                        with torch.no_grad():
                             inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)
@@ -1250,6 +1261,22 @@ def create_runtime_wrapper(
                     continue
                 original_inpt = args[inpt_idx]
                 updated_inpt = updated_inputs[i]
+                if meta.mutates_storage_metadata:
+                    # mutates_storage_metadata means our input saw a x.set_(y) call.
+                    # What if x **also** saw a data and/or a metadata mutation?
+                    # (1) If the [meta]data mutation occurred after the set_(),
+                    #     then there is no need to copy_() the data.
+                    #     When we perform x.set_(x_updated), we are guaranteed that
+                    #     x_updated already has the final version of the data/metadata
+                    # (2) If a data mutation occurred before the set_().
+                    #     This case seems very difficult to support.
+                    #     TODO: discuss on the PR and decide if we want to tr to
+                    #     either support it, or detect and ban it.
+                    if trace_joint:
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
+                    original_inpt.set_(updated_inpt)
+                    continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
