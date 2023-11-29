@@ -396,8 +396,8 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-
-#if defined(TORCH_DISABLE_GPU_ASSERTS)
+// ROCm disable kernel assert by default 
+#if defined(TORCH_DISABLE_GPU_ASSERTS) && defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
 #else
@@ -411,7 +411,7 @@ __host__ __device__
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif //  TORCH_DISABLE_GPU_ASSERTS
+#endif //  TORCH_DISABLE_GPU_ASSERTS && USE_ROCM
 #endif // __APPLE__
 
 #ifdef __APPLE__
