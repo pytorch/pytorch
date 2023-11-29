@@ -903,7 +903,7 @@ def register_replacement(
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
         with torch._dynamo.utils.detect_fake_mode(args):
@@ -923,7 +923,7 @@ def register_replacement(
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
-                exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                exclusive_arg_names=exclusive_arg_names,
                 scalar_workaround=scalar_workaround,
             )
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
@@ -935,7 +935,7 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:  # type: ignore[has-type]
+        for name in argnames:
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
