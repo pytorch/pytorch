@@ -80,8 +80,8 @@ class Transformer(Module):
         >>> out = transformer_model(src, tgt)
 
     .. note::
-        A full example to apply nn.Transformer module for the word language model is available in
-        `here <https://github.com/pytorch/examples/tree/master/word_language_model>`_
+        A full example to apply the ``nn.Transformer`` module for the word language model is available in
+        `this repository <https://github.com/pytorch/examples/tree/master/word_language_model>`_
     """
 
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
@@ -307,7 +307,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in :class:`Transformer` class.
+            see the docs in :class:`Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -452,7 +452,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in :class:`Transformer` class.
+            see the docs in :class:`Transformer`.
         """
         output = tgt
 
@@ -608,7 +608,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in :class:`Transformer` class.
+            see the docs in :class:`Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -836,7 +836,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in :class:`Transformer` class.
+            see the docs in :class:`Transformer`.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
