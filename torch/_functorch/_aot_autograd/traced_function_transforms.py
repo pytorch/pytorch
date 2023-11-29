@@ -1,3 +1,15 @@
+"""
+This module is responsible for transforming functions to be traced into a form
+that is easier for the downstream infra (e.g. Autograd, FX, AOTAutograd analysis)
+to handle.
+
+It does so by:
+1. functionalization (including RNG functionalzation)
+2. creating a joint graph when required
+3. transforming mutations into extra outputs
+4. dispatching subclasses
+"""
+
 import warnings
 from contextlib import nullcontext
 from typing import Any, Callable, List, Tuple, Union
@@ -372,9 +384,16 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     if meta.input_info[i].mutations_hidden_from_autograd:
+                        # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                             inpt_old
                         ):
+                            inpt_old.copy_(inpt_new)
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                        # Under no_grad = run under no_grad (we still bump the VC though)
+                        # (inference_mode will also bump the VC, as long as the tensor in question
+                        # was created outside of inference_mode)
+                        with torch.no_grad():
                             inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)

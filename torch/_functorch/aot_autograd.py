@@ -15,9 +15,7 @@ from torch._dynamo.utils import dynamo_timed, preserve_rng_state
 from torch._guards import detect_fake_mode
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import (
-    ShapeEnv
-)
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
@@ -50,7 +48,7 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     set_model_name,
     setup_stacktrace_preservation_hooks,
 )
-from ._aot_autograd.alias_runtime_wrappers import aot_wrapper_dedupe, aot_wrapper_synthetic_base
+from ._aot_autograd.runtime_wrappers import aot_wrapper_dedupe, aot_wrapper_synthetic_base
 from ._aot_autograd.jit_compile_runtime_wrappers import aot_dispatch_base, aot_dispatch_autograd
 from ._aot_autograd.dispatch_and_compile_graph import aot_dispatch_base_graph, aot_dispatch_autograd_graph
 
