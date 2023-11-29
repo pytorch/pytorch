@@ -1,3 +1,7 @@
+"""
+Contains various utils for AOTAutograd, including those for handling collections.
+"""
+
 import dataclasses
 import warnings
 from contextlib import nullcontext
