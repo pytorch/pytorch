@@ -9,9 +9,9 @@ from itertools import chain, count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
+from sympy import Expr
 
 import torch
-from sympy import Expr
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
