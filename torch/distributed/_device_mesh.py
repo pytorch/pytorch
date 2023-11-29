@@ -382,7 +382,7 @@ class DeviceMesh:
 
     def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
         """
-        Returns the local rank of the given mesh_dim.
+        Returns the local rank of the given mesh_dim of the DeviceMesh.
 
         Optional Args:
             mesh_dim (str/int): it can be the name of the mesh dimension or the index
