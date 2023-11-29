@@ -3282,7 +3282,20 @@ def create_runtime_wrapper(
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
                         updated_inpt = updated_inpt.alias
-                    original_inpt.set_(updated_inpt)
+                    try:
+                        original_inpt.set_(updated_inpt)
+                    except RuntimeError:
+                        # This happens when the sizes of the two tensors do not match, probably
+                        # because we saw .data
+                        # while we could call
+                        # original_inpt.data = updated_inpt
+                        # That's a little gross, let's use the "safe" pattern instead
+                        with torch.no_grad():
+                            version_counter = original_inpt._version
+                            original_inpt.set_(updated_inpt)
+                            if version_counter > 0:
+                                version_counter = version_counter - 1
+                            torch._C._autograd._unsafe_set_version_counter(original_inpt, version_counter)
                     continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
