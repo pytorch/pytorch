@@ -6,12 +6,9 @@ how to further proceed with compilation or construct runtime wrappers.
 In particular, the following analyses are provided:
 1. Refine the view and mutation metadata collected previously - removing duplicate
    inputs or mapping views to their bases.
-2. Based on view base analysis, it may merge inputs of different views into a single
-   input corresponding to a common base.
-3. We also analyze the function signature for export graphs.
+2. We also analyze the function signature for export graphs.
 """
 
-import collections
 import itertools
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -21,7 +18,6 @@ from torch import Tensor
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from torch.multiprocessing.reductions import StorageWeakRef
 from .functional_utils import _get_mutation_type
 from .schemas import (
     BackwardSignature,
@@ -323,7 +319,7 @@ def _tensors_definitely_do_not_overlap(x, y):
     return False
 
 
-def _compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
+def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     actual_aliased_indices = set()
     for j in range(len(aliased_input_indices)):
         for i in range(j):
@@ -333,248 +329,6 @@ def _compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
                 actual_aliased_indices.add(i_)
                 actual_aliased_indices.add(j_)
     return actual_aliased_indices
-
-
-# Note [Handling mutations on an input that aliases other inputs]
-# The easiest example to show-case this edge case is here:
-#
-# def f(a, b):
-#     a.mul_(2)
-#     out = a + b
-#     return out
-# b = torch.ones(...)
-# a = b.view(-1)
-# f(a, b)
-#
-# In this situation, if a and b happened to be aliased, we need to trace something different!
-# Suppose we had b = a.view(-1)
-# (In this case, that means that `a._base is b`)
-#
-# We need to ensure that the aliasing relationship between a and b is preserved.
-# We do that detecting the specific situation above (mutate an input that aliases another input),
-# and when we do that, we create a synthetic base argument. Then inside of the traced forward,
-# we regenerate a and b off of that base.
-# The complete example of the transformed function looks like this:
-#
-# // The traced forward takes in a synthetic base, and regenerates the aliased inputs as views
-# // We could consider getting view-replay support here to minimize as_strided_scatter ops in the graph
-# def traced_forward(base):
-#     a = base.as_strided(...)
-#     b = base.as_strided(...)
-#     a_updated = a.mul(2)
-#     base_updated = torch.as_strided_scatter(base, a_updated, ...)
-#     b_updated = base_updated.as_strided(...)
-#     out = a_updated + b_updated
-#     return a_updated, out
-#
-# def compiled_fn(a, b):
-#     // we detect that a is the "differentiable base" here
-#     base = a
-#     // In other situations, we might do either:
-#     // (1) a and b are both views off of some larger differentiable base
-#     //     assert a._base is b._base and a._base is not None
-#     //     base = a._base
-#     // (2) a and b both don't require gradients. Create a base from the storage
-#     //     assert a._base is None and b._base is None
-#     //     base = torch.Tensor(a.storage())
-#     a_updated, out = traced_forward(base)
-#     a.copy_(a_updated)
-#     return out
-#
-# This function:
-# (1) Merges input views into a synthetic base argument, when any of those input views are mutated
-# (2) Returns metadata telling the autograd.Function how to modify their arguments properly,
-#     to respect the new calling convention.
-#
-# The calling convention is as follows.
-# Any inputs that were originally views of one another get yanked, and replaced with a synthetic base.
-# The argument list ordering goes [base1, ..., baseN], [arg1, ..., argN],
-# Where the ordering of the bases is determined from the ordering of the original view args.
-# baseA will come before baseB if the earliest original argument coming from baseA
-# showed up earlier in the argument list than the earliest original argument coming from baseB.
-#
-# Example, given some tensors a, b, c, d
-# call site:
-#   f(a, c.view(-1), b.view(-1), b, c, d)
-# Modified argument list:
-#   c_base comes first because the first c view came earlier in arg list than the first b view
-#   a and d still show up in the modified arg list, but b and c don't- they're regenerated from their bases
-#   b_base = torch.Tensor(b.storage())
-#   c_base = torch.Tensor(c.storage())
-#   f(c_base, b_base, a, d)
-def merge_view_inputs(
-    fwd_inputs: List[Any],
-    mutated_input_info: List[InputAliasInfo],
-    *,
-    # The autograd case currently has more restrictions than the inference case.
-    is_inference: bool,
-) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
-    def _are_differentiable_views(view1, view2):
-        if view1 is view2:
-            return True
-        if view1._base is None and view2._base is None:
-            return False
-        if view1._base is view2._base or view1._base is view2 or view1 is view2._base:
-            return True
-        return False
-
-    def _same_dtype_views(view1, view2):
-        if view1.dtype != view2.dtype:
-            return False
-        if view1._base is not None and view1.dtype != view1._base.dtype:
-            return False
-        if view2._base is not None and view2.dtype != view2._base.dtype:
-            return False
-        return True
-
-    assert len(fwd_inputs) == len(mutated_input_info)
-    storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
-    base_args = []
-    other_args = []
-    for i, inpt in enumerate(fwd_inputs):
-        if isinstance(inpt, Tensor):
-            storage_ref = StorageWeakRef(inpt.untyped_storage())
-            storage_ref_to_idx[storage_ref].append(i)
-        else:
-            other_args.append(inpt)
-    # Note [Synthetic Base Info Metadata]
-    # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
-    # It's either:
-    # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
-    # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
-    #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
-    for aliased_input_indices in storage_ref_to_idx.values():
-        if len(aliased_input_indices) <= 1 or not any(
-            # We only care about mutations that affect all aliases,
-            # so metadata mutations on an input doesn't require us to do synthetic base handling.
-            mutated_input_info[inpt_idx].mutates_data
-            for inpt_idx in aliased_input_indices
-        ):
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
-            continue
-
-        # Here, we attempt to do a more complicated check to detect false aliasing
-        # (e.g. if all the tensors have the same storage, but don't actually overlap)
-        # In theory, we could have a large group of tensors that all share storages, where only *some* of them
-        # have overlapping memory.
-        # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
-        # of tensors in the current group that shares a storage is non-overlapping.
-        aliased_input_indices_no_false_sharing = _compute_overlapping_inputs(
-            fwd_inputs, aliased_input_indices
-        )
-        if len(aliased_input_indices_no_false_sharing) <= 1:
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
-            continue
-
-        # We detected an input that was mutated, AND aliases with another input.
-        # we need to replace this set of aliased inputs with a single synthetic base.
-        # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
-        # and error out. We can fix them later.
-        # These checks are transitive, so we don't need to check every pair.
-        for idx1, idx2 in zip(
-            aliased_input_indices, aliased_input_indices[1:], strict=False
-        ):
-            view1 = fwd_inputs[idx1]
-            view2 = fwd_inputs[idx2]
-            # The "inputs that are aliased but have different differentiable bases" case
-            # is more complicated and hopefully pretty rare. Not currently handled.
-            if not is_inference:
-                assert _are_differentiable_views(
-                    view1, view2
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
-            # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
-            # not handling for now
-            assert _same_dtype_views(
-                view1, view2
-            ), "aot_autograd() does not yet handle input mutations on views with different dtypes."
-        non_none_bases = [
-            fwd_inputs[i]._base
-            for i in aliased_input_indices
-            if fwd_inputs[i]._base is not None
-        ]
-        aliases_with_none_bases = [
-            fwd_inputs[i] for i in aliased_input_indices if fwd_inputs[i]._base is None
-        ]
-        if len(non_none_bases) == 0:
-            # Case where none of the aliases have a ._base
-            # we generate a synthetic base without gradients, and generate views off of it
-            # We hit this case when we have input tensors to the graph that share a storage,
-            # but do not have a ._base field.
-            # Wondering when we hit this case?
-            # The _base field simply says that autograd knows about the aliasing relationship,
-            # but sometimes we create tensors which are aliased out of the same storage but guaranteed
-            # to be disjoint. In these cases, we will skip setting up the _base relationship
-            # for performance reasons (because the fact that the tensors share the same storage
-            # is unobservable unless you (1) do naughty things with resize_/as_strided
-            # or (2) look at the storage--as we are doing here.)
-            # One particular example of this is optimizer steps on the LSTM module:
-            # LSTM parameters are packed into a contiguous storage for efficiency reasons when
-            # calling cuDNN kernels, so when these parameters get passed to the optimizer we will
-            # find they share the same storage, but do not have _base set since they are all disjoint.
-            #
-            # NOTE: There is one case where this is unsafe:
-            # torch.Tensor(storage) will ALWAYS create a 1D tensor, which is not necessarily
-            # the same shape as the "actual" base that the tensor came from.
-            # For the most part this is fine, because we always use as_strided()
-            # to generate the original aliased inputs again.
-            # If we were to use view-replay though, this could cause the aliased views
-            # to have incorrect sizes.
-            example_idx = aliased_input_indices[0]
-            example_alias = fwd_inputs[example_idx]
-            # Note that this function is re-used at both trace time and runtime.
-            # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
-            synthetic_base = torch.empty(
-                (0,), dtype=example_alias.dtype, device=example_alias.device
-            )
-            # We don't actually have a convenient way of going from storage -> tensor,
-            # So using set_() here (we suffer some minor overhead, but this case is rare).
-            synthetic_base.set_(example_alias.untyped_storage())
-        else:
-            # Case where all of the aliases require gradients, and have the same _base.
-            synthetic_base = non_none_bases[0]
-            for other_base in non_none_bases[1:]:
-                assert (
-                    other_base is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
-            for alias in aliases_with_none_bases:
-                assert (
-                    alias is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
-        base_args.append(synthetic_base)
-        for curr_view_idx in aliased_input_indices:
-            curr_view = fwd_inputs[curr_view_idx]
-            base_idx = len(base_args) - 1
-            # We store just enough info here so that we can regenerate the view later.
-            # Regeneration: curr_view._view_func(args[base_idx])
-            inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
-    if len(base_args) == 0:
-        assert len(other_args) == len(fwd_inputs)
-        # If no synthetic bases are necessary, just return the original inputs.
-        return fwd_inputs, None
-    else:
-        # Otherwise, return:
-        # (1) The new args according to the updated calling convention: (synthetic_bases, other_args)
-        # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
-        #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
-        args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {arg: i for (i, arg) in enumerate(fwd_inputs)}
-        for i, other_arg in enumerate(other_args):
-            new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[other_arg]
-            inner_calling_convention_meta[old_idx] = new_idx
-        # post process into a list
-        post_processed_calling_convention_meta: List[
-            Union[int, Tuple[int, torch.Tensor]]
-        ] = [-1 for _ in range(len(inner_calling_convention_meta))]
-        for k, v in inner_calling_convention_meta.items():
-            post_processed_calling_convention_meta[k] = v
-        # Quick assert: every argument in the inner calling convention should be accounted for.
-        for x in post_processed_calling_convention_meta:
-            assert x != -1
-        return args_to_functionalization, post_processed_calling_convention_meta
 
 
 def _graph_input_names(gm):
