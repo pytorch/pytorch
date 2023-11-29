@@ -1,3 +1,12 @@
+"""
+This module is one of the analysis modules - it takes as input a function or graph
+and some preexisting properties, and returns some data that is useful for deciding
+how to further proceed with compilation or construct runtime wrappers.
+
+In particular, the analysis here constructs view and mutation metadata from running
+a functionalized version of the graph under compilation.
+"""
+
 import collections
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List
@@ -17,12 +26,12 @@ from torch.utils._python_dispatch import (
 from .functional_utils import (
     _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
-    from_functional,
+    are_all_mutations_under_no_grad_or_inference_mode,
+    from_fun,
+    has_data_mutation,
     has_metadata_mutation,
     has_same_metadata,
-    to_functional,
-    was_tensor_metadata_updated,
-    was_tensor_updated,
+    to_fun,
 )
 from .schemas import (
     InputAliasInfo,
@@ -69,11 +78,11 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
-    def _to_functional(t):
+    def _to_fun(t):
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = to_functional(t)
+            r = to_fun(t)
             memo[t] = r
             return r
         else:
@@ -87,7 +96,7 @@ def run_functionalized_fw_and_collect_metadata(
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
 
-        flat_f_args = pytree.tree_map(_to_functional, flat_args)
+        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -114,21 +123,38 @@ def run_functionalized_fw_and_collect_metadata(
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
-                new_arg = from_functional(f_arg)
-            if was_tensor_updated(arg, new_arg):
-                if was_tensor_metadata_updated(arg, new_arg):
-                    mutates_data = False
-                    mutates_metadata = True
-                else:
-                    mutates_data = True
-                    mutates_metadata = has_metadata_mutation(f_arg)
-                mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
-                    f_arg
-                )
-            else:
+                new_arg = from_fun(f_arg)
+            mutates_metadata = has_metadata_mutation(
+                f_arg, arg, check_only_storage_mutation=False
+            )
+            mutates_storage_metadata = has_metadata_mutation(
+                f_arg, arg, check_only_storage_mutation=True
+            )
+            mutates_data = has_data_mutation(f_arg)
+            mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
+                f_arg
+            )
+            mutations_under_no_grad_or_inference_mode = (
+                mutates_data
+                and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
+            )
+
+            # Here, we're saying that if an input experienced a set call, inp.set_(other),
+            # then we can effectively not have to worry about whether its data was mutated.
+            # There are 3 cases:
+            # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+            #     In this case, we're not really mutating the input storage of "inp";
+            #     we're mutating the storage of an intermdiate value (other),
+            #     and slamming that storage into the input tensor. So no data mutation is necessary.
+            # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+            #     In this case, the data mutation will be properly handled in the runtime
+            #     epilogue during the processing of "other"
+            # (3) We mutate inp *before* the set_() call.
+            #     This case is *not* currently handled.
+            #     TODO: discuss this in the PR. Both supporting this, and detecting + erroring out,
+            #     seem painful to get working.
+            if mutates_storage_metadata:
                 mutates_data = False
-                mutates_metadata = False
-                mutations_hidden_from_autograd = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
 
@@ -138,12 +164,15 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_data=mutates_data,
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
+                    mutates_storage_metadata=mutates_storage_metadata,
+                    mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     requires_grad=requires_grad,
                     mutation_type=_get_mutation_type(
                         keep_input_mutations,
                         mutates_data,
                         mutates_metadata,
                         mutations_hidden_from_autograd,
+                        mutations_under_no_grad_or_inference_mode,
                         requires_grad,
                     ),
                 )
@@ -262,7 +291,7 @@ def run_functionalized_fw_and_collect_metadata(
                     o, FunctionalTensor
                 ) and torch._functionalize_is_multi_output_view(  # type: ignore[attr-defined]
                     o.elem
-                )  # typing: ignore[attr-defined]
+                )
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
                 out_storage_to_tensors[curr_storage].add(o)
@@ -464,6 +493,7 @@ from a multi-output view call"
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
                 mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -486,11 +516,11 @@ from a multi-output view call"
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
-        traced_tangents = pytree.tree_map(from_functional, f_tangents)
+        traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
-        user_outs = pytree.tree_map(from_functional, f_output_tangents)
+        user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [
             inp
@@ -516,7 +546,7 @@ from a multi-output view call"
             f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
         if is_train:
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
-        fw_graph_outs = pytree.tree_map(from_functional, f_fw_graph_outs)
+        fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
         if torch.is_grad_enabled() != prior_grad_enabled:

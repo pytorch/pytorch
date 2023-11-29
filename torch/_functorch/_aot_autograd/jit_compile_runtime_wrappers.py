@@ -1,3 +1,12 @@
+"""
+These are the runtime wrappers that are associated with JIT-compiling.
+
+This includes the forward-only and joint JIT runtime wrappers.
+
+This module depends heavily on the runtime wrapper building blocks defined
+in `runtime_wrappers`.
+"""
+
 import logging
 from contextlib import nullcontext
 from functools import wraps
