@@ -2294,9 +2294,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions)
-          .def_property_readonly(
-              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2362,13 +2360,10 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-#ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-#endif
-      ;
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color);
 
 #endif
 
