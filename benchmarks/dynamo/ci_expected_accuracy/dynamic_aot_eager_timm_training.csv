@@ -98,6 +98,10 @@ hrnet_w18,pass,6
 
 
 
+hrnet_w18,infra_error,0
+
+
+
 inception_v3,pass,8
 
 

@@ -138,10 +138,6 @@ hf_GPT2,pass,0
 
 
 
-hf_GPT2_large,infra_error,0
-
-
-
 hf_Reformer,pass,5
 
 
@@ -279,6 +275,10 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 timm_vovnet,pass,0
+
+
+
+torch_multimodal_clip,pass,0
 
 
 
