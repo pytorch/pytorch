@@ -35,7 +35,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu11==2.15.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu11==2.19.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.1": (
@@ -80,15 +80,17 @@ def get_nccl_submodule_version() -> str:
     return f"{d['NCCL_MAJOR']}.{d['NCCL_MINOR']}.{d['NCCL_PATCH']}"
 
 
-def get_nccl_wheel_version() -> str:
+def get_nccl_wheel_version(arch_version: str) -> str:
     import re
 
-    requrements = map(str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]))
-    return [x for x in requrements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
+    requirements = map(
+        str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
+    )
+    return [x for x in requirements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
 
 
-def validate_nccl_dep_consistency() -> None:
-    wheel_ver = get_nccl_wheel_version()
+def validate_nccl_dep_consistency(arch_version: str) -> None:
+    wheel_ver = get_nccl_wheel_version(arch_version)
     submodule_ver = get_nccl_submodule_version()
     if wheel_ver != submodule_ver:
         raise RuntimeError(
@@ -325,7 +327,7 @@ def generate_wheels_matrix(
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],  # noqa: B950
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
                             ".", "_"
                         ),
@@ -348,7 +350,7 @@ def generate_wheels_matrix(
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"] # Windows/Mac for poetry
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # npqa: B950
                         if os != "linux"
                         else "",
                     }
@@ -356,4 +358,5 @@ def generate_wheels_matrix(
     return ret
 
 
-validate_nccl_dep_consistency()
+validate_nccl_dep_consistency("12.1")
+validate_nccl_dep_consistency("11.8")
