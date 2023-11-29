@@ -1364,7 +1364,7 @@ TORCH_IMPL_FUNC(mean_out)
         result_mut = result_mut.to(dtype);
         break;
       default:
-        // not BF16 & not FP16
+        // floating point or complex types
         at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
     }
   } else {
