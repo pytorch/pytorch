@@ -1,7 +1,7 @@
 """
-This module defines runtime wrappers, which, based on previous analysis
-attempts to process the inputs and outputs, apply mutations, functionalize randomness
-and dispatch subclasses.
+This module holds defines runtime wrappers, which, based on previous analysis
+attempts to process the inputs and outputs, apply mutations and handle
+functionalized randomness at runtime.
 """
 
 from typing import Callable, List, Optional, Union
