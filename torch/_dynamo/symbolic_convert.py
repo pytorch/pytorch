@@ -801,9 +801,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.compile_subgraph(
             self,
             partial_convert=True,
-            reason=GraphCompileReason(
-                f"step_unsupported {inst}", [self.frame_summary()]
-            ),
+            reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         self.output.add_output_instructions(
             [create_jump_absolute(continue_inst)] + self.instructions
@@ -1340,10 +1338,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def store_attr_graph_break(self, inst):
         self.output.compile_subgraph(
-            self,
-            reason=GraphCompileReason(
-                f"store_attr {val} {obj}", [self.frame_summary()]
-            ),
+            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
         )
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
@@ -1414,7 +1409,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable))
                 or (isinstance(k, TensorVariable) and k.specialized_value is not None)
                 or k.is_python_constant()
-            ), f"Tried to write key {k}"
+            )
 
             result[ConstDictVariable.get_key(self, k)] = v
         assert len(result) == len(items) / 2

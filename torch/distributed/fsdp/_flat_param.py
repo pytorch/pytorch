@@ -1132,91 +1132,90 @@ class FlatParamHandle:
             shard_param_offsets,
         )
 
-    # @no_type_check
-    # @torch.no_grad()
+    @no_type_check
+    @torch.no_grad()
     def init_flat_param_attributes(self) -> None:
-        with torch.no_grad():
-            """
-            This initializes some attributes on the handle's ``FlatParameter``.
-            This should be called during lazy initialization since it requires the
-            parameter to be on the compute device if not offloading to CPU and we
-            want to give users the chance to move the parameter appropriately after
-            the FSDP constructor.
+        """
+        This initializes some attributes on the handle's ``FlatParameter``.
+        This should be called during lazy initialization since it requires the
+        parameter to be on the compute device if not offloading to CPU and we
+        want to give users the chance to move the parameter appropriately after
+        the FSDP constructor.
 
-            For each tensor attribute on the ``FlatParameter``, see the unshard and
-            reshard methods in this class for the allocation and free pattern.
-            """
-            flat_param = self.flat_param
-            if flat_param.dtype != self._orig_param_dtype:
-                # Entering this branch means that the user changed the parameter
-                # dtype after FSDP initialization, in which case we may need to
-                # refresh some saved dtype attributes (dtypes specified as a part
-                # of mixed precision take precedence).
-                if not self._low_prec_param_dtype_specified:
-                    self._fwd_bwd_param_dtype = flat_param.dtype
-                # For `reduce_dtype`, require `param_dtype` was not specified since
-                # then we infer the `reduce_dtype` from the specified `param_dtype`
-                if (
-                    not self._low_prec_reduce_dtype_specified
-                    and not self._low_prec_param_dtype_specified
-                ):
-                    self._reduce_dtype = flat_param.dtype
-                self._orig_param_dtype = flat_param.dtype
-            cpu_device = torch.device("cpu")
-            if self._offload_params:
-                _p_assert(
-                    flat_param.device == cpu_device,
-                    f"Expects the `FlatParameter` to be on CPU when parameter CPU "
-                    f"offloading is enabled, not {flat_param.device}",
-                )
-            else:
-                self._check_on_compute_device(self.flat_param)
-            flat_param._local_shard = flat_param.data
-            if self._offload_params:
-                # Pin the memory for faster H2D transfer
-                flat_param._local_shard = flat_param._local_shard.pin_memory()
-                # Pre-allocate the sharded gradient on CPU to enable non-blocking
-                # D2H transfer during the backward pass
-                flat_param._cpu_grad = torch.zeros_like(
-                    flat_param._local_shard, device=cpu_device
-                ).pin_memory()
+        For each tensor attribute on the ``FlatParameter``, see the unshard and
+        reshard methods in this class for the allocation and free pattern.
+        """
+        flat_param = self.flat_param
+        if flat_param.dtype != self._orig_param_dtype:
+            # Entering this branch means that the user changed the parameter
+            # dtype after FSDP initialization, in which case we may need to
+            # refresh some saved dtype attributes (dtypes specified as a part
+            # of mixed precision take precedence).
+            if not self._low_prec_param_dtype_specified:
+                self._fwd_bwd_param_dtype = flat_param.dtype
+            # For `reduce_dtype`, require `param_dtype` was not specified since
+            # then we infer the `reduce_dtype` from the specified `param_dtype`
+            if (
+                not self._low_prec_reduce_dtype_specified
+                and not self._low_prec_param_dtype_specified
+            ):
+                self._reduce_dtype = flat_param.dtype
+            self._orig_param_dtype = flat_param.dtype
+        cpu_device = torch.device("cpu")
+        if self._offload_params:
+            _p_assert(
+                flat_param.device == cpu_device,
+                f"Expects the `FlatParameter` to be on CPU when parameter CPU "
+                f"offloading is enabled, not {flat_param.device}",
+            )
+        else:
+            self._check_on_compute_device(self.flat_param)
+        flat_param._local_shard = flat_param.data
+        if self._offload_params:
+            # Pin the memory for faster H2D transfer
+            flat_param._local_shard = flat_param._local_shard.pin_memory()
+            # Pre-allocate the sharded gradient on CPU to enable non-blocking
+            # D2H transfer during the backward pass
+            flat_param._cpu_grad = torch.zeros_like(
+                flat_param._local_shard, device=cpu_device
+            ).pin_memory()
+        if self._uses_param_mixed_precision:
+            # For parameter mixed precision, we maintain a low precision
+            # sharded tensor on the compute device to be all-gathered (for
+            # sharded strategies) or directly used (for `NO_SHARD`) for
+            # computation.
+            flat_param._mp_shard = torch.empty_like(
+                flat_param._local_shard,
+                device=self.device,
+                dtype=self._fwd_bwd_param_dtype,
+            )
+            _free_storage(flat_param._mp_shard)
+        if self.uses_sharded_strategy:
+            # We maintain a padded unsharded tensor that serves as the
+            # all-gather destination and owns the original parameter storages.
+            unsharded_param_dtype = (
+                self._fwd_bwd_param_dtype
+                if self._uses_param_mixed_precision
+                else flat_param.dtype
+            )  # use low precision if parameter mixed precision is enabled
+            padded_unsharded_numel = flat_param.numel() * self.world_size
+            flat_param._full_param_padded = torch.empty(
+                padded_unsharded_numel,
+                device=self.device,
+                dtype=unsharded_param_dtype,
+            )
+            flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
+            _free_storage(flat_param._full_param_padded)
+
             if self._uses_param_mixed_precision:
-                # For parameter mixed precision, we maintain a low precision
-                # sharded tensor on the compute device to be all-gathered (for
-                # sharded strategies) or directly used (for `NO_SHARD`) for
-                # computation.
-                flat_param._mp_shard = torch.empty_like(
-                    flat_param._local_shard,
-                    device=self.device,
-                    dtype=self._fwd_bwd_param_dtype,
-                )
-                _free_storage(flat_param._mp_shard)
-            if self.uses_sharded_strategy:
-                # We maintain a padded unsharded tensor that serves as the
-                # all-gather destination and owns the original parameter storages.
-                unsharded_param_dtype = (
-                    self._fwd_bwd_param_dtype
-                    if self._uses_param_mixed_precision
-                    else flat_param.dtype
-                )  # use low precision if parameter mixed precision is enabled
-                padded_unsharded_numel = flat_param.numel() * self.world_size
-                flat_param._full_param_padded = torch.empty(
+                # For parameter mixed precision, we maintain a full precision
+                # padded unsharded tensor for when we force full precision.
+                flat_param._full_prec_full_param_padded = torch.empty(
                     padded_unsharded_numel,
                     device=self.device,
-                    dtype=unsharded_param_dtype,
+                    dtype=flat_param.dtype,  # full precision
                 )
-                flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
-                _free_storage(flat_param._full_param_padded)
-
-                if self._uses_param_mixed_precision:
-                    # For parameter mixed precision, we maintain a full precision
-                    # padded unsharded tensor for when we force full precision.
-                    flat_param._full_prec_full_param_padded = torch.empty(
-                        padded_unsharded_numel,
-                        device=self.device,
-                        dtype=flat_param.dtype,  # full precision
-                    )
-                    _free_storage(flat_param._full_prec_full_param_padded)
+                _free_storage(flat_param._full_prec_full_param_padded)
 
     ###################
     # UNSHARD/RESHARD #
@@ -1306,10 +1305,6 @@ class FlatParamHandle:
         already_unsharded = torch._same_storage_size(
             unsharded_flat_param, unsharded_flat_param.numel()
         )
-        # already_unsharded = (
-        #     unsharded_flat_param._typed_storage()._size()
-        #     == unsharded_flat_param.numel()
-        # )
         return not already_unsharded
 
     def _alloc_padded_unsharded_flat_param(self):
@@ -1543,20 +1538,20 @@ class FlatParamHandle:
             "Expects to be in `BACKWARD_PRE` or `IDLE` (if prefetching)",
         )
         flat_param = self.flat_param
-        if self.flat_param.grad is not None and (
-            self.flat_param.grad.size() != self.flat_param._unpadded_unsharded_size
-            or self.flat_param.grad.device != self.flat_param.device  # grad on CPU
+        if flat_param.grad is not None and (
+            flat_param.grad.size() != flat_param._unpadded_unsharded_size
+            or flat_param.grad.device != flat_param.device  # grad on CPU
         ):
             self._check_on_compute_device(self.flat_param)
-            grad_offloaded = self.flat_param.grad.device != self.device
+            grad_offloaded = flat_param.grad.device != self.device
             _p_assert(
                 not grad_offloaded or self._offload_params,
                 f"Expects the sharded gradient to be on {self.device} "
-                f"but got {self.flat_param.grad.device}",
+                f"but got {flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
-                self.flat_param.grad.size()
-                == self.flat_param._local_shard.size()  # type: ignore[attr-defined]
+                flat_param.grad.size()
+                == flat_param._local_shard.size()  # type: ignore[attr-defined]
             )
             if prev_iter_synced_gradients:
                 # TODO (awgu): Gradient accumulation outside `no_sync()`
@@ -1565,14 +1560,14 @@ class FlatParamHandle:
                 # between a CPU tensor (the existing sharded gradient) and
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
-                    self.flat_param._saved_grad_shard = self.flat_param.grad.data  # type: ignore[attr-defined]
-                    sharded_grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
+                    flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
+                    sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
                 else:
                     _p_assert(
-                        hasattr(self.flat_param, "_cpu_grad"),
+                        hasattr(flat_param, "_cpu_grad"),
                         "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
-                    sharded_grad = self.flat_param._cpu_grad  # type: ignore[attr-defined]
+                    sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
                 # If user specified to keep the gradient in low precision, then
                 # the gradient may still be of the low precision dtype if the
                 # user did not set the gradient to `None` after the previous
@@ -1580,21 +1575,21 @@ class FlatParamHandle:
                 # precision dtype so that FSDP can accumulate in that dtype in
                 # the post-backward hook and assign to `.grad` in that dtype in
                 # the post-backward callback.
-                local_shard_dtype = self.flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                local_shard_dtype = flat_param._local_shard.dtype  # type: ignore[attr-defined]
                 if (
                     self._keep_low_precision_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
                     sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
-                padded_unsharded_size = self.flat_param._padded_unsharded_size  # type: ignore[attr-defined]
+                padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 _p_assert(
-                    self.flat_param.grad.size() == padded_unsharded_size,
+                    flat_param.grad.size() == padded_unsharded_size,
                     "Expects `.grad` to be the unsharded gradient in "
                     f"`no_sync()` with size {padded_unsharded_size} "
-                    f"but got size {self.flat_param.grad.size()}",
+                    f"but got size {flat_param.grad.size()}",
                 )
-            self.flat_param.grad = None
+            flat_param.grad = None
 
     def prepare_gradient_for_optim(self):
         """Prepare the gradient for optimizer computation by moving the sharded gradient to the ``.grad`` attribute."""

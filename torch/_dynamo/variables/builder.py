@@ -287,7 +287,6 @@ class VariableBuilder:
             or source.guard_source() == GuardSource.CONSTANT
         ):
             return None
-        # print("Installing guard?", source)
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
