@@ -4343,6 +4343,15 @@ def _weight_norm_interface(x, y, dim):
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
 
+@register_decomposition(aten.take)
+@out_wrapper()
+def take(self, index):
+    flattened = self.reshape(-1)
+    numel = flattened.size(0)
+    # gather does not support negative indices
+    # https://github.com/pytorch/pytorch/issues/55143
+    index = torch.where(index < 0, index + numel, index)
+    return flattened.gather(dim=0, index=index)
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
