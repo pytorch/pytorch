@@ -217,7 +217,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
     )
 
 
-def serialize_torch_artifact(artifact) -> bytes:
+def serialize_torch_artifact(artifact, convert_to_cpu=False) -> bytes:
     buffer = io.BytesIO()
     # This is a workaround for backend's tensor deserialization problem:
     # unpickleTensor() always create a tensor on the device where it was originally saved
@@ -233,7 +233,8 @@ def serialize_torch_artifact(artifact) -> bytes:
             return torch.nn.Parameter(t.cpu())
         else:
             return t.cpu()
-    artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
+    if convert_to_cpu:
+        artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
     torch.save(artifact, buffer)
     return buffer.getvalue()
 
@@ -950,7 +951,17 @@ class ExportedProgramSerializer:
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> SerializedArtifact:
+    def serialize(
+        self,
+        exported_program: ep.ExportedProgram,
+        *,
+        convert_to_cpu=False,
+    ) -> SerializedArtifact:
+        """
+        Args:
+            exported_program: Exported Program to serialize
+            convert_to_cpu: Flag to convert all constants (ex. weights) to cpu device
+        """
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature,
             exported_program.module_call_graph
@@ -976,8 +987,8 @@ class ExportedProgramSerializer:
                 schema_version=SCHEMA_VERSION,
                 dialect=exported_program.dialect,
             ),
-            serialize_torch_artifact(exported_program.state_dict),
-            serialize_torch_artifact(constants),
+            serialize_torch_artifact(exported_program.state_dict, convert_to_cpu),
+            serialize_torch_artifact(constants, convert_to_cpu),
         )
 
 
