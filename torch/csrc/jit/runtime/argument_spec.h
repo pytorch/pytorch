@@ -72,10 +72,10 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code =
-        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs)
+      : hash_code(c10::hash_combine(
+            num_flat_tensor_inputs,
+            num_flat_optional_inputs)) {
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
