@@ -21,26 +21,28 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
     m.graph.eliminate_dead_code()
     m.recompile()
 
-    def dropout_train(x):
-        return F.dropout(x, p=0.5, training=True)
+    for inplace in [False, True]:
 
-    def dropout_eval(x):
-        return F.dropout(x, p=0.5, training=False)
+        def dropout_train(x):
+            return F.dropout(x, p=0.5, training=True, inplace=inplace)
 
-    example_inputs = (torch.randn(1),)
-    match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-    replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+        def dropout_eval(x):
+            return F.dropout(x, p=0.5, training=False, inplace=inplace)
 
-    from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+        example_inputs = (torch.randn(1),)
+        match_pattern = get_aten_graph_module(dropout_train, example_inputs)
+        replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
 
-    replace_pattern_with_filters(
-        m,
-        match_pattern,
-        replacement_pattern,
-        match_filters=[],
-        ignore_literals=True,
-    )
-    m.recompile()
+        from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+
+        replace_pattern_with_filters(
+            m,
+            match_pattern,
+            replacement_pattern,
+            match_filters=[],
+            ignore_literals=True,
+        )
+        m.recompile()
 
 
 def _replace_batchnorm_for_eval(m: torch.fx.GraphModule):

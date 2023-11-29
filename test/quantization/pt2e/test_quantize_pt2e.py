@@ -1607,34 +1607,44 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
     def test_move_exported_model_to_eval(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.dropout = torch.nn.Dropout(0.5)
 
-            def forward(self, x):
-                return self.dropout(x)
+        for inplace in [True, False]:
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
-        example_inputs = (torch.randn(1),)
-        m = M().train()
-        m = capture_pre_autograd_graph(m, example_inputs)
+                def forward(self, x):
+                    return self.dropout(x)
 
-        # Assert that dropout op exists and is in train mode
-        dropout_node = None
-        for n in m.graph.nodes:
-            if n.target == torch.ops.aten.native_dropout.default:
-                dropout_node = n
-                break
-        self.assertTrue(dropout_node is not None)
-        self.assertTrue(dropout_node.args[2])
+            example_inputs = (torch.randn(1),)
+            m = M().train()
+            m = capture_pre_autograd_graph(m, example_inputs)
 
-        # Do the subgraph rewriting
-        torch.ao.quantization.move_exported_model_to_eval(m)
+            # Assert that dropout op exists and is in train mode
+            dropout_node = None
+            for n in m.graph.nodes:
+                if n.target == torch.ops.aten.native_dropout.default or n.target == torch.ops.aten.dropout_.default:
+                    dropout_node = n
+                    break
+            self.assertTrue(dropout_node is not None)
+            self.assertTrue(dropout_node.args[2])
 
-        # Assert that dropout op is now replaced with a clone op
-        targets = [n.target for n in m.graph.nodes]
-        self.assertTrue(torch.ops.aten.clone.default in targets)
-        self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+            # Do the subgraph rewriting
+            torch.ao.quantization.move_exported_model_to_eval(m)
+
+            # Assert that dropout op is now replaced with a clone op
+            targets = [n.target for n in m.graph.nodes]
+            if inplace:
+                dropout_eval_node = None
+                for node in m.graph.nodes:
+                    if node.target == torch.ops.aten.dropout_.default:
+                        dropout_eval_node = node
+                self.assertTrue(dropout_eval_node is not None)
+                self.assertFalse(dropout_eval_node.args[2])
+            else:
+                self.assertTrue(torch.ops.aten.clone.default in targets)
+                self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
 
     def test_bn_move_exported_model_to_eval(self):
         class M(torch.nn.Module):
