@@ -5,9 +5,10 @@ from typing import Dict
 
 import torch
 import torch.distributed as dist
+from torch.distributed import distributed_c10d
+from torch._utils import _get_device_module
 
 from . import default_hooks as default
-from torch.distributed import distributed_c10d
 
 __all__ = [
     "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
@@ -407,6 +408,7 @@ def powerSGD_hook(
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
+    device_module = _get_device_module(device.type)
     dtype = input_tensor.dtype
 
     # Incorporate the error from the previous state into the gradients.
@@ -619,8 +621,8 @@ def powerSGD_hook(
                 for i, original_tensor in enumerate(original_tensors):
                     original_tensor.copy_(tensor[i])
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize(device)
+        if device_module.is_available():
+            device_module.synchronize(device)
 
         if state.use_error_feedback:
             # Memorize the local errors.
@@ -715,6 +717,7 @@ def batched_powerSGD_hook(
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
+    device_module = _get_device_module(device.type)
     total_length = input_tensor.shape[0]
     state.total_numel_before_compression += total_length
 
@@ -836,8 +839,8 @@ def batched_powerSGD_hook(
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
-        if torch.cuda.is_available():
-            torch.cuda.synchronize(device)
+        if device_module.is_available():
+            device_module.synchronize(device)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
