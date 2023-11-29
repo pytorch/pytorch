@@ -305,7 +305,7 @@ def optim_inputs_func_adam():
         ),
         OptimizerInput(
             params=None,
-            kwargs={"lr": torch.tensor(.001), "amsgrad": True, "capturable": True},
+            kwargs={"lr": torch.tensor(0.001), "amsgrad": True, "capturable": True},
             desc="Tensor lr with capturable and amsgrad",
         ),
     ]
