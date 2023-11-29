@@ -1349,19 +1349,18 @@ TORCH_IMPL_FUNC(mean_out)
     auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
     if (is_half_type) {
       result_mut = result_mut.to(ScalarType::Float);
-      // self (input tensor) will initially be cast to FP32 in sum_out.
-      // This results in having to read that FP32 tensor again, but maybe in
-      // the future, we could revise the implementation to not materialize
-      // that intermediate FP32 tensor. That approach would probably require
-      // some modifications in binary_kernel_reduce_vec(),
-      // TensorIteratorBase::for_each(), and
-      // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
     }
-    // Common code-flow for all output dtypes
+    // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
+    // FP32 in sum_out. This results in having to read that FP32 tensor again,
+    // but maybe in the future, we could revise the implementation to not
+    // materialize that intermediate FP32 tensor. That approach would probably
+    // require some modifications in binary_kernel_reduce_vec(),
+    // TensorIteratorBase::for_each(), and
+    // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
+    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
     // After sum & div, cast result_mut back to BF16 or FP16, if required.
     // TensorBase::to is (sort of a) no-op for other dtypes.
-    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod)
-                                                                  .to(dtype);
+    result_mut = result_mut.to(dtype);
   } else {
     // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
