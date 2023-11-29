@@ -3674,8 +3674,10 @@ def run(runner, args, original_dir=None):
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
                 write_csv("timeout")
-            except subprocess.SubprocessError:
-                print("ERROR", file=sys.stderr)
+            except subprocess.CalledProcessError as e:
+                print("Run failed with return code: ", e.returncode, file=sys.stderr)
+                print("Output: ", e.output, file=sys.stderr)
+                print("Error: ", e.stderr, file=sys.stderr)
                 write_csv("infra_error")
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
