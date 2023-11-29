@@ -307,7 +307,6 @@ def _tensor_nbytes(numel, dtype):
     return numel * dtype.itemsize
 
 def _size_of(node: fx.Node) -> int:
-    print("SIZEOF?", node)
     if 'val' in node.meta:
         val = node.meta['val']
         if isinstance(val, py_sym_types):

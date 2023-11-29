@@ -533,12 +533,13 @@ class StreamVariable(VariableTracker):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert (
-            value.device.type == device
+            value.device.type == device.type
         ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
         self.device = device
+        torch._dynamo.device_interface.register_interface_for_device(self.device, torch._dynamo.device_interface.CudaInterface)
 
     def call_method(
         self,
@@ -573,6 +574,7 @@ class StreamVariable(VariableTracker):
                 ),
             )
         elif name == "record_event":
+            print("asking for record_event?")
             return wrap_fx_proxy_cls(
                 target_cls=EventVariable,
                 tx=tx,
@@ -585,6 +587,15 @@ class StreamVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "cuda.Stream")
+        codegen.extend_output([codegen.create_load_const(str(self.device))])
+        codegen.extend_output(create_call_function(1, False))
+        return []
+
+    def rename(self, tx, name):
+        print("Renaming stream?", name)
 
 
 class EventVariable(VariableTracker):

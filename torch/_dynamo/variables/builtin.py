@@ -1066,7 +1066,6 @@ class BuiltinVariable(VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
 
         name = name_var.as_python_constant()
-        print("GETTATR", name, type(obj), obj.source, "mut" if tx.output.side_effects.is_attribute_mutation(obj) else "not mut")
 
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")

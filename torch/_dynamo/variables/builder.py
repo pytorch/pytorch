@@ -61,6 +61,7 @@ from ..source import (
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
+    GlobalSource,
 )
 from ..utils import (
     build_checkpoint_variable,
@@ -286,6 +287,7 @@ class VariableBuilder:
             or source.guard_source() == GuardSource.CONSTANT
         ):
             return None
+        # print("Installing guard?", source)
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
@@ -599,7 +601,7 @@ class VariableBuilder:
             return StreamVariable(
                 None,
                 value,
-                value.device.type,
+                value.device,
                 source=self.source,
             )
         elif isinstance(value, _EventBase):
@@ -1521,7 +1523,7 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
-            proxy, example_value, example_value.device.type, **options
+            proxy, example_value, example_value.device, **options
         )
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)

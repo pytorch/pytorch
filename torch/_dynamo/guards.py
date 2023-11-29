@@ -1438,4 +1438,9 @@ def install_guard(*guards, skip=0):
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
+        # TODO(voz): Remove this garbage hack, this is here because we get a grad access,
+        # guard it, and then .grad gets Noned out - we need to clear the guards when that happens
+        if "grad.data" in guard.name:
+            # grad.data guards are handled separately
+            continue
         add(guard, skip=skip + 1)

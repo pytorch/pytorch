@@ -242,10 +242,10 @@ def _share_state_and_init_handle_attrs(
             "set yet or should have been set to `False`",
         )
         fsdp_state._is_root = False
-        # fsdp_state._unshard_stream = root_state._unshard_stream
-        # fsdp_state._post_backward_stream = root_state._post_backward_stream
-        # fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
-        # fsdp_state._default_stream = root_state._default_stream
+        fsdp_state._unshard_stream = root_state._unshard_stream
+        fsdp_state._post_backward_stream = root_state._post_backward_stream
+        fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
+        fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
         handle = fsdp_state._handle
@@ -275,15 +275,15 @@ def _init_streams(
     assert state._device_handle.is_available()
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves.
-    # state._unshard_stream = state._device_handle.Stream()
+    state._unshard_stream = state._device_handle.Stream()
     # Stream for overlapping gradient reduction with the backward pass gradient
     # computation.
-    # state._post_backward_stream = state._device_handle.Stream()
+    state._post_backward_stream = state._device_handle.Stream()
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
-    # state._pre_unshard_stream = state._device_handle.Stream()
+    state._pre_unshard_stream = state._device_handle.Stream()
     # Default stream for computation
-    # state._default_stream = state._device_handle.current_stream()
+    state._default_stream = state._device_handle.current_stream()
 
 
 @no_type_check
@@ -585,11 +585,11 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
-        # _wait_for_computation_stream(
-        #     state._device_handle.current_stream(),
-        #     state._unshard_stream,
-        #     state._pre_unshard_stream,
-        # )
+        _wait_for_computation_stream(
+            state._device_handle.current_stream(),
+            state._unshard_stream,
+            state._pre_unshard_stream,
+        )
         _reset_flat_param_grad_info_if_needed(state._all_handles)
 
         # Prepares the forward inputs by moving them to ``compute_device``
@@ -683,8 +683,8 @@ def _pre_backward_hook(
                 _unshard(
                     state,
                     handle,
-                    None,
-                    None,
+                    state._unshard_stream,
+                    state._pre_unshard_stream,
                 )
             # state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
@@ -708,16 +708,6 @@ def _post_backward_hook(
     flat_param,
     *unused: Any,
 ):
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # log.warning("STATE IS? %s", state)
-    # log.warning("handle IS? %s", handle)
-    # log.warning("UNUSED IS? %s %s", unused, "what")
-    # log.warning("POST BACKWARD ARGS? %s", len(unused))
-    # import os
-    # gpu_id = int(os.environ["LOCAL_RANK"])
-    # if gpu_id == 0:
-    # log.warning("RUNNING POST BWD HOOK")
-    # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     """
     Reduce-scatters the gradient of ``handle`` 's ``FlatParameter``.
 
@@ -766,24 +756,20 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
-        # state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            state._post_backward_stream.wait_stream(state._device_handle.current_stream())
 
-        # with state._device_handle.stream(state._post_backward_stream):
-        autograd_computed_grad = flat_param.grad.data
-        if (
-            not _low_precision_hook_enabled(state)
-            and flat_param.grad.dtype != handle._reduce_dtype
-            # If we are forcing full precision but communicating grads
-            # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
-            and not handle._force_full_precision
-        ):
-            # with torch.no_grad():
-            flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
-                # curr_version = flat_param.grad._version
-                # flat_param.grad.set_(flat_param.grad.to(handle._reduce_dtype))
-                # torch._C._autograd._unsafe_set_version_counter(
-                #     flat_param.grad, curr_version
-                # )
+        with state._device_handle.stream(state._post_backward_stream):
+            autograd_computed_grad = flat_param.grad.data
+            if (
+                not _low_precision_hook_enabled(state)
+                and flat_param.grad.dtype != handle._reduce_dtype
+                # If we are forcing full precision but communicating grads
+                # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
+                and not handle._force_full_precision
+            ):
+                with torch.no_grad():
+                    flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
         if handle.uses_sharded_strategy:
             _reduce_grad(state, handle)
@@ -792,9 +778,9 @@ def _post_backward_hook(
         # Since the unsharded gradient is produced in the computation
         # stream and consumed in the post-backward stream, inform the
         # caching allocator (before it goes out of scope)
-        # _no_dispatch_record_stream(
-        #     autograd_computed_grad, state._post_backward_stream
-        # )
+        _no_dispatch_record_stream(
+            autograd_computed_grad, state._post_backward_stream
+        )
 
 
 def _post_backward_reshard(
@@ -1056,9 +1042,9 @@ def _cast_grad_to_param_dtype(
         # caching allocator; for the sharded strategies, the gradient is
         # produced in the post-backward stream, so this `record_stream()`
         # should be a no-op
-        # _no_dispatch_record_stream(
-        #     low_prec_grad_data, state._device_handle.current_stream()
-        # )
+        _no_dispatch_record_stream(
+            low_prec_grad_data, state._device_handle.current_stream()
+        )
 
 
 def _check_grad_to_accumulate(
@@ -1104,18 +1090,19 @@ def _post_backward_final_callback(
     )
     root_state = state
 
-    # if root_state._sync_gradients:
-    # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
-    # since it currently runs in the post-backward stream. That can be
-    # pushed to the next forward if run in a different stream
-    # state._device_handle.current_stream().wait_stream(
-    #     root_state._post_backward_stream
-    # )
-    # if root_state.cpu_offload.offload_params:
-    # Wait for non-blocking GPU -> CPU sharded gradient copies from the
-    # post-backward hooks to finish explicitly since CPU gradients do
-    # not automatically synchronize with the GPU
-    # state._device_handle.current_stream().synchronize()
+    if root_state._sync_gradients:
+        current_stream = state._device_handle.current_stream()
+        # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
+        # since it currently runs in the post-backward stream. That can be
+        # pushed to the next forward if run in a different stream
+        current_stream.wait_stream(root_state._post_backward_stream)
+        if root_state._all_reduce_stream is not current_stream:  # uses HSDP
+            current_stream.wait_stream(root_state._all_reduce_stream)
+        if root_state.cpu_offload.offload_params:
+            # Wait for non-blocking GPU -> CPU sharded gradient copies from the
+            # post-backward hooks to finish explicitly since CPU gradients do
+            # not automatically synchronize with the GPU
+            state._device_handle.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
     for fsdp_state in state._all_fsdp_states:
@@ -1529,11 +1516,11 @@ def _wait_for_computation_stream(
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
-    # unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
     # runs once per iteration
-    # pre_unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    pre_unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
 
 
 def _reset_flat_param_grad_info_if_needed(
