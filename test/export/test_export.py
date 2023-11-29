@@ -624,16 +624,23 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-        # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
+        @dataclass
+        class MyOtherDataClass:  # the pytree registration don't allow registering the same class twice
+            x: int
+            y: int
+            z: int = None
 
+        # Override the registration with keep none fields
+        register_dataclass_as_pytree_node(MyOtherDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyOtherDataClass")
+
+        dt = MyOtherDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass,
+                MyOtherDataClass,
                 (
-                    MyDataClass,
+                    MyOtherDataClass,
                     ['x', 'y', 'z'],
                     [],
                 ),
@@ -643,7 +650,7 @@ class TestExport(TestCase):
         self.assertEqual(flat, [3, 4, None])
 
         orig_dt = tree_unflatten(flat, spec)
-        self.assertTrue(isinstance(orig_dt, MyDataClass))
+        self.assertTrue(isinstance(orig_dt, MyOtherDataClass))
         self.assertEqual(orig_dt.x, 3)
         self.assertEqual(orig_dt.y, 4)
         self.assertEqual(orig_dt.z, None)
@@ -1630,7 +1637,6 @@ def forward(self, l_x_):
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        def check_device_and_fake_mode():
             exported_program = torch.export.export(model, (x,))
             export_res = exported_program(x)
             exp_res = model(x)
@@ -1638,8 +1644,9 @@ def forward(self, l_x_):
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
+            decomposed_ep = exported_program.run_decompositions()
+            export_res = decomposed_ep(x)
+            self.assertTrue(export_res.size() == exp_res.size())
 
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()

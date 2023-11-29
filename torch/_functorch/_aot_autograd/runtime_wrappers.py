@@ -1,3 +1,9 @@
+"""
+This module defines runtime wrappers, which, based on previous analysis
+attempts to process the inputs and outputs, apply mutations, functionalize randomness
+and dispatch subclasses.
+"""
+
 from contextlib import nullcontext
 from typing import Callable, List, Optional, Union
 from unittest.mock import patch
@@ -86,6 +92,22 @@ def create_runtime_wrapper(
                     continue
                 original_inpt = args[inpt_idx]
                 updated_inpt = updated_inputs[i]
+                if meta.mutates_storage_metadata:
+                    # mutates_storage_metadata means our input saw a x.set_(y) call.
+                    # What if x **also** saw a data and/or a metadata mutation?
+                    # (1) If the [meta]data mutation occurred after the set_(),
+                    #     then there is no need to copy_() the data.
+                    #     When we perform x.set_(x_updated), we are guaranteed that
+                    #     x_updated already has the final version of the data/metadata
+                    # (2) If a data mutation occurred before the set_().
+                    #     This case seems very difficult to support.
+                    #     TODO: discuss on the PR and decide if we want to tr to
+                    #     either support it, or detect and ban it.
+                    if trace_joint:
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
+                    original_inpt.set_(updated_inpt)
+                    continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
