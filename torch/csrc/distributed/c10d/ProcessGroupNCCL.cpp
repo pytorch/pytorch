@@ -702,6 +702,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
   heartbeatTimeoutInSec_ =
@@ -768,6 +770,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "] ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
@@ -1255,24 +1258,38 @@ void ProcessGroupNCCL::workCleanupLoop() {
         }
 
         // Report desync state in case of timeout
-        if (desyncDebug_ && timedOut) {
+        if (timedOut) {
           try {
-            // Set shutdown mode, so the heartbeat monitor thread will not
-            // abort process immediately.
-            collectiveDebugInfoMode_.store(true);
-            // Store debug info to storage. (By default to local disk)
-            auto dumpingDebugInfo = tryWriteDebugInfo();
-            auto desyncMsg = getNCCLWatchdogDebugInfo();
-            LOG(ERROR) << desyncMsg;
-            if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
-              std::this_thread::sleep_for(
-                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
-              // At this point, we either have already waited for
-              // `kWatchdogThreadSleepMillis * 30` or the thread has finished so
-              // that we mark the thread detach and the dump of debug info
-              // becomes "best effort".
-              dumpingDebugInfo->detach();
+            if (desyncDebug_ || dumpOnTimeout_) {
+              // Set shutdown mode, so the heartbeat monitor thread will not
+              // abort process immediately.
+              collectiveDebugInfoMode_.store(true);
             }
+
+            c10::optional<std::thread> dumpingDebugInfo;
+            if (dumpOnTimeout_) {
+              // Store debug info to storage. (By default to local disk)
+              dumpingDebugInfo = tryWriteDebugInfo();
+            }
+
+            if (desyncDebug_) {
+              auto desyncMsg = getNCCLWatchdogDebugInfo();
+              LOG(ERROR) << desyncMsg;
+            }
+
+            if (dumpOnTimeout_) {
+              // Store debug info to storage. (By default to local disk)
+              if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+                // At this point, we either have already waited for
+                // `kWatchdogThreadSleepMillis * 30` or the thread has finished
+                // so that we mark the thread detach and the dump of debug info
+                // becomes "best effort".
+                dumpingDebugInfo->detach();
+              }
+            }
+
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
