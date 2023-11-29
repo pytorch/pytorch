@@ -1,6 +1,8 @@
 import argparse
 import collections
+import importlib
 import sys
+
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
@@ -585,7 +587,7 @@ def gen_nn_functional(fm: FileManager) -> None:
 def generate_docstrings() -> Dict[str, str]:
     docstrings = {}
 
-    def mock_add_docstr(func, docstr):
+    def mock_add_docstr(func: Mock, docstr: str) -> None:
         docstrings[func._extract_mock_name()] = docstr
 
     with patch.dict(
@@ -595,8 +597,8 @@ def generate_docstrings() -> Dict[str, str]:
             "torch._C": Mock(_add_docstr=mock_add_docstr),
         },
     ):
-        sys.path.append("torch")  # bypassing torch/__init__.py
-        import _torch_docs
+        sys.path.append("torch")
+        importlib.import_module(name="_torch_docs", package="torch")
 
     return docstrings
 
@@ -1005,7 +1007,7 @@ def gen_pyi(
             if docstr is not None:
                 l, r = hint.rsplit("...", 1)
                 hint = "\n    ".join(
-                    [l, '"""'] + docstr.strip().split("\n") + ['"""', "...", r]
+                    [l, 'r"""'] + docstr.strip().split("\n") + ['"""', "...", r]
                 )
             new_hints.append(hint)
         function_hints += new_hints
