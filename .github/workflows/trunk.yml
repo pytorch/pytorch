@@ -184,7 +184,7 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.2" },
         ]}
 
   linux-focal-rocm5_7-py3_8-test:
