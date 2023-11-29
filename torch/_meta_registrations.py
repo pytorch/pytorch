@@ -5314,32 +5314,11 @@ def meta__flash_attention_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    head_dim = query.size(3)
-    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
-    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
 
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, len_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
-
-    return grad_q, grad_k, grad_v
+    return grad_query, grad_key, grad_value
 
 
 @register_meta(
