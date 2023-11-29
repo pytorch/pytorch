@@ -50,9 +50,6 @@ accumulated_cache_size_limit = 64
 specialize_int = False
 
 # legacy config, does nothing now!
-constant_functions: Dict[Any, bool] = {}
-
-# legacy config, does nothing now!
 dynamic_shapes = True
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
