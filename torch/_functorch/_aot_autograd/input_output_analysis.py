@@ -4,7 +4,7 @@ and some preexisting properties, and returns some data that is useful for decidi
 how to further proceed with compilation or construct runtime wrappers.
 
 In particular, the following analyses are provided:
-1. refine the view and mutation metadata collected previously - removing duplicate
+1. Refine the view and mutation metadata collected previously - removing duplicate
    inputs or mapping views to their bases.
 2. We also analyze the function signature for export graphs.
 """
