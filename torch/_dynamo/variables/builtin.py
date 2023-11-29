@@ -1292,7 +1292,6 @@ class BuiltinVariable(VariableTracker):
                             update_grad,
                             *proxy_args_kwargs([obj, val], {}),
                         )
-                        # obj.as_proxy().node.meta["example_value"].grad = val.as_proxy().node.meta['example_value']
 
 
 

@@ -192,7 +192,7 @@ class GradModeVariable(ContextWrappingVariable):
             tx.output.create_node(
                 "call_function", torch._C._set_grad_enabled, (value,), {}
             )
-        torch._C._set_grad_enabled(value)
+            torch._C._set_grad_enabled(value)
 
     def module_name(self):
         return "torch"
@@ -574,7 +574,6 @@ class StreamVariable(VariableTracker):
                 ),
             )
         elif name == "record_event":
-            print("asking for record_event?")
             return wrap_fx_proxy_cls(
                 target_cls=EventVariable,
                 tx=tx,

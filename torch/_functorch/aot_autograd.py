@@ -822,13 +822,9 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
             abt.stride() != b.stride() or
             abt.storage_offset() != b.storage_offset()
         ):
-            try:
-                reshaped_base_tensor = aliased_base_tensor.as_strided(
-                    b.size(), b.stride(), b.storage_offset()
-                )
-            except:
-                # breakpoint()
-                reshaped_base_tensor = aliased_base_tensor
+            reshaped_base_tensor = aliased_base_tensor.as_strided(
+                b.size(), b.stride(), b.storage_offset()
+            )
         else:
             reshaped_base_tensor = aliased_base_tensor
         out = target_meta_tensor._view_func(reshaped_base_tensor)
@@ -856,11 +852,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
             size, stride, storage_offset
         )
     else:
-        try:
-            aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
-        except:
-            # breakpoint()
-            aliased_out = aliased_base_tensor
+        aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
     if aliased_base_tensor.requires_grad and not target_requires_grad:
         aliased_out = aliased_out.detach()
@@ -1876,7 +1868,6 @@ def create_joint(
             with fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
-                    assert False
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
                     backward_out = torch.autograd.grad(
                         needed_outs,
@@ -1884,12 +1875,6 @@ def create_joint(
                         allow_unused=True,
                     )
                 else:
-                    """
-                    if dist.get_rank() == 0:
-                        breakpoint()
-                    else:
-                        time.sleep(9999999)
-                    """
                     torch.autograd.backward(needed_outs, needed_tangents)
                     backward_out = [g.grad for g in grad_primals]
                     """
@@ -2464,7 +2449,7 @@ def merge_view_inputs(
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
-    return fwd_inputs, None
+    # return fwd_inputs, None
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
@@ -3259,7 +3244,6 @@ def create_runtime_wrapper(
             updated_inputs = all_outs[: num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply :]
 
-            print("WHERE?", runtime_metadata.mutated_inp_runtime_indices)
             for i, inpt_idx in enumerate(
                 runtime_metadata.mutated_inp_runtime_indices
             ):
@@ -3330,13 +3314,7 @@ def create_runtime_wrapper(
                         # if all of the mutations to the leaf input were non-autograd-tracking mutations
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                        print("META?", meta)
-                        print("RIG?", original_inpt)
-                        print("UPD?", updated_inpt)
-                        try:
-                            original_inpt.detach().copy_(updated_inpt)
-                        except:
-                            print("Failed lol")
+                        original_inpt.detach().copy_(updated_inpt)
                     else:
                         original_inpt.copy_(updated_inpt)
         else:
