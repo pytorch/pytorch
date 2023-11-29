@@ -651,7 +651,7 @@ class BuiltinVariable(VariableTracker):
                 ),
             )
 
-        if self.fn is round and any(isinstance(args, SymNodeVariable) for arg in args)
+        if self.fn is round and any(isinstance(arg, SymNodeVariable) for arg in args):
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
