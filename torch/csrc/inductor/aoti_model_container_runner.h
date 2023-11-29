@@ -24,7 +24,7 @@ class TORCH_API AOTIModelContainerRunner {
 
   std::vector<at::Tensor> run(
       std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr,
+      AOTInductorStreamHandle stream_handle = nullptr,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 
   std::vector<const char*> get_call_spec();

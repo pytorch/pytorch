@@ -36,7 +36,7 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
     std::vector<at::Tensor> inputs,
-    AOTInductorStreamHandle cuda_stream_handle,
+    AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
@@ -54,7 +54,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
-      cuda_stream_handle,
+      stream_handle,
       proxy_executor_handle));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
