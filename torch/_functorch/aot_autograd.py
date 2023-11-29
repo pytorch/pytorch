@@ -863,7 +863,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         aliased_out = aliased_out.view(target_meta_tensor.dtype)
     return aliased_out
 
-def to_fun(t):
+def to_fun(t, is_pre_dispatch=False):
     if isinstance(t, Tensor):
         if is_traceable_wrapper_subclass(t):
             # See Note [Functionalization always runs last]
@@ -874,7 +874,7 @@ def to_fun(t):
             torch._mirror_autograd_meta_to(t, out)
             return out
         else:
-            return FunctionalTensor.to_functional(t)
+            return FunctionalTensor.to_functional(t, is_pre_dispatch)
     else:
         return t
 
@@ -1063,6 +1063,7 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     requires_subclass_dispatch: bool = False,
+    is_pre_dispatch: bool = False,
 ) -> ViewAndMutationMeta:
     memo = {}
 
@@ -1070,7 +1071,7 @@ def run_functionalized_fw_and_collect_metadata(
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = to_fun(t)
+            r = to_fun(t, is_pre_dispatch)
             memo[t] = r
             return r
         else:
@@ -1091,7 +1092,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
-        with disable_above, FunctionalTensorMode():
+        with disable_above, FunctionalTensorMode(is_pre_dispatch):
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
 
@@ -1634,6 +1635,7 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    pre_dispatch: bool = False
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -1877,7 +1879,7 @@ def create_functionalized_fn(
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
-        with disable_above, FunctionalTensorMode():
+        with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
             # Run the joint
             f_outs = fn(*f_args)
 
@@ -1940,7 +1942,7 @@ def create_functionalized_fn(
 
 def create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     with enable_python_dispatcher():
-        fx_g = make_fx(f, decomposition_table=aot_config.decompositions)(*args)
+        fx_g = make_fx(f, decomposition_table=aot_config.decompositions, pre_dispatch=aot_config.pre_dispatch)(*args)
 
     return fx_g
 
@@ -4373,6 +4375,7 @@ def create_aot_dispatcher_function(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
+                    is_pre_dispatch=aot_config.pre_dispatch,
                 )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
@@ -4956,6 +4959,7 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -5064,6 +5068,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=params_len,
             no_tangents=True,
+            pre_dispatch=pre_dispatch,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -5209,6 +5214,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -5238,6 +5244,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        pre_dispatch=pre_dispatch,
     )
 
     fx_g, meta = create_aot_dispatcher_function(

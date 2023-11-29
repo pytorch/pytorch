@@ -2656,6 +2656,62 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_predispatch_func_simple(self):
+        def fn(p, x):
+            y = x + 2
+            y.add_(2)
+            return (x * 2 + y,)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg1_1, 2)
+    add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
+    mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add_2 = torch.ops.aten.add.Tensor(mul, add_1);  mul = add_1 = None
+    return (add_2,)""")
+
+    def test_aot_export_predispatch_func_composite_implicit(self):
+        def fn(p, x):
+            y = x @ x
+            y.add_(2)
+            return (x.sum() + y.sum(),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
+    add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    sum_2 = torch.ops.aten.sum.default(add);  add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_func_view(self):
+        def fn(p, x):
+            y = x @ x
+            y.add_(2)
+            return (x.sum() + y.view(1, 4).sum(),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        # TODO (this is broken)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    _tensor_constant0 = self._tensor_constant0
+    sum_2 = torch.ops.aten.sum.default(_tensor_constant0);  _tensor_constant0 = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
     def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
         class M(torch.nn.Module):
             def __init__(self):
