@@ -584,11 +584,11 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
-def gather_docstrings() -> Dict[str, str]:
-    docstrings = {}
+def gather_docstrs() -> Dict[str, str]:
+    docstrs = {}
 
     def mock_add_docstr(func: Mock, docstr: str) -> None:
-        docstrings[func._extract_mock_name()] = docstr
+        docstrs[func._extract_mock_name()] = docstr
 
     sys.path.append("torch")
     patch_dict = {
@@ -602,7 +602,17 @@ def gather_docstrings() -> Dict[str, str]:
         with patch.dict(sys.modules, patch_dict):
             importlib.import_module(name="_tensor_docs", package="torch")
 
-    return docstrings
+    return docstrs
+
+
+def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    if "..." in hint:  # function or method
+        assert hint.endswith("...")
+        return "\n    ".join(
+            [hint[:-3], 'r"""'] + docstr.strip().split("\n") + ['"""', "..."]
+        )
+    else:  # attribute or property
+        return f'{hint}\n"""{docstr}"""\n'
 
 
 def gen_pyi(
@@ -997,28 +1007,16 @@ def gen_pyi(
         )
         return hint
 
-    def add_docstr_to_hint(docstr: str, hint: str) -> str:
-        if "..." in hint:  # function or method
-            assert hint.endswith("...")
-            return "\n    ".join(
-                [hint[:-3], 'r"""'] + docstr.strip().split("\n") + ['"""', "..."]
-            )
-        else:  # attribute or property
-            return f'{hint}\n"""{docstr}"""\n'
-
+    docstrs = gather_docstrs()
     function_hints = []
-    docstr_dict = gather_docstrings()
     for name, hints in sorted(unsorted_function_hints.items()):
-        new_hints = []
-        for hint in hints:
-            hint = replace_special_case(hint)
-            if len(hints) > 1:
-                hint = "@overload\n" + hint
-            docstr = docstr_dict.get(f"torch.{name}")
-            if docstr is not None:
-                hint = add_docstr_to_hint(docstr, hint)
-            new_hints.append(hint)
-        function_hints += new_hints
+        hints = [replace_special_case(h) for h in hints]
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
+        function_hints += hints
 
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1238,15 +1236,12 @@ def gen_pyi(
 
     tensor_method_hints = []
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
-        new_hints = []
-        for hint in hints:
-            if len(hints) > 1:
-                hint = "@overload\n" + hint
-            docstr = docstr_dict.get(f"torch._C.TensorBase.{name}")
-            if docstr is not None:
-                hint = add_docstr_to_hint(docstr, hint)
-            new_hints.append(hint)
-        tensor_method_hints += new_hints
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch._C.TensorBase.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
+        tensor_method_hints += hints
 
     # TODO: Missing type hints for nn
 
