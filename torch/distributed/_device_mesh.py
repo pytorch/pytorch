@@ -357,9 +357,9 @@ class DeviceMesh:
             return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
         else:
             dim_groups = []
-            for mesh_dim in range(self.mesh.ndim):
+            for ith_dim in range(self.mesh.ndim):
                 dim_groups.append(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
                 )
             return dim_groups
 
