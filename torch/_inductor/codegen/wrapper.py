@@ -13,6 +13,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
 from torch.fx.node import _get_qualified_name
@@ -2603,7 +2604,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"cuda kernel parameters for {name} should already exist at this moment"
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
+        cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
         assert cubin_path is not None and os.path.exists(
             cubin_path
         ), f"cubin file should already exist at this moment: {cubin_path}"
