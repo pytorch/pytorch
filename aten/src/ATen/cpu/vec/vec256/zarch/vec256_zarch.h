@@ -1733,6 +1733,16 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   template <
       typename U = T,
       std::enable_if_t<Vectorized<U>::float_num_vecs() == 1, int> = 0>
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    auto float_val = convert_to_float(_vec);
+    return {(float_val - zero_point) * scale};
+  }
+
+  template <
+      typename U = T,
+      std::enable_if_t<Vectorized<U>::float_num_vecs() == 1, int> = 0>
   static Vectorized<T> quantize(
       const float_vec_return_type& rhs,
       float scale,

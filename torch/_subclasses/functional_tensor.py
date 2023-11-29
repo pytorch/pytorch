@@ -56,6 +56,7 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.numel.default,  # type: ignore[has-type]
         torch.ops.aten.sym_numel.default,  # type: ignore[has-type]
         torch.ops.aten.dim.default,  # type: ignore[has-type]
+        torch.ops.prim.device.default,
     ]
 
     def __new__(cls, elem):
@@ -280,6 +281,13 @@ class FunctionalTensorMode(TorchDispatchMode):
         try:
             # By default for python functionalization (for AOTAutograd), we reapply views.
             old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+
+            # Sometimes these functions cannot be directly dispatched to functionalize key
+            # because args are sometimes not functional tensors for some reason?
+            if func in FunctionalTensor.metadata_fns:
+                outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
+                return pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+
             outs_unwrapped = func._op_dk(
                 torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
             )

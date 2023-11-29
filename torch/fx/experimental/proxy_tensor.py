@@ -47,7 +47,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -253,10 +253,6 @@ HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
-
-    # if "mul_" in str(func):
-    #     breakpoint()
-
     def can_handle_tensor(x):
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
         if proxy_mode._allow_fake_constant:
