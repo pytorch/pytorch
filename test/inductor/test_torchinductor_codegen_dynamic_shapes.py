@@ -206,6 +206,8 @@ test_failures = {
     "test_cat_of_loops_and_extern_kernel_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    # need to enable CL with dynamic shapes
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
     "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
