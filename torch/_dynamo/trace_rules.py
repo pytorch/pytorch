@@ -9,7 +9,7 @@ from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
 from .utils import hashable, is_function
 
-from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable, SkipFilesVariable
 
 
 """
@@ -45,10 +45,6 @@ manual_torch_name_rule_map = {
     "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
     "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
     "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
-    "torch.default_generator#get_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator#get_state": TorchInGraphFunctionVariable,
-    "torch.default_generator#set_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator#set_state": TorchInGraphFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -60,11 +56,36 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
+    "torch.autograd._profiler_enabled": SkipFilesVariable,
+    # We graph break on RNG state setters or getters like
+    # `torch.get_rng_state` or `torch.set_rng_state`. These functions
+    # are not aten operations and therefore they are completely ignored
+    # by the AOT dispatcher. As a result, the AOT graph does not have
+    # these setter or getter functions, producing an incorrect graph
+    # when it comes to rng states.
+    "torch.default_generator#get_state": SkipFilesVariable,
+    "torch._C.Generator#get_state": SkipFilesVariable,
+    "torch.get_rng_state": SkipFilesVariable,
+    "torch.cuda.get_rng_state": SkipFilesVariable,
+    "torch.default_generator#set_state": SkipFilesVariable,
+    "torch._C.Generator#set_state": SkipFilesVariable,
+    "torch.set_rng_state": SkipFilesVariable,
+    "torch.cuda.set_rng_state": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/107187
+    "torch.manual_seed": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/93501
+    "torch.nn.utils.rnn.pack_padded_sequence": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/99569
+    "torch.nn.Parameter": SkipFilesVariable,
+    "torch._nested_tensor_from_mask": SkipFilesVariable,
+    "torch._nested_from_padded": SkipFilesVariable,
 }
 
 

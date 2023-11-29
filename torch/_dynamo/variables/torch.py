@@ -29,7 +29,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_python_args,
     has_torch_function,
-    is_rng_state_getter_or_setter,
     istype,
     product,
     proxy_args_kwargs,
@@ -369,8 +368,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
-        elif self.value is torch.autograd._profiler_enabled:
-            unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
@@ -393,17 +390,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
-        elif is_rng_state_getter_or_setter(self.value):
-            # We graph break on RNG state setters or getters like
-            # `torch.get_rng_state` or `torch.set_rng_state`. These functions
-            # are not aten operations and therefore they are completely ignored
-            # by the AOT dispatcher. As a result, the AOT graph does not have
-            # these setter or getter functions, producing an incorrect graph
-            # when it comes to rng states.
-            unimplemented(f"RNG state getter/setter function - {self.value}")
-        elif self.value is torch.manual_seed:
-            # https://github.com/pytorch/pytorch/issues/107187
-            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1
@@ -505,13 +491,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         elif (
             self.value is torch.nested.nested_tensor
             and kwargs.get("layout", torch.strided) == torch.strided
-        ) or self.value in (
-            torch._nested_tensor_from_mask,
-            torch._nested_from_padded,
         ):
             raise unimplemented("torch.compile does not support strided NestedTensor")
-        elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
-            unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -732,9 +713,6 @@ class TorchVariable(BaseTorchVariable):
                 ).call_function(tx, args, kwargs)
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
-        elif self.value is torch.nn.Parameter:
-            # https://github.com/pytorch/pytorch/issues/99569
-            unimplemented("torch.nn.Parameter not supported")
         elif isinstance(self.value, types.ModuleType):
             unimplemented("TypeError(\"'module' object is not callable\")")
         else:
