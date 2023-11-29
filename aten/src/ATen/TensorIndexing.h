@@ -224,7 +224,8 @@ static inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(dim, start, stop, std::move(step));
+  return self.slice_symint(
+      dim, std::move(start), std::move(stop), std::move(step));
 }
 
 static inline Tensor applySelect(
@@ -258,7 +259,7 @@ static inline Tensor applySelect(
   // if the index is negative, do not normalize it because that would fix the
   // index on the current tensor size in the tracer. aten::select also works on
   // negative indices
-  return self.select_symint(dim, index);
+  return self.select_symint(dim, std::move(index));
 }
 
 static inline Tensor boolToIndexingTensorCPUOrCUDA(
@@ -534,7 +535,7 @@ static inline Tensor applySlicing(
         /*original_tensor=*/self,
         /*index=*/obj,
         /*dim=*/&dim,
-        /*specified_dims=*/&specified_dims,
+        /*specified_dims_ptr=*/&specified_dims,
         /*real_dim=*/i,
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
