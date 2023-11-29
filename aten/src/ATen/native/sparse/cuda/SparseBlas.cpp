@@ -126,13 +126,12 @@ Tensor& addmm_out_sparse_compressed_cuda(
               "x",
               self_->size(1));
 
-  if (&result != &self) {
+  if (!result.is_same(self)) {
     if (result.layout() == kStrided) {
       at::native::resize_output(result, self_->sizes());
     } else {
       result.resize_as_sparse_(*self_);
     }
-    result.copy_(*self_);
   }
 
   if (result.numel() == 0) {
@@ -142,15 +141,21 @@ Tensor& addmm_out_sparse_compressed_cuda(
   if (sparse::impl::_is_sparse_and_zero(mat1) || sparse::impl::_is_sparse_and_zero(mat2)) {
     // According to docs, when beta==0 values in self should be ignored.
     // nans and infs should not propagate
-    if (beta.toComplexDouble() == 0.) {
+    const auto beta_val = beta.toComplexDouble();
+    if (beta_val == 0.) {
       result.zero_();
     } else {
-      result.mul_(beta);
+      if (!result.is_same(self)) {
+        result.copy_(*self_);
+      }
+      if (beta_val != 1.) {
+        result.mul_(beta);
+      }
     }
     return result;
   }
 
-  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::addmm_out_sparse_csr(*self_, mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -167,9 +172,8 @@ Tensor& baddbmm_out_sparse_csr_cuda(
   TORCH_CHECK(mat2.layout() == kStrided, "torch.baddbmm: Expect mat2 to be strided, but got ", mat2.layout());
   TORCH_CHECK(result.layout() == kStrided, "torch.baddbmm: Expect result to be strided, but got ", result.layout());
 
-  if (&result != &self) {
+  if (!result.is_same(self)) {
     at::native::resize_output(result, self.sizes());
-    result.copy_(self);
   }
 
   if (mat1._nnz() == 0) {
@@ -178,12 +182,17 @@ Tensor& baddbmm_out_sparse_csr_cuda(
     if (beta.toComplexDouble() == 0.) {
       result.zero_();
     } else {
-      result.mul_(beta);
+      if (!result.is_same(self)) {
+        result.copy_(self);
+      }
+      if (beta.toComplexDouble() != 1.) {
+        result.mul_(beta);
+      }
     }
     return result;
   }
 
-  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::addmm_out_sparse_csr(self, mat1, mat2, beta, alpha, result);
   return result;
 }
 
