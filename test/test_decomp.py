@@ -1,4 +1,4 @@
-# Owner(s): ["module: decompositions"]
+# Owner(s): ["module: primTorch", "module: decompositions"]
 
 from collections import defaultdict
 from torch import Tensor

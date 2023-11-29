@@ -99,7 +99,6 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_layernorm": {},
     "batch_tanh": {},
     "batch_relu": {},
-    "batch_sigmoid": {},
 }
 
 # Post grad group/batch fusion and options, set to empty dict to disable fusion.
