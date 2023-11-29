@@ -39,7 +39,6 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    GFX90A_Exact,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION
 )
