@@ -29,19 +29,6 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     return inp.replace(src, dst)
 
 
-def patch_setup_py(path: Path, *, version: str, name: str = "triton") -> None:
-    with open(path) as f:
-        orig = f.read()
-    # Replace name
-    orig = check_and_replace(orig, 'name="triton",', f'name="{name}",')
-    # Replace version
-    orig = check_and_replace(
-        orig, f'version="{read_triton_version()}",', f'version="{version}",'
-    )
-    with open(path, "w") as f:
-        f.write(orig)
-
-
 def patch_init_py(path: Path, *, version: str) -> None:
     with open(path) as f:
         orig = f.read()
@@ -67,10 +54,12 @@ def build_triton(
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
 
+    version_suffix = ""
     if not release:
         # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
         # while release build should only include the version, i.e. 2.1.0
-        version = f"{version}+{commit_hash[:10]}"
+        version_suffix = f"+{commit_hash[:10]}"
+        version += version_suffix
 
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
@@ -132,11 +121,9 @@ def build_triton(
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name
 
-        patch_setup_py(
-            triton_pythondir / "setup.py",
-            name=triton_pkg_name,
-            version=f"{version}",
-        )
+        # change built wheel name and version
+        env["TRITON_WHEEL_NAME"] = triton_pkg_name
+        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
