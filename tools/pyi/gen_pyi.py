@@ -596,9 +596,9 @@ def gather_docstrs() -> Dict[str, str]:
     }
     with patch.dict(sys.modules, patch_dict):
         sys.path.append("torch")  # allows submodules of `torch` to be imported
-        _torch_docs = importlib.import_module(name="_torch_docs", package="torch")
+        _torch_docs = importlib.import_module("_torch_docs")
         with patch.dict(sys.modules, {"torch._torch_docs": _torch_docs}):
-            importlib.import_module(name="_tensor_docs", package="torch")
+            importlib.import_module("_tensor_docs")
     return docstrs
 
 
