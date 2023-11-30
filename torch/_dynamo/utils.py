@@ -400,7 +400,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error("Unable to write execution record %s", filename, exc_info=True)
+        log.exception("Unable to write execution record %s", filename)
 
 
 def count_calls(g: fx.Graph):
@@ -2294,4 +2294,18 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     return isinstance(vt, TensorWithTFOverrideVariable) or (
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
+    )
+
+
+# see note [Tensor Fakification and Symbol Caching]
+def to_fake_tensor(t, fake_mode):
+    symbolic_context = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_context:
+            symbolic_context = tracing_context.tensor_to_context[t]
+            source = symbolic_context.tensor_source
+
+    return fake_mode.from_tensor(
+        t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )

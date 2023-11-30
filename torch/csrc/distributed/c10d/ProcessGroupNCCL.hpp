@@ -43,6 +43,12 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
 
+// Environment Variable to control whether dumping debug info on watchdog
+// timeout is enabled. This variable must be set together with
+// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
+static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
+
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -341,6 +347,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
+
+    // Optional "parent" backend and color to create communicators from
+    // via `ncclCommSplit`
+    std::shared_ptr<ProcessGroupNCCL> split_from;
+    int64_t split_color{0};
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -508,6 +519,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
+
+  // Return the total number of splits the communicators held by this process
+  // group have performed.
+  uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
@@ -856,6 +871,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
