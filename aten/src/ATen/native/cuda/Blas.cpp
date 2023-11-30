@@ -233,6 +233,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
     self__sizes = self_->sizes();
   } else {
+  #if defined(USE_ROCM) && ROCM_VERSION >= 50700
+    useLtInterface = !disable_addmm_cuda_lt &&
+        result.dim() == 2 && result.is_contiguous() &&
+        isSupportedHipLtROCmArch(self.device().index()) &&
+        (scalar_type == at::ScalarType::Float ||
+          scalar_type == at::ScalarType::Half ||
+          scalar_type == at::ScalarType::BFloat16);
+  #endif
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
     self__sizes = self_->sizes();
     TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
