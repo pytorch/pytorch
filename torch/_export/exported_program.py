@@ -58,8 +58,3 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
-
-
-def combine_args_kwargs(args, kwargs):
-    kwargs = kwargs or {}
-    return (args, kwargs)

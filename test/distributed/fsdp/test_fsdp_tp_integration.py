@@ -8,12 +8,16 @@ import torch
 from torch import distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh, Shard
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-from torch.distributed.tensor.parallel import parallelize_module, SequenceParallel
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -246,10 +250,14 @@ class TestTPFSDPIntegration(FSDPTest):
             mesh_dim_names=["dp", "tp"],
         )
         # Shard with TP and then wrap with FSDP
+        sequence_parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0)),
+            "net2": RowwiseParallel(output_layouts=Shard(0)),
+        }
         tp_fsdp_model = parallelize_module(
             tp_fsdp_model,
             mesh_2d["tp"],
-            SequenceParallel(),
+            sequence_parallelize_plan,
         )
         tp_pg = mesh_2d["tp"].get_dim_groups(mesh_dim=0)
         assert isinstance(tp_fsdp_model.net1.weight, DT)
