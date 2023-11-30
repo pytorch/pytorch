@@ -78,8 +78,8 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
@@ -151,6 +151,10 @@ def register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
+    with _NODE_REGISTRY_LOCK:
+        if cls in SUPPORTED_NODES:
+            raise ValueError(f"{cls} is already registered as pytree node.")
+
     _private_register_pytree_node(
         cls,
         flatten_fn,
@@ -243,7 +247,11 @@ def _private_register_pytree_node(
     """
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
-            raise ValueError(f"{cls} is already registered as pytree node.")
+            # TODO: change this warning to an error after OSS/internal stabilize
+            warnings.warn(
+                f"{cls} is already registered as pytree node. "
+                "Overwriting the previous registration.",
+            )
 
         node_def = NodeDef(
             cls,
