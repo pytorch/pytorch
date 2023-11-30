@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._sympy.value_ranges import ValueRanges
 from .exported_program import ExportedProgram
 
 
@@ -118,11 +117,8 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
 
     """
 
-    # Import sympy locally
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"
+    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
@@ -311,10 +307,11 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
             f" but got {index}, which is out of bounds for the given tensor.",
         )
 
+    # Import sympy locally
     import sympy
 
-    # Import sympy locally
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     return _create_constraint(
         weakref.ref(t),
@@ -484,7 +481,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[Any, ValueRanges], List[Tuple]]:
+) -> Tuple[Dict, List[Tuple]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -510,6 +507,7 @@ def _process_constraints(
 
     # Import sympy locally
     from torch.fx.experimental.symbolic_shapes import SymInt
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
