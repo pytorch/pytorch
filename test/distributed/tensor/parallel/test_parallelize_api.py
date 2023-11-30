@@ -6,15 +6,10 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
     _parallelize_linear_like_module,
-    _parallelize_mlp,
     parallelize_module,
 )
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
-    make_input_replicate_1d,
-    make_output_replicate_1d,
-    PairwiseParallel,
-    ParallelStyle,
     PrepareModuleInput,
     PrepareModuleOutput,
     RowwiseParallel,
@@ -142,23 +137,6 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_params(local_module, dist_module, rank0_only, rowwise)
 
     @with_comms
-    def test_parallelize_mlp(self):
-        inp_size = [12, 10]
-        model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
-
-        # Ensure model are initialized the same way.
-        self.assertEqual(model.net1.weight, model_tp.net1.weight)
-        self.assertEqual(model.net1.bias, model_tp.net1.bias)
-        self.assertEqual(model.net2.weight, model_tp.net2.weight)
-        self.assertEqual(model.net2.bias, model_tp.net2.bias)
-
-        # Parallelize module.
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        model_tp = _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
-        self._compare_module(model, model_tp, inp_size)
-
-    @with_comms
     def test_parallelize_mlp_with_module_api(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
@@ -176,12 +154,8 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "net1": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
-                "net2": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
+                "net1": ColwiseParallel(output_layouts=Replicate()),
+                "net2": ColwiseParallel(output_layouts=Replicate()),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
@@ -216,40 +190,11 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "dummy_encoder.net1": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
-                "dummy_encoder.net2": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
+                "dummy_encoder.net1": ColwiseParallel(output_layouts=Replicate()),
+                "dummy_encoder.net2": ColwiseParallel(output_layouts=Replicate()),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
-
-    @with_comms
-    def test_parallelize_mlp_error(self):
-        class DummyParallel(ParallelStyle):
-            def __init__(self) -> None:
-                super().__init__(
-                    make_input_replicate_1d,
-                    make_output_replicate_1d,
-                    input_layouts=None,
-                    output_layouts=None,
-                    use_local_output=False,
-                )
-
-        model_tp = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Only support PairwiseParallel for MLP parallelization.",
-        ):
-            _parallelize_mlp(model_tp, device_mesh, DummyParallel())
-
-        with self.assertRaisesRegex(
-            RuntimeError, "More than one nn.Linear needed for a MLP."
-        ):
-            _parallelize_mlp(torch.nn.Linear(10, 5), device_mesh, PairwiseParallel())
 
     @with_comms
     def test_linear_row_wise_parallel(self):
@@ -274,7 +219,7 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_linear_col_wise_parallel(self):
         # test ColwiseParallel
         inp_size = [8, 10]
-        colwise = ColwiseParallel(make_input_replicate_1d, make_output_replicate_1d)
+        colwise = ColwiseParallel(output_layouts=Replicate())
 
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)
