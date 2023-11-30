@@ -29,7 +29,7 @@ def get_optimizer_step(opt, closure=None):
     # see the [Note on graph break] in optimizer.py
     # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
     # as dynamo does not support differentiable optimizers anyway
-    step_fn = opt.step.__wrapped__ if hasattr(opt.step, "__wrapped") else opt.step
+    step_fn = opt.step.__wrapped__ if hasattr(opt.step, "__wrapped__") else opt.step
     if closure is not None:
 
         def fn():
