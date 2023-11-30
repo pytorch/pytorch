@@ -37,10 +37,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         dist_res = torch.addmm(input, mat1, mat2)
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        self.assertEqual(
-            dist_res.redistribute(device_mesh, replica_spec).to_local(),
-            local_res,
-        )
+        self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
     def test_addmm_auto_redistribute(self):
@@ -64,16 +61,14 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertIsInstance(dist_res.placements[0], _Partial)
 
         # test if result is the same as tensor
-        replica_res = dist_res.redistribute(device_mesh, replica_spec)
-        dist_local_res = replica_res.to_local()
+        dist_local_res = dist_res.full_tensor()
         self.assertEqual(local_res, dist_local_res)
 
         # backward checks
         dist_local_res.sum().backward()
         local_res.sum().backward()
         self.assertIsNotNone(mat2.grad)
-        mat2_grad = mat2.grad.redistribute(device_mesh, replica_spec)
-        self.assertEqual(mat2_grad.to_local(), tensor_to_shard0.grad)
+        self.assertEqual(mat2.grad.full_tensor(), tensor_to_shard0.grad)
 
     @with_comms
     def test_mm(self):

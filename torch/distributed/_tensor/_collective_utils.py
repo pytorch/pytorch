@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import torch
 import torch.distributed._tensor.placement_types as placement_types
-from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     all_to_all,
     broadcast,
@@ -170,7 +170,7 @@ def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
 def get_bandwidth_factor(mesh: DeviceMesh) -> List[float]:
     # generate bandwidth factor for intra-host/inter-host communication pattern
     factors = [1.0] * mesh.ndim
-    num_devices_per_host = mesh_resources.num_devices_per_host(mesh.device_type)
+    num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
 
     num_devices = 1
     for mesh_dim in reversed(range(mesh.ndim)):

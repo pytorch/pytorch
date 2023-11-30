@@ -2530,6 +2530,7 @@ class TestSparseCSR(TestCase):
         run_test(4, 5, 4, 10, False)
         run_test(4, 4, 4, 16, True)
 
+    @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 0.01})
@@ -2894,6 +2895,7 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
+    @skipIfTorchDynamo()
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @all_sparse_compressed_layouts()
@@ -3696,6 +3698,185 @@ class TestSparseCompressedTritonKernels(TestCase):
                 for grid in grid_gen:
                     res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
+
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_scatter_mm(self, device, dtype):
+        from torch.sparse._triton_ops import scatter_mm
+        from functools import partial
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+        sizes = [8, 16]
+        for m, k, n in itertools.product(sizes, sizes, sizes):
+            blocks = torch.stack([tensor(m, k), tensor(m, k)])
+            others = torch.stack([tensor(k, n), tensor(k, n)])
+
+            expected = torch.stack([blocks[0] @ others[0] + blocks[1] @ others[0],
+                                    blocks[0] @ others[1],
+                                    blocks[1] @ others[1]])
+
+            indices_data = (
+                'scatter_mm',
+                torch.tensor([0, 2, 3, 4], dtype=torch.int32, device=device),
+                torch.tensor([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=torch.int32, device=device))
+
+            result = scatter_mm(blocks, others, indices_data=indices_data)
+
+            self.assertEqual(result, expected)
+
+            indices_data = (
+                'bsr_strided_mm',
+                torch.tensor([0, 2, 4, 5, 6], dtype=torch.int32, device=device),
+                torch.tensor([0, n, 2 * n * m, 2 * n * m + n], dtype=torch.int32, device=device),
+                torch.tensor([1, 0, 1, 0, 1, 1], dtype=torch.int32, device=device),
+                torch.tensor([0, 2 * k * n, n, 2 * k * n + n, 2 * k * n, 2 * k * n + n],
+                             dtype=torch.int32, device=device),
+                dict(SPLIT_N=2, is_compressed=False, TILE_M=m, TILE_N=n, GROUP_SIZE=1)
+            )
+
+            for bsize in [(), (2,), (3, 4)]:
+                other = tensor(*bsize, 2 * k, 2 * n)
+                expected = torch.cat([
+                    torch.cat([blocks[1], blocks[0]], dim=1),
+                    torch.cat([torch.zeros_like(blocks[0]), blocks[1]], dim=1)], dim=0) @ other
+                result = scatter_mm(blocks, other, indices_data=indices_data)
+                self.assertEqual(result, expected)
+
+    @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_scatter_mm(self, device, dtype, blocksize):
+        import triton
+        from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
+        from functools import partial
+        if isinstance(blocksize, str):
+            blocksize = tuple(map(int, blocksize.split('x')))
+        else:
+            blocksize = (blocksize,) * 2
+        # Note that each value in a non-zero block is in range blocksize * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        sizes = [blocksize[0], 2 * blocksize[0], 4 * blocksize[0]]
+        sizes_K = [blocksize[1], 2 * blocksize[1]]
+
+        for bd, bs, M, K, N, has_zero_row_block in itertools.product(batches, batches[:1], sizes, sizes_K, sizes, (False, True)):
+            bsr_dense = tensor(bs + (M, K))
+            if has_zero_row_block:
+                if M > blocksize[0]:
+                    bsr_dense[:blocksize[0]].zero_()
+                else:
+                    continue
+            bsr = bsr_dense.to_sparse_bsr(blocksize)
+            dense = tensor(bd + (K, N))
+            expected = bsr.to_dense() @ dense
+
+            for indices_format in ('bsr_strided_mm', 'bsr_strided_mm_compressed', 'scatter_mm'):
+                if indices_format in {'bsr_strided_mm', 'bsr_strided_mm_compressed'}:
+                    SPLIT_N_list = [N]
+                    while SPLIT_N_list[-1] > 1:
+                        SPLIT_N_list.append(max(1, SPLIT_N_list[-1] // 2))
+                else:
+                    SPLIT_N_list = [1]
+                for SPLIT_N in SPLIT_N_list:
+                    indices_data = bsr_scatter_mm_indices_data(
+                        bsr, dense, indices_format=indices_format, SPLIT_N=SPLIT_N)
+                    try:
+                        result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
+                    except triton.compiler.OutOfResources:
+                        # ensure that there was at least one succesful test:
+                        assert SPLIT_N < SPLIT_N_list[0]
+                        break
+
+                    self.assertEqual(result, expected)
+        torch.sparse._triton_ops._bsr_scatter_mm_indices_data.cache_clear()
+
+    def test_TensorAsKey(self, device):
+        from torch.sparse._triton_ops import TensorAsKey
+        assertEqualOptions = dict(exact_dtype=True, exact_device=True, exact_layout=True)
+
+        t = torch.tensor([1, 2, 3, 4], dtype=torch.int64, device=device)
+        key = TensorAsKey(t)
+        self.assertTrue(key == TensorAsKey(t))
+        self.assertTrue(key.obj is t)
+
+        t2 = t[:]
+        key2 = TensorAsKey(t2)
+        self.assertTrue(key == key2)
+        self.assertEqual(key2.obj, t, **assertEqualOptions)
+        # deleting object leads to dead key
+        del t2
+        self.assertTrue(key2.obj is None)
+        self.assertTrue(key.obj is t)
+
+        # key with different storage offset and shape:
+        self.assertFalse(key == TensorAsKey(t[1:]))
+
+        # key with different strides:
+        self.assertFalse(key == TensorAsKey(t[::2]))
+
+        # when object dies, make sure that key represents a dead
+        # object as well:
+        del t
+        self.assertTrue(key.obj is None)
+
+        # Storing a tensor as a dict key:
+        d = {}
+        t3 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key3 = TensorAsKey(t3)
+        d[key3] = 123
+        self.assertTrue(d.get(key3) == 123)
+        t3_ = t3[:]
+        self.assertTrue(d.get(TensorAsKey(t3_)) == 123)
+        self.assertTrue(d.get(TensorAsKey(t3.clone())) is None)
+
+        d[TensorAsKey(t3_)] = 567
+        self.assertTrue(d.get(key3) == 567)
+
+        # t3 and t3_ reference the same data, so, the key becomes dead
+        # (that is, its .obj property returns None) until all
+        # references are deleted:
+        del t3
+        self.assertTrue(key3.obj is not None)
+        self.assertTrue(d.get(key3) == 567)
+        del t3_
+        self.assertTrue(key3.obj is None)
+        self.assertTrue(d.get(key3) == 567)
+
+        # Storing a tensor as a dict key and value:
+        d = {}
+        t4 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key4 = TensorAsKey(t4)
+        d[key4] = (t4, 123)
+        self.assertEqual(d.get(key4), (t4, 123), **assertEqualOptions)
+        # when object is deleted, the key represents an alive object
+        # because the object is referenced by the dict item value:
+        del t4
+        self.assertTrue(key4.obj is not None)
+        # This also means that the life time of the tensor is same as
+        # the life time of the corresponding dict item:
+        del d[key4]
+        self.assertTrue(key4.obj is None)
+
+        # Storing a tensor as a dict key and value wrapped with TensorAsKey:
+        d = {}
+        t5 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key5 = TensorAsKey(t5)
+        d[key5] = (key5, 567)
+        self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
+        self.assertTrue(key5.obj is not None)
+        # when object is deleted, it will be dead as the wrapped value
+        # hold the tensor instance as a weakref:
+        del t5
+        self.assertTrue(key5.obj is None)
+        # but key is still valid:
+        self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

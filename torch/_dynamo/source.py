@@ -439,14 +439,14 @@ class ConstantSource(Source):
     def name(self):
         return self.source_name
 
-    def make_guard(self, fn, is_volatile=False):
+    def make_guard(self, fn):
         raise NotImplementedError()
 
 
 @dataclasses.dataclass(frozen=True)
 class NumpyTensorSource(ChainedSource):
     def name(self) -> str:
-        return f"__as_tensor({self.base.name()})"
+        return f"___from_numpy({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()

@@ -1,5 +1,5 @@
 import torch
-from typing import Any, List, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import builtins
 
@@ -28,16 +28,14 @@ _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
 
-class SymInt:
-    pass
-
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Union[_device, str, _int, None]
+Device = Optional[Union[_device, str, _int]]
+del Optional
 
 # Storage protocol implemented by ${Type}StorageBase classes
 

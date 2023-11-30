@@ -1,11 +1,12 @@
 #pragma once
+#include <c10/util/ApproximateClock.h>
 #include <torch/csrc/autograd/profiler.h>
 
 namespace c10d {
 constexpr int kUnsetTime = -1;
 
 inline int64_t current_time_in_nanos() {
-  return torch::profiler::impl::getTime();
+  return c10::getTime();
 }
 
 class TORCH_API Timer {

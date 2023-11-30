@@ -14,8 +14,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -1086,6 +1085,6 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-}}}
+}} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

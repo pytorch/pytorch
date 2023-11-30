@@ -75,7 +75,7 @@ def cond(pred, true_fn, false_fn, operands):
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple[torch.Tensor]): A tuple of inputs to the true/false functions.
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
 
     Example::
 
@@ -108,8 +108,6 @@ def cond(pred, true_fn, false_fn, operands):
 
         - `cond` only supports **inference** right now. Autograd will be supported in the future.
 
-        - The **operands** must be a **tuple of tensors**. Pytree of tensors will be supported in the future.
-
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
@@ -129,11 +127,12 @@ def cond(pred, true_fn, false_fn, operands):
         if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callbale.")
 
-        if not isinstance(operands, (tuple, list)) or any(
-            not isinstance(t, torch.Tensor) for t in operands
+        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                f"Expect operands to be a tuple of Tensors, but got {operands}."
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                f"consists of tensor leaves, but got {operands}."
             )
 
     _validate_input(pred, true_fn, false_fn, operands)
@@ -195,8 +194,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == "output":
             false_outs.extend(node.args)
 
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
@@ -282,8 +281,8 @@ def inner(mode, pred, true_fn, false_fn, operands):
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     with mode:
         true_outs = true_fn(*operands)
-        flat_true_outs, _ = pytree.tree_flatten(true_outs)
-        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+        flat_true_outs = pytree.tree_leaves(true_outs)
+        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
@@ -371,7 +370,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                         return out_storage in input_storages
                     return False
 
-                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
+                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
                     return True
 
         for _, module in gm.named_children():

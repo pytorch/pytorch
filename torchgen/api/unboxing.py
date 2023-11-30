@@ -114,7 +114,7 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
         for i in range(len(args))
     ] + [""]
     binding_list = []
-    for i, arg in enumerate(args):
+    for arg in args:
         # expecting only Argument
         if not isinstance(arg.argument, Argument):
             raise Exception(

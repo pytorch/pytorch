@@ -75,10 +75,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.6.0
+mypy==1.7.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.6.0
+#Pinned versions: 1.7.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -137,10 +137,9 @@ optree==0.9.1
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==9.3.0 ; python_version <= "3.8"
-pillow==10.0.1 ; python_version > "3.8"
+pillow==10.0.1
 #Description:  Python Imaging Library fork
-#Pinned versions:
+#Pinned versions: 10.0.1
 #test that import:
 
 protobuf==3.20.2
@@ -293,3 +292,9 @@ tensorboard==2.13.0
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard
+
+pywavelets==1.4.1
+#Description: This is a requirement of scikit-image, we need to pin
+# it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
+#Pinned versions: 1.4.1
+#test that import:

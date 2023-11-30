@@ -1156,7 +1156,7 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-#if defined __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
     if (M >= 32768) {
       const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
       const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
