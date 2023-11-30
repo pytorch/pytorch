@@ -437,6 +437,9 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+// mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
+// but mean_stub must be defined for CPU as well
+REGISTER_DISPATCH(mean_stub, nullptr);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
@@ -448,9 +451,5 @@ REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
-
-// mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
-// but mean_stub must be defined for CPU as well
-REGISTER_NO_CPU_DISPATCH(mean_stub);
 
 }  // namespace at::native
