@@ -832,29 +832,55 @@ TreeSpec(tuple, None, [*,
     @parametrize(
         "spec",
         [
+            # py_pytree.tree_structure([])
             py_pytree.TreeSpec(list, None, []),
+            # py_pytree.tree_structure(())
             py_pytree.TreeSpec(tuple, None, []),
+            # py_pytree.tree_structure({})
             py_pytree.TreeSpec(dict, [], []),
+            # py_pytree.tree_structure([0])
             py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
+            # py_pytree.tree_structure([0, 1])
             py_pytree.TreeSpec(
-                list, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+                list,
+                None,
+                [
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
+                ],
             ),
+            # py_pytree.tree_structure((0, 1, 2))
             py_pytree.TreeSpec(
                 tuple,
                 None,
-                [py_pytree.LeafSpec(), py_pytree.LeafSpec(), py_pytree.LeafSpec()],
+                [
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
+                ],
             ),
+            # py_pytree.tree_structure({"a": 0, "b": 1, "c": 2})
             py_pytree.TreeSpec(
                 dict,
                 ["a", "b", "c"],
-                [py_pytree.LeafSpec(), py_pytree.LeafSpec(), py_pytree.LeafSpec()],
+                [
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
+                ],
             ),
+            # py_pytree.tree_structure(OrderedDict([("a", (0, 1)), ("b", 2), ("c", {"a": 3, "b": 4, "c": 5})])
             py_pytree.TreeSpec(
                 OrderedDict,
                 ["a", "b", "c"],
                 [
                     py_pytree.TreeSpec(
-                        tuple, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+                        tuple,
+                        None,
+                        [
+                            py_pytree.LeafSpec(),
+                            py_pytree.LeafSpec(),
+                        ],
                     ),
                     py_pytree.LeafSpec(),
                     py_pytree.TreeSpec(
@@ -868,6 +894,7 @@ TreeSpec(tuple, None, [*,
                     ),
                 ],
             ),
+            # py_pytree.tree_structure([(0, 1, [2, 3])])
             py_pytree.TreeSpec(
                 list,
                 None,
@@ -888,6 +915,39 @@ TreeSpec(tuple, None, [*,
                             ),
                         ],
                     ),
+                ],
+            ),
+            # py_pytree.tree_structure(defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}}))
+            py_pytree.TreeSpec(
+                defaultdict,
+                (list, ["a", "b", "c"]),
+                [
+                    py_pytree.TreeSpec(
+                        list,
+                        None,
+                        [
+                            py_pytree.LeafSpec(),
+                            py_pytree.LeafSpec(),
+                        ],
+                    ),
+                    py_pytree.TreeSpec(
+                        list,
+                        None,
+                        [
+                            py_pytree.LeafSpec(),
+                            py_pytree.LeafSpec(),
+                        ],
+                    ),
+                    py_pytree.TreeSpec(dict, [], []),
+                ],
+            ),
+            # py_pytree.tree_structure(torch.return_types.sort((torch.zeros(1), torch.zeros(1))))
+            py_pytree.TreeSpec(
+                py_pytree.structseq,
+                torch.return_types.sort,
+                [
+                    py_pytree.LeafSpec(),
+                    py_pytree.LeafSpec(),
                 ],
             ),
         ],
@@ -1085,6 +1145,12 @@ class TestCxxPytree(TestCase):
                 OrderedDict([("a", (0, 1)), ("b", 2), ("c", {"a": 3, "b": 4, "c": 5})])
             ),
             cxx_pytree.tree_structure([(0, 1, [2, 3])]),
+            cxx_pytree.tree_structure(
+                defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}})
+            ),
+            cxx_pytree.tree_structure(
+                torch.return_types.sort((torch.zeros(1), torch.zeros(1)))
+            ),
         ],
     )
     def test_pytree_serialize(self, spec):
