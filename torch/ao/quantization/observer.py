@@ -214,7 +214,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         **kwargs,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__(dtype=dtype, is_dynamic=is_dynamic, **kwargs)
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
@@ -476,10 +476,10 @@ class MinMaxObserver(UniformQuantizationObserverBase):
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
             )
-        if is_dynamic:
-            raise NotImplementedError(
-                "MinMaxObserver doesn't support dynamic quantization"
-            )
+        # TODO: MinMaxObserver by itself doesn't support dynamic quantization, but
+        # if it's inherited by MovingAverageObserver, and averaging_constant is 1, it
+        # supports dynamic quantization, we may need to better error checking here
+
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -593,7 +593,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
-        is_dynamic=is_dynamic,
+        is_dynamic=False,
         **kwargs
     ) -> None:
         if not is_per_tensor(qscheme):
@@ -876,7 +876,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
-        is_dynamic=is_dynamic,
+        is_dynamic=False,
         **kwargs
     ) -> None:
         if not is_per_channel(qscheme):

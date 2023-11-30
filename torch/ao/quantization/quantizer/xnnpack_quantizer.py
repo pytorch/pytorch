@@ -8,8 +8,10 @@ from typing import Any, Callable, Dict, List, Optional, Set
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
-from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -105,12 +107,13 @@ def get_symmetric_quantization_config(
     is_qat: bool = False,
     is_dynamic: bool = False,
 ):
-
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
-            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(averaging_constant=1)
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(
+                averaging_constant=1
+            )
             extra_args["observer"] = dynamic_quant_observer
         else:
             act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
@@ -137,6 +140,7 @@ def get_symmetric_quantization_config(
         MinMaxObserver
     )
     if is_qat:
+        # TODO: qat + per channel?
         weight_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
     elif is_per_channel:
         weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver

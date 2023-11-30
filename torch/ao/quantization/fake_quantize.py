@@ -166,14 +166,13 @@ class FakeQuantize(FakeQuantizeBase):
             assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
             assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
+        observer_kwargs["is_dynamic"] = is_dynamic
         self.activation_post_process = observer(**observer_kwargs)
         # TODO: keeping self.quant_min/max for BC; remove after a couple releases
         # Users should use self.activation_post_process.quant_min
         self.quant_min = self.activation_post_process.quant_min
         self.quant_max = self.activation_post_process.quant_max
-        # TODO: cleanup
-        is_dynamic = is_dynamic or observer_kwargs.get("is_dynamic", False)
-        self.is_dynamic = is_dynamic
+        self.is_dynamic = self.activation_post_process.is_dynamic
         if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
@@ -380,8 +379,9 @@ Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
 """
 
-default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, is_dynamic=True,
-                                                    dtype=torch.quint8, averaging_constant=1)
+default_dynamic_fake_quant = FakeQuantize.with_args(
+    observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, is_dynamic=True,
+    dtype=torch.quint8, averaging_constant=1)
 """
 Default dynamic fake_quant for activations.
 """

@@ -440,7 +440,9 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_qat_dynamic_linear(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(
-            is_per_channel=True, is_dynamic=True, is_qat=True,
+            is_per_channel=True,
+            is_dynamic=True,
+            is_qat=True,
         )
         quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
