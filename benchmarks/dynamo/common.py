@@ -1855,7 +1855,6 @@ class BenchmarkRunner:
     def skip_models_due_to_control_flow(self):
         return set()
 
-    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -2317,20 +2316,10 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    return "pass_due_to_skip"
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    return "fail_to_run"
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                return "fail_to_run"
 
             def dump_max_mean_values(tol, ref, res):
                 if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
@@ -3685,8 +3674,10 @@ def run(runner, args, original_dir=None):
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
                 write_csv("timeout")
-            except subprocess.SubprocessError:
-                print("ERROR", file=sys.stderr)
+            except subprocess.CalledProcessError as e:
+                print("Run failed with return code: ", e.returncode, file=sys.stderr)
+                print("Output: ", e.output, file=sys.stderr)
+                print("Error: ", e.stderr, file=sys.stderr)
                 write_csv("infra_error")
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
