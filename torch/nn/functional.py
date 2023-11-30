@@ -5010,7 +5010,7 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
     scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.

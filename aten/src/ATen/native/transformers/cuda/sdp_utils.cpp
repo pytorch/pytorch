@@ -248,7 +248,7 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
 }
 
 
-TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
+bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
@@ -286,7 +286,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 }
 
-TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
