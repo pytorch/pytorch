@@ -1296,7 +1296,7 @@ class TestOptim(TestCase):
         buffer.seek(0)
         loaded_dict = torch.load(buffer)
 
-        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim = torch.optim.Adam(model.parameters())
         new_optim.load_state_dict(loaded_dict)
 
         self.assertTrue(new_optim.param_groups[0]['decoupled_weight_decay'])
