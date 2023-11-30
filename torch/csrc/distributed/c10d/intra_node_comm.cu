@@ -15,21 +15,20 @@ static constexpr uint32_t kNumelPerThread =
 ;
 static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
 
-#define DEVICE_INLINE __device__ inline __attribute__((always_inline))
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+using __nv_bfloat162 = uint16_t;
+#endif
 
 struct __align__(16) bf16x8 {
   __nv_bfloat162 vals[4];
 };
 
+#define DEVICE_INLINE __device__ inline __attribute__((always_inline))
+
 DEVICE_INLINE __nv_bfloat162
 bf16hadd2(const __nv_bfloat162 x, const __nv_bfloat162 y) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
-  float fxl, fxh, fyl, fyh;
-  fxl = __low2float(x);
-  fxh = __high2float(x);
-  fyl = __low2float(y);
-  fyh = __high2float(y);
-  return __floats2bfloat162_rn(fxl + fyl, fxh + fyh);
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
 #else
   return __hadd2(x, y);
 #endif
@@ -47,15 +46,23 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
 // releaseSignal and acquireSignal also enforces memory ordering
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-synchronization-domains
 DEVICE_INLINE void releaseSignal(uint32_t* addr) {
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
+#else
   atomicAdd_system(addr, 1);
+#endif
 }
 
 DEVICE_INLINE void acquireSignal(uint32_t* addr) {
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
+#else
   volatile uint32_t* signal = addr;
   uint32_t val;
   do {
     val = *signal;
   } while (val == 0 || atomicCAS_system(addr, val, val - 1) != val);
+#endif
 }
 
 #define LOAD_16(a, b) \
@@ -358,7 +365,7 @@ static auto castArr(std::array<void*, kMaxDevices> arr) {
 }
 
 bool isIntraNodeCommSupported() {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   return false;
 #else
   return true;
