@@ -324,6 +324,25 @@ class TestMHADeviceType(TestCase):
             average_attn_weights=False,
         )
 
+    @torch.no_grad()
+    def test_multihead_attention_fastpath_for_all_batchfirst(self) -> None:
+        # set up model to ensure fast path
+        mha = torch.nn.MultiheadAttention(100, 2, batch_first=True)
+        mha.eval()
+
+        # query, key, val needs to be the same Tensor for fast path
+        query = key = value = torch.randn(5, 2, 100)
+        attn_out_bf_fast_path, attn_weights_bf_fast_path = mha.forward(query, key, value)
+
+        # test fast path with batch_first=False
+        query = key = value = query.transpose(1, 0)  # transform for batch_first = False
+        self.assertEqual(query.shape, (2, 5, 100))
+        mha.batch_first = False
+        self.assertFalse(mha.batch_first)
+        attn_out_no_bf_fast_path, attn_weights_no_bf_fast_path = mha.forward(query, key, value)
+        attn_out_no_bf_fast_path = attn_out_no_bf_fast_path.transpose(1, 0)  # transform output
+        self.assertEqual(attn_out_no_bf_fast_path.shape, (5, 2, 100))
+        self.assertTrue(torch.equal(attn_out_bf_fast_path, attn_out_no_bf_fast_path))
 
 instantiate_device_type_tests(TestMHADeviceType, globals())
 

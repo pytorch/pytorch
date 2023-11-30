@@ -331,6 +331,40 @@ def sdp_kernel(
         enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
 
+_ATFP_state = {
+    "enable_nested_tensor": True,
+    "enable_encoder": True,
+    "enable_mha": True,
+    "enable_math": True,
+}
+
+
+def _get_ATFP_state(key: str):
+    if key == "*":
+        return _ATFP_state
+    else:
+        return _ATFP_state[key]
+
+
+@contextlib.contextmanager
+def ATFPbackend(
+    enable_nested_tensor: bool = True,
+    enable_encoder: bool = True,
+    enable_mha: bool = True,
+    enable_math: bool = True
+):
+    global _ATFP_state
+    stacked = _ATFP_state
+    try:
+        _ATFP_state = {
+            "enable_nested_tensor": enable_nested_tensor,
+            "enable_encoder": enable_encoder,
+            "enable_mha": enable_mha,
+            "enable_math": enable_math,
+        }
+        yield
+    finally:
+        _ATFP_state = stacked
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()

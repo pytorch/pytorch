@@ -267,13 +267,15 @@ class TransformerEncoder(Module):
 
         enc_layer = "encoder_layer"
         why_not_sparsity_fast_path = ''
-        if not isinstance(encoder_layer, torch.nn.TransformerEncoderLayer):
+        if not _get_ATFP_state("enable_nested_tensor"):
+            why_not_sparsity_fast_path = "AT FastPath backend manager for enable_nested_tensor is False"
+        elif not isinstance(encoder_layer, torch.nn.TransformerEncoderLayer):
             why_not_sparsity_fast_path = f"{enc_layer} was not TransformerEncoderLayer"
         elif encoder_layer.norm_first :
             why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
-        elif not encoder_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = (f"{enc_layer}.self_attn.batch_first was not True" +
-                                          "(use batch_first for better inference performance)")
+        # elif not encoder_layer.self_attn.batch_first:
+        #     why_not_sparsity_fast_path = (f"{enc_layer}.self_attn.batch_first was not True" +
+        #                                   "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
         elif not encoder_layer.activation_relu_or_gelu:
@@ -334,7 +336,12 @@ class TransformerEncoder(Module):
         src_key_padding_mask_for_layers = src_key_padding_mask
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
-        batch_first = first_layer.self_attn.batch_first
+        batch_first = first_layer.self_attn.batch_first or src.is_nested
+        if not batch_first:
+            src_bf = src.transpose(1, 0)
+        else:
+            src_bf = src
+
         if not atfp_nested_tensor_enabled():
             why_not_sparsity_fast_path = "AT FastPath backend manager for enable_nested_tensor is False"
         elif not hasattr(self, "use_nested_tensor"):
@@ -347,11 +354,11 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
-        elif (((not hasattr(self, "mask_check")) or self.mask_check)
-                and not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
-            why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
         elif output.is_nested:
             why_not_sparsity_fast_path = "NestedTensor input is not supported"
+        elif (((not hasattr(self, "mask_check")) or self.mask_check)
+                and not torch._nested_tensor_from_mask_left_aligned(src_bf, src_key_padding_mask.logical_not())):
+            why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
         elif mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
         elif torch.is_autocast_enabled():
@@ -382,7 +389,9 @@ class TransformerEncoder(Module):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
 
+
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
+                output = src_bf
                 convert_to_nested = True
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
@@ -394,7 +403,9 @@ class TransformerEncoder(Module):
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = output.to_padded_tensor(0., src.size())
+            output = output.to_padded_tensor(0., src_bf.size())
+            if not batch_first:
+                output = output.transpose(1, 0)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -509,6 +520,7 @@ class TransformerEncoderLayer(Module):
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
+            Nested Tensor inputs always use batch first ordering, and the setting is ignored for such inputs.
         norm_first: if ``True``, layer norm is done prior to attention and feedforward
             operations, respectively. Otherwise it's done after. Default: ``False`` (after).
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
@@ -532,7 +544,7 @@ class TransformerEncoderLayer(Module):
         - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
           argument ``requires_grad``
         - training is disabled (using ``.eval()``)
-        - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
+        - The input is batched (i.e., ``src.dim() == 3``)
         - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
         - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
         - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask``
@@ -643,8 +655,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
             why_not_sparsity_fast_path = "training is enabled"
-        elif not self.self_attn.batch_first :
-            why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+        # elif not batch_first:
+        #     why_not_sparsity_fast_path = "self_attn.batch_first was not True"
         elif not self.self_attn._qkv_same_embed_dim :
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
@@ -687,8 +699,12 @@ class TransformerEncoderLayer(Module):
                                               "input/output projection weights or biases requires_grad")
 
             if not why_not_sparsity_fast_path:
+                if not batch_first:
+                    src = src.transpose(1, 0)
                 merged_mask, mask_type = self.self_attn.merge_masks(src_mask, src_key_padding_mask, src)
-                return torch._transformer_encoder_layer_fwd(
+                assert False, "because" + why_not_sparsity_fast_path + " and " + f"{get_ATFP_state('*')}"
+
+                result = torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
                     self.self_attn.num_heads,
@@ -710,6 +726,10 @@ class TransformerEncoderLayer(Module):
                     merged_mask,
                     mask_type,
                 )
+                if batch_first:
+                    return result
+                else:
+                    return result.transpose(1, 0)
 
         assert atfp_math_enabled(), "TransformerEncoderLayer: Fallback math implementation not enabled"
 
