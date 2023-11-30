@@ -340,7 +340,7 @@ def _broadcast_processed_state(
     if fsdp_state.rank == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
-            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),
+            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
@@ -2069,13 +2069,13 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
 
 @no_type_check
 def _set_optim_use_dtensor(
-    module: nn.Module,
+    fsdp_state: _FSDPState,
     state_dict_settings: StateDictSettings,
 ) -> None:
     # If device_mesh is passed in when initalizing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
     # has to be set to SHARDED_STATE_DICT.
-    if getattr(module, "device_mesh", None):
+    if getattr(fsdp_state, "_device_mesh", None):
         state_dict_type = state_dict_settings.state_dict_type
         if state_dict_type == StateDictType.LOCAL_STATE_DICT:
             raise RuntimeError(
