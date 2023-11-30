@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -921,6 +921,7 @@ def draw_graph(
     clear_meta: bool = True,
     prog: Union[str, List[str]] = None,
     parse_stack_trace: bool = False,
+    dot_graph_shape: Optional[str] = None,
 ) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
@@ -931,7 +932,12 @@ def draw_graph(
     if not ext:
         ext = ".svg"
     print(f"Writing FX graph to file: {base}{ext}")
-    g = graph_drawer.FxGraphDrawer(traced, figname, parse_stack_trace=parse_stack_trace)
+    g = graph_drawer.FxGraphDrawer(
+        traced,
+        figname,
+        parse_stack_trace=parse_stack_trace,
+        dot_graph_shape=dot_graph_shape,
+    )
     x = g.get_main_dot_graph()
     write_method = getattr(x, "write_" + ext.lstrip("."))
     fname = f"{base}{ext}"
@@ -941,6 +947,11 @@ def draw_graph(
         write_method(fname, prog=prog)
 
 
-def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
-    draw_graph(graph, file_name)
+def draw_joint_graph(
+    graph: torch.fx.GraphModule,
+    joint_inputs,
+    file_name: str = "full_graph.png",
+    dot_graph_shape: Optional[str] = None,
+):
+    draw_graph(graph, file_name, dot_graph_shape=dot_graph_shape)
     return default_partition(graph, joint_inputs)
