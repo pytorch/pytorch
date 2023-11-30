@@ -670,7 +670,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_decorator(self):
         def autocast_func(orig_func):
-            @torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
@@ -691,7 +691,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(a_float32, b_float32)
         self.assertTrue(same(ref, res))
-        self.assertTrue(res.dtype == torch.bfloat16)
+        self.assertTrue(res.dtype == torch.float16)
 
     def test_generic_context_manager(self):
         def fn(x):
