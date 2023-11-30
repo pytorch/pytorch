@@ -201,6 +201,15 @@ class FakeTensorTest(TestCase):
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
 
+    def test_batch_tensor(self):
+        x = torch.rand((3, 4, 5))
+        b = torch._C._functorch._add_batch_dim(x, 0, 0)
+        mode = FakeTensorMode()
+        fake_b = mode.from_tensor(b)
+        self.assertEqual(fake_b.shape, (4, 5))
+        self.assertEqual(fake_b.device, b.device)
+        self.assertTrue(isinstance(fake_b, FakeTensor))
+
     def test_constructor(self):
         with FakeTensorMode():
             x = torch.rand([4, 4], device="cpu")

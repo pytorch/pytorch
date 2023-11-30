@@ -7,6 +7,7 @@ import torch
 from torch._C._functorch import (
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
+    _add_batch_dim,
     current_level,
     is_batchedtensor,
     peek_interpreter_stack,
@@ -307,6 +308,7 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                 elif is_batchedtensor(t):
+                    # Wraps a BatchedTensor in a FakeTensor
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
                         t, source
                     )

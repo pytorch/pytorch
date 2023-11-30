@@ -1719,6 +1719,7 @@ def forward(self, arg0_1):
 
         if nClosure:
             c = torch.ones(5, dtype=torch.int64) + 5
+
             def fn(x):
                 return torch.cond(
                     pred=torch.tensor([True]),
