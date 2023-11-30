@@ -508,14 +508,16 @@ class SubclassCreationMeta:
     #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: torch.Tensor
     # meta and inner_keys are produced by the subclass's __tensor_flatten__.
-    # We need to keep them around to plumb them into __tensor_unflatten__.
+    # We need to keep them around along with outer_size to plumb them into __tensor_unflatten__.
     meta: Any
     inner_keys: List[any]
+    outer_size: Tuple[int]
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[self.flat_tensor_start_idx:self.flat_tensor_start_idx + self.arg_count]
         assert len(curr_args) == len(self.inner_keys), f'inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}'
-        out = type(self.original_subclass).__tensor_unflatten__(dict(zip(self.inner_keys, curr_args)), self.meta)
+        out = type(self.original_subclass).__tensor_unflatten__(
+            dict(zip(self.inner_keys, curr_args)), self.meta, self.outer_size)
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
@@ -882,7 +884,7 @@ def to_fun(t):
             # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
-            out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
+            out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t), t.shape)
             torch._mirror_autograd_meta_to(t, out)
             return out
         else:
@@ -906,7 +908,7 @@ def from_fun(t):
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
-        out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
+        out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t), t.shape)
         torch._mirror_autograd_meta_to(t, out)
         return out
 
@@ -1032,6 +1034,7 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
                 original_subclass=a,
                 meta=meta,
                 inner_keys=attrs,
+                outer_size=a.shape,
             ))
         else:
             infos.append(idx)
@@ -1404,7 +1407,7 @@ from a multi-output view call")
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
         def view_avoid_dupes_with_primals(t):
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
-                return transform_subclass(t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t))
+                return transform_subclass(t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t), t.shape)
             if isinstance(t, Tensor):
                 return t.view(t.shape)
             return t

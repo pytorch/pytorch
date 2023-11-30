@@ -641,7 +641,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 )
 
             @staticmethod
-            def __tensor_unflatten__(tensors, metadatas):
+            def __tensor_unflatten__(tensors, metadatas, outer_size):
                 return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
 
             @classmethod
