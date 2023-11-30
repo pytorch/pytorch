@@ -1057,21 +1057,6 @@ class VariableBuilder:
             )
         )
 
-        # install guards for subclass inner tensors
-        if is_traceable_wrapper_subclass(value):
-            attrs, _ = value.__tensor_flatten__()
-            for attr in attrs:
-                inner_value = getattr(value, attr)
-                inner_source = AttrSource(self.source, attr)
-                install_guard(
-                    inner_source.make_guard(
-                        functools.partial(
-                            GuardBuilder.TENSOR_MATCH,
-                            value=TensorWeakRef(inner_value),
-                        )
-                    )
-                )
-
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
@@ -1806,29 +1791,12 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-
-        # list of (fake_tensor, real_tensor, source, symbolic_context)
-        tracking_info = [(fake_e, e, source, symbolic_context)]
-        if is_traceable_wrapper_subclass(fake_e):
-            attrs, _ = fake_e.__tensor_flatten__()
-            for attr in attrs:
-                tracking_info.append(
-                    (
-                        getattr(fake_e, attr),
-                        getattr(e, attr),
-                        AttrSource(source, attr),
-                        symbolic_context.inner_contexts[attr],
-                    )
-                )
-
-        for fake, real, source, symbolic_context in tracking_info:
-            tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
-            tx.output.tracked_fakes_id_to_source[id(real)].append(source)
-            tx.output.tensor_weakref_to_sizes_strides[real] = {
-                "size": fake.size(),
-                "stride": fake.stride(),
-            }
-
+        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, symbolic_context))
+        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+        tx.output.tensor_weakref_to_sizes_strides[e] = {
+            "size": fake_e.size(),
+            "stride": fake_e.stride(),
+        }
         return fake_e
     else:
         return e

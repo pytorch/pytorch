@@ -257,13 +257,12 @@ class MetaConverter:
                 inner_strides,
                 inner_storage_offset,
             ) = sym_sizes_strides_storage_offset(inner_t, inner_src, symbolic_context)
-            # NB: Interesting as_strided() hack to make sure storage offset is set correctly.
             return torch.empty_strided(
                 inner_sizes,
                 inner_strides,
                 dtype=inner_t.dtype,
                 device="meta",
-            ).as_strided(inner_sizes, inner_strides, inner_storage_offset)
+            )
 
         # see expired-storages
         self.check_expired_count += 1
@@ -491,7 +490,6 @@ class MetaConverter:
                             ),
                             outer_size=sizes,
                             outer_stride=strides,
-                            outer_storage_offset=storage_offset,
                         )
                     else:
                         r = callback(

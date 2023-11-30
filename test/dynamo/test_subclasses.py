@@ -63,6 +63,52 @@ class SigmoidToExpSubclass(torch.Tensor):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+# Wrapper subclass with two inner tensors: data and scale
+# data has same shape as outer, and scale has single dim size
+class ScaledTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+        self._data = data
+        self._scale = scale
+
+    def __tensor_flatten__(self):
+        ctx = {}
+        return ["_data", "_scale"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        assert len(inner_tensors) == 2
+        return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        scaled_tensor = args[0]
+        out = func(scaled_tensor._data, *args[1:], **kwargs)
+        return ScaledTensor(out, scaled_tensor._scale)
+
+    def __repr__(self):
+        return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
+
+
+def func(a):
+    return a.sin()
+
+
 class EagerRecordGraphAndInputs:
     def __init__(self):
         self.graphs = []
@@ -89,7 +135,7 @@ def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
     compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
     compiled_f(*inputs1)
     compiled_f(*inputs2)
-    return compile_count[0] == 2
+    return compile_count[0] > 1
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
@@ -623,9 +669,7 @@ class GraphModule(torch.nn.Module):
                 return ["inner_elem"], None
 
             @staticmethod
-            def __tensor_unflatten__(
-                inner_tensors, _, outer_size, outer_stride, outer_storage_offset
-            ):
+            def __tensor_unflatten__(inner_tensors, _, outer_size, outer_stride):
                 return DoubleSizeMaybeAddGeThreeTensor(inner_tensors["inner_elem"])
 
             def __repr__(self):
@@ -705,51 +749,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
 
-    def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
-        class ScaledTensor(torch.Tensor):
-            def __new__(
-                cls,
-                data: torch.Tensor,
-                scale: torch.Tensor,
-            ):
-                return torch.Tensor._make_wrapper_subclass(
-                    cls,
-                    data.size(),
-                    strides=data.stride(),
-                    storage_offset=data.storage_offset(),
-                    dtype=data.dtype,
-                    layout=data.layout,
-                    requires_grad=data.requires_grad,
-                    device=data.device,
-                )
-
-            def __init__(self, data: torch.Tensor, scale: torch.Tensor):
-                self._data = data
-                self._scale = scale
-
-            def __tensor_flatten__(self):
-                ctx = {}
-                return ["_data", "_scale"], ctx
-
-            @staticmethod
-            def __tensor_unflatten__(
-                inner_tensors, metadata, outer_size, outer_stride, outer_storage_offset
-            ):
-                assert len(inner_tensors) == 2
-                return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs=None):
-                scaled_tensor = args[0]
-                out = func(scaled_tensor._data, *args[1:], **kwargs)
-                return ScaledTensor(out, scaled_tensor._scale)
-
-            def __repr__(self):
-                return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
-
-        def func(a):
-            return a.sin()
-
+    def test_wrapper_subclass_with_same_sized_inner_tensor(self):
         # shouldn't recompile for different sizes when dynamic=True
         sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
         sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(7))
@@ -760,11 +760,6 @@ class GraphModule(torch.nn.Module):
         sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
         self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
 
-        # should recompile for different scale size when dynamic=False
-        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
-        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
-        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
-
         # avoid recompile using manual mark_dynamic() for different data size
         sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
         # NB: mark_dynamic() on outer tensor should translate to inner tensors of the same size
@@ -772,6 +767,15 @@ class GraphModule(torch.nn.Module):
         torch._dynamo.mark_dynamic(sub1, 1)
         sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
         self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+    # Broken because we don't guard properly on inner tensors yet.
+    # TODO: Enable this when we do
+    @unittest.expectedFailure
+    def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
+        # should recompile for different scale size when dynamic=False
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
+        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
 
         # still recompiles using manual mark_dynamic() on outer for different scale size
         sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
