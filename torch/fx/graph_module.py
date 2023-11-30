@@ -157,7 +157,7 @@ class _CodeOnlyModule(torch.nn.Module):
         self.__dict__ = body
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
+def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=None) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -194,7 +194,9 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    gm = GraphModule(com, graph, class_name=graphmodule_cls_name)
+    if graph_module_cls is None:
+        graph_module_cls = GraphModule
+    gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
