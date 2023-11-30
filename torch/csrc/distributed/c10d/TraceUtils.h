@@ -380,9 +380,6 @@ struct NCCLTraceBuffer {
         torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
     std::lock_guard<std::mutex> guard(mutex_);
 
-    static c10::ApproximateClockToUnixTimeConverter clock_converter;
-    static auto tsc_to_ns = clock_converter.makeConverter();
-
     auto te = Entry{
         id_,
         pg_id,
