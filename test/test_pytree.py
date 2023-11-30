@@ -343,7 +343,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda ddct: py_pytree.TreeSpec(
                         defaultdict,
-                        (ddct.default_factory, list(ddct.keys())),
+                        [ddct.default_factory, list(ddct.keys())],
                         [py_pytree.LeafSpec() for _ in ddct.values()],
                     ),
                 ),
@@ -744,7 +744,7 @@ TreeSpec(tuple, None, [*,
             # py_pytree.tree_structure(defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}}))
             py_pytree.TreeSpec(
                 defaultdict,
-                (list, ["a", "b", "c"]),
+                [list, ["a", "b", "c"]],
                 [
                     py_pytree.TreeSpec(
                         list,
@@ -768,9 +768,17 @@ TreeSpec(tuple, None, [*,
         ],
     )
     def test_pytree_serialize(self, spec):
+        # Ensure that the spec is valid
+        self.assertEqual(
+            spec,
+            py_pytree.tree_structure(
+                py_pytree.tree_unflatten([0] * spec.num_leaves, spec)
+            ),
+        )
+
         serialized_spec = py_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, str))
-        self.assertTrue(spec == py_pytree.treespec_loads(serialized_spec))
+        self.assertIsInstance(serialized_spec, str)
+        self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
@@ -886,6 +894,7 @@ TreeSpec(tuple, None, [*,
             py_pytree.treespec_loads(bad_protocol_serialized_spec)
 
     def test_saved_serialized(self):
+        # py_pytree.tree_structure(OrderedDict([(1, (0, 1)), (2, 2), (3, {4: 3, 5: 4, 6: 5})]))
         complicated_spec = py_pytree.TreeSpec(
             OrderedDict,
             [1, 2, 3],
@@ -904,6 +913,13 @@ TreeSpec(tuple, None, [*,
                     ],
                 ),
             ],
+        )
+        # Ensure that the spec is valid
+        self.assertEqual(
+            complicated_spec,
+            py_pytree.tree_structure(
+                py_pytree.tree_unflatten([0] * complicated_spec.num_leaves, complicated_spec)
+            ),
         )
 
         serialized_spec = py_pytree.treespec_dumps(complicated_spec)
@@ -966,9 +982,16 @@ class TestCxxPytree(TestCase):
         ],
     )
     def test_pytree_serialize(self, spec):
+        self.assertEqual(
+            spec,
+            cxx_pytree.tree_structure(
+                cxx_pytree.tree_unflatten([0] * spec.num_leaves, spec)
+            ),
+        )
+
         serialized_spec = cxx_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, str))
-        self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
+        self.assertIsInstance(serialized_spec, str)
+        self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
