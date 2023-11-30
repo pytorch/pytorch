@@ -71,7 +71,7 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(python_type):
+def convert_arg_type(python_type: str):
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
     if python_type == "Tensor":
@@ -95,7 +95,7 @@ def convert_arg_type(python_type):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(python_type):
+def convert_return_type(python_type: str):
     # TODO: support alias
     python_to_cpp = {
         "Tensor": "at::Tensor",
@@ -113,12 +113,12 @@ def get_cpp_op_schema(kernel):
     arg_names = [x.name for x in kernel._schema.arguments]
     returns = [repr(x.real_type) for x in kernel._schema.returns]
 
-    num_retunrs = len(returns)
-    assert num_retunrs > 0, "must have at least one return value"
+    num_returns = len(returns)
+    assert num_returns > 0, "must have at least one return value"
 
-    if num_retunrs == 1:
+    if num_returns == 1:
         cpp_return_value = convert_return_type(returns[0])
-    elif num_retunrs > 1:
+    elif num_returns > 1:
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
