@@ -877,7 +877,7 @@ exclude_patterns = [
     '**/fb/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
-    'test/ao/sparcity/**',  # should be run through test/test_ao_sparsity.py
+    'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/bottleneck_test/test_args.py',
     'test/bottleneck_test/test_cuda.py',
     'test/distributed/_shard/test_sharder.py',
