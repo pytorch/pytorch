@@ -89,7 +89,7 @@ def _log_modified_bessel_fn(x, order=0):
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
     while not done.all():
-        u = torch.rand((3,) + x.shape, dtype=torch.double, device=loc.device)
+        u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()
         z = torch.cos(math.pi * u1)
         f = (1 + proposal_r * z) / (proposal_r + z)
@@ -124,20 +124,9 @@ class VonMises(Distribution):
     has_rsample = False
 
     def __init__(self, loc, concentration, validate_args=None):
-        self.dtype = loc.dtype
-        self.loc, self.concentration = broadcast_all(loc.to(torch.double), concentration.to(torch.double))
+        self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
-
-        # Parameters for sampling
-        if self.concentration < 1e-5:
-            # second order Taylor expansion around kappa = 0
-            self._proposal_r = 1 / self.concentration + self.concentration
-        else:
-            tau = 1 + (1 + 4 * self.concentration**2).sqrt()
-            rho = (tau - (2 * tau).sqrt()) / (2 * self.concentration)
-            self._proposal_r = (1 + rho**2) / (2 * rho)
-
         super().__init__(batch_shape, event_shape, validate_args)
 
     def log_prob(self, value):
@@ -149,7 +138,25 @@ class VonMises(Distribution):
             - math.log(2 * math.pi)
             - _log_modified_bessel_fn(self.concentration, order=0)
         )
-        return log_prob.to(self.dtype)
+        return log_prob
+
+    @lazy_property
+    def _loc(self):
+        return self.loc.to(torch.double)
+
+    @lazy_property
+    def _concentration(self):
+        return self.concentration.to(torch.double)
+
+    @lazy_property
+    def _proposal_r(self):
+        kappa = self._concentration
+        tau = 1 + (1 + 4 * kappa**2).sqrt()
+        rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
+        _proposal_r = (1 + rho**2) / (2 * rho)
+        # second order Taylor expansion around 0 for small kappa
+        _proposal_r_taylor = 1 / kappa + kappa
+        return torch.where(kappa < 1e-5, _proposal_r_taylor, _proposal_r)
 
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
@@ -159,8 +166,8 @@ class VonMises(Distribution):
         "Efficient simulation of the von Mises distribution." Applied Statistics (1979): 152-157.
         """
         shape = self._extended_shape(sample_shape)
-        x = torch.empty(shape, dtype=torch.double, device=self.loc.device)
-        return _rejection_sample(self.loc, self.concentration, self._proposal_r, x).to(self.dtype)
+        x = torch.empty(shape, dtype=self._loc.dtype, device=self.loc.device)
+        return _rejection_sample(self._loc, self._concentration, self._proposal_r, x).to(self.loc.dtype)
 
     def expand(self, batch_shape):
         try:
