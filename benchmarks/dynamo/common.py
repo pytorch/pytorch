@@ -3516,6 +3516,7 @@ def run(runner, args, original_dir=None):
                     torch.Tensor, lambda x: x.to(device=device), example_inputs
                 )
             else:
+                name = model_name
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
