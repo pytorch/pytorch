@@ -1062,22 +1062,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         self._qlinear_cpu_test_helper(int8_mixed_bf16=True)
 
-    def _qlinear_unary_cpu_test_helper(self, int8_mixed_bf16=False):
+    def _qlinear_unary_cpu_test_helper(
+        self, postop, post_op_algorithm="", int8_mixed_bf16=False
+    ):
         class M(torch.nn.Module):
-            def __init__(self, use_bias):
+            def __init__(self, use_bias, post_op_algo):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
-                self.unary_fn = torch.nn.ReLU()
+                if postop == torch.nn.GELU:
+                    self.unary_fn = postop(approximate=post_op_algo)
+                else:
+                    self.unary_fn = postop
+
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
-                self.unary_fn2 = torch.nn.ReLU()
+                if postop == torch.nn.GELU:
+                    self.unary_fn2 = postop(approximate=post_op_algo)
+                else:
+                    self.unary_fn2 = postop
 
             def forward(self, x):
                 tmp = self.unary_fn(self.linear(x))
                 return self.unary_fn2(self.linear2(tmp))
 
         bias_list = [True, False]
-        for bias in bias_list:
-            mod = M(bias).eval()
+        cases = itertools.product(bias_list, post_op_algorithm)
+        for bias, post_op_algo in cases:
+            mod = M(bias, post_op_algo).eval()
             v = torch.randn((2, 4))
 
             def matcher_check_fn():
@@ -1103,7 +1113,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper()
+        self._qlinear_unary_cpu_test_helper(postop=torch.nn.ReLU())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_gelu_cpu(self):
+        r"""
+        This testcase will quantize a Linear->GELU pattern.
+        """
+        self._qlinear_unary_cpu_test_helper(
+            postop=torch.nn.GELU(), post_op_algorithm=["none", "tanh"]
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
