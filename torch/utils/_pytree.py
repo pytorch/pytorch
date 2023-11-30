@@ -471,7 +471,7 @@ def _structseq_flatten(seq: structseq[Any]) -> Tuple[List[Any], Context]:
 
 
 def _structseq_unflatten(values: Iterable[Any], context: Context) -> structseq[Any]:
-    return context(values)
+    return context(values)  # type: ignore[no-any-return]
 
 
 def _structseq_serialize(context: Context) -> DumpableContext:
