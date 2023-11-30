@@ -1,4 +1,9 @@
+import functools
+import unittest
+
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
     import triton
@@ -20,6 +25,27 @@ if HAS_CUDA:
         x = tl.load(in_ptr0 + offsets, mask=mask)
         y = tl.load(in_ptr1 + offsets, mask=mask)
         output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def add_kernel_with_optional_param(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        ARGS_PASSED: "tl.constexpr",
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        if ARGS_PASSED == "two":
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+        else:
+            output = x
         tl.store(out_ptr + offsets, output, mask=mask)
 
     @triton.autotune(
@@ -129,14 +155,3 @@ if HAS_CUDA:
             mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
         x = tl.load(in_ptr0 + offsets, mask=mask)
         tl.store(out_ptr + offsets, x, mask=mask)
-
-else:
-    triton = None
-    tl = None
-    add_kernel = None
-    add_kernel_autotuned = None
-    add_kernel_2d_autotuned = None
-    mul2_kernel = None
-    mul2_inplace_kernel = None
-    zero_negs = None
-    indirection_kernel = None

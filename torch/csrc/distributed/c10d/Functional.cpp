@@ -3,7 +3,6 @@
 #include <shared_mutex>
 
 #include <ATen/ATen.h>
-#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/function.h>
@@ -30,9 +29,11 @@ class WorkRegistry {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
-    if (it == registry_.end()) {
-      return nullptr;
-    }
+    TORCH_CHECK(
+        it != registry_.end(),
+        "No pending collective is associated with the tensor storage. "
+        "This typically means that the tensor is not a collective output, "
+        "or the tensor has already been waited on.");
     auto work = it->second;
     registry_.erase(it);
     return work;
@@ -66,11 +67,10 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
-at::Tensor& all_reduce_(
-    at::Tensor& input,
-    std::string reduce_op,
-    // c10::string_view group_name,
-    std::string group_name) {
+at::Tensor all_reduce_(
+    at::Tensor input,
+    const std::string& reduce_op,
+    const std::string& group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -83,38 +83,16 @@ at::Tensor& all_reduce_(
 
 at::Tensor all_reduce(
     const at::Tensor& input,
-    std::string reduce_op,
-    std::string group_name) {
+    const std::string& reduce_op,
+    const std::string& group_name) {
   auto output = input.clone();
   return all_reduce_(output, reduce_op, group_name);
 }
 
-at::Tensor& all_reduce__functionalization_glue(
-    at::Tensor& input,
-    std::string reduce_op,
-    std::string group_name) {
-  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(input));
-  at::functionalization::impl::sync(input);
-  auto input_ = at::functionalization::impl::from_functional_tensor(input);
-  static auto op_handle =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("_c10d_functional::all_reduce", "")
-          .typed<at::Tensor(const at::Tensor&, std::string, std::string)>();
-  at::Tensor tmp_output;
-  {
-    at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = op_handle.call(input_, reduce_op, group_name);
-  }
-  at::functionalization::impl::replace_(input, tmp_output);
-  at::functionalization::impl::commit_update(input);
-  at::functionalization::impl::sync(input);
-  return input;
-}
-
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
-    std::string reduce_op,
-    std::string group_name) {
+    const std::string& reduce_op,
+    const std::string& group_name) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -127,44 +105,14 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 }
 
 std::vector<at::Tensor> all_reduce_coalesced(
-    std::vector<at::Tensor> inputs,
-    std::string reduce_op,
-    std::string group_name) {
+    const std::vector<at::Tensor>& inputs,
+    const std::string& reduce_op,
+    const std::string& group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone());
   }
   return all_reduce_coalesced_(outputs, reduce_op, group_name);
-}
-
-std::vector<at::Tensor> all_reduce_coalesced__functionalization_glue(
-    std::vector<at::Tensor> inputs,
-    std::string reduce_op,
-    std::string group_name) {
-  std::vector<at::Tensor> inputs_;
-  for (const auto& input : inputs) {
-    TORCH_INTERNAL_ASSERT(
-        at::functionalization::impl::isFunctionalTensor(input));
-    at::functionalization::impl::sync(input);
-    inputs_.push_back(
-        at::functionalization::impl::from_functional_tensor(input));
-  }
-  static auto op_handle =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("_c10d_functional::all_reduce_coalesced", "")
-          .typed<std::vector<at::Tensor>(
-              std::vector<at::Tensor>, std::string, std::string)>();
-  std::vector<at::Tensor> tmp_outputs;
-  {
-    at::AutoDispatchSkipFunctionalize guard;
-    tmp_outputs = op_handle.call(inputs_, reduce_op, group_name);
-  }
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    at::functionalization::impl::replace_(inputs[i], tmp_outputs[i]);
-    at::functionalization::impl::commit_update(inputs[i]);
-    at::functionalization::impl::sync(inputs[i]);
-  }
-  return inputs;
 }
 
 at::Tensor allocate_all_gather_output(
@@ -178,9 +126,9 @@ at::Tensor allocate_all_gather_output(
 }
 
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
-    std::vector<at::Tensor> inputs,
-    int64_t group_size,
-    std::string group_name) {
+    const std::vector<at::Tensor>& inputs,
+    const int64_t group_size,
+    const std::string& group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
@@ -197,8 +145,8 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
-    int64_t group_size,
-    std::string group_name) {
+    const int64_t group_size,
+    const std::string& group_name) {
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
 }
@@ -219,10 +167,10 @@ at::Tensor allocate_reduce_scatter_output(
 }
 
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
-    std::vector<at::Tensor> inputs,
-    std::string reduce_op,
-    int64_t group_size,
-    std::string group_name) {
+    const std::vector<at::Tensor>& inputs,
+    const std::string& reduce_op,
+    const int64_t group_size,
+    const std::string& group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
@@ -240,40 +188,18 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 }
 
 at::Tensor reduce_scatter_tensor(
-    const at::Tensor& input,
-    std::string reduce_op,
-    int64_t group_size,
-    std::string group_name) {
+    at::Tensor input,
+    const std::string& reduce_op,
+    const int64_t group_size,
+    const std::string& group_name) {
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, reduce_op, group_size, group_name)[0];
 }
 
-at::Tensor all_to_all_single(
-    const at::Tensor& input,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
-    std::string group_name) {
-  std::vector<int64_t> output_sizes = input.sizes().vec();
-  output_sizes[0] =
-      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
-  auto output = input.new_empty(output_sizes);
-
-  auto group = c10d::resolve_process_group(group_name);
-  auto work = group->alltoall_base(
-      output,
-      const_cast<at::Tensor&>(input),
-      output_split_sizes,
-      input_split_sizes);
-  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
-  return output;
-}
-
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  if (work != nullptr) {
-    work->wait();
-  }
+  work->wait();
   return tensor;
 }
 
@@ -332,23 +258,8 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_to_all_single("
-      "Tensor input, "
-      "SymInt[] output_split_sizes, "
-      "SymInt[] input_split_sizes, "
-      "str group_name) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
       {at::Tag::pt2_compliant_tag});
-}
-
-TORCH_LIBRARY_IMPL(_c10d_functional, Functionalize, m) {
-  m.impl("all_reduce_", all_reduce__functionalization_glue);
-  m.impl("all_reduce_coalesced_", all_reduce_coalesced__functionalization_glue);
 }

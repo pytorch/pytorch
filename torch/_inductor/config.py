@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
@@ -85,11 +85,26 @@ split_cat_fx_passes = True
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
-# enable pattern match with group fusion (using fbgemm)
+# Deprecated
 group_fusion = False
 
-# enable pattern match with batch fusion (using torch op)
+# Deprecated
 batch_fusion = True
+
+# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
+    "batch_linear": {},
+    "batch_linear_lhs": {},
+    "batch_layernorm": {},
+    "batch_tanh": {},
+    "batch_relu": {},
+    "batch_sigmoid": {},
+}
+
+# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -179,6 +194,10 @@ coordinate_descent_search_radius = int(
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -291,7 +310,7 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil  # type: ignore[import]
+    from libfb.py import parutil
 
     try:
         if __package__:
@@ -333,6 +352,9 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+# Specify a file where we print out the profiling results.
+# None means we do not dump results to a file.
+profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -399,6 +421,9 @@ class cpp:
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
     fallback_scatter_reduce_sum = True
+
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
 
 
 # config specific to codegen/triton.py
@@ -616,7 +641,7 @@ _save_config_ignore = {
 }
 
 if TYPE_CHECKING:
-    from torch._dynamo.config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 
