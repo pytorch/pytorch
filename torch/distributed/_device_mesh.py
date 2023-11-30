@@ -178,7 +178,7 @@ class DeviceMesh:
 
         # private field to pre-generate DeviceMesh's hash
         self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
         # Skip process group initialization if xla device.
         # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
