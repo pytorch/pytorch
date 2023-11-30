@@ -230,6 +230,10 @@ timm_vovnet,pass,8
 
 
 
+torch_multimodal_clip,pass,8
+
+
+
 tts_angular,pass,10
 
 

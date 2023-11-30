@@ -286,6 +286,10 @@ timm_vovnet,pass,0
 
 
 
+torch_multimodal_clip,pass,3
+
+
+
 tts_angular,pass,2
 
 

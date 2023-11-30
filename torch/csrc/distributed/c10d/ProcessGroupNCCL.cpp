@@ -942,7 +942,7 @@ c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
   if (writeDebugInfo_) {
     return c10::nullopt;
   }
-  // If we have not dumped the debugInfo return true and set the flag to false
+  // If we have not dumped the debugInfo return true and set the flag
   writeDebugInfo_ = true;
   return c10::optional<std::thread>(
       std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
@@ -1051,8 +1051,7 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 }
 
 void ProcessGroupNCCL::dumpDebuggingInfo() {
-  LOG(ERROR)
-      << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
+  LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1315,7 +1314,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        NCCLTraceBuffer::get()->complete(work.trace_id_);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
