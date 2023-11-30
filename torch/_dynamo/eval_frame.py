@@ -1422,6 +1422,14 @@ def export(
                         case_name="cond_operands",
                     )
 
+            for node in graph.graph.nodes:
+                if node.op == "get_attr" and isinstance(
+                    getattr(graph, node.target), torch.Tensor
+                ):
+                    node.meta["val"] = fake_mode.from_tensor(
+                        getattr(graph, node.target), static_shapes=True
+                    )
+
         if same_signature:
             flat_args_dynamic_dims = [
                 {c.dim for c in (constraints or ()) if c.w_tensor() is x}
