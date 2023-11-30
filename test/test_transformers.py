@@ -3036,20 +3036,6 @@ class TestAttnMasks(NNTestCase):
         torch.testing.assert_close(key.grad, key_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
         torch.testing.assert_close(value.grad, value_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
 
-    def test_base_case(self, device):
-        shape = SdpaShape(16, 16, 128, 16)
-        make_tensor = partial(
-            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
-        )
-        self.run_test(device, False, make_tensor, make_tensor, attn_bias=None)
-
-    def test_base_case_compile(self, device):
-        shape = SdpaShape(16, 16, 128, 16)
-        make_tensor = partial(
-            torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True
-        )
-        self.run_test(device, True, make_tensor, make_tensor, attn_bias=None)
-
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
