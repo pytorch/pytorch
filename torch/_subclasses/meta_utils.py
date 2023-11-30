@@ -452,7 +452,6 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
 
-                    # TODO: Change to use the new abstraction
                     from torch.fx.experimental.symbolic_shapes import (
                         SubclassSymbolicContext,
                     )
