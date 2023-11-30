@@ -268,7 +268,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             shape=outer_size,
             dtype=spec.tensor_meta.dtype,
             requires_grad=requires_grad,
-            stride=spec.tensor_meta.stride,
+            stride=outer_stride,
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
