@@ -365,11 +365,13 @@ def _maybe_insert_input_observers_for_node(
         )
         new_args.append(new_arg)
 
-    # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
-    # that persist in exported graph. This is just a work around for these.
+    # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
+    # gelu has a memory kwarg that persist in exported graph.
+    # This is just a work around for these.
     assert (
         node.target == torch.ops.aten.clone.default or
         node.target == torch.ops.aten.zeros_like.default or
+        node.target == torch.ops.aten.gelu.default or
         len(node.kwargs) == 0
     ), " expecting kwargs for aten op IR to be empty"
 
