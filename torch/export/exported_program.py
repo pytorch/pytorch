@@ -243,11 +243,10 @@ class ExportedProgram:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
-        from torch._export import combine_args_kwargs
 
         if self.call_spec.in_spec is not None:
             try:
-                user_args = combine_args_kwargs(args, kwargs)
+                user_args = (args, kwargs or {})
                 args = fx_pytree.tree_flatten_spec(
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
@@ -468,7 +467,7 @@ class ExportedProgram:
         ]
 
         state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
