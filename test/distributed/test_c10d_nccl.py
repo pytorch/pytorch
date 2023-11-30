@@ -13,7 +13,7 @@ import pickle
 import time
 import warnings
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from itertools import chain, product
 from unittest import mock
 
@@ -1271,6 +1271,27 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # Verification
         self.assertEqual(torch.arange(self.world_size), output_t)
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    def test_comm_split_optimization(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        # Test lazy splitting behavior across each per-device backend.
+        for device in self.rank_to_GPU[self.rank]:
+            backend = pg._get_backend(torch.device(device))
+
+            # split doesn't happen unless the original process group has lazily
+            # created communicators, so first verify we haven't split even when
+            # making the new group and running an operation on the original pg.
+            ng = c10d.new_group()
+            tensor = torch.tensor([self.rank]).cuda(device)
+            pg.broadcast(tensor, 0)
+            self.assertEqual(backend.comm_split_count(), 0)
+
+            # The new group will force a split of the original on first use.
+            ng.broadcast(tensor, 0)
+            self.assertEqual(backend.comm_split_count(), 1)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -3556,6 +3577,10 @@ class NCCLTraceTest(MultiProcessTestCase):
         self.assertEqual(last['input_sizes'], ((3, 4),))
         self.assertEqual(last['output_sizes'], ((3, 4),))
         self.assertEqual(last['seq_id'], 2)
+        now = datetime.now()
+        event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
+        before_test = now - timedelta(minutes=1)
+        self.assertTrue(before_test < event_created_time < now)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -3673,7 +3698,6 @@ class NCCLTraceTest(MultiProcessTestCase):
             if self.rank == 0:
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
-
 
 
 
