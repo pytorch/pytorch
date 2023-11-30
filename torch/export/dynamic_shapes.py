@@ -7,13 +7,12 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import sympy
-
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint, SymInt
-from torch.utils._sympy.value_ranges import ValueRanges
 from .exported_program import ExportedProgram
+
+
+__all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
 
 
 class _Dim(type):
@@ -119,7 +118,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"
+    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
@@ -308,6 +307,12 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
             f" but got {index}, which is out of bounds for the given tensor.",
         )
 
+    # Import sympy locally
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+    from torch.utils._sympy.value_ranges import ValueRanges
+
     return _create_constraint(
         weakref.ref(t),
         id(t),
@@ -476,7 +481,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple]]:
+) -> Tuple[Dict, List[Tuple]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -499,6 +504,10 @@ def _process_constraints(
     from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
         InputDim,
     )
+
+    # Import sympy locally
+    from torch.fx.experimental.symbolic_shapes import SymInt
+    from torch.utils._sympy.value_ranges import ValueRanges
 
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
@@ -538,7 +547,7 @@ def _process_constraints(
                     equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[sympy.Symbol, ValueRanges] = {}
+    range_constraints: Dict[Any, ValueRanges] = {}
 
     # Add inline constraints to range_constraints
     range_constraints = {
