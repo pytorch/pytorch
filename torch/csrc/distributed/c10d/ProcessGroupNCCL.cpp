@@ -1972,8 +1972,12 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {
   TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled");
-  TORCH_CHECK(ncclStartEvents_, "getDuration only works if timing was enabled");
-  TORCH_CHECK(ncclEndEvents_, "getDuration only works if timing was enabled");
+  TORCH_CHECK(
+      ncclStartEvents_,
+      "getDuration only works if ncclStartEvents_ is populated, true if timing enabled");
+  TORCH_CHECK(
+      ncclEndEvents_,
+      "getDuration only works if ncclEndEvents_ is populated, which should always be true");
   return getDurationFromFirstEvent(*ncclStartEvents_, *ncclEndEvents_);
 }
 
