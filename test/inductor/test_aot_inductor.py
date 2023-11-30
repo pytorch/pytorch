@@ -37,6 +37,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_with_optional_param,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -1270,6 +1271,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_triton_kernel_with_none_input(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                n_elements = x.size()[0]
+                BLOCK_SIZE = 1024
+
+                x = x.clone()
+                y = y.clone()
+                output_wo_y = torch.empty_like(x)
+                output_with_y = torch.empty_like(x)
+
+                wo_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    None,
+                    output_wo_y,
+                    n_elements,
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                with_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    y,
+                    output_with_y,
+                    n_elements,
+                    ARGS_PASSED="two",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+
+                return 2.71 * output_wo_y + 3.14 * output_with_y
+
+        example_inputs = (
+            torch.randn(1023, device=self.device),
+            torch.randn(1023, device=self.device),
+        )
+
+        self.check_model(Model(), example_inputs)
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1320,6 +1365,28 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), inputs)
+
+    def test_zero_size_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, channel, r=8):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveAvgPool2d(1)
+                self.net = torch.nn.Sequential(
+                    torch.nn.Linear(channel, channel // r, bias=False),
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(channel // r, channel, bias=False),
+                    torch.nn.Sigmoid(),
+                )
+
+            def forward(self, inp):
+                b, c, _, _ = inp.shape
+                x = self.pool(inp).view(b, c)
+                x = self.net(x).view(b, c, 1, 1)
+                x = inp * x
+                return x
+
+        inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
+        self.check_model(Model(4), inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
