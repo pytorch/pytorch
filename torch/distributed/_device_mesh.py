@@ -354,8 +354,8 @@ class DeviceMesh:
                 )
             return dim_groups
 
-    def size(self, dim: Optional[int] = None) -> int:
-        return self.mesh.numel() if dim is None else self.mesh.size(dim)
+    def size(self, mesh_dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
 
     @property
     def ndim(self) -> int:

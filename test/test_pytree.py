@@ -6,9 +6,8 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 
 import torch
-import torch.utils._pytree as _pytree
-import torch.utils._pytree.api.cxx as cxx_pytree
-import torch.utils._pytree.api.python as py_pytree
+import torch.utils._cxx_pytree as cxx_pytree
+import torch.utils._pytree as py_pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -30,10 +29,9 @@ class GlobalDummyType:
 
 class TestGenericPytree(TestCase):
     def test_aligned_public_apis(self):
-        public_apis = _pytree.__all__
+        public_apis = py_pytree.__all__
 
         self.assertEqual(public_apis, cxx_pytree.__all__)
-        self.assertEqual(public_apis, py_pytree.__all__)
 
         for name in public_apis:
             cxx_api = getattr(cxx_pytree, name)
