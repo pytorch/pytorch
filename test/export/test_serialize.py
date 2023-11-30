@@ -44,6 +44,7 @@ def get_filtered_export_db_tests():
         "dictionary",  # Graph output must be a tuple()
         "fn_with_kwargs",  # export doesn't support kwargs yet
         "scalar_output",  # Tracing through 'f' must produce a single graph
+        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
     }
 
     return [
@@ -440,6 +441,19 @@ class TestDeserialize(TestCase):
 
         self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
 
+    def test_list_of_optional_tensors(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y, z):
+                indices = [None, None, torch.tensor([1, 3, 5, 7])]
+                indexed = torch.ops.aten.index.Tensor(x + y, indices)
+                return indexed + z
+
+        inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
+        self.check_graph(MyModule(), inputs)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -470,6 +484,24 @@ class TestDeserialize(TestCase):
             return torch.cat([x, torch.tensor([1, 1])])
 
         self.check_graph(f, (torch.tensor([1, 1]),))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_device(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
+        model = MyModule().eval().cuda()
+        self.check_graph(model, (inp,))
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -603,7 +635,7 @@ class TestSaveLoad(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
-                loaded_ep = load(f)
+                load(f)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
