@@ -37,6 +37,7 @@ if HAS_CUDA:
         add_kernel,
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
+        add_kernel_with_optional_param,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -60,7 +61,14 @@ except (unittest.SkipTest, ImportError) as e:
 
 class AOTInductorModelRunner:
     @classmethod
-    def compile(cls, model, example_inputs, options=None, constraints=None):
+    def compile(
+        cls,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,
@@ -68,6 +76,7 @@ class AOTInductorModelRunner:
             options=options,
             constraints=constraints,
             remove_runtime_assertions=True,
+            disable_constraint_solver=disable_constraint_solver,
         )
         return so_path
 
@@ -111,9 +120,21 @@ class AOTInductorModelRunner:
         return optimized
 
     @classmethod
-    def run(cls, device, model, example_inputs, options=None, constraints=None):
+    def run(
+        cls,
+        device,
+        model,
+        example_inputs,
+        options=None,
+        constraints=None,
+        disable_constraint_solver=False,
+    ):
         so_path = AOTInductorModelRunner.compile(
-            model, example_inputs, options=options, constraints=constraints
+            model,
+            example_inputs,
+            options=options,
+            constraints=constraints,
+            disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
         return optimized(example_inputs)
@@ -146,6 +167,7 @@ def check_model(
     example_inputs,
     options=None,
     constraints=None,
+    disable_constraint_solver=False,
 ):
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
@@ -158,7 +180,12 @@ def check_model(
 
         torch.manual_seed(0)
         actual = AOTInductorModelRunner.run(
-            self.device, model, example_inputs, options, constraints
+            self.device,
+            model,
+            example_inputs,
+            options,
+            constraints,
+            disable_constraint_solver,
         )
 
     self.assertTrue(same(actual, expected))
@@ -746,9 +773,11 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
-            torch.tensor([1, 1, 1], device="cuda"),
-            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+            torch.tensor([1, 1, 1], device=self.device),
+            torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -760,7 +789,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device=self.device) * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
@@ -1049,6 +1078,22 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_with_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1205,6 +1250,144 @@ class AOTInductorTestsTemplate:
         ]
         self.check_model(Model(), (a,), constraints=constraints)
 
+    def test_triton_kernel_reinterpret_view(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        @triton.jit
+        def pass_kernel(x, y):
+            pass
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                pass_kernel[(1,)](x, torch.empty_like(x))
+                return x
+
+        example_inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_triton_kernel_with_none_input(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                n_elements = x.size()[0]
+                BLOCK_SIZE = 1024
+
+                x = x.clone()
+                y = y.clone()
+                output_wo_y = torch.empty_like(x)
+                output_with_y = torch.empty_like(x)
+
+                wo_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    None,
+                    output_wo_y,
+                    n_elements,
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                with_kernel = add_kernel_with_optional_param[(1,)](
+                    x,
+                    y,
+                    output_with_y,
+                    n_elements,
+                    ARGS_PASSED="two",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+
+                return 2.71 * output_wo_y + 3.14 * output_with_y
+
+        example_inputs = (
+            torch.randn(1023, device=self.device),
+            torch.randn(1023, device=self.device),
+        )
+
+        self.check_model(Model(), example_inputs)
+
+    def test_shifted_constraint_ranges(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                torch._check(y.size(0) == x.size(0) + 1)
+                return x.sum(0) + y.sum(0)
+
+        a = torch.randn((4, 5), device=self.device)
+        b = torch.randn((5, 5), device=self.device)
+
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 2,
+            torch._export.dynamic_dim(a, 0) <= 1024,
+            torch._export.dynamic_dim(b, 0) >= 3,
+            torch._export.dynamic_dim(b, 0) <= 1025,
+        ]
+
+        self.check_model(
+            Model(),
+            (a, b),
+            constraints=constraints,
+            disable_constraint_solver=True,
+        )
+
+    def test_scatter_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                index: torch.Tensor,
+                src: torch.Tensor,
+            ):
+                return torch.scatter(inp, 1, index, src)
+
+        inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
+    def test_zero_size_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, channel, r=8):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveAvgPool2d(1)
+                self.net = torch.nn.Sequential(
+                    torch.nn.Linear(channel, channel // r, bias=False),
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(channel // r, channel, bias=False),
+                    torch.nn.Sigmoid(),
+                )
+
+            def forward(self, inp):
+                b, c, _, _ = inp.shape
+                x = self.pool(inp).view(b, c)
+                x = self.net(x).view(b, c, 1, 1)
+                x = inp * x
+                return x
+
+        inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
+        self.check_model(Model(4), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1240,6 +1423,12 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # error: could not find s0
+        "test_shifted_constraint_ranges": TestFailure(
+            ("abi_compatible_cpu",), is_skip=True
+        ),
+        # the test segfaults
+        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
     },
 )
 
