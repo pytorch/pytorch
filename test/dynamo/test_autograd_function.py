@@ -381,6 +381,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def forward(ctx, a, b):
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
+
             @staticmethod
             @torch.cuda.amp.custom_bwd
             def backward(ctx, grad):
@@ -398,7 +399,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
-
 
     def test_graph_break_if_lifted_free_variable(self):
         torch._dynamo.utils.counters.clear()
