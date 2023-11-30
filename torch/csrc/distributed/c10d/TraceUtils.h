@@ -347,7 +347,7 @@ struct NCCLTraceBuffer {
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
-    uint64_t time_created_;
+    c10::time_t time_created_;
 
     const char* state_ = "scheduled";
 
@@ -391,7 +391,7 @@ struct NCCLTraceBuffer {
         std::move(traceback),
         std::move(start),
         std::move(end),
-        uint64_t(tsc_to_ns(c10::getApproximateTime()) / 1000)};
+        c10::getTime()};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
@@ -503,7 +503,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_s, int64_t(e.pg_id_));
       dict.insert(seq_id_s, int64_t(e.seq_id_));
       dict.insert(profiling_name_s, e.profiling_name_);
-      dict.insert(time_created_s, int64_t(e.time_created_));
+      dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
