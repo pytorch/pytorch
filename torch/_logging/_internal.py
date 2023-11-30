@@ -183,6 +183,7 @@ def set_logs(
     graph_sizes: bool = False,
     guards: bool = False,
     recompiles: bool = False,
+    recompiles_verbose: bool = False,
     trace_source: bool = False,
     trace_call: bool = False,
     output_code: bool = False,
@@ -288,6 +289,10 @@ def set_logs(
         recompiles (:class:`bool`):
             Whether to emit a guard failure reason and message every time
             TorchDynamo recompiles a function. Default: ``False``
+
+        recompiles_verbose (:class:`bool`):
+            Whether to emit all guard failure reasons when TorchDynamo recompiles
+            a function, even those that are not actually run. Default: ``False``
 
         trace_source (:class:`bool`):
             Whether to emit when TorchDynamo begins tracing a new line. Default: ``False``
@@ -400,6 +405,7 @@ def set_logs(
         graph_sizes=graph_sizes,
         guards=guards,
         recompiles=recompiles,
+        recompiles_verbose=recompiles_verbose,
         trace_source=trace_source,
         trace_call=trace_call,
         output_code=output_code,

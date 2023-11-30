@@ -45,10 +45,14 @@ def _parameterized_class_attrs_and_values():
         itertools.product(
             (True, False),
             (True, False),
+            (
+                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+            ),
         )
     )
     return {
-        "attrs": ["op_level_debug", "dynamic_shapes"],
+        "attrs": ["op_level_debug", "dynamic_shapes", "model_type"],
         "input_values": input_values,
     }
 
@@ -72,6 +76,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     op_level_debug: bool
     dynamic_shapes: bool
+    model_type: onnx_test_common.TorchModelType
 
     def setUp(self):
         super().setUp()
@@ -131,6 +136,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: Operator '<built-in function pow>' is not an allowed operator type:"
+        "(<class 'torch._ops.OpOverload'>, <class 'torch._ops.HigherOrderOperator'>)"
+        "Valid builtin ops: [<built-in function getitem>, <built-in function add>, <built-in function mul>,"
+        "<built-in function sub>, <built-in function truediv>, <built-in function ge>, <built-in function le>,"
+        "<built-in function gt>, <built-in function lt>, <built-in function eq>, <built-in function ne>,"
+        "<built-in function floordiv>, <built-in function mod>, <built-in function and_>, <built-in function or_>,"
+        "<built-in function not_>]"
+        " Github issue: https://github.com/pytorch/pytorch/issues/113778"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
@@ -442,6 +457,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'view_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
+    )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
@@ -469,6 +489,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
         "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
@@ -488,9 +513,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
-        "of node (n0__4) does not match expected type (tensor(int64))"
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node."
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -510,7 +540,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
         "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
-    def test_expand_as_fill_seperate_tensor(self):
+    def test_expand_as_fill_separate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
                 aa = torch.tensor([[0], [1], [2]])
@@ -577,6 +607,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112443"
+    )
     def test_operator_with_scalar_output(self):
         def func(x, y):
             return x.item() + y
@@ -585,6 +619,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4))
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "Unsupported: Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112443"
+    )
     def test_operator_with_dynamic_output_shape(self):
         def func(x):
             return x.nonzero()
@@ -593,6 +631,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "AssertionError: AssertionError: original output #1 is BaseModelOutputWithPastAndCrossAttentions("
+        " last_hidden_state=FakeTensor(..., size=(2, 128, 16), grad_fn=<ViewBackward0>),"
+        " past_key_values=((FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>))),"
+        " hidden_states=None, attentions=None, cross_attentions=None),"
+        " but only the following types are supported:"
+        " (<class 'torch.Tensor'>, <class 'torch.SymInt'>, <class 'torch.SymFloat'>, <class 'torch.SymBool'>)"
+        " Github issue: https://github.com/pytorch/pytorch/issues/110100"
+    )
     def test_gpt2_tiny_from_config(self):
         # Model
         config = transformers.GPT2Config(
@@ -843,38 +897,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
-        )
-
-    def test_exported_program_as_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        # TODO: Support dynamic shape
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            exported_program, (x,), skip_dynamic_shapes_check=True
-        )
-
-    def test_exported_program_as_input_from_file(self):
-        import tempfile
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
-            torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
-            loaded_exported_program = torch.export.load(f.name)
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
 
