@@ -3910,7 +3910,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 for a in axes:
                     shape[a] *= 2
                 r = torch.empty(shape, dtype=t.dtype, device=t.device)
-                s = r[*(slice(None, None, 2 if t.shape[i] != r.shape[i] else None) for i in range(t.ndim))]
+                s = r[tuple(slice(None, None, 2 if t.shape[i] != r.shape[i] else None) for i in range(t.ndim))]
                 s.copy_(t)
                 return s
             elif t.layout is torch.sparse_bsr:
