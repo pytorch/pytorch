@@ -80,7 +80,7 @@ class TunableOp {
 
     TuningStatus operator()(const ParamsT* params) {
       int id = -1;
-      TuningContext* ctx = at::cuda::getTuningContext();
+      TuningContext* ctx = getTuningContext();
       if (ctx->IsTunableOpEnabled()) {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
@@ -172,7 +172,7 @@ class TunableOp {
     }
 
     int FindFastestImpl(const ParamsT* params, const std::vector<Callable<ParamsT>>& candidates) {
-      TuningContext* ctx = at::cuda::getTuningContext();
+      TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
       TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')');

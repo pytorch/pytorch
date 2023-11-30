@@ -50,6 +50,7 @@ struct TuningResults {
 class TuningResultsManager {
   public:
     TuningResultsManager() = default;
+    ~TuningResultsManager() = default;
 
     KernelMap Lookup(const std::string& op_signature);
 
@@ -74,6 +75,8 @@ class TuningResultsManager {
     ResultsMap Dump();
 
     void DisjointMerge(const std::string& op_signature, const KernelMap& kernel_map);
+
+    size_t GetSize();
 
   private:
     std::mutex lock_;
@@ -110,7 +113,11 @@ class TuningResultsValidator {
 class TuningContext {
   public:
     TuningContext();
-    ~TuningContext() = default;
+    ~TuningContext();
+    TuningContext(TuningContext &) = delete;
+    TuningContext(TuningContext &&) = delete;
+    TuningContext &operator=(TuningContext &) = delete;
+    TuningContext &operator=(TuningContext &&) = delete;
 
     void EnableTunableOp();
     void DisableTunableOp();
@@ -128,21 +135,31 @@ class TuningContext {
 
     TuningResultsManager& GetTuningResultsManager();
 
-    const TuningResultsManager& GetTuningResultsManager() const;
-
     const TuningResultsValidator& GetTuningResultsValidator() const;
 
     TuningResults GetTuningResults();
 
     TuningStatus LoadTuningResults(const TuningResults& tr);
 
+    void SetFilename(const std::string& filename);
+    std::string GetFilename() const;
+
+  protected:
+    void ReadFile(const std::string& filename);
+    void WriteFile(const std::string& filename);
+
   private:
     bool enable_;
     bool tuning_enable_;
     int max_tuning_duration_ms_;
-    TuningResultsManager manager_;
+    mutable TuningResultsManager manager_;
+    mutable std::once_flag manager_init_once_;
     TuningResultsValidator validator_;
+    std::string filename_;
+    size_t results_count_from_input_file_;
 };
+
+TuningContext* getTuningContext();
 
 class ITimer {
   public:

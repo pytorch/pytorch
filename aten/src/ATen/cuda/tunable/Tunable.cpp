@@ -18,10 +18,12 @@
 #endif
 
 #include <chrono>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -30,16 +32,17 @@
 #include <utility>
 #include <vector>
 
-namespace at::cuda {
-
-tunable::TuningContext* getTuningContext() {
-  static tunable::TuningContext* obj = new tunable::TuningContext;
-  return obj;
-}
-
-} // namespace at::cuda
-
 namespace at::cuda::tunable {
+
+namespace {
+
+TuningContext tuning_context;
+
+} // anonymous namespace
+
+TuningContext* getTuningContext() {
+  return &tuning_context;
+}
 
 // TuningResultsManager
 
@@ -132,6 +135,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
 }
 
 void TuningResultsManager::Load(const std::unordered_map<std::string, KernelMap>& results_to_load) {
+  TUNABLE_LOG("Loading results");
   std::scoped_lock l{lock_};
   for (const auto& [op_signature, kernel_map] : results_to_load) {
     DisjointMergeImpl(op_signature, kernel_map, results_);
@@ -146,6 +150,15 @@ std::unordered_map<std::string, KernelMap> TuningResultsManager::Dump() {
 void TuningResultsManager::DisjointMerge(const std::string& op_signature, const KernelMap& kernel_map) {
   std::scoped_lock l{lock_};
   DisjointMergeImpl(op_signature, kernel_map, results_);
+}
+
+size_t TuningResultsManager::GetSize() {
+  size_t size = 0;
+  std::scoped_lock l{lock_};
+  for (const auto& [op_signature, kernel_map] : results_) {
+    size += kernel_map.size();
+  }
+  return size;
 }
 
 // TuningResultsValidator
@@ -277,7 +290,22 @@ TuningStatus TuningResultsValidator::ValidatePyTorchGitCommit(const std::string&
 
 // TuningContext
 
-TuningContext::TuningContext() : enable_{false}, tuning_enable_{false}, max_tuning_duration_ms_{} {
+TuningContext::TuningContext() :
+    enable_{false},
+    tuning_enable_{false},
+    max_tuning_duration_ms_{},
+    filename_{},
+    results_count_from_input_file_{0}
+{
+}
+
+TuningContext::~TuningContext() {
+  if (IsTunableOpEnabled()
+      && IsTuningEnabled()
+      && !GetFilename().empty()
+      && results_count_from_input_file_ != GetTuningResultsManager().GetSize()) {
+    WriteFile(GetFilename());
+  }
 }
 
 void TuningContext::EnableTunableOp() {
@@ -293,7 +321,7 @@ void TuningContext::DisableTunableOp() {
 bool TuningContext::IsTunableOpEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    TUNABLE_LOG("PYTORCH_TUNABLEOP_ENABLED=1");
+    //TUNABLE_LOG("PYTORCH_TUNABLEOP_ENABLED=1");
     return true;
   }
   return enable_;
@@ -312,7 +340,7 @@ void TuningContext::DisableTuning() {
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
+    //TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
     return true;
   }
   return tuning_enable_;
@@ -337,10 +365,11 @@ void TuningContext::DisableTunableOpAndTuning() {
 }
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
-  return manager_;
-}
-
-const TuningResultsManager& TuningContext::GetTuningResultsManager() const {
+  std::call_once(manager_init_once_, [this]() {
+    if (!GetFilename().empty()) {
+      ReadFile(GetFilename());
+    }
+  });
   return manager_;
 }
 
@@ -359,6 +388,49 @@ TuningStatus TuningContext::LoadTuningResults(const TuningResults& tr) {
   TORCH_CHECK(GetTuningResultsValidator().ValidateAll(tr.validators));
   GetTuningResultsManager().Load(tr.results);
   return OK;
+}
+
+void TuningContext::SetFilename(const std::string& filename) {
+  filename_ = filename;
+}
+
+std::string TuningContext::GetFilename() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
+  if (env != nullptr) {
+    return env;
+  }
+  return filename_;
+}
+
+void TuningContext::ReadFile(const std::string& filename) {
+  TUNABLE_LOG("reading tuning results from ", filename);
+  ResultsMap results;
+  std::string line;
+  std::ifstream file(filename);
+  while (std::getline(file, line)) {
+    std::string part;
+    std::vector<std::string> parts;
+    std::stringstream line_as_stream(line);
+    while (std::getline(line_as_stream, part, ',')) {
+      parts.push_back(part);
+    }
+    if (parts.size() >= 3) {
+      results[parts[0]][parts[1]] = atoi(parts[2].c_str());
+    }
+  }
+  manager_.Load(results);
+}
+
+void TuningContext::WriteFile(const std::string& filename) {
+  std::ofstream file(filename, std::ios::out | std::ios::trunc);
+  TORCH_CHECK(file.good(), "error opening tuning results file for writing ", filename);
+  auto results = GetTuningResultsManager().Dump();
+  for (const auto& [op_sig, kernelmap] : results) {
+    for (const auto& [param_sig, index] : kernelmap) {
+      file << op_sig << "," << param_sig << "," << index << std::endl;
+    }
+  }
+  file.close();
 }
 
 } // namespace at::cuda::tunable
