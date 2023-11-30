@@ -549,6 +549,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
+            # saved_tensors here may be empty due to proxy?
             saved_tensors_source = AttrSource(self.source, "saved_tensors")
             install_guard(
                 self.source.make_guard(GuardBuilder.TYPE_MATCH),

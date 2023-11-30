@@ -1016,6 +1016,7 @@ void Engine::evaluate_function(
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
+    std::cout << "Engine::evaluate_function calls release_variables on Node("<< func->name() << ")" << std::endl;
     fn.release_variables();
   }
 

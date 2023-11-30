@@ -28,5 +28,11 @@ def call_hook(hook, *args):
         return args[0]
     return result
 
+class FakeContext:
+    def __init__(self, saved_tensors):
+        # this will cache the results of saved_tensors
+        # and will no longer call into c++
+        self.saved_tensors = saved_tensors
+
 def call_backward(backward, *args):
-    return backward._forward_cls.backward(backward, *args)
+    return backward(FakeContext(backward.saved_tensors), *args)

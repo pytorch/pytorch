@@ -489,7 +489,7 @@ variable_list compiled_autograd(
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
   PyObject* pybackwards = PyTuple_New(static_cast<Py_ssize_t>(1));
-  PyTuple_SET_ITEM(pybackwards, 0, compiler_call.backward_ctx);
+  PyTuple_SET_ITEM(pybackwards, 0, compiler_call.backwards[0].release());
   THPObjectPtr backwards(pybackwards);
   std::cout << "calling compiled_fn (graph) start" << std::endl;
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(

@@ -170,6 +170,11 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  int emplace_backward(c10::SafePyObject&& fn) {
+    backwards.emplace_back(std::move(fn));
+    return backwards.size() - 1;
+  }
+
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   std::vector<int64_t> dyn_size_inputs;
@@ -177,6 +182,7 @@ struct AutogradCompilerCall {
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   PyObject* backward_ctx;
+  std::vector<c10::SafePyObject> backwards;
 };
 
 class CompiledNodeArgs {
@@ -370,6 +376,10 @@ class CompiledNodeArgs {
     Node* node = _node_call.node.get();
     return CacheKey(
         typeid(*node), _specialization_key, _specialization_key_size);
+  }
+
+  void add_backward(c10::SafePyObject&& obj) {
+    _compiler.emplace_backward(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {

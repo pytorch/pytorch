@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -96,6 +97,7 @@ void deleteNode(Node* function) {
   // To avoid stack overflow on large computational graphs,
   // we need to track reference decrementing and freeing
   // on the heap.
+  std::cout << "function.cpp: deleteNode release_variables" << std::endl;
   function->release_variables();
   std::vector<std::shared_ptr<Node>> stack;
   gatherFunctions(function, stack);

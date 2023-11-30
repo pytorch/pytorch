@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <vector>
+#include <iostream>
 
 namespace torch {
 namespace autograd {
@@ -419,6 +420,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 template <class T>
 void CppNode<T>::release_variables() {
   // lock to ensure thread safety, see [Thread Safety on Autograd Node]
+  std::cout << "CppNode<T>::release_variables()" << std::endl;
   std::lock_guard<std::mutex> lock(mutex_);
   ctx_.saved_variables_.clear();
   ctx_.has_freed_buffers_ = true;

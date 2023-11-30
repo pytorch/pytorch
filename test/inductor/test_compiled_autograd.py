@@ -76,7 +76,7 @@ class TestCompiledAutograd(TestCase):
                 x = torch.randn((i), requires_grad=True)
                 out = MyFn.apply(x)
                 print("PYTHON RUNNING BACKWARD")
-                out.sum().backward(retain_graph=True) # TODO: fix saved_variables freed issue
+                out.sum().backward()
                 print("PYTHON DONE BACKWARD")
                 yield x.grad
 

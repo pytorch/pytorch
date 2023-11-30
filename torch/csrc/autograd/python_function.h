@@ -15,6 +15,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -27,7 +28,9 @@ namespace autograd {
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyNode : public Node {
-  PyNode(THPObjectPtr obj) : obj(obj.release()) {}
+  PyNode(THPObjectPtr obj) : obj(obj.release()) {
+    std::cout << "PyNode(" << name() << ") ctor called" << std::endl;
+  }
 
   variable_list compiled_apply(variable_list&& inputs, SwapSavedVariables& saved);
   variable_list apply(variable_list&& inputs) override;
