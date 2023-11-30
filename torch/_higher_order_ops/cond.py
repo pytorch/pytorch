@@ -441,8 +441,6 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
             f = false_fn(*args)
             return torch.where(p, t, f)
 
-        with interpreter.lower():
-            result = torch.vmap(fn, in_dims=in_dims)(*tensors)
     else:
         # Ideally, PyTorch should vmap true_fn/false_fn and call cond again:
         #    torch.cond(pred, true_fn_vmap, false_fn_vmap, tensors)

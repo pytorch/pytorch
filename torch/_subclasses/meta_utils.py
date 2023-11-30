@@ -566,9 +566,6 @@ class MetaConverter:
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
 
-                    # if torch._C._functorch.is_functorch_wrapped_tensor(t):
-                    #     return NotImplemented
-
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
                     if swr not in self.storage_memo and (

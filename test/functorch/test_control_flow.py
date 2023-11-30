@@ -1634,6 +1634,77 @@ def forward(self, arg0_1):
             self.assertEqual(eager_res, out[0])
             self.assertEqual(eager_res, out[1])
 
+    def test_cond_vmap_simple(self):
+
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 100,
+                false_fn=lambda x: x,
+                operands=(x,)
+            )
+
+        x = torch.arange(15).reshape((3, 5))
+        res = torch.vmap(fn, in_dims=(0,))(x)
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(res, x + 100)
+
+    def test_cond_vmap_multiple_inputs(self):
+
+        def fn(x, y):
+            return torch.cond(
+                pred=x.sum() < y.sum(),
+                true_fn=lambda z, w: z + 100,   # x
+                false_fn=lambda z, w: w,  # y
+                operands=(x, y)
+            )
+
+        x = torch.arange(15).reshape(3, 5)
+        y = torch.ones_like(x) + 3
+        res = torch.vmap(fn, in_dims=(0, 0))(x, y)
+        expected = torch.tensor(
+            [
+                [100, 101, 102, 103, 104],
+                [4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4]
+            ]
+        )
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(expected, res)
+
+    def test_cond_vmap_single_input_with_closure(self):
+
+        x = torch.ones((3, 5)) + 3
+        z = torch.arange(5)
+
+        def fn(w):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda k: k + z,
+                false_fn=lambda k: k - z,
+                operands=(w,)
+            )
+
+        res = torch.vmap(fn, in_dims=(0,))(x,)
+        self.assertEqual(x + z, res)
+
+    def test_cond_vmap_multiple_args_with_closure(self):
+
+        x = torch.ones((3, 5)) + 3
+        y = torch.arange(15).reshape(3, 5)
+        z = torch.arange(5)
+
+        def fn(a, b):
+            return torch.cond(
+                pred=torch.tensor([False]),
+                true_fn=lambda k, w: k + z,
+                false_fn=lambda k, w: w - z,
+                operands=(a, b)
+            )
+
+        res = torch.vmap(fn)(x, y)
+        self.assertEqual(y - z, res)
+
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 if __name__ == '__main__':
