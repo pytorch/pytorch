@@ -5,7 +5,6 @@
 
 namespace c10d {
 
-constexpr const char* ENABLE_INTRA_NODE_COMM = "ENABLE_INTRA_NODE_COMM";
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
 

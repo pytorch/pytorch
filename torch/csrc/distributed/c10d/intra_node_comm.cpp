@@ -21,6 +21,9 @@
 
 namespace c10d {
 
+static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
+    "ENABLE_INTRA_NODE_COMM"};
+
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous Utilities
 ////////////////////////////////////////////////////////////////////////////////
@@ -247,10 +250,15 @@ static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
 static NvlMesh getNvlMesh(size_t worldSize) {
   using namespace c10::cuda;
 
-  nvmlDevice_t devices[worldSize];
-  std::unordered_map<std::string, size_t> busIdToIdx;
-  size_t switchLinkCount[worldSize] = {};
   NvlMesh nvlMesh = {};
+  auto driverApi = DriverAPI::get();
+  if (driverApi == nullptr) {
+    return nvlMesh;
+  }
+
+  std::vector<nvmlDevice_t> devices(worldSize, 0);
+  std::unordered_map<std::string, size_t> busIdToIdx;
+  std::vector<size_t> switchLinkCount(worldSize, 0);
 
   for (size_t idx = 0; idx < worldSize; ++idx) {
     cudaDeviceProp prop{};
@@ -266,8 +274,8 @@ static NvlMesh getNvlMesh(size_t worldSize) {
         prop.pciBusID,
         prop.pciDeviceID);
     TORCH_CHECK(
-        DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-            busId, &devices[idx]) == NVML_SUCCESS);
+        driverApi->nvmlDeviceGetHandleByPciBusId_v2_(busId, &devices[idx]) ==
+        NVML_SUCCESS);
     busIdToIdx.emplace(std::make_pair(busId, idx));
   }
 
@@ -275,7 +283,7 @@ static NvlMesh getNvlMesh(size_t worldSize) {
     for (size_t link = 0; link < kMaxNvLinks; ++link) {
       nvmlReturn_t ret;
       nvmlIntNvLinkDeviceType_t deviceType;
-      ret = DriverAPI::get()->nvmlDeviceGetNvLinkRemoteDeviceType_(
+      ret = driverApi->nvmlDeviceGetNvLinkRemoteDeviceType_(
           devices[idx], link, &deviceType);
       if (ret != NVML_SUCCESS) {
         break;
@@ -283,7 +291,7 @@ static NvlMesh getNvlMesh(size_t worldSize) {
       // Remote device is GPU
       if (deviceType == NVML_NVLINK_DEVICE_TYPE_GPU) {
         nvmlPciInfo_t pciInfo;
-        ret = DriverAPI::get()->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
+        ret = driverApi->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
             devices[idx], link, &pciInfo);
         if (ret != NVML_SUCCESS) {
           break;
@@ -343,24 +351,57 @@ static Topology detectTopology(
   bool fullyConnected = true;
   for (size_t i = 0; i < deviceIds.size() - 1; ++i) {
     for (size_t j = i + 1; j < deviceIds.size(); ++j) {
-      if (nvlMesh[deviceIds[i]][deviceIds[j]] == 0) {
+      if (nvlMesh[deviceIds[i]][deviceIds[j]] == 0 ||
+          nvlMesh[deviceIds[j]][deviceIds[i]] == 0) {
         fullyConnected = false;
       }
     }
   }
   if (fullyConnected) {
     std::cout << "IntraNodeComm: Topology::FULLY_CONNECTED" << std::endl;
-    LOG(INFO) << "IntraNodeComm: Topology::FULLY_CONNECTED";
     return Topology::FULLY_CONNECTED;
   }
   if (deviceIds.size() == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
     std::cout << "IntraNodeComm: Topology::HYBRID_CUBE_MESH" << std::endl;
-    LOG(INFO) << "IntraNodeComm: Topology::HYBRID_CUBE_MESH";
     return Topology::HYBRID_CUBE_MESH;
   }
   std::cout << "IntraNodeComm: Topology::UNKNOWN" << std::endl;
   return Topology::UNKNOWN;
 };
+
+////////////////////////////////////////////////////////////////////////////////
+// CUDA Functions
+////////////////////////////////////////////////////////////////////////////////
+
+bool isIntraNodeCommSupported();
+
+void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank);
+
+AllReduceAlgo selectAllReduceAlgo(
+    const at::Tensor& input,
+    Topology topology,
+    size_t worldSize);
+
+at::Tensor oneShotAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> buffers,
+    std::array<void*, kMaxDevices> p2pStates,
+    size_t rank,
+    size_t worldSize);
+
+at::Tensor twoShotAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize);
+
+at::Tensor hybridCubeMeshAllReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous and Initialization
@@ -382,20 +423,6 @@ IntraNodeComm::~IntraNodeComm() {
   // TODO
 }
 
-void* initFcP2pState();
-void* initHcmP2pState(NvlMesh nvlMesh, size_t rank);
-
-void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank) {
-  if (topology == Topology::FULLY_CONNECTED) {
-    return initFcP2pState();
-  } else if (topology == Topology::HYBRID_CUBE_MESH) {
-    return initHcmP2pState(nvlMesh, rank);
-  } else {
-    LOG(FATAL) << "Invalid topology";
-    return nullptr;
-  }
-}
-
 /**
  * Rendezvous via shared memory given a rendezvous ID.
  *
@@ -405,7 +432,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
-  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize == 1 ||
+  if (!isIntraNodeCommSupported() ||
+      !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
     return nullptr;
   }
@@ -538,7 +566,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     const std::string& prefix,
     size_t rank,
     size_t worldSize) {
-  if (!parseEnvVarFlag(ENABLE_INTRA_NODE_COMM) || worldSize == 1 ||
+  if (!isIntraNodeCommSupported() ||
+      !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
     return nullptr;
   }
@@ -582,36 +611,10 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
   return rendezvous(uuid, rank, worldSize);
 }
 
-AllReduceAlgo selectAllReduceAlgo(
-    const at::Tensor& input,
-    Topology topology,
-    size_t worldSize);
-
 bool IntraNodeComm::shouldUseIntraNodeAllReduce(const at::Tensor& input) {
   auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
   return algo != AllReduceAlgo::NONE;
 }
-
-at::Tensor oneShotAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> buffers,
-    std::array<void*, kMaxDevices> p2pStates,
-    size_t rank,
-    size_t worldSize);
-
-at::Tensor twoShotAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    size_t rank,
-    size_t worldSize);
-
-at::Tensor hybridCubeMeshAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    size_t rank,
-    size_t worldSize);
 
 at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
   auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
@@ -624,8 +627,7 @@ at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
       return hybridCubeMeshAllReduce(
           input, p2pStates_, buffers_, rank_, worldSize_);
     default:
-      LOG(FATAL) << "FOOBAR";
-      return input;
+      C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
   }
 }
 

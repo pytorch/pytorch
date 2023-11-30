@@ -47,7 +47,7 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
 // releaseSignal and acquireSignal also enforces memory ordering
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-synchronization-domains
 DEVICE_INLINE void releaseSignal(uint32_t* addr) {
-  atomicInc_system(addr, 1);
+  atomicAdd_system(addr, 1);
 }
 
 DEVICE_INLINE void acquireSignal(uint32_t* addr) {
@@ -78,13 +78,6 @@ struct FcP2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
   uint32_t flags[kMaxAllReduceBlocks];
 };
-
-void* initFcP2pState() {
-  void* state = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&state, sizeof(FcP2pState)));
-  C10_CUDA_CHECK(cudaMemset(state, 0, sizeof(FcP2pState)));
-  return state;
-}
 
 template <uint32_t kWorldSize>
 static __global__ void oneShotAllReduceKernel(
@@ -257,21 +250,6 @@ HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
   return hcm;
 }
 
-void* initHcmP2pState(NvlMesh nvlMesh, size_t rank) {
-  HcmP2pState state;
-  memset(&state, 0, sizeof(state));
-
-  auto hcm = getHybridCubeMesh(nvlMesh);
-  std::copy(hcm[rank].begin(), hcm[rank].begin() + 3, state.neighborRanks);
-  state.relayRank = hcm[rank][3];
-
-  void* stateDev = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&stateDev, sizeof(state)));
-  AT_CUDA_CHECK(
-      cudaMemcpy(stateDev, &state, sizeof(state), cudaMemcpyHostToDevice));
-  return stateDev;
-}
-
 static __global__ void hybridCubeMeshAllReduceKernel(
     at::BFloat16* input,
     size_t M,
@@ -371,12 +349,52 @@ static void getLaunchConfig(size_t N, dim3& blocks, dim3& threads) {
 }
 
 template <typename T>
-auto castArr(std::array<void*, kMaxDevices> arr) {
+static auto castArr(std::array<void*, kMaxDevices> arr) {
   std::array<T, kMaxDevices> arr_;
   for (size_t i = 0; i < kMaxDevices; ++i) {
     arr_[i] = reinterpret_cast<T>(arr[i]);
   }
   return arr_;
+}
+
+bool isIntraNodeCommSupported() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+  return false;
+#else
+  return true;
+#endif
+}
+
+static void* initFcP2pState() {
+  void* state = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&state, sizeof(FcP2pState)));
+  C10_CUDA_CHECK(cudaMemset(state, 0, sizeof(FcP2pState)));
+  return state;
+}
+
+static void* initHcmP2pState(NvlMesh nvlMesh, size_t rank) {
+  HcmP2pState state;
+  memset(&state, 0, sizeof(state));
+
+  auto hcm = getHybridCubeMesh(nvlMesh);
+  std::copy(hcm[rank].begin(), hcm[rank].begin() + 3, state.neighborRanks);
+  state.relayRank = hcm[rank][3];
+
+  void* stateDev = nullptr;
+  C10_CUDA_CHECK(cudaMalloc(&stateDev, sizeof(state)));
+  AT_CUDA_CHECK(
+      cudaMemcpy(stateDev, &state, sizeof(state), cudaMemcpyHostToDevice));
+  return stateDev;
+}
+
+void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank) {
+  if (topology == Topology::FULLY_CONNECTED) {
+    return initFcP2pState();
+  } else if (topology == Topology::HYBRID_CUBE_MESH) {
+    return initHcmP2pState(nvlMesh, rank);
+  } else {
+    C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid topology");
+  }
 }
 
 at::Tensor oneShotAllReduce(
