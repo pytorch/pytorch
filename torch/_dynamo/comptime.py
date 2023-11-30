@@ -242,100 +242,93 @@ class ComptimeContext:
         return self.__tx
 
 
-# Convenience wrappers that are more compact to use
+class _Comptime:
+    @staticmethod
+    def __call__(fn):
+        """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
+        return
 
+    # Convenience wrappers that are more compact to use
 
-def graph_break():
-    comptime(lambda ctx: ctx.graph_break())
+    @staticmethod
+    def graph_break():
+        comptime(lambda ctx: ctx.graph_break())
 
+    @staticmethod
+    def print_graph():
+        comptime(lambda ctx: ctx.print_graph())
 
-def print_graph():
-    comptime(lambda ctx: ctx.print_graph())
-
-
-def print_disas(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_disas(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_disas(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_disas(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-def print_value_stack(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_value_stack(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_value_stack(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_value_stack(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-# This is a more useful variant of print_value_stack that can be used
-# in an expression context; e.g., x + print_value_stack_and_return(y + z),
-# you will see x on the stack prior to the addition operation
-def print_value_stack_and_return(e, *, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_value_stack(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    # This is a more useful variant of print_value_stack that can be used
+    # in an expression context; e.g., x + print_value_stack_and_return(y + z),
+    # you will see x on the stack prior to the addition operation
+    @staticmethod
+    def print_value_stack_and_return(e, *, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_value_stack(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
-    return e
+        return e
 
-
-def print_locals(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_locals(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_locals(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_locals(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-def print_bt(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_bt(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_bt(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_bt(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
+
+    @staticmethod
+    def print_guards():
+        comptime(lambda ctx: ctx.print_guards())
+
+    @staticmethod
+    def breakpoint():
+        """
+        Like pdb breakpoint(), but drop into pdb whenever this line
+        of code is compiled by dynamo.  Use it by putting
+        this in your model code::
+
+            from torch._dynamo.comptime import comptime
+            comptime.breakpoint()
+
+        And then, inside pdb, you can access 'ctx' to query things
+        about the compilation context::
+
+            (Pdb) !ctx.print_bt()
+            (Pdb) !ctx.print_locals()
+            (Pdb) p ctx.get_local("attention").as_fake()
+        """
+
+        def inner(inner_ctx):
+            ctx = inner_ctx.parent()
+            builtins.breakpoint()
+
+        comptime(inner)
 
 
-def print_guards():
-    comptime(lambda ctx: ctx.print_guards())
-
-
-def breakpoint():
-    """
-    Like pdb breakpoint(), but drop into pdb whenever this line
-    of code is compiled by dynamo.  Use it by putting
-    this in your model code::
-
-        from torch._dynamo.comptime import comptime
-        comptime.breakpoint()
-
-    And then, inside pdb, you can access 'ctx' to query things
-    about the compilation context::
-
-        (Pdb) !ctx.print_bt()
-        (Pdb) !ctx.print_locals()
-        (Pdb) p ctx.get_local("attention").as_fake()
-    """
-
-    def inner(inner_ctx):
-        ctx = inner_ctx.parent()
-        builtins.breakpoint()
-
-    comptime(inner)
-
-
-def comptime(fn):
-    """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
-    return
-
-
-comptime.graph_break = graph_break
-comptime.print_graph = print_graph
-comptime.print_disas = print_disas
-comptime.print_value_stack = print_value_stack
-comptime.print_value_stack_and_return = print_value_stack_and_return
-comptime.print_locals = print_locals
-comptime.print_bt = print_bt
-comptime.print_guards = print_guards
-comptime.breakpoint = breakpoint
+comptime = _Comptime()

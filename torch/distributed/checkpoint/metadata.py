@@ -18,9 +18,7 @@ __all__ = [
 
 @dataclass
 class ChunkStorageMetadata:
-    """
-    Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it.
-    """
+    """Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it."""
 
     offsets: torch.Size
     sizes: torch.Size
@@ -53,9 +51,7 @@ class Metadata:
 
 @dataclass(frozen=True)
 class MetadataIndex:
-    """
-    This class represents a lookup key for items in a state dict or Metadata.
-    """
+    """This class represents a lookup key for items in a state dict or Metadata."""
 
     fqn: str
     """Fully Qualified Name of the object"""

@@ -22,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -326,6 +326,23 @@ class TestQuantizedOps(TestCase):
                 'output_is_observed': True,
             }
         ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
+    @skipIfNoFBGEMM
+    def test_sigmoid_dequantize_rounding_error(self):
+        # issue #107030
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'output_is_observed': True,
+            }
+        ]
+        X = (np.full(64, 514., dtype=np.float32), (1028.02, 255, torch.quint8))
         self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
 
     """Tests the correctness of the quantized::hardsigmoid op."""
@@ -2557,15 +2574,18 @@ class TestQuantizedOps(TestCase):
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases_product = itertools.product(*combined)
         test_cases = list(test_cases_product)
-        # add just one test case to test overflow
-        test_cases.append([
-            [1, 4, 224, 224, 160],  # shape,
-            torch.qint8,  # torch_type
-            0.1,  # scale
-            0,  # zero_point
-            False,   # channels_last
-            True,  # affine
-        ])
+        # NB: Add just one test case to test overflow, but this case is too slow to run
+        # internally in @fbcode//mode/dev, the long pole is the 4x calls to torch.sort
+        # inside torch.unique current implementation
+        if not IS_SANDCASTLE:
+            test_cases.append([
+                [1, 4, 224, 224, 160],  # shape,
+                torch.qint8,  # torch_type
+                0.1,  # scale
+                0,  # zero_point
+                False,   # channels_last
+                True,  # affine
+            ])
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 

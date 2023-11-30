@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -408,9 +409,13 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   ASSERT_EQ(logs.size(), 2);
   std::map<std::string, std::map<std::string, std::string>> expected_logs = {
       {"pytorch.stream.writer.metadata",
-       {{"serialization_id", writer.serializationId()}}},
+       {{"serialization_id", writer.serializationId()},
+       {"file_name", "archive"},
+       {"file_size", str(oss.str().length())}}},
       {"pytorch.stream.reader.metadata",
-       {{"serialization_id", writer.serializationId()}}}
+       {{"serialization_id", writer.serializationId()},
+       {"file_name", "archive"},
+       {"file_size", str(iss.str().length())}}}
   };
   ASSERT_EQ(expected_logs, logs);
 

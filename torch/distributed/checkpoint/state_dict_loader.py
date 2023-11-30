@@ -23,7 +23,7 @@ def load_state_dict(
     planner: Optional[LoadPlanner] = None,
 ) -> None:
     """
-    Loads a distributed ``state_dict`` in SPMD style.
+    Load a distributed ``state_dict`` in SPMD style.
 
     Each rank will try to read the least amount of data necessary
     to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
@@ -85,7 +85,6 @@ def load_state_dict(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)

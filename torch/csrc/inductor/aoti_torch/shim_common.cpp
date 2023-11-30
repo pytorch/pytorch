@@ -26,6 +26,7 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
+#include <ATen/ops/scatter.h>
 
 #endif
 
@@ -223,11 +224,14 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     c10::Device device = c10_device(device_type, device_index);
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
-    at::Tensor* new_tensor = new at::Tensor(at::for_blob(data, sizes)
-                                                .strides(strides)
-                                                .storage_offset(storage_offset)
-                                                .options(options)
-                                                .make_tensor());
+    at::Tensor* new_tensor = (data != nullptr)
+        ? new at::Tensor(at::for_blob(data, sizes)
+                             .strides(strides)
+                             .storage_offset(storage_offset)
+                             .options(options)
+                             .make_tensor())
+        // data == nullptr can happen for a 0-size tensor
+        : new at::Tensor(at::empty_strided(sizes, strides, options));
     *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
@@ -405,6 +409,21 @@ AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
         assert(false);
       }
     }
+  });
+}
+
+AOTITorchError aoti_torch_scatter_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::scatter_out(*out_tensor, *self_tensor, dim, *index_tensor, *src_tensor);
   });
 }
 

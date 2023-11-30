@@ -399,8 +399,8 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
-    def _test_memoryless(self, obs_class):
-        obs = obs_class(averaging_constant=1)
+    def _test_dynamic_quant_observer(self, obs_class):
+        obs = obs_class(averaging_constant=1, is_dynamic=True)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -410,11 +410,20 @@ class TestObserver(QuantizationTestCase):
             obs(x)
             self.assertEqual(params, obs.calculate_qparams())
 
-    def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MovingAverageMinMaxObserver)
+    def test_dynamic_quant_observer(self):
+        self._test_dynamic_quant_observer(MovingAverageMinMaxObserver)
 
-    def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
+    def test_dynamic_quant_perchannel_observer(self):
+        self._test_dynamic_quant_observer(MovingAveragePerChannelMinMaxObserver)
+
+    def test_dynamic_quant_observer_matching_choose_qparams(self):
+        obs = MovingAverageMinMaxObserver(averaging_constant=1, is_dynamic=True)
+        for x in [torch.randn(3, 3), torch.rand(3, 3, 3), torch.randn(3, 3, 3, 3)]:
+            obs(x)
+            params = obs.calculate_qparams()
+            scale, zero_point = torch._choose_qparams_per_tensor(x)
+            self.assertEqual(scale, params[0])
+            self.assertEqual(zero_point, params[1])
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):

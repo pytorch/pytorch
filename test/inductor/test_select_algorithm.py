@@ -44,13 +44,6 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    def check_counter(self, counter, expected):
-        if not inductor_config.cpp_wrapper:
-            self.assertEqual(counter, expected)
-        else:
-            # cpp_wrapper for the CUDA backend runs two passes
-            self.assertEqual(counter, 2 * expected)
-
     @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu(self):
@@ -64,7 +57,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(1, 16, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
@@ -82,7 +75,7 @@ class TestSelectAlgorithm(TestCase):
         )
 
         foo(*inps)
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
@@ -112,7 +105,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(8, 32, device="cuda"),
             torch.randn(32, 8, device="cuda"),
         )
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test__int_mm(self):
@@ -206,7 +199,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(512, 512, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm_dup_args(self):
@@ -215,7 +208,7 @@ class TestSelectAlgorithm(TestCase):
             return torch.mm(a, a)
 
         foo(torch.randn(32, 32, device="cuda"))
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm_dup_args_view(self):
@@ -226,7 +219,7 @@ class TestSelectAlgorithm(TestCase):
             return torch.mm(q, k.transpose(0, 1))
 
         foo(torch.randn(64, 64, device="cuda"))
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocm
     @expectedFailureDynamicWrapper
@@ -252,7 +245,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocm
     @patches

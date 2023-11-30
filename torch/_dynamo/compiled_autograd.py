@@ -139,17 +139,18 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(outputs, proxies)
         return outputs
 
-    def post_acc_grad_hook(self, inputs, hook_id):
+    def post_acc_grad_hook(self, input, hook_id):
+        assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
-            inputs,
+            input,
         )
         with disable_proxy_modes_tracing():
-            inputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(inputs, proxies)
-        return inputs
+            input = [maybe_clone(input)]
+            self.bind_tensors_to_proxies(input, proxies)
+        return input
 
     def end_capture(self, outputs):
         self.stack.close()

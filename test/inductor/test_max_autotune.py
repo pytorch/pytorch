@@ -680,7 +680,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         # failure by virtue of not receiving the expected result back.
         visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
         if not self.multi_device:
-            assert visible_devices == self.parent_valid_devices
+            assert visible_devices == self.parent_visible_devices
         else:
             valid_devices = self.parent_visible_devices.split(",")
             assert visible_devices in valid_devices
@@ -716,7 +716,7 @@ class TestTuningProcess(TestCase):
             # Then send another request and make sure the sub-process
             # has restarted and is operational. 'valid_devices' expected
             # to be None because autotune_multi_device is off.
-            choice.bmreq.parent_valid_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+            choice.bmreq.parent_visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
 
             timings = tuning_pool.benchmark([choice])
             self.assertTrue(choice in timings)

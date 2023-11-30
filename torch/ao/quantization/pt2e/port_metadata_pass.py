@@ -188,7 +188,6 @@ class PortNodeMetaForQDQ(_ExportPassBase):
     """
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-        print("before port:", graph_module)
         for node in graph_module.graph.nodes:
             annotation = node.meta.get("quantization_annotation", None)
             if _is_valid_annotation(annotation):
