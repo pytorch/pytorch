@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d {
+namespace intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
@@ -36,8 +37,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       size_t rank,
       size_t worldSize);
 
-  bool shouldUseIntraNodeAllReduce(const at::Tensor& input);
-  at::Tensor allReduce(const at::Tensor& input);
+  AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);
+  at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
 
  private:
   Topology topology_;
@@ -47,4 +48,5 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t worldSize_;
 };
 
+} // namespace intra_node_comm
 } // namespace c10d

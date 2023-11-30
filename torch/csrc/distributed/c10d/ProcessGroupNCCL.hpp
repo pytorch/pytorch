@@ -534,7 +534,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
 
-  c10::intrusive_ptr<c10d::IntraNodeComm> initIntraNodeComm();
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
@@ -907,7 +907,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   size_t uid_;
 
-  c10::intrusive_ptr<IntraNodeComm> intraNodeComm_;
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();

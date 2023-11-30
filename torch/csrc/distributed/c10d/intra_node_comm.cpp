@@ -6,9 +6,6 @@
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <cuda_runtime.h>
-#include <nvml.h>
-
 #include <iostream>
 #include <random>
 
@@ -19,7 +16,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#include <nvml.h>
+#endif
+
 namespace c10d {
+namespace intra_node_comm {
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
@@ -225,6 +228,41 @@ void TwoPhaseExchange::run(
   pthread_mutex_unlock(&mutex_);
 }
 
+static std::string generateUUID() {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(0, 15);
+  std::uniform_int_distribution<> dis2(8, 11);
+
+  std::stringstream ss;
+  int i;
+
+  ss << std::hex;
+  for (i = 0; i < 8; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  for (i = 0; i < 4; i++) {
+    ss << dis(gen);
+  }
+  ss << "-4"; // Version 4 : Random
+  for (i = 0; i < 3; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  ss << dis2(gen);
+
+  for (i = 0; i < 3; i++) {
+    ss << dis(gen);
+  }
+  ss << "-";
+  for (i = 0; i < 12; i++) {
+    ss << dis(gen);
+  }
+
+  return ss.str();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
@@ -362,14 +400,14 @@ static Topology detectTopology(
     }
   }
   if (fullyConnected) {
-    std::cout << "IntraNodeComm: Topology::FULLY_CONNECTED" << std::endl;
+    LOG(INFO) << "IntraNodeComm: Topology::FULLY_CONNECTED";
     return Topology::FULLY_CONNECTED;
   }
   if (deviceIds.size() == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
-    std::cout << "IntraNodeComm: Topology::HYBRID_CUBE_MESH" << std::endl;
+    LOG(INFO) << "IntraNodeComm: Topology::HYBRID_CUBE_MESH";
     return Topology::HYBRID_CUBE_MESH;
   }
-  std::cout << "IntraNodeComm: Topology::UNKNOWN" << std::endl;
+  LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
 };
 
@@ -386,26 +424,13 @@ AllReduceAlgo selectAllReduceAlgo(
     Topology topology,
     size_t worldSize);
 
-at::Tensor oneShotAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> buffers,
-    std::array<void*, kMaxDevices> p2pStates,
-    size_t rank,
-    size_t worldSize);
-
-at::Tensor twoShotAllReduce(
+at::Tensor allReduce(
     const at::Tensor& input,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
-    size_t worldSize);
-
-at::Tensor hybridCubeMeshAllReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    size_t rank,
-    size_t worldSize);
+    size_t worldSize,
+    AllReduceAlgo algo);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous and Initialization
@@ -436,12 +461,12 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
+#ifdef USE_CUDA
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
     return nullptr;
   }
-
   // Data structure for rendezvous
   struct Shared {
     std::array<int, kMaxDevices> deviceIds;
@@ -521,41 +546,9 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   }
   return c10::make_intrusive<IntraNodeComm>(
       topology, p2pStates, buffers, rank, worldSize);
-}
-
-std::string generateUUID() {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<> dis(0, 15);
-  std::uniform_int_distribution<> dis2(8, 11);
-
-  std::stringstream ss;
-  int i;
-
-  ss << std::hex;
-  for (i = 0; i < 8; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  for (i = 0; i < 4; i++) {
-    ss << dis(gen);
-  }
-  ss << "-4"; // Version 4 : Random
-  for (i = 0; i < 3; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  ss << dis2(gen);
-
-  for (i = 0; i < 3; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  for (i = 0; i < 12; i++) {
-    ss << dis(gen);
-  }
-
-  return ss.str();
+#else
+  return nullptr;
+#endif
 }
 
 /**
@@ -570,6 +563,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     const std::string& prefix,
     size_t rank,
     size_t worldSize) {
+#ifdef USE_CUDA
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
@@ -613,26 +607,22 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     uuid = store->get_to_str(rdzvIdKey);
   }
   return rendezvous(uuid, rank, worldSize);
+#else
+  return nullptr;
+#endif
 }
 
-bool IntraNodeComm::shouldUseIntraNodeAllReduce(const at::Tensor& input) {
-  auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
-  return algo != AllReduceAlgo::NONE;
+AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
+  return c10d::intra_node_comm::selectAllReduceAlgo(
+      input, topology_, worldSize_);
 }
 
-at::Tensor IntraNodeComm::allReduce(const at::Tensor& input) {
-  auto algo = selectAllReduceAlgo(input, topology_, worldSize_);
-  switch (algo) {
-    case AllReduceAlgo::ONE_SHOT:
-      return oneShotAllReduce(input, p2pStates_, buffers_, rank_, worldSize_);
-    case AllReduceAlgo::TWO_SHOT:
-      return twoShotAllReduce(input, p2pStates_, buffers_, rank_, worldSize_);
-    case AllReduceAlgo::HCM:
-      return hybridCubeMeshAllReduce(
-          input, p2pStates_, buffers_, rank_, worldSize_);
-    default:
-      C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
-  }
+at::Tensor IntraNodeComm::allReduce(
+    const at::Tensor& input,
+    AllReduceAlgo algo) {
+  return c10d::intra_node_comm::allReduce(
+      input, p2pStates_, buffers_, rank_, worldSize_, algo);
 }
 
+} // namespace intra_node_comm
 } // namespace c10d

@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 namespace c10d {
+namespace intra_node_comm {
 
 static constexpr size_t kBytesPerThread = 16;
 static constexpr size_t kMaxAllReduceBlocks = 24;
@@ -12,7 +13,6 @@ static constexpr size_t kThreadsPerBlock = 1024;
 static constexpr size_t kWarpSize = 32;
 static constexpr uint32_t kNumelPerThread =
     kBytesPerThread / sizeof(at::BFloat16);
-;
 static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
 
 #if defined(USE_ROCM)
@@ -67,14 +67,6 @@ DEVICE_INLINE void acquireSignal(uint32_t* addr) {
 
 #define LOAD_16(a, b) \
   *reinterpret_cast<uint4*>(a) = reinterpret_cast<const uint4*>(b)[0]
-
-static inline size_t divUp(uint32_t a, uint32_t b) {
-  return (a + b - 1) / b;
-}
-
-static inline size_t alignUp(uint32_t a, uint32_t b) {
-  return divUp(a, b) * b;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Fully Connected Algos
@@ -327,6 +319,18 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   }
 }
 
+static inline size_t divUp(uint32_t a, uint32_t b) {
+  return (a + b - 1) / b;
+}
+
+static inline size_t alignUp(uint32_t a, uint32_t b) {
+  return divUp(a, b) * b;
+}
+
+static inline size_t getAlignedSize(const at::Tensor& input, size_t factor) {
+  return alignUp(input.numel(), kNumelPerWarp * factor) * input.element_size();
+}
+
 static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
@@ -334,9 +338,6 @@ static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
   TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
-  TORCH_CHECK(
-      static_cast<size_t>(input.numel() * input.element_size()) <
-      kMaxIntraNodeSize);
 }
 
 static void getLaunchConfig(size_t N, dim3& blocks, dim3& threads) {
@@ -366,7 +367,7 @@ static auto castArr(std::array<void*, kMaxDevices> arr) {
 
 bool isIntraNodeCommSupported() {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  return false;
+  xxx return false;
 #else
   return true;
 #endif
@@ -468,8 +469,6 @@ at::Tensor twoShotAllReduce(
   dim3 blocks, threads;
   getLaunchConfig(N_per_rank, blocks, threads);
 
-  TORCH_WARN_ONCE("two shot: blocks: ", blocks.x, " threads: ", threads.x);
-
   auto output = N_aligned == static_cast<size_t>(input.numel())
       ? input
       : input.new_empty(N_aligned);
@@ -528,8 +527,6 @@ at::Tensor hybridCubeMeshAllReduce(
   dim3 blocks, threads;
   getLaunchConfig(N, blocks, threads);
 
-  TORCH_WARN_ONCE("blocks: ", blocks.x, " threads: ", threads.x);
-
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
       buffers[rank],
@@ -557,29 +554,47 @@ AllReduceAlgo selectAllReduceAlgo(
     const at::Tensor& input,
     Topology topology,
     size_t worldSize) {
-  // Only supports bf16 for now
+  // Only support bf16 for now
   if (input.dtype() != at::kBFloat16) {
     return AllReduceAlgo::NONE;
   }
-  const size_t numel = input.numel();
-  const size_t elem_sz = input.element_size();
   if (topology == Topology::HYBRID_CUBE_MESH) {
     TORCH_CHECK(
         worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
-    if (alignUp(numel, kNumelPerWarp) * elem_sz <= 256 * 1024) {
+    if (getAlignedSize(input, 1) <= 256 * 1024) {
       return AllReduceAlgo::HCM;
     }
   }
   if (topology == Topology::FULLY_CONNECTED) {
-    if (alignUp(numel, kNumelPerWarp) * elem_sz <= 256 * 1024) {
+    if (getAlignedSize(input, 1) <= 256 * 1024) {
       return AllReduceAlgo::ONE_SHOT;
     }
-    if (alignUp(numel, kNumelPerWarp * worldSize) * elem_sz <=
-        10 * 1024 * 1024) {
+    if (getAlignedSize(input, worldSize) <= 10 * 1024 * 1024) {
       return AllReduceAlgo::TWO_SHOT;
     }
   }
   return AllReduceAlgo::NONE;
 }
 
+at::Tensor allReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    size_t rank,
+    size_t worldSize,
+    AllReduceAlgo algo) {
+  switch (algo) {
+    case AllReduceAlgo::ONE_SHOT:
+      return oneShotAllReduce(input, p2pStates, buffers, rank, worldSize);
+    case AllReduceAlgo::TWO_SHOT:
+      return twoShotAllReduce(input, p2pStates, buffers, rank, worldSize);
+    case AllReduceAlgo::HCM:
+      return hybridCubeMeshAllReduce(
+          input, p2pStates, buffers, rank, worldSize);
+    default:
+      C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
+  }
+}
+
+} // namespace intra_node_comm
 } // namespace c10d
