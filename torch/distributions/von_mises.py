@@ -161,9 +161,13 @@ class VonMises(Distribution):
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
         """
-        The sampling algorithm for the von Mises distribution is based on the following paper:
-        Best, D. J., and Nicholas I. Fisher.
-        "Efficient simulation of the von Mises distribution." Applied Statistics (1979): 152-157.
+        The sampling algorithm for the von Mises distribution is based on the
+        following paper: D.J. Best and N.I. Fisher, "Efficient simulation of the
+        von Mises distribution." Applied Statistics (1979): 152-157.
+
+        Sampling is always done in double precision internally to avoid a hang
+        in _rejection_sample() for small values of the concentration, which
+        starts to happen for single precision around 1e-4 (see issue #88443).
         """
         shape = self._extended_shape(sample_shape)
         x = torch.empty(shape, dtype=self._loc.dtype, device=self.loc.device)
