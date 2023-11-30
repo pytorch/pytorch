@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint, SymInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from .exported_program import ExportedProgram
 
@@ -118,6 +117,9 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     them to be fully polymorphic or within some range.
 
     """
+
+    # Import sympy locally
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: "StrictMinMaxConstraint"
@@ -311,6 +313,9 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
 
     import sympy
 
+    # Import sympy locally
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
     return _create_constraint(
         weakref.ref(t),
         id(t),
@@ -502,6 +507,9 @@ def _process_constraints(
     from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
         InputDim,
     )
+
+    # Import sympy locally
+    from torch.fx.experimental.symbolic_shapes import SymInt
 
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])

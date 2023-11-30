@@ -74,7 +74,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, ten
                     assert buffer_node_name in buffer_name_to_node
                     buffer_node = buffer_name_to_node[buffer_node_name]
                     with gm.graph.inserting_before(node):
-                        buffer_update_node = gm.graph.call_function(
+                        gm.graph.call_function(
                             torch.ops.aten.copy_.default, (buffer_node, return_node)
                         )
                 else:
@@ -330,8 +330,3 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
-
-
-def combine_args_kwargs(args, kwargs):
-    kwargs = kwargs or {}
-    return (args, kwargs)
