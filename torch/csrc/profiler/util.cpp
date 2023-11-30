@@ -125,6 +125,7 @@ std::vector<FileLineFunc> prepareCallstack(
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
         entries.emplace_back(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             FileLineFunc{*(src->filename()), line, entry.filename});
       }
     }
