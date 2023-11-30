@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: quantization"]
 
+import unittest
+
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import generate_numeric_debug_handle
 from torch.fx import Node
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_WINDOWS
-import unittest
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
