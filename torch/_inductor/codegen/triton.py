@@ -20,6 +20,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
@@ -859,6 +860,13 @@ class TritonKernel(Kernel):
         self.simplify_indexing = simplify_indexing
 
     def need_numel_args(self):
+        r"""
+        Indicate whether we need provide numel as arguments for the generated
+        kernel calls in the benchmark.
+
+        Should be true for pointwise/reduction kernels but false for triton
+        matmul kernels.
+        """
         return True
 
     def should_use_persistent_reduction(self) -> bool:
@@ -1147,7 +1155,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
+            elif var.name.startswith(("s", "ps", "i")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1272,7 +1280,7 @@ class TritonKernel(Kernel):
         return mask
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
@@ -1540,9 +1548,11 @@ class TritonKernel(Kernel):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = self.cse.generate(
-                    self.compute,
-                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                accumulator_index = str(
+                    self.cse.generate(
+                        self.compute,
+                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                    )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
@@ -1586,7 +1596,7 @@ class TritonKernel(Kernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"  # type: ignore[assignment]
+                accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
@@ -2905,7 +2915,8 @@ class TritonScheduling(BaseScheduling):
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
         def load_cache():
             path = cache_file_path()

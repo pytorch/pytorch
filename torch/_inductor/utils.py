@@ -876,9 +876,7 @@ def use_cutlass_template(layout):
 
 
 def use_aten_gemm_kernels():
-    return (
-        not use_max_autotune() or _use_autotune_backend("ATEN")
-    ) and not config.skip_aten_gemm
+    return not use_max_autotune() or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:

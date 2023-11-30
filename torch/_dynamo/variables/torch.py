@@ -22,7 +22,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..allowed_functions import torch_get_name
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
@@ -298,6 +298,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+        elif self.value == math.radians and not (constant_args or unspec_python_args):
+            # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.radians), args, kwargs
+            )
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
             if isinstance(args[0], TensorVariable) or (
@@ -386,25 +393,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
             if not np:
                 unimplemented("torch.from_numpy. NumPy is not available")
-            assert len(args) == 1, f"Got arguments {args}"
-            assert not kwargs
-            t = args[0]
-            from .tensor import NumpyNdarrayVariable
-
-            if isinstance(t, NumpyNdarrayVariable):
-                # TODO: mark the tensor as non-resizable
-                return wrap_fx_proxy_cls(
-                    target_cls=TensorVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.detach,
-                        *proxy_args_kwargs(args, {}),
-                    ),
-                    example_value=None,
-                )
-            else:
-                unimplemented(f"torch.from_numpy(<{type(t)}>)")
+            return wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.as_tensor,
+                    *proxy_args_kwargs(args, {}),
+                ),
+                example_value=None,
+            )
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.autograd._profiler_enabled:

@@ -8,6 +8,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -63,7 +64,8 @@ class TestKernelBenchmark(TestCase):
         out = f(inp)
         self.verify_compiled_kernels()
 
-    @config.patch(max_autotune=True, skip_aten_gemm=True)
+    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
         N = 256
