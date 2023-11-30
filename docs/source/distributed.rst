@@ -177,8 +177,8 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-or :func:`torch.distributed.init_process_group` function before calling any other methods.
-:func:`torch.distributed.init_process_group` blocks until all processes have joined.
+or :func:`torch.distributed.init_device_mesh` function before calling any other methods.
+Both block until all processes have joined.
 
 .. autofunction:: is_available
 
