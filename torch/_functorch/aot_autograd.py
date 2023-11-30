@@ -1092,7 +1092,14 @@ def run_functionalized_fw_and_collect_metadata(
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+<<<<<<< HEAD
+        with disable_above, FunctionalTensorMode():
+            print("HERERE", flat_f_args)
+            for i in flat_f_args:
+                print(id(i))
+=======
         with disable_above, FunctionalTensorMode(is_pre_dispatch):
+>>>>>>> 2c30b17b9ea ([WIP] pre-dispatch aot_export)
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
 
@@ -1881,6 +1888,7 @@ def create_functionalized_fn(
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
         with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
             # Run the joint
+            print(f_args)
             f_outs = fn(*f_args)
 
         if aot_config.keep_inference_input_mutations:
