@@ -251,6 +251,7 @@ static NvlMesh getNvlMesh(size_t worldSize) {
   using namespace c10::cuda;
 
   NvlMesh nvlMesh = {};
+#ifdef USE_CUDA
   auto driverApi = DriverAPI::get();
   if (driverApi == nullptr) {
     return nvlMesh;
@@ -318,6 +319,9 @@ static NvlMesh getNvlMesh(size_t worldSize) {
     }
   }
   return nvlMesh;
+#else
+  return nvlMesh;
+#endif
 }
 
 /**
