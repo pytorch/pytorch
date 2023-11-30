@@ -1313,7 +1313,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        NCCLTraceBuffer::get()->complete(work.trace_id_);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -1970,8 +1970,10 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 }
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {
-  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled")
-  return getDurationFromFirstEvent(ncclStartEvents_, ncclEndEvents_);
+  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled");
+  TORCH_CHECK(ncclStartEvents_, "getDuration only works if timing was enabled");
+  TORCH_CHECK(ncclEndEvents_, "getDuration only works if timing was enabled");
+  return getDurationFromFirstEvent(*ncclStartEvents_, *ncclEndEvents_);
 }
 
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
