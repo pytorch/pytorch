@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -289,7 +290,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Wrote finished ";
+  LOG(INFO) << "Finished writing NCCLPG debug info.";
 }
 
 inline std::string pickle_str(const c10::IValue& v) {
@@ -343,12 +344,19 @@ struct NCCLTraceBuffer {
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     EventList *start_, *end_;
+
+    // timestamp when the entry was created, likely close to the time the work
+    // was 'enqueued'- not necessarily started
+    c10::time_t time_created_;
+
     const char* state_ = "scheduled";
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
     c10::SmallVector<int, 4> output_dims_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+    bool retired_ = false; // is this work entry no longer in the workMetaList_?
+                           // a retired but not completed event has timed out
   };
 
   bool enabled_ = false;
@@ -381,7 +389,8 @@ struct NCCLTraceBuffer {
         profiling_name,
         std::move(traceback),
         std::move(start),
-        std::move(end)};
+        std::move(end),
+        c10::getTime()};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
@@ -406,6 +415,33 @@ struct NCCLTraceBuffer {
     return id_++;
   }
 
+  void update_state(Entry& r) {
+    if (r.start_ != nullptr) {
+      bool started = true;
+      for (auto& ev : *r.start_) {
+        if (!ev.query()) {
+          started = false;
+          break;
+        }
+      }
+      if (started) {
+        r.state_ = "started";
+      }
+    }
+    if (r.end_ != nullptr) {
+      bool completed = true;
+      for (auto& ev : *r.end_) {
+        if (!ev.query()) {
+          completed = false;
+          break;
+        }
+      }
+      if (completed) {
+        r.state_ = "completed";
+      }
+    }
+  }
+
   std::vector<Entry> dump_entries() {
     std::lock_guard<std::mutex> guard(mutex_);
     std::vector<Entry> result;
@@ -414,44 +450,21 @@ struct NCCLTraceBuffer {
     result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
     // query any remaining events
     for (auto& r : result) {
-      if (r.start_ != nullptr) {
-        bool started = true;
-        for (auto& ev : *r.start_) {
-          if (!ev.query()) {
-            started = false;
-            break;
-          }
-        }
-        if (started) {
-          r.state_ = "started";
-        }
-        r.start_ = nullptr;
-      }
-      if (r.end_ != nullptr) {
-        bool completed = true;
-        for (auto& ev : *r.end_) {
-          if (!ev.query()) {
-            completed = false;
-            break;
-          }
-        }
-        if (completed) {
-          r.state_ = "completed";
-        }
-        r.end_ = nullptr;
-      }
+      update_state(r);
+      r.start_ = r.end_ = nullptr;
     }
     return result;
   }
 
-  void complete(c10::optional<size_t> id) {
+  void retire_id(c10::optional<size_t> id) {
     if (!enabled_ || !id) {
       return;
     }
     std::lock_guard<std::mutex> guard(mutex_);
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
-      entry.state_ = "completed";
+      update_state(entry);
+      entry.retired_ = true;
       entry.start_ = entry.end_ = nullptr;
     }
   }
@@ -464,12 +477,14 @@ struct NCCLTraceBuffer {
     c10::IValue profiling_name_s = "profiling_name";
     c10::IValue input_sizes_s = "input_sizes";
     c10::IValue output_sizes_s = "output_sizes";
+    c10::IValue time_created_s = "time_created_us";
 
     c10::IValue frames_s = "frames";
     c10::IValue state_s = "state";
     c10::IValue line_s = "line";
     c10::IValue name_s = "name";
     c10::IValue filename_s = "filename";
+    c10::IValue retired_s = "retired";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
@@ -492,6 +507,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_s, int64_t(e.pg_id_));
       dict.insert(seq_id_s, int64_t(e.seq_id_));
       dict.insert(profiling_name_s, e.profiling_name_);
+      dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
@@ -510,6 +526,8 @@ struct NCCLTraceBuffer {
       dict.insert(input_sizes_s, read_sizes(e.input_dims_));
       dict.insert(output_sizes_s, read_sizes(e.output_dims_));
       dict.insert(state_s, e.state_);
+      dict.insert(retired_s, e.retired_);
+
       auto frames = new_list();
       for (int64_t frame : tb) {
         frames.push_back(all_frames.at(frame));
