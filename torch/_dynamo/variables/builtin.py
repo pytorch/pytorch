@@ -1251,8 +1251,10 @@ class BuiltinVariable(VariableTracker):
                             ),
                         )
 
-                    # Step 3 - drop the version counter - this is a hack required to get
+                    # Step 3 - drop the version counter - this is a step required to get
                     # .data setting to play correctly with the autograd engine.
+                    # Esentially, dynamo is trying to faithful preserve the (absurd)
+                    # behavior of .data= from eager mode
                     def _lower_version_count_by_1(x):
                         version = x._version
                         if version > 0:
@@ -1266,11 +1268,11 @@ class BuiltinVariable(VariableTracker):
                         (out.as_proxy(),),
                         {},
                     )
+                    obj.as_proxy().node.meta['example_value'] = _lower_version_count_by_1(obj.as_proxy().node.meta['example_value'])
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
 
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
