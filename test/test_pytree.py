@@ -961,9 +961,16 @@ TreeSpec(tuple, None, [*,
         ],
     )
     def test_pytree_serialize(self, spec):
+        self.assertEqual(
+            spec,
+            py_pytree.tree_structure(
+                py_pytree.tree_unflatten([0] * spec.num_leaves, spec)
+            ),
+        )
+
         serialized_spec = py_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, str))
-        self.assertTrue(spec == py_pytree.treespec_loads(serialized_spec))
+        self.assertIsInstance(serialized_spec, str)
+        self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         Point = namedtuple("Point", ["x", "y"])
@@ -1098,6 +1105,12 @@ TreeSpec(tuple, None, [*,
                 ),
             ],
         )
+        self.assertEqual(
+            complicated_spec,
+            py_pytree.tree_structure(
+                py_pytree.tree_unflatten([0] * complicated_spec.num_leaves, complicated_spec)
+            ),
+        )
 
         serialized_spec = py_pytree.treespec_dumps(complicated_spec)
         saved_spec = (
@@ -1162,9 +1175,16 @@ class TestCxxPytree(TestCase):
         ],
     )
     def test_pytree_serialize(self, spec):
+        self.assertEqual(
+            spec,
+            cxx_pytree.tree_structure(
+                cxx_pytree.tree_unflatten([0] * spec.num_leaves, spec)
+            ),
+        )
+
         serialized_spec = cxx_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, str))
-        self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
+        self.assertIsInstance(serialized_spec, str)
+        self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
