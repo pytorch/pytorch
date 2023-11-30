@@ -1590,12 +1590,9 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raise _BypassDispatchCache
         for any situation that precludes caching.
         """
-        # TODO: why are these ops causing problems?
-        if func.name().startswith("_torch_testing"):
-            raise _BypassDispatchCache("testing op")
-
-        # Avoid caching any ops that would call for a more complicated caching
-        # solution, e.g., data dependent ops or ops that modify the inputs.
+        # Avoid caching for any ops that would require a more sophisticated
+        # caching implementation, e.g., data dependent ops or ops that modify
+        # the inputs.
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")
 
@@ -1622,14 +1619,18 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
-        # Hash on the op and arguments (capturing the metadata for the FakeTensors).
-        # Also capture the default_dtype since that can affect the output tensor,
-        # e.g., when operating on constant float values.
         key_values = (
             func,
+            # Translate any FakeTensor args to metadata.
             self._translate_arg(args),
             self._translate_arg(kwargs),
+            # Capture the default_dtype mode since that can affect the output tensor,
+            # e.g., when operating on constant float values.
             torch.get_default_dtype(),
+            # The disallowance of dynamic shapes can affect caching, e.g., a change of
+            # mode can introduce a DynamicOutputShapeException where it wasn't seen on
+            # a previous instance of the same func and arg combination.
+            self.shape_env and self.shape_env.allow_dynamic_output_shape_ops,
         )
         return _DispatchCacheKey(key_values)
 
@@ -1657,7 +1658,10 @@ class FakeTensorMode(TorchDispatchMode):
         elif isinstance(arg, torch.Tensor):
             raise _BypassDispatchCache("non-fake tensor")
         else:
-            return arg
+            # It's important to capture the type of the arg since, e.g., 1 and 1.0
+            # hash to the same value, but can produce different dtypes for the
+            # output tensor.
+            return (type(arg), arg)
 
     def _make_cache_entry(
         self, args: Tuple[Any], output: FakeTensor
