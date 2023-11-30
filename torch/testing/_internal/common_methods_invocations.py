@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    SM53OrLater, SM60OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, SM53OrLater, SM60OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
@@ -14294,7 +14294,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support efficient attention")],
+        decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
             # Device mismatch due to philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
