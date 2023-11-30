@@ -1296,6 +1296,14 @@ class TestOptim(TestCase):
             sparse_only=True,
             maximize=True,
         )
+        import warnings
+        with warnings.catch_warnings(record=True) as ws:
+            SparseAdam(torch.zeros(3))
+            self.assertEqual(len(ws), 1)
+            for warning in ws:
+                self.assertEqual(len(warning.message.args), 1)
+                self.assertRegex(warning.message.args[0],
+                                 "Passing in a raw Tensor as ``params`` to SparseAdam ")
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
         ):
