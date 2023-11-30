@@ -106,7 +106,7 @@ void tupleUnpack(Stack& stack) {
 }
 
 void format(Stack& stack, size_t num_inputs) {
-  TORCH_CHECK(num_inputs > 0 && num_inputs > stack.size(), 
+  TORCH_CHECK(num_inputs > 0 && num_inputs <= stack.size(), 
       "Invalid number of inputs for format string: ", num_inputs);
 
   // static const std::regex unsupported_options("\\{(.*?)\\}");
