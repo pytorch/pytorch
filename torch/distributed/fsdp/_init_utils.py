@@ -345,18 +345,14 @@ def _check_ignored_states(
         all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
         if not all_params and not all_modules:
             # Sort for consistent ordering for unit test regex matching
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_states expects all nn.Parameter or all nn.Module list "
                 f"elements but got types {sorted_types}"
             )
     else:
         if not all(isinstance(state, nn.Module) for state in ignored_states):
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_modules expects nn.Module list elements but got "
                 f"types {sorted_types}"
