@@ -98,8 +98,8 @@ class AOTInductorModelContainer {
   // This function updates the inactive buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
   // We can later change the inactive buffer to active with corresponding
-  // function calls (TODO.)
-  void update_inactive_constants_buffer(
+  // function calls (swap_constant_buffer)
+  void update_inactive_constant_buffer(
       const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
 #ifdef USE_CUDA
     if (this->num_models() == 0) {
@@ -108,7 +108,6 @@ class AOTInductorModelContainer {
     auto num_constants = models_[0]->num_constants();
 
     auto* constants_blob_ptr = static_cast<uint8_t*>(get_inactive_blob_ptr());
-
     auto inactive_constants_map = get_inactive_map();
 
     for (size_t idx = 0; idx < num_constants; idx++) {
@@ -121,17 +120,17 @@ class AOTInductorModelContainer {
       }
 
       // Move the data to container handled blob.
-      auto* internal_constants_ptr =
+      uint8_t* internal_constants_ptr =
           constants_blob_ptr + constants_internal_offset_[idx];
       void* user_constant_ptr;
-      int64_t* constant_size;
+      int64_t constant_size;
       aoti_torch_get_data_ptr(it->second, &user_constant_ptr);
-      aoti_torch_get_sizes(it->second, &constant_size);
+      aoti_torch_get_storage_size(it->second, &constant_size);
 
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_constants_ptr,
           user_constant_ptr,
-          *constant_size,
+          constant_size,
           cudaMemcpyDeviceToDevice));
 
       // Generate Tensor from container handled blob.
@@ -176,7 +175,7 @@ class AOTInductorModelContainer {
     }
   }
 
-  void swap_constants_buffer() {
+  void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
     // Need to wait?
     auto constants_map = get_inactive_map();

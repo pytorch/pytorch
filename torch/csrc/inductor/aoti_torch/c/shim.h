@@ -107,6 +107,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes // returns borrowed reference
