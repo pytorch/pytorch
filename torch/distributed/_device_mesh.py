@@ -417,7 +417,10 @@ class DeviceMesh:
             mesh_dim = 0
 
         mesh_dim_group = self.get_group(mesh_dim)  # type: ignore[arg-type]
-        return get_rank(mesh_dim_group)
+        assert isinstance(
+            mesh_dim_group, ProcessGroup
+        ), "We expect ProcessGroup before calling `get_rank`!"
+        return get_rank(mesh_dim_group)  # type: ignore[arg-type]
 
     def get_coordinate(self) -> Optional[List[int]]:
         """
