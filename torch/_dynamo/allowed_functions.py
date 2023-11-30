@@ -27,7 +27,7 @@ from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import is_safe_constant, NP_SUPPORTED_MODULES
+from .utils import hashable, is_safe_constant, NP_SUPPORTED_MODULES
 
 """
 A note on allowed functions:
@@ -152,7 +152,7 @@ def _disallowed_function_ids() -> Set[int]:
 # Helper function to dump the torch name rule map generated based on
 # the heuristic defined in gen_allowed_objs_and_ids.
 def dump_allowed_torch_name_rule_map() -> None:
-    m = gen_allowed_objs_and_ids().name_rule_map
+    m = gen_allowed_objs_and_ids(record=True, c_binding_only=False).name_rule_map
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
@@ -167,22 +167,26 @@ class AllowedObjects:
     """
 
     object_ids: Dict[int, str]
-    objects: Set[Any]
+    ctx_mamager_classes: Set[Any]
+    c_binding_in_graph_functions: Set[Any]
+    non_c_binding_in_graph_functions: Set[Any]
     name_rule_map: Dict[str, Any]
 
 
-def gen_allowed_objs_and_ids() -> AllowedObjects:
+def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
-    from .variables import TorchCtxManagerClassVariable
+    from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    torch_objects = set()
+    ctx_mamager_classes = set()
+    c_binding_in_graph_functions = set()
+    non_c_binding_in_graph_functions = set()
     torch_name_rule_map = dict()
 
-    # Add obj to torch_objects set if it's a torch context manager class.
+    # Add obj to ctx_mamager_classes set if it's a torch context manager class.
     # This is used to generate the ctx manager class list based on heuristic.
     def heuristic_record_if_ctx_manager(obj, module, name):
         if (
@@ -193,7 +197,46 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             torch_name_rule_map[
                 f"{module.__name__}.{name}"
             ] = TorchCtxManagerClassVariable
-            torch_objects.add(obj)
+            ctx_mamager_classes.add(obj)
+
+    # In some platforms, these functions were loaded as classes instead of functions.
+    # To mitigate these weired cases, we need this special check.
+    def is_special_functions(obj):
+        return hashable(obj) and obj in {
+            torch._C._cuda_isCurrentStreamCapturing,
+            torch._C._graph_pool_handle,
+        }
+
+    # Add obj to c_binding_in_graph_functions set or non_c_binding_in_graph_functions set
+    # if it's a torch function or method.
+    # This is used to generate the in graph function list based on heuristic.
+    def heuristic_record_if_in_graph_function(obj, module, name):
+        try:
+            if hasattr(obj, "__wrapped__"):
+                obj = obj.__wrapped__
+        except Exception:
+            pass
+        if isinstance(
+            obj,
+            (
+                types.FunctionType,
+                types.MethodType,
+                types.BuiltinFunctionType,
+                types.MethodDescriptorType,
+                types.WrapperDescriptorType,
+            ),
+        ) or is_special_functions(obj):
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchInGraphFunctionVariable
+            if c_binding_only:
+                if not hasattr(obj, "__code__"):
+                    c_binding_in_graph_functions.add(obj)
+            else:
+                if hasattr(obj, "__code__"):
+                    non_c_binding_in_graph_functions.add(obj)
+                else:
+                    c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -319,10 +362,14 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -356,7 +403,13 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return AllowedObjects(torch_object_ids, torch_objects, torch_name_rule_map)
+    return AllowedObjects(
+        torch_object_ids,
+        ctx_mamager_classes,
+        c_binding_in_graph_functions,
+        non_c_binding_in_graph_functions,
+        torch_name_rule_map,
+    )
 
 
 @FunctionIdSet

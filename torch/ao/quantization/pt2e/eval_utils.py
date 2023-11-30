@@ -44,6 +44,9 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
 
 
 def _replace_batchnorm_for_eval(m: torch.fx.GraphModule):
+    # TODO(Leslie): This function still fails to support custom momentum and eps value.
+    # Enable this support in future updates.
+
     # Avoid circular dependencies
     from .utils import get_aten_graph_module
 
