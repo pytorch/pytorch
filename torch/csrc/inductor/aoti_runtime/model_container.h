@@ -23,7 +23,7 @@ class AOTInductorModelContainer {
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<AtenTensorHandle>>();
-    use_secondary = false;
+    use_secondary_ = false;
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
@@ -139,7 +139,7 @@ class AOTInductorModelContainer {
       // guarantee that the tensor is contiguous.
       AtenTensorHandle tensor_handle;
       int64_t* stride;
-      size_t offset;
+      int64_t offset;
       int device_idx = -1;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(it->second, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
@@ -147,11 +147,11 @@ class AOTInductorModelContainer {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx));
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_constants_ptr,
-          model_[0]->constant_ndim(idx),
-          model_[0]->constant_shape(idx),
+          models_[0]->constant_ndim(idx),
+          models_[0]->constant_shape(idx),
           stride,
           offset,
-          model_[0]->constant_type(idx),
+          models_[0]->constant_type(idx),
           aoti_torch_device_type_cuda(),
           device_idx,
           &tensor_handle));
@@ -188,7 +188,7 @@ class AOTInductorModelContainer {
       model->update_constants_array(constants_array);
     }
 
-    use_secondary = !use_secondary;
+    use_secondary_ = !use_secondary_;
   }
 
   size_t num_inputs() const {
@@ -232,10 +232,11 @@ class AOTInductorModelContainer {
 
   // Let's place this within USE_CUDA at the moment before we fully support
   // update for CPU cases.
-  bool use_secondary;
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
 #endif // USE_CUDA
+
+  bool use_secondary_;
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
@@ -283,7 +284,7 @@ class AOTInductorModelContainer {
 
 #ifdef USE_CUDA
   void* get_inactive_blob_ptr() {
-    if (use_secondary) {
+    if (use_secondary_) {
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
@@ -295,7 +296,7 @@ class AOTInductorModelContainer {
 #endif // USE_CUDA
 
   std::shared_ptr<ConstantMap> get_inactive_map() {
-    if (use_secondary) {
+    if (use_secondary_) {
       return constants_map_;
     } else {
       if (!constants_map_secondary_) {
@@ -306,7 +307,7 @@ class AOTInductorModelContainer {
   }
 
   std::shared_ptr<std::vector<AtenTensorHandle>> get_inactive_array() {
-    if (use_secondary) {
+    if (use_secondary_) {
       return constants_array_;
     } else {
       if (!constants_array_secondary_) {
