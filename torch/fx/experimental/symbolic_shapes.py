@@ -62,7 +62,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext"
 ]
