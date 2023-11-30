@@ -10,7 +10,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,fail_to_run,31
+DALLE2_pytorch,fail_to_run,21
 
 
 
@@ -267,6 +267,10 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 timm_vovnet,pass,0
+
+
+
+torch_multimodal_clip,pass,0
 
 
 
