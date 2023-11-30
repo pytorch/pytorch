@@ -1126,13 +1126,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x / param
 
     def test_math_radians(self):
-        dynamic = ifdynstaticdefault(False, True)
-
         def func(x, a):
             return x + math.radians(a)
 
         cnt = torch._dynamo.testing.CompileCounter()
-        cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
 
         assert cnt.frame_count == 0
         x = torch.rand(10)
