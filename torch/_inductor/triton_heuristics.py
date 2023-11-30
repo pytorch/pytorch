@@ -632,7 +632,7 @@ def end_graph():
             log.warning(
                 "failed to write profile bandwidth result into %s: %s",
                 output_file,
-                f"{e}",
+                e,
             )
 
 
