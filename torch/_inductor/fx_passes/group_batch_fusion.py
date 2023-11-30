@@ -101,6 +101,12 @@ class BatchFusion(GroupBatchFusionBase):
     pass
 
 
+class BatchPointwiseOpsFusionFactory(BatchFusion):
+    def __init__(self, op, **kwargs):
+        super().__init__(**kwargs)
+        self.op = op
+
+
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
@@ -356,66 +362,6 @@ class BatchLinearFusion(BatchFusion):
                 graph.erase_node(linear)
 
 
-@register_fusion("batch_tanh")
-class BatchTanhFusion(BatchFusion):
-    """
-    Batch tanh fusion in pre grad pass.
-    We only fuse the tahn if the input is after same split node.
-    """
-
-    def _getitem_args(self, getitem_node: torch.fx.Node):
-        if getitem_node.target != operator.__getitem__ or (
-            getitem_node.op != "call_function"
-        ):
-            return None
-        return getitem_node.args[0]
-
-    def match(self, node: torch.fx.Node):
-        input = get_arg_value(node, 0, "input")
-        if (
-            CallFunctionVarArgs(torch.tanh).match(node)
-            and is_node_meta_valid(node)
-            and self._getitem_args(input) is not None
-        ):
-            group_key = (
-                "batch_tanh",
-                self._getitem_args(input),
-                str(input.meta["example_value"].shape),
-            )
-        else:
-            group_key = None
-        return group_key
-
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
-        batch_nodes = []
-        batch_inputs = []
-
-        for node in subset:
-            batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
-
-        with graph.inserting_before(subset[0]):
-            stack_inputs = graph.call_function(
-                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
-            )
-
-            batch_tanh = graph.call_function(
-                torch.tanh,
-                args=(stack_inputs,),
-            )
-            unbind_tanh = graph.call_function(
-                torch.unbind, args=(batch_tanh,), kwargs={"dim": 0}
-            )
-            for i, node in enumerate(batch_nodes):
-                with graph.inserting_after(unbind_tanh):
-                    getitem = graph.call_function(
-                        operator.getitem, args=(unbind_tanh, i)
-                    )
-                node.replace_all_uses_with(getitem)
-                getitem.meta.update(node.meta)
-                graph.erase_node(node)
-
-
 @register_fusion("batch_layernorm")
 class BatchLayernormFusion(BatchFusion):
     """
@@ -528,31 +474,24 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
-@register_fusion("batch_relu")
-class BatchReLUFusion(BatchFusion):
+class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch relu fusion in pre grad pass.
-    We only fuse the relu if the input is after same split/unbind node.
+    Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
+    We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
-    def _getitem_args(self, getitem_node: torch.fx.Node):
-        if getitem_node.target != operator.__getitem__ or (
-            getitem_node.op != "call_function"
-        ):
-            return None
-        return getitem_node.args[0]
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
-        if (
-            CallFunctionVarArgs(torch.nn.functional.relu).match(node)
-            and is_node_meta_valid(node)
-            and self._getitem_args(input) is not None
-        ):
+        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_relu",
-                self._getitem_args(input),
+                "batch_" + self.op.__name__.lower() + "_pre_grad",
                 str(input.meta["example_value"].shape),
+                str(node.kwargs.get("inplace", False)),
             )
         else:
             group_key = None
@@ -566,29 +505,48 @@ class BatchReLUFusion(BatchFusion):
             batch_nodes.append(node)
             batch_inputs.append(get_arg_value(node, 0, "input"))
 
-        # assume all the nodes to be batched have the same inplace
-        inplace = subset[0].kwargs.get("inplace", False)
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
-
-            batch_relu = graph.call_function(
-                torch.nn.functional.relu,
-                args=(stack_inputs,),
-                kwargs={"inplace": inplace},
-            )
-            unbind_relu = graph.call_function(
-                torch.unbind, args=(batch_relu,), kwargs={"dim": 0}
+            if self.op == torch.nn.functional.relu:
+                batch_op = graph.call_function(
+                    self.op,
+                    args=(stack_inputs,),
+                    kwargs={"inplace": subset[0].kwargs.get("inplace", False)},
+                )
+            else:
+                batch_op = graph.call_function(
+                    self.op,
+                    args=(stack_inputs,),
+                )
+            unbind_op = graph.call_function(
+                torch.unbind, args=(batch_op,), kwargs={"dim": 0}
             )
             for i, node in enumerate(batch_nodes):
-                with graph.inserting_after(unbind_relu):
-                    getitem = graph.call_function(
-                        operator.getitem, args=(unbind_relu, i)
-                    )
+                with graph.inserting_after(unbind_op):
+                    getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
+
+
+@register_fusion("batch_tanh")
+class BatchTanhPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.tanh, **kwargs)
+
+
+@register_fusion("batch_sigmoid")
+class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.sigmoid, **kwargs)
+
+
+@register_fusion("batch_relu")
+class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nn.functional.relu, **kwargs)
 
 
 def find_independent_subset_greedy(

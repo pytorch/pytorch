@@ -851,7 +851,7 @@ class TestOptim(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
+            if (kwargs_with_flags.get('capturable') or
                     optimizer_constructor.__name__ in ["Adadelta", "ASGD"]):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
@@ -1296,6 +1296,14 @@ class TestOptim(TestCase):
             sparse_only=True,
             maximize=True,
         )
+        import warnings
+        with warnings.catch_warnings(record=True) as ws:
+            SparseAdam(torch.zeros(3))
+            self.assertEqual(len(ws), 1)
+            for warning in ws:
+                self.assertEqual(len(warning.message.args), 1)
+                self.assertRegex(warning.message.args[0],
+                                 "Passing in a raw Tensor as ``params`` to SparseAdam ")
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
         ):
