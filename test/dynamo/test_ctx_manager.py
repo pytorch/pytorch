@@ -676,13 +676,29 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
             return new_fwd
 
+        def autocast_func_cuda(orig_func):
+            @torch.cuda.amp.autocast(dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cpu(orig_func):
+            @torch.cpu.amp.autocast(dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
         def mm(a, b):
             return torch.mm(a, b)
 
-        mm_bf16 = autocast_func(mm)
+        mm_float16 = autocast_func(mm)
+        mm_float16_cuda = autocast_func_cuda(mm)
+        mm_float16_cpu = autocast_func_cpu(mm)
 
         def fn(a, b):
-            return mm_bf16(a, b)
+            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
 
         a_float32 = torch.rand((8, 8), device="cuda")
         b_float32 = torch.rand((8, 8), device="cuda")
@@ -691,7 +707,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(a_float32, b_float32)
         self.assertTrue(same(ref, res))
-        self.assertTrue(res.dtype == torch.float16)
+        self.assertTrue(res[0].dtype == torch.float16)
+        self.assertTrue(res[1].dtype == torch.float16)
 
     def test_generic_context_manager(self):
         def fn(x):
