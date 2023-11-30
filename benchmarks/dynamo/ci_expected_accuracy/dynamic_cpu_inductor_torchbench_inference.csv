@@ -50,47 +50,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,infra_error,0
+detectron2_fasterrcnn_r_101_c4,eager_validation_fail,0
 
 
 
-detectron2_fasterrcnn_r_101_dc5,infra_error,0
+detectron2_fasterrcnn_r_101_dc5,eager_validation_fail,0
 
 
 
-detectron2_fasterrcnn_r_101_fpn,infra_error,0
+detectron2_fasterrcnn_r_101_fpn,eager_validation_fail,0
 
 
 
-detectron2_fasterrcnn_r_50_c4,infra_error,0
+detectron2_fasterrcnn_r_50_c4,eager_validation_fail,0
 
 
 
-detectron2_fasterrcnn_r_50_dc5,infra_error,0
+detectron2_fasterrcnn_r_50_dc5,eager_validation_fail,0
 
 
 
-detectron2_fasterrcnn_r_50_fpn,infra_error,0
+detectron2_fasterrcnn_r_50_fpn,eager_validation_fail,0
 
 
 
-detectron2_fcos_r_50_fpn,infra_error,0
+detectron2_fcos_r_50_fpn,eager_validation_fail,0
 
 
 
-detectron2_maskrcnn_r_101_c4,infra_error,0
+detectron2_maskrcnn_r_101_c4,eager_validation_fail,0
 
 
 
-detectron2_maskrcnn_r_101_fpn,infra_error,0
+detectron2_maskrcnn_r_101_fpn,eager_validation_fail,0
 
 
 
-detectron2_maskrcnn_r_50_c4,infra_error,0
+detectron2_maskrcnn_r_50_c4,eager_validation_fail,0
 
 
 
-detectron2_maskrcnn_r_50_fpn,infra_error,0
+detectron2_maskrcnn_r_50_fpn,eager_validation_fail,0
 
 
 
@@ -206,7 +206,7 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
-pyhpc_turbulent_kinetic_energy,infra_error,0
+pyhpc_turbulent_kinetic_energy,eager_validation_fail,0
 
 
 

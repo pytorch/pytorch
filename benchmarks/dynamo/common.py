@@ -3477,25 +3477,25 @@ def run(runner, args, original_dir=None):
             # Go back to main branch
             repo.git.checkout(main_branch)
     elif args.only:
-        def write_csv_when_exception(name, status):
+
+        def write_csv_when_exception(name: str, status: str, device=None):
             placeholder_batch_size = 0
+            devices = [device] if device is not None else args.devices
             if args.accuracy:
                 headers = ["dev", "name", "batch_size", "accuracy"]
                 rows = [
-                    [device, name, placeholder_batch_size, status]
-                    for device in args.devices
+                    [device, name, placeholder_batch_size, status] for device in devices
                 ]
             elif args.performance:
                 headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
                 rows = [
                     [device, name, placeholder_batch_size, 0.0, 0.0]
-                    for device in args.devices
+                    for device in devices
                 ]
             else:
                 headers = []
                 rows = [
-                    [device, name, placeholder_batch_size, 0.0]
-                    for device in args.devices
+                    [device, name, placeholder_batch_size, 0.0] for device in devices
                 ]
 
             for row in rows:
@@ -3575,7 +3575,7 @@ def run(runner, args, original_dir=None):
 
                     print(traceback.format_exc())
                     print("eager_validation_fail")
-                    write_csv_when_exception(name, "eager_validation_fail")
+                    write_csv_when_exception(name, "eager_validation_fail", device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

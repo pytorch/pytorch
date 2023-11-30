@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,infra_error,0
+detectron2_fcos_r_50_fpn,eager_validation_fail,0
 
 
 
@@ -186,7 +186,7 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
-pyhpc_turbulent_kinetic_energy,infra_error,0
+pyhpc_turbulent_kinetic_energy,eager_validation_fail,0
 
 
 

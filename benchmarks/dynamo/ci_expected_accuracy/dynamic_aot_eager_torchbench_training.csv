@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,infra_error,0
+torchrec_dlrm,eager_validation_fail,0
 
 
 
@@ -190,7 +190,7 @@ soft_actor_critic,pass,7
 
 
 
-speech_transformer,infra_error,0
+speech_transformer,eager_validation_fail,0
 
 
 
