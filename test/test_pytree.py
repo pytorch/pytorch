@@ -208,13 +208,13 @@ class TestGenericPytree(TestCase):
         def run_test(tup):
             expected_spec = gen_expected_fn(tup)
             values, treespec = pytree_impl.tree_flatten(tup)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, tup)
-            self.assertTrue(isinstance(unflattened, tuple))
+            self.assertIsInstance(unflattened, tuple)
 
         run_test(())
         run_test((1.0,))
@@ -243,13 +243,13 @@ class TestGenericPytree(TestCase):
         def run_test(lst):
             expected_spec = gen_expected_fn(lst)
             values, treespec = pytree_impl.tree_flatten(lst)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, lst)
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, lst)
-            self.assertTrue(isinstance(unflattened, list))
+            self.assertIsInstance(unflattened, list)
 
         run_test([])
         run_test([1.0, 2])
@@ -282,13 +282,13 @@ class TestGenericPytree(TestCase):
         def run_test(dct):
             expected_spec = gen_expected_fn(dct)
             values, treespec = pytree_impl.tree_flatten(dct)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(dct.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, dct)
-            self.assertTrue(isinstance(unflattened, dict))
+            self.assertIsInstance(unflattened, dict)
 
         run_test({})
         run_test({"a": 1})
@@ -325,13 +325,13 @@ class TestGenericPytree(TestCase):
         def run_test(odict):
             expected_spec = gen_expected_fn(odict)
             values, treespec = pytree_impl.tree_flatten(odict)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(odict.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, odict)
-            self.assertTrue(isinstance(unflattened, OrderedDict))
+            self.assertIsInstance(unflattened, OrderedDict)
 
         od = OrderedDict()
         run_test(od)
@@ -348,7 +348,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda ddct: py_pytree.TreeSpec(
                         defaultdict,
-                        (ddct.default_factory, list(ddct.keys())),
+                        [ddct.default_factory, list(ddct.keys())],
                         [py_pytree.LeafSpec() for _ in ddct.values()],
                     ),
                 ),
@@ -369,14 +369,14 @@ class TestGenericPytree(TestCase):
         def run_test(ddct):
             expected_spec = gen_expected_fn(ddct)
             values, treespec = pytree_impl.tree_flatten(ddct)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(ddct.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, ddct)
             self.assertEqual(unflattened.default_factory, ddct.default_factory)
-            self.assertTrue(isinstance(unflattened, defaultdict))
+            self.assertIsInstance(unflattened, defaultdict)
 
         run_test(defaultdict(list, {}))
         run_test(defaultdict(int, {"a": 1}))
@@ -411,14 +411,14 @@ class TestGenericPytree(TestCase):
         def run_test(deq):
             expected_spec = gen_expected_fn(deq)
             values, treespec = pytree_impl.tree_flatten(deq)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(deq))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, deq)
             self.assertEqual(unflattened.maxlen, deq.maxlen)
-            self.assertTrue(isinstance(unflattened, deque))
+            self.assertIsInstance(unflattened, deque)
 
         run_test(deque([]))
         run_test(deque([1.0, 2]))
@@ -442,13 +442,13 @@ class TestGenericPytree(TestCase):
             else:
                 expected_spec = cxx_pytree.tree_structure(Point(0, 1))
             values, treespec = pytree_impl.tree_flatten(tup)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, tup)
-            self.assertTrue(isinstance(unflattened, Point))
+            self.assertIsInstance(unflattened, Point)
 
         run_test(Point(1.0, 2))
         run_test(Point(torch.tensor(1.0), 2))
@@ -474,7 +474,7 @@ class TestGenericPytree(TestCase):
         values, spec = pytree_impl.tree_flatten(expected)
         # Check that values is actually List[Tensor] and not (ReturnType(...),)
         for value in values:
-            self.assertTrue(isinstance(value, torch.Tensor))
+            self.assertIsInstance(value, torch.Tensor)
         result = pytree_impl.tree_unflatten(values, spec)
 
         self.assertEqual(type(result), type(expected))
@@ -490,7 +490,7 @@ class TestGenericPytree(TestCase):
     def test_flatten_unflatten_nested(self, pytree_impl):
         def run_test(pytree):
             values, treespec = pytree_impl.tree_flatten(pytree)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(len(values), treespec.num_leaves)
 
             # NB: python basic data structures (dict list tuple) all have
@@ -783,15 +783,17 @@ class TestPythonPytree(TestCase):
             )
 
     def test_treespec_equality(self):
-        self.assertTrue(
-            py_pytree.LeafSpec() == py_pytree.LeafSpec(),
+        self.assertEqual(
+            py_pytree.LeafSpec(),
+            py_pytree.LeafSpec(),
         )
-        self.assertTrue(
-            py_pytree.TreeSpec(list, None, []) == py_pytree.TreeSpec(list, None, []),
+        self.assertEqual(
+            py_pytree.TreeSpec(list, None, []),
+            py_pytree.TreeSpec(list, None, []),
         )
-        self.assertTrue(
-            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()])
-            == py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
+        self.assertEqual(
+            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
+            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
         )
         self.assertFalse(
             py_pytree.TreeSpec(tuple, None, []) == py_pytree.TreeSpec(list, None, []),
@@ -920,7 +922,7 @@ TreeSpec(tuple, None, [*,
             # py_pytree.tree_structure(defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}}))
             py_pytree.TreeSpec(
                 defaultdict,
-                (list, ["a", "b", "c"]),
+                [list, ["a", "b", "c"]],
                 [
                     py_pytree.TreeSpec(
                         list,
@@ -953,6 +955,7 @@ TreeSpec(tuple, None, [*,
         ],
     )
     def test_pytree_serialize(self, spec):
+        # Ensure that the spec is valid
         self.assertEqual(
             spec,
             py_pytree.tree_structure(
@@ -1014,7 +1017,7 @@ TreeSpec(tuple, None, [*,
             DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
         )
         serialized_spec = py_pytree.treespec_dumps(spec, 1)
-        self.assertTrue("moo" in serialized_spec)
+        self.assertIn("moo", serialized_spec)
         roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
 
@@ -1078,6 +1081,7 @@ TreeSpec(tuple, None, [*,
             py_pytree.treespec_loads(bad_protocol_serialized_spec)
 
     def test_saved_serialized(self):
+        # py_pytree.tree_structure(OrderedDict([(1, (0, 1)), (2, 2), (3, {4: 3, 5: 4, 6: 5})]))
         complicated_spec = py_pytree.TreeSpec(
             OrderedDict,
             [1, 2, 3],
@@ -1097,10 +1101,13 @@ TreeSpec(tuple, None, [*,
                 ),
             ],
         )
+        # Ensure that the spec is valid
         self.assertEqual(
             complicated_spec,
             py_pytree.tree_structure(
-                py_pytree.tree_unflatten([0] * complicated_spec.num_leaves, complicated_spec)
+                py_pytree.tree_unflatten(
+                    [0] * complicated_spec.num_leaves, complicated_spec
+                )
             ),
         )
 
@@ -1122,7 +1129,7 @@ TreeSpec(tuple, None, [*,
 
 class TestCxxPytree(TestCase):
     def test_treespec_equality(self):
-        self.assertTrue(cxx_pytree.LeafSpec() == cxx_pytree.LeafSpec())
+        self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
