@@ -414,6 +414,7 @@ at::Tensor oneShotAllReduce(
             castArr<FcP2pState*>(p2pStates),                        \
             castArr<at::BFloat16*>(buffers),                        \
             rank);                                                  \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
   }
   X(2);
   X(3);
@@ -465,7 +466,7 @@ at::Tensor twoShotAllReduce(
             castArr<FcP2pState*>(p2pStates),                        \
             castArr<at::BFloat16*>(buffers),                        \
             rank);                                                  \
-    AT_CUDA_CHECK(cudaGetLastError());                              \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
   }
   X(2);
   X(3);
@@ -523,6 +524,7 @@ at::Tensor hybridCubeMeshAllReduce(
       castArr<HcmP2pState*>(p2pStates),
       castArr<at::BFloat16*>(buffers),
       rank);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return input;
 }
 
