@@ -70,7 +70,6 @@ from .exported_program import (
     _create_stateful_graph_module,
     _process_constraints,
     CallSpec,
-    combine_args_kwargs,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -386,7 +385,7 @@ def capture_pre_autograd_graph(
             if re.match(r"^[if]\d+$", str(k))
         }
 
-        flat_args, _ = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
         range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
         unlifted_m = _create_stateful_graph_module(
             m,
@@ -802,7 +801,7 @@ def _export(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs or {}))
     _, orig_in_spec = pytree.tree_flatten((args, kwargs))
     index = 0
     total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
