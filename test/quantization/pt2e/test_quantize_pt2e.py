@@ -1642,13 +1642,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 self,
             ):
                 super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
                 self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn1 = torch.nn.BatchNorm2d(3)
-                self.bn2 = torch.nn.BatchNorm2d(3)
 
             def forward(self, x):
-                x = self.conv(self.bn1(x))
-                return self.bn2(x)
+                return self.conv(self.bn(x))
 
         m = M().train()
         example_inputs = (

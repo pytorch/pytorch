@@ -99,6 +99,7 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_layernorm": {},
     "batch_tanh": {},
     "batch_relu": {},
+    "batch_sigmoid": {},
 }
 
 # Post grad group/batch fusion and options, set to empty dict to disable fusion.
@@ -193,6 +194,10 @@ coordinate_descent_search_radius = int(
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -416,6 +421,9 @@ class cpp:
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
     fallback_scatter_reduce_sum = True
+
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
 
 
 # config specific to codegen/triton.py
