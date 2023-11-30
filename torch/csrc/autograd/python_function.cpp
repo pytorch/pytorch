@@ -1172,7 +1172,6 @@ static PyObject* get_base_setup_context() {
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
-  std::cout << "THPFunction_apply called" << std::endl;
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
   auto info_pair = unpack_input<false>(inputs);
@@ -1269,9 +1268,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       if (!ctx_input_tuple) {
         return nullptr;
       }
-      std::cout << "cpp call forward" << std::endl;
       output = PyObject_CallObject(forward_fn, ctx_input_tuple);
-      std::cout << "cpp done calling forward" << std::endl;
     }
     if (!output)
       return nullptr;

@@ -15,7 +15,6 @@
 #include <memory>
 #include <utility>
 #include <vector>
-#include <optional>
 
 namespace torch {
 namespace jit {
