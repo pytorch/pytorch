@@ -344,36 +344,45 @@ _odict_unflatten = _ordereddict_unflatten
 
 
 def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
-    values, keys = _dict_flatten(d)
-    return values, (d.default_factory, keys)
+    values, dict_context = _dict_flatten(d)
+    return values, (d.default_factory, dict_context)
 
 
 def _defaultdict_unflatten(
-    values: Iterable[Any], context: Context
+    values: Iterable[Any],
+    context: Context,
 ) -> DefaultDict[Any, Any]:
-    default_factory, keys = context
-    return defaultdict(default_factory, zip(keys, values))
+    default_factory, dict_context = context
+    return defaultdict(default_factory, _dict_unflatten(values, dict_context))
 
 
 def _defaultdict_serialize(context: Context) -> DumpableContext:
-    default_factory, keys = context
+    default_factory, dict_context = context
     json_defaultdict = {
         "default_factory_module": default_factory.__module__,
         "default_factory_name": default_factory.__qualname__,
-        "keys": keys,
+        "dict_context": dict_context,
     }
     return json_defaultdict
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
+    assert isinstance(dumpable_context, dict)
+    assert set(dumpable_context) == {
+        "default_factory_module",
+        "default_factory_name",
+        "dict_context",
+    }
+
     default_factory_module = dumpable_context["default_factory_module"]
     default_factory_name = dumpable_context["default_factory_name"]
     assert isinstance(default_factory_module, str)
     assert isinstance(default_factory_name, str)
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
-    keys = dumpable_context["keys"]
-    return default_factory, keys
+
+    dict_context = dumpable_context["dict_context"]
+    return default_factory, dict_context
 
 
 _private_register_pytree_node(
