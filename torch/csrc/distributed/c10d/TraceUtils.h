@@ -290,7 +290,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Wrote finished ";
+  LOG(INFO) << "Finished writing NCCLPG debug info.";
 }
 
 inline std::string pickle_str(const c10::IValue& v) {
