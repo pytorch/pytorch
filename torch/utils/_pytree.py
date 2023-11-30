@@ -45,20 +45,6 @@ from typing import (
 
 from typing_extensions import Self  # Python 3.11+
 
-from .typing import (
-    Context,
-    DumpableContext,
-    FlattenFunc,
-    FromDumpableContextFn,
-    PyTree,
-    R,
-    S,
-    T,
-    ToDumpableContextFn,
-    U,
-    UnflattenFunc,
-)
-
 
 __all__ = [
     "PyTree",
@@ -93,9 +79,22 @@ __all__ = [
 ]
 
 
+T = TypeVar("T")
+S = TypeVar("S")
+U = TypeVar("U")
+R = TypeVar("R")
+
+
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
+Context = Any
+PyTree = Any
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
+DumpableContext = Any  # Any json dumpable text
+ToDumpableContextFn = Callable[[Context], DumpableContext]
+FromDumpableContextFn = Callable[[DumpableContext], Context]
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
 MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
 
@@ -178,7 +177,7 @@ def register_pytree_node(
     )
 
     try:
-        from . import cxx
+        from . import _cxx_pytree as cxx
     except ImportError:
         pass
     else:
@@ -316,7 +315,7 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
-class structseq(tuple, Generic[_T_co]):  # type: ignore[misc]
+class structseq(tuple, Generic[_T_co]):  # type: ignore[type-arg,misc]
     """A generic type stub for CPython's ``PyStructSequence`` type."""
 
     n_fields: Final[int]  # type: ignore[misc]
@@ -356,7 +355,7 @@ def is_structseq_class(cls: type) -> bool:
     ):
         try:
             # Check the type does not allow subclassing
-            class SubClass(cls):
+            class SubClass(cls):  # type: ignore[misc]
                 pass
 
         except TypeError:
