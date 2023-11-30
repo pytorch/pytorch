@@ -3581,6 +3581,8 @@ class NCCLTraceTest(MultiProcessTestCase):
         event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
+        # very loose bounds, measured 0.036 ms on devgpu
+        self.assertTrue(0 < last['duration_ms'] < 100)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
