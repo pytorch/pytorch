@@ -918,7 +918,9 @@ TreeSpec(tuple, None, [*,
         self.assertEqual(
             complicated_spec,
             py_pytree.tree_structure(
-                py_pytree.tree_unflatten([0] * complicated_spec.num_leaves, complicated_spec)
+                py_pytree.tree_unflatten(
+                    [0] * complicated_spec.num_leaves, complicated_spec
+                )
             ),
         )
 
