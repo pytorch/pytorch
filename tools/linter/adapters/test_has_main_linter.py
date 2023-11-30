@@ -78,7 +78,8 @@ def check_file(filename: str) -> List[LintMessage]:
         if not v.found:
             message = (
                 "Test files need to have a main block which either calls run_tests "
-                + "(to ensure that the tests are run during OSS CI) or raises an exception."
+                + "(to ensure that the tests are run during OSS CI) or raises an exception "
+                + "and added to the blocklist in test/run_test.py"
             )
             lint_messages.append(
                 LintMessage(
