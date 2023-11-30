@@ -9,6 +9,9 @@ from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
 
+# Regular log messages should go through 'log'.
+# ddp_graph_log is a separate artifact logger reserved for dumping graphs.
+# See docs/source/logging.rst for more info.
 log = logging.getLogger(__name__)
 ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
@@ -409,7 +412,9 @@ or file a github issue."""
                     if isinstance(arg, torch.Tensor) and not isinstance(
                         arg, torch._subclasses.FakeTensor
                     ):
-                        new_args.append(fake_mode.from_tensor(arg))
+                        new_args.append(
+                            torch._dynamo.utils.to_fake_tensor(arg, fake_mode)
+                        )
                     else:
                         new_args.append(arg)
 
