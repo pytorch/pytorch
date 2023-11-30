@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_reduce_op_db, foreach_other_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, floating_types_and, floating_types, integral_types_and,
 )
@@ -30,12 +30,14 @@ class RegularFuncWrapper:
     def __init__(self, func):
         self.func = func
 
-    def __call__(self, inputs, values=None, **kwargs):
-        if values is not None:
+    def __call__(self, inputs, scalars=None, **kwargs):
+        if scalars is not None:
             assert len(inputs) == 3
-            if isinstance(values, Number):
-                values = [values for _ in range(len(inputs[0]))]
-            return [self.func(*i, value=values[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
+            # We need to distribute each scalar to the regular func and it needs
+            # special consideration as it is a keyword only argument to the
+            # regular func. (Strangely, it is not a keyword only argument to the
+            # foreach func)
+            return [self.func(*i, value=scalars[idx], **kwargs) for idx, i in enumerate(zip(*inputs))]
         if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
@@ -48,7 +50,7 @@ class ForeachFuncWrapper:
         # Some foreach functions don't have in-place implementations.
         self.is_inplace = False if func is None else func.__name__.endswith('_')
 
-    def __call__(self, inputs, is_cuda, is_fastpath, **kwargs):
+    def __call__(self, inputs, is_cuda, expect_fastpath, **kwargs):
         actual = None
         zero_size = kwargs.pop("zero_size", False)
         if (
@@ -60,7 +62,7 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert mta_called == (is_fastpath and (not zero_size))
+            assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
@@ -119,20 +121,21 @@ class TestForeach(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/100811
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=(torch.float32,)
     )
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
         wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
-            if not op.has_no_out_of_place:
-                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+            if op.supports_out:
+                wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
             with InplaceForeachVersionBumpCheck(self, sample.input):
-                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
+                inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
     @parametrize(
         "noncontiguous,inplace",
@@ -148,12 +151,9 @@ class TestForeach(TestCase):
             func, ref, _, _ = self._get_funcs(op)
         for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
             ref_kwargs = sample.kwargs
-            kwargs = ref_kwargs.copy()
-            expect_fastpath = not (noncontiguous or sample.disable_fastpath)
-            if op in foreach_pointwise_op_db:
-                values = kwargs.pop("values", None)
-                if values is not None:
-                    sample.args = (*sample.args, values)
+            # div promotes ints to floats, so we cannot go on the fastpath there
+            div_slowpath = dtype in integral_types_and(torch.bool) and op.name == '_foreach_div'
+            expect_fastpath = not (noncontiguous or sample.disable_fastpath or div_slowpath)
             ref_input, ctxmgr = sample.input, nullcontext()
             if inplace:
                 with torch.no_grad():
@@ -161,11 +161,11 @@ class TestForeach(TestCase):
                 ctxmgr = InplaceForeachVersionBumpCheck(self, sample.input)
             try:
                 with ctxmgr:
-                    actual = func([sample.input, *sample.args], self.is_cuda, expect_fastpath, **kwargs)
+                    actual = func([sample.input, *sample.args], self.is_cuda, expect_fastpath, **sample.kwargs)
             except Exception as e:
                 with (
                     self.assertRaisesRegex(type(e), re.escape(str(e)))
-                    if not (op.has_no_in_place or op.has_no_out_of_place)
+                    if not (op.has_no_in_place or not op.supports_out)
                     else self.assertRaises(type(e))
                 ):
                     ref([ref_input, *sample.ref_args], **ref_kwargs)
@@ -241,7 +241,7 @@ class TestForeach(TestCase):
                     (rhs_arg,) = transformed_sample.args
                     ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
                     sum(wrapped_op(
-                        [rhs_arg, tensors], is_cuda=False, is_fastpath=False
+                        [rhs_arg, tensors], is_cuda=False, expect_fastpath=False
                     )).mean().backward()
                     sum([ref.func(ref_rhs_arg, t) for t in ref_tensors]).mean().backward()
                     self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
@@ -253,40 +253,44 @@ class TestForeach(TestCase):
             assert isinstance(sample.args, tuple)
             assert len(sample.args) == 2
             inputs = [sample.input, *sample.args]
-            kwargs = sample.kwargs
+            kwargs = sample.kwargs.copy()
             disable_fastpath = sample.disable_fastpath and is_fastpath
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-            values = kwargs.pop("values", None)
+            scalars = kwargs.pop("scalars", None)
 
-            if is_fastpath and isinstance(values, list):
+            if is_fastpath and scalars:
                 sample = sample.transform(lambda t: t.clone().detach() if torch.is_tensor(t) else t)
                 inputs = [sample.input, *sample.args]
-                tensor_values = torch.tensor(values)
+                tensor_values = torch.tensor(scalars)
                 # 1D Tensor of scalars
                 for is_inplace, op_, ref_ in ((False, wrapped_op, ref), (True, inplace_op, inplace_ref)):
                     self._pointwise_test(
                         op_, ref_, inputs, is_fastpath and not disable_fastpath, is_inplace,
-                        values=tensor_values)
+                        scalars=tensor_values, **kwargs)
                     self._pointwise_test(
                         op_, ref_, inputs, is_fastpath and not disable_fastpath, is_inplace,
-                        values=tensor_values[0],
+                        scalars=tensor_values[0],
                         custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.",
+                        **kwargs,
                     )
                     if self.is_cuda:
                         self._pointwise_test(
                             op_, ref_, inputs, is_fastpath and not disable_fastpath, is_inplace,
-                            values=tensor_values.cuda(),
+                            scalars=tensor_values.cuda(),
                             custom_values_err="Expected scalars to be on CPU, got cuda:0 instead.",
+                            **kwargs,
                         )
                     self._pointwise_test(
                         op_, ref_, inputs, is_fastpath and not disable_fastpath, is_inplace,
-                        values=tensor_values[:2],
-                        custom_values_err=f"Expected length of scalars to match input of length {len(values)} but got 2 instead.",
+                        scalars=tensor_values[:2],
+                        custom_values_err=f"Expected length of scalars to match input of length {len(scalars)} but got 2 instead.",
+                        **kwargs,
                     )
                     self._pointwise_test(
                         op_, ref_, inputs, is_fastpath and not disable_fastpath, is_inplace,
-                        values=torch.tensor([[0, 1], [2, 3]])[:, 1],
+                        scalars=torch.tensor([[0, 1], [2, 3]])[:, 1],
                         custom_values_err="Expected scalars to be contiguous.",
+                        **kwargs,
                     )
 
             # Tests of implicit broadcasting
@@ -304,47 +308,48 @@ class TestForeach(TestCase):
             ]
             self._pointwise_test(
                 wrapped_op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False,
-                values=values)
+                scalars=scalars, **kwargs)
             self._pointwise_test(
                 inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath,
-                is_inplace=True, values=values)
+                is_inplace=True, scalars=scalars, **kwargs)
 
     def _pointwise_test(
         self,
         op, ref, inputs, is_fastpath, is_inplace,
         *,
-        values=None, custom_values_err=None,
+        scalars=None, custom_values_err=None, **kwargs
     ):
-        kwargs = {}
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1], inputs[2]] if is_inplace else inputs
         try:
             with (InplaceForeachVersionBumpCheck(self, inputs[0]) if is_inplace else nullcontext()):
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                ref(ref_inputs)
+                ref(ref_inputs, **kwargs)
         else:
-            expected = ref(ref_inputs)
+            expected = ref(ref_inputs, **kwargs)
             self.assertEqual(expected, actual)
-        if values is not None:
+        if scalars is not None:
+            kwargs = kwargs.copy()
+            kwargs["scalars"] = scalars
             try:
-                actual = op(inputs + [values], self.is_cuda, is_fastpath, **kwargs)
+                actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
             except RuntimeError as e:
                 # Match with error messages from regular non-foreach reference if no
                 # custom error message was provided.
                 if custom_values_err is None:
                     with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                        ref(ref_inputs, values=values)
+                        ref(ref_inputs, **kwargs)
                 else:
                     self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
             else:
-                expected = ref(ref_inputs, values=values)
+                expected = ref(ref_inputs, **kwargs)
                 self.assertEqual(expected, actual)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0])]]:
+        for tensors in [[torch.randn([0], device=device, dtype=dtype)]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 
@@ -352,7 +357,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, tensors)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
@@ -371,7 +376,7 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         allowed_dtypes=[torch.float],
     )
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
@@ -389,7 +394,7 @@ class TestForeach(TestCase):
 
     @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
@@ -454,7 +459,7 @@ class TestForeach(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
@@ -506,7 +511,7 @@ class TestForeach(TestCase):
             alpha=None, scalar_self_arg=False)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
@@ -536,12 +541,11 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
-        op.has_no_out_of_place = op.name != "_foreach_zero"
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
         tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2]))[0].input
         tensors[1] = tensors[1].to("cpu")
-        if op.has_no_out_of_place:
+        if not op.supports_out:
             try:
                 actual = method((tensors,), False, False, zero_size=False)
             except RuntimeError as e:
@@ -557,13 +561,13 @@ class TestForeach(TestCase):
             with self.assertRaisesRegex(type(e), str(e)):
                 ref_inplace((tensors,))
         else:
-            if op.has_no_out_of_place:
+            if not op.supports_out:
                 self.assertEqual(expected, tensors)
             else:
                 self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
 
     @onlyCUDA
-    @ops(filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db))
+    @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
@@ -627,7 +631,7 @@ class TestForeach(TestCase):
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
-        actual = fn(inputs, is_cuda=True, is_fastpath=True, ord=ord, zero_size=False)
+        actual = fn(inputs, is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
         expect = ref_fn(inputs, ord=ord)
 
         if dtype == torch.float16:
@@ -656,7 +660,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         dtypes=(torch.float,),
     )
     def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
@@ -680,18 +684,17 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        filter(
+            lambda op: op.supports_out,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
+        ),
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
-        if op.has_no_out_of_place:
-            self.skipTest(f"{op.name} does not have out-of-place implementation")
         func, *_ = self._get_funcs(op)
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
         self.assertTrue(all(t.requires_grad for t in sample.input))
-        if func.func in foreach_pointwise_op_db:
-            sample.kwargs.pop("values", None)
-        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
+        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, expect_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
@@ -699,7 +702,7 @@ class TestForeach(TestCase):
     @ops(
         filter(
             lambda op: op.backward_requires_result,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         ),
         dtypes=(torch.float32,),
     )
@@ -709,7 +712,7 @@ class TestForeach(TestCase):
             class Foo:
                 pass
 
-            out = func((sample.input, *sample.args), is_cuda=False, is_fastpath=False, **sample.kwargs)
+            out = func((sample.input, *sample.args), is_cuda=False, expect_fastpath=False, **sample.kwargs)
             foo = Foo()
             meta_dict = out[0].grad_fn.metadata
             meta_dict[0] = foo
@@ -772,11 +775,23 @@ class TestForeach(TestCase):
         self.assertEqual(num_tensors_seen, 2 * num_tensors_per_list)
 
     @onlyCUDA
+    def test_0dim_tensor_overload_cpu_ok(self):
+        tensors = [torch.ones((), device="cuda", dtype=torch.float32) for _ in range(2)]
+        scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
+
+        # For mul and div, the scalar is allowed to be on CPU too
+        actual = torch._foreach_mul(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
+        actual = torch._foreach_div(tensors, scalar_cpu_tensor)
+        self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
+
+
+    @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [make_tensor((2, 2), dtype=torch.float, device="cuda") for _ in range(2)]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
-            torch._foreach_mul(tensors, torch.tensor(1.0, device="cpu"))
+            torch._foreach_add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
 
         tensors = [make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", "cuda")]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be 0 dim but"):
@@ -808,7 +823,7 @@ class TestForeach(TestCase):
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
     )
@@ -816,7 +831,7 @@ class TestForeach(TestCase):
     def test_autodiff(self, device, dtype, op, inplace):
         if not (op.supports_autograd or op.supports_forward_ad):
             self.skipTest("neither reverse mode nor forward mode supported")
-        if (not inplace) and op.has_no_out_of_place:
+        if (not inplace) and not op.supports_out:
             self.skipTest("out-of-place not implemented")
         if inplace and op.has_no_in_place:
             self.skipTest("in-place not implemented")

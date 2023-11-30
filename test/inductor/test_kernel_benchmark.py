@@ -23,6 +23,7 @@ class TestKernelBenchmark(TestCase):
         cls.exit_stack.close()
 
     def setUp(self):
+        super().setUp()
         PyCodeCache.cache.clear()
 
     def get_compiled_module(self):

@@ -15,7 +15,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
@@ -523,9 +522,14 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
 
-template <int alignment>
-bool is_aligned(const SymInt& size){
-  return size % alignment == 0;
+template<int alignment>
+bool aligned_tensor(const at::Tensor& tensor){
+  for(const auto i : c10::irange(tensor.dim() - 1)){
+    if(tensor.sym_stride(i) % alignment != 0){
+      return false;
+    }
+  }
+  return tensor.sym_stride(-1) == 1;
 }
 
 template <int alignment>
@@ -541,26 +545,23 @@ at::Tensor preprocess_mask(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value) {
-  constexpr int mem_eff_alignment = 16;
-  // Expand to 4d case
-  at::Tensor attn_mask = mask.expand_symint(
+  constexpr int mem_eff_alignment = 8;
+  at::Tensor result_mask = mask;
+  if (!aligned_tensor<mem_eff_alignment>(mask)) {
+    TORCH_WARN_ONCE(
+        "Memory Efficient Attention requires the attn_mask to be aligned to, ",
+        mem_eff_alignment,
+        " elements. "
+        "Prior to calling SDPA, pad the last dimension of the attn_mask "
+        "to be at least a multiple of ", mem_eff_alignment,
+        " and then slice the attn_mask to the original size.");
+    result_mask = pad_bias<mem_eff_alignment>(mask);
+  }
+  return result_mask.expand_symint(
       {query.sym_size(0),
        query.sym_size(1),
        query.sym_size(2),
        key.sym_size(2)});
-
-  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
-  // Apply pad_bias and store the result in attn_mask
-  if (!aligned_last_dim) {
-    return pad_bias<mem_eff_alignment>(attn_mask);
-  }
-  // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
-    return attn_mask.contiguous();
-  }
-
-  return attn_mask;
 }
 // FlashAttentionV2 requires that head dimension be a multiple of 8
 // This was previously done within the kernel, however

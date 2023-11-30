@@ -1,4 +1,4 @@
-r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter
+r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
@@ -81,6 +81,7 @@ class _DatasetKind:
 
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
+
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
     """
 
@@ -122,8 +123,7 @@ def _share_dist_seed(generator, pg):
 
 class DataLoader(Generic[T_co]):
     r"""
-    Data loader. Combines a dataset and a sampler, and provides an iterable over
-    the given dataset.
+    Data loader combines a dataset and a sampler, and provides an iterable over the given dataset.
 
     The :class:`~torch.utils.data.DataLoader` supports both map-style and
     iterable-style datasets with single- or multi-process loading, customizing
@@ -210,6 +210,7 @@ class DataLoader(Generic[T_co]):
     .. _multiprocessing context:
         https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
+
     dataset: Dataset[T_co]
     batch_size: Optional[int]
     num_workers: int
@@ -678,7 +679,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
-    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
     #

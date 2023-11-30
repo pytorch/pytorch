@@ -16,6 +16,7 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -58,13 +59,8 @@ __all__ = [
 ]
 
 
-from .exported_program import (
-    ExportBackwardSignature,
-    ExportedProgram,
-    ExportGraphSignature,
-    ModuleCallEntry,
-    ModuleCallSignature,
-)
+from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
+from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -353,7 +349,8 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -412,14 +409,29 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-        dynamic_shapes: Should be a dict from argument names of ``f`` to their dynamic shape specifications,
-         as follows. The dynamic shape of a tensor argument can be specified as either
+        dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
          (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
          not required to include static dimension indices in this dict, but when they are,
          they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
          where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
+
+        strict: When enabled (default), the export function will trace the program through
+         TorchDynamo which will ensure the soundness of the resulting graph. Otherwise, the
+         exported program will not validate the implicit assumptions baked into the graph and
+         may cause behavior divergence between the original model and the exported one. This is
+         useful when users need to workaround bugs in the tracer, or simply want incrementally
+         enable safety in their models. Note that this does not affect the resulting IR spec
+         to be different and the model will be serialized in the same way regardless of what value
+         is passed here.
+         WARNING: This option is experimental and use this at your own risk.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -443,6 +455,7 @@ def export(
             args,
             kwargs,
             constraints,
+            strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
     else:
@@ -451,6 +464,7 @@ def export(
             args,
             kwargs,
             dynamic_shapes=dynamic_shapes,
+            strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
 
@@ -570,12 +584,12 @@ def load(
     )
 
 
-def register_dataclass(typ: Any) -> None:
+def register_dataclass(cls: Type[Any]) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
-        typ: the dataclass type to register
+        cls: the dataclass type to register
 
     Example::
 
@@ -601,4 +615,4 @@ def register_dataclass(typ: Any) -> None:
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(typ)
+    return register_dataclass_as_pytree_node(cls)

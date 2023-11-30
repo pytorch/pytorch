@@ -132,7 +132,7 @@ class DebugInterpreter(fx.Interpreter):
             if not isinstance(ni, SymInt):
                 return ni
             r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
-            assert len(r.free_symbols) == 0, r
+            assert r.is_number, r
             return int(r)
 
         def subst_symint_tuple(nis):
