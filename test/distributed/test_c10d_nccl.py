@@ -3582,6 +3582,8 @@ class NCCLTraceTest(MultiProcessTestCase):
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
 
+        self.assertTrue(10000 > last['duration_us'] > 10)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_long(self):

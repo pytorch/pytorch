@@ -907,6 +907,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
 TORCH_API std::string dump_nccl_trace();
 
+// Helper used by work::getDuration() and nccl flight recorder
+float getDurationFromFirstEvent(
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclStartEvents,
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclEndEvents) {
+  TORCH_CHECK(
+      ncclStartEvents->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
+  TORCH_CHECK(
+      ncclEndEvents->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
+  TORCH_CHECK(
+      (*ncclEndEvents)[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return (*ncclStartEvents)[0].elapsed_time((*ncclEndEvents)[0]);
+}
+
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
