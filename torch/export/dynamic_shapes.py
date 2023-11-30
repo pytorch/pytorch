@@ -7,13 +7,14 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import sympy
-
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint, SymInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from .exported_program import ExportedProgram
+
+
+__all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
 
 
 class _Dim(type):
@@ -308,6 +309,8 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
             f" but got {index}, which is out of bounds for the given tensor.",
         )
 
+    import sympy
+
     return _create_constraint(
         weakref.ref(t),
         id(t),
@@ -476,7 +479,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple]]:
+) -> Tuple[Dict[Any, ValueRanges], List[Tuple]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -538,7 +541,7 @@ def _process_constraints(
                     equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[sympy.Symbol, ValueRanges] = {}
+    range_constraints: Dict[Any, ValueRanges] = {}
 
     # Add inline constraints to range_constraints
     range_constraints = {
