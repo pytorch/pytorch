@@ -499,37 +499,63 @@ def tree_map_only(
 
 
 @overload
-def tree_map_only(__type_or_types: Type2[T, S], func: Fn2[T, S, Any], tree: PyTree) -> PyTree:
+def tree_map_only(
+    __type_or_types: Type2[T, S],
+    func: Fn2[T, S, Any],
+    tree: PyTree,
+) -> PyTree:
     ...
 
 
 @overload
-def tree_map_only(__type_or_types: Type3[T, S, U], func: Fn3[T, S, U, Any], tree: PyTree) -> PyTree:
+def tree_map_only(
+    __type_or_types: Type3[T, S, U],
+    func: Fn3[T, S, U, Any],
+    tree: PyTree,
+) -> PyTree:
     ...
 
 
-def tree_map_only(__type_or_types: TypeAny, func: FnAny[Any], tree: PyTree) -> PyTree:
+def tree_map_only(
+    __type_or_types: TypeAny,
+    func: FnAny[Any],
+    tree: PyTree,
+) -> PyTree:
     return tree_map(map_only(__type_or_types)(func), tree)
 
 
 @overload
-def tree_map_only_(__type_or_types: Type[T], func: Fn[T, Any], tree: PyTree) -> PyTree:
-    ...
-
-
-@overload
-def tree_map_only_(__type_or_types: Type2[T, S], func: Fn2[T, S, Any], tree: PyTree) -> PyTree:
+def tree_map_only_(
+    __type_or_types: Type[T],
+    func: Fn[T, Any],
+    tree: PyTree,
+) -> PyTree:
     ...
 
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type3[T, S, U], func: Fn3[T, S, U, Any], tree: PyTree
+    __type_or_types: Type2[T, S],
+    func: Fn2[T, S, Any],
+    tree: PyTree,
 ) -> PyTree:
     ...
 
 
-def tree_map_only_(__type_or_types: TypeAny, func: FnAny[Any], tree: PyTree) -> PyTree:
+@overload
+def tree_map_only_(
+    __type_or_types: Type3[T, S, U],
+    func: Fn3[T, S, U, Any],
+    tree: PyTree,
+) -> PyTree:
+    ...
+
+
+def tree_map_only_(
+    __type_or_types: TypeAny,
+    func: FnAny[Any],
+    tree: PyTree,
+) -> PyTree:
     return tree_map_(map_only(__type_or_types)(func), tree)
 
 
