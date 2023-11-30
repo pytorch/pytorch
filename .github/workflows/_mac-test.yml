@@ -72,7 +72,7 @@ jobs:
         continue-on-error: true
         run: |
           for dir in  ~/.local/lib/python3.*/site-packages; do
-            echo "Cleaning up dir"
+            echo "Cleaning up ${dir}"
             rm -rf "${dir}"
           done
 
