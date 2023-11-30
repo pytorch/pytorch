@@ -1,50 +1,48 @@
 #!/usr/bin/env python3
 """
-Test ownership was introduced in https://github.com/pytorch/pytorch/issues/66232.
+This lint verifies that every Python test file (file that matches test_*.py or
+*_test.py in the test folder) has a main block which raises an exception or
+calls run_tests to ensure that the test will be run in OSS CI.
 
-This lint verifies that every Python test file (file that matches test_*.py or *_test.py in the test folder)
-has valid ownership information in a comment header. Valid means:
-  - The format of the header follows the pattern "# Owner(s): ["list", "of owner", "labels"]
-  - Each owner label actually exists in PyTorch
-  - Each owner label starts with "module: " or "oncall: " or is in ACCEPTABLE_OWNER_LABELS
+Takes ~2 minuters to run without the multiprocessing, probably overkill.
 """
 import argparse
 import json
+import multiprocessing as mp
 from enum import Enum
 from typing import List, NamedTuple, Optional
-import multiprocessing as mp
+
 import libcst as cst
 import libcst.matchers as m
 
 LINTER_CODE = "TEST_HAS_MAIN"
 
 
-class TypingCollector(cst.CSTVisitor):
-    def __init__(self, raise_or_run: str = "any"):
+class HasMainVisiter(cst.CSTVisitor):
+    def __init__(self) -> None:
         super().__init__()
         self.found = False
-        self._docstring: Optional[str] = None
-        self.raise_or_run = raise_or_run
 
     def visit_Module(self, node: cst.Module) -> bool:
         name = m.Name("__name__")
         main = m.SimpleString('"__main__"') | m.SimpleString("'__main__'")
-        run_test_call = m.Call(func=m.Name("run_tests") | m.Attribute(attr=m.Name("run_tests")))
+        run_test_call = m.Call(
+            func=m.Name("run_tests") | m.Attribute(attr=m.Name("run_tests"))
+        )
         raise_block = m.Raise()
 
-        # left = node.test
-        s1 = m.Comparison(
+        # name == main or main == name
+        if_main1 = m.Comparison(
             name,
             [m.ComparisonTarget(m.Equal(), main)],
         )
-        s2 = m.Comparison(
+        if_main2 = m.Comparison(
             main,
             [m.ComparisonTarget(m.Equal(), name)],
         )
         for child in node.children:
-            if m.matches(child, m.If(test=s1 | s2)):
-                to_match = raise_block if self.raise_or_run == "raise" else run_test_call | raise_block
-                if len(m.findall(node, to_match)) > 0:
+            if m.matches(child, m.If(test=if_main1 | if_main2)):
+                if len(m.findall(node, run_test_call | raise_block)) > 0:
                     self.found = True
                     break
 
@@ -69,33 +67,30 @@ class LintMessage(NamedTuple):
     replacement: Optional[str]
     description: Optional[str]
 
-SHOULD_RAISE = [
-    "jit", "quantization", "ao/sparsity",
-]
 
 def check_file(filename: str) -> List[LintMessage]:
     lint_messages = []
 
     with open(filename) as f:
         file = f.read()
-        should_raise = any(f"test/{folder}" in filename for folder in SHOULD_RAISE)
-        v = TypingCollector(raise_or_run="raise" if should_raise else "any")
+        v = HasMainVisiter()
         cst.parse_module(file).visit(v)
-        if v.found == False:
-            message = "Needs to have a main block which raises an exception or calls run_tests"
-            if should_raise:
-                message = "Needs to have a main block which raises an exception"
+        if not v.found:
+            message = (
+                "Test files need to have a main block which either calls run_tests "
+                + "(to ensure that the tests are run during OSS CI) or raises an exception."
+            )
             lint_messages.append(
                 LintMessage(
                     path=filename,
-                    line=len(file.rea()),
+                    line=None,
                     char=None,
                     code=LINTER_CODE,
                     severity=LintSeverity.ERROR,
                     name="[no-main]",
                     original=None,
                     replacement=None,
-                    description="message",
+                    description=message,
                 )
             )
     return lint_messages
@@ -103,7 +98,7 @@ def check_file(filename: str) -> List[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="test ownership linter",
+        description="test files should have main block linter",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
