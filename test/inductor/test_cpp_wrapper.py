@@ -122,7 +122,15 @@ if TEST_WITH_ROCM:
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
-def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
+def make_test_case(
+    name,
+    device,
+    tests,
+    condition=True,
+    slow=False,
+    func_inputs=None,
+    code_string_count={},
+):
     test_name = f"{name}_{device}" if device else name
 
     func = getattr(tests, test_name)
@@ -138,6 +146,12 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
                 func, *func_inputs if func_inputs else []
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
+            self.assertTrue(
+                all(
+                    code.count(string) == code_string_count[string]
+                    for string in code_string_count
+                )
+            )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -163,6 +177,7 @@ if RUN_CPU:
         condition: bool = True
         slow: bool = False
         func_inputs: list = None
+        code_string_count: dict = {}
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
@@ -306,7 +321,9 @@ if RUN_CPU:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_tensor2"),  # constant input
-        BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest(
+            "test_transpose", code_string_count={".reset();": 2}
+        ),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
     ]:
@@ -317,6 +334,7 @@ if RUN_CPU:
             item.condition,
             item.slow,
             item.func_inputs,
+            item.code_string_count,
         )
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
