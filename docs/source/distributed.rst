@@ -348,10 +348,10 @@ DeviceMesh
 DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
 It allows user to easily create inter node and intra node process groups without worrying about
 how to set up the ranks correctly for different sub process groups, and it helps manage those
-distributed process group easily. :func:`~torch.distributed.device_mesh` function can be used to
-create new DeviceMesh, with a mesh tensor describing the device topology.
+distributed process group easily. :func:`~torch.distributed.init_device_mesh` function can be
+used to create new DeviceMesh, with a mesh shape describing the device topology.
 
-.. autofunction:: DeviceMesh
+.. autoclass:: DeviceMesh
 
 Point-to-point communication
 ----------------------------
