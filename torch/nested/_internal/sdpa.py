@@ -1,5 +1,6 @@
-from typing import Optional
 import logging
+from typing import Optional
+
 import torch
 from torch.backends.cuda import (
     can_use_efficient_attention,
@@ -14,6 +15,7 @@ from torch.backends.cuda import (
 from .nested_tensor import NestedTensor
 
 log = logging.getLogger(__name__)
+
 
 def _validate_sdpa_input(
     query: torch.Tensor,
@@ -65,25 +67,210 @@ def _validate_sdpa_input(
             )
 
 
-def _can_use_math_sdpa_jagged(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
-    dropout_p=0.0,
-    is_causal=False,
-    scale=None,
-):
-    if (
-        not query.is_contiguous()
-        or not key.is_contiguous()
-        or not value.is_contiguous()
+def _check_batch_size_nested(params: SDPAParams, debug=False) -> bool:
+    # This is expected to be called after check_tensor_shapes ensuring that the
+    # size() calls won't error since the inputs are all 4 dimensional
+    q_batch_size = params.query.size(0)
+    k_batch_size = params.key.size(0)
+    v_batch_size = params.value.size(0)
+
+    same_batch_size = q_batch_size == k_batch_size and q_batch_size == v_batch_size
+
+    # num_heads logic for nested input is checked in
+    # check_for_seq_len_0_nested_tensor as there is handling there to make sure
+    # num_heads is not ragged
+    return same_batch_size
+
+
+def _check_head_dim_size_flash_nested(params: SDPAParams, debug=False) -> bool:
+    max_size = 256
+    query_size_last = params.query.size(-1)
+    key_size_last = params.key.size(-1)
+    value_size_last = params.value.size(-1)
+    same_head_dim_size = (
+        query_size_last == key_size_last and query_size_last == value_size_last
+    )
+    if not (
+        same_head_dim_size
+        and (query_size_last % 8 == 0)
+        and (query_size_last <= max_size)
     ):
-        raise ValueError("If inputs are nested tensors they must be contiguous.")
-    if is_causal:
-        raise ValueError(
-            "Nested tensors for query / key are not supported when is_causal=True."
+        if debug:
+            log.warning(
+                "For NestedTensor inputs, Flash attention requires q,k,v to have the same "
+                "last dimension and to be a multiple of 8 and less than or equal to 256. "
+                "Got Query.size(-1): %d, Key.size(-1): %d, Value.size(-1): %d instead.",
+                query_size_last,
+                key_size_last,
+                value_size_last,
+            )
+        return False
+    return True
+
+
+def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
+    param: torch.Tensor, param_name: str, debug=False
+) -> bool:
+    if not isinstance(param, NestedTensor):
+        return True
+
+    if param._ragged_idx == 1:
+        # num_head_dims is ragged
+        if debug:
+            log.warning(
+                "Fused kernels do not support ragged num_head_dims, %s has a ragged num_heads.",
+                param_name,
+            )
+        return False
+
+    # This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+    if not torch.all(param.offsets().diff()):
+        if debug:
+            log.warning(
+                "Fused kernels do not support seq_len == 0, %s has a seq len of 0.",
+                param_name,
+            )
+        return False
+
+    return True
+
+
+def _try_broadcast_param_size(q_size, k_size, v_size, param_name, debug=False) -> bool:
+    max_size = max(q_size, k_size, v_size)
+    if (
+        (q_size != max_size and q_size != 1)
+        or (k_size != max_size and k_size != 1)
+        or (v_size != max_size and v_size != 1)
+    ):
+        if debug:
+            log.warning(
+                "Both fused kernels require query, key and value to have broadcastable %s, "
+                "got Query %s %d, Key %s %d, Value %s %d instead.",
+                param_name,
+                param_name,
+                q_size,
+                param_name,
+                k_size,
+                param_name,
+                v_size,
+            )
+        return False
+    return True
+
+
+def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
+    # When this function is called we are assured that the nt is dim==4
+    q_is_safe = (
+        _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
+            params.query, "query", debug
         )
+        if params.query.is_nested
+        else True
+    )
+    # short circuit if any is unsafe
+    if not q_is_safe:
+        return False
+
+    k_is_safe = (
+        _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
+            params.key, "key", debug
+        )
+        if params.key.is_nested
+        else True
+    )
+    # short circuit if any is unsafe
+    if not k_is_safe:
+        return False
+
+    v_is_safe = (
+        _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
+            params.value, "value", debug
+        )
+        if params.value.is_nested
+        else True
+    )
+    # short circuit if any is unsafe
+    if not v_is_safe:
+        return False
+
+    # We now know none of the inputs have ragged num_heads, so we can safely
+    # access .size(1)
+    q_num_heads = params.query.size(1)
+    k_num_heads = params.key.size(1)
+    v_num_heads = params.value.size(1)
+    same_num_heads = q_num_heads == k_num_heads and q_num_heads == v_num_heads
+
+    if not same_num_heads:
+        if (
+            params.query.requires_grad
+            or params.key.requires_grad
+            or params.value.requires_grad
+        ):
+            if debug:
+                log.warning(
+                    "Both fused kernels do not support training with broadcasted NT inputs."
+                )
+            return False
+        return _try_broadcast_param_size(
+            q_num_heads, k_num_heads, v_num_heads, "num heads", debug
+        )
+    return True
+
+
+def _check_requires_grad_nested(params: SDPAParams, debug=False) -> bool:
+    if (
+        params.query.requires_grad
+        or params.key.requires_grad
+        or params.value.requires_grad
+    ):
+        if debug:
+            log.warning(
+                "Memory efficient attention currently doesn't support training with NT inputs."
+            )
+        return False
+    return True
+
+
+def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+    constraints = (
+        _check_batch_size_nested,
+        _check_head_dim_size_flash_nested,
+        _check_for_seq_len_0_nested,
+    )
+    for constraint in constraints:
+        if not constraint(params, debug):
+            return False
+    return True
+
+
+def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+    constraints = (
+        _check_requires_grad_nested,
+        _check_batch_size_nested,
+        _check_for_seq_len_0_nested,
+    )
+    for constraint in constraints:
+        if not constraint(params, debug):
+            return False
+    return True
+
+
+def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
+    if (
+        not params.query.is_contiguous()
+        or not params.key.is_contiguous()
+        or not params.value.is_contiguous()
+    ):
+        if debug:
+            log.warning("If inputs are nested tensors they must be contiguous.")
+        return False
+    if params.is_causal:
+        if debug:
+            log.warning(
+                "Nested tensors for query / key are not supported when is_causal=True."
+            )
+        return False
+    return True
 
 
 def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
@@ -104,19 +291,23 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
 
     for backend in ordering:
         if backend == SDPBackend.FLASH_ATTENTION:
-            if can_use_flash_attention(params):
+            if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
                 return SDPBackend.FLASH_ATTENTION
         if backend == SDPBackend.EFFICIENT_ATTENTION:
-            if can_use_efficient_attention(params):
+            if can_use_efficient_attention(params) and _can_use_efficient_sdpa_jagged(
+                params
+            ):
                 return SDPBackend.EFFICIENT_ATTENTION
         if backend == SDPBackend.EFFICIENT_ATTENTION:
-            if math_sdp_enabled():
+            if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
                 return SDPBackend.MATH
 
     log.warning("Memory efficient kernel not used because:")
-    can_use_efficient_attention(params, True)
+    can_use_efficient_attention(params, debug=True)
+    _can_use_efficient_sdpa_jagged(params, debug=True)
     log.warning("Flash attention kernel not used because:")
-    can_use_flash_attention(params, True)
+    can_use_flash_attention(params, debug=True)
+    _can_use_flash_sdpa_jagged(params, debug=True)
     raise ValueError("No available kernel. Aborting execution.")
 
 
@@ -455,7 +646,6 @@ def jagged_scaled_dot_product_attention(
         # Reshape output to convert nnz to batch_size and seq_len
         return attention.view(-1).reshape(*output_shape).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
-        _can_use_math_sdpa_jagged(query, key, value)
         return torch._scaled_dot_product_attention_math(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
