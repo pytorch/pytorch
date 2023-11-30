@@ -16,6 +16,7 @@ from .asgd import ASGD
 from .sgd import SGD
 from .radam import RAdam
 from .rprop import Rprop
+from .core import CoRe
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
 from .nadam import NAdam
@@ -33,6 +34,7 @@ del asgd
 del sgd
 del radam
 del rprop
+del core
 del rmsprop
 del optimizer
 del nadam

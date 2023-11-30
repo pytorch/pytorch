@@ -1525,6 +1525,7 @@ class TorchPatcher:
             radam,
             rmsprop,
             rprop,
+            core,
             sgd,
             sparse_adam,
         )
@@ -1541,6 +1542,7 @@ class TorchPatcher:
             radam,
             rmsprop,
             rprop,
+            core,
             sgd,
             sparse_adam,
         }

@@ -13,6 +13,7 @@ from .nadam import nadam  # type: ignore[attr-defined] # noqa: F401
 from .radam import radam  # type: ignore[attr-defined] # noqa: F401
 from .rmsprop import rmsprop  # type: ignore[attr-defined] # noqa: F401
 from .rprop import rprop  # type: ignore[attr-defined] # noqa: F401
+from .core import core  # type: ignore[attr-defined] # noqa: F401
 from .sgd import sgd  # type: ignore[attr-defined] # noqa: F401
 
 

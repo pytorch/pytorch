@@ -11,5 +11,6 @@ from .optimizer import Optimizer as Optimizer
 from .radam import RAdam as RAdam
 from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
+from .core import CoRe as CoRe
 from .sgd import SGD as SGD
 from .sparse_adam import SparseAdam as SparseAdam
