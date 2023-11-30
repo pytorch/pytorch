@@ -8528,21 +8528,6 @@ def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad,
             scale=scale,
         ))
 
-    # Add non standard shapes
-    diff_v_head_dim = SampleInput(
-        make((batch, seq_q, num_heads, head_dim)),
-        make((batch, seq_kv, num_heads, head_dim)),
-        make((batch, seq_kv, num_heads, head_dim + 8)),
-        cum_seq_q=None,
-        cum_seq_k=None,
-        max_q=seq_q,
-        max_k=seq_kv,
-        dropout_p=dropout_p,
-        is_causal=is_causal,
-        return_debug_mask=False,
-        scale=scale,
-    )
-
     yield from samples
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
