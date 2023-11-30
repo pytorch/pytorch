@@ -1239,8 +1239,7 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
-                    # Step 1 - disable grad
-                    version = obj.as_proxy().node.meta["example_value"]._version
+                    # Step 1 - disable grads
                     with dynamo_disable_grad(tx), torch.no_grad():
                         # Step 2 - call `set_`
                         out = wrap_fx_proxy(
@@ -1251,14 +1250,20 @@ class BuiltinVariable(VariableTracker):
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
+
                     # Step 3 - drop the version counter - this is a hack required to get
                     # .data setting to play correctly with the autograd engine.
-                    if version > 0:
-                        verion = version - 1
+                    def _lower_version_count_by_1(x):
+                        version = x._version
+                        if version > 0:
+                            version = version - 1
+                        torch._C._autograd._unsafe_set_version_counter(x, version)
+                        return x
+
                     tx.output.create_proxy(
                         "call_function",
-                        torch._C._autograd._unsafe_set_version_counter,
-                        (out.as_proxy(), version),
+                        _lower_version_count_by_1,
+                        (out.as_proxy(),),
                         {},
                     )
                     # This handles options prop, guards and ends with a clone
