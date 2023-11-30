@@ -1,14 +1,11 @@
 import collections
-import dataclasses
 import itertools
 import logging
 import warnings
 import pprint
-from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
-from enum import Enum
+from contextlib import nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
 from unittest.mock import patch
 
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -27,12 +24,11 @@ from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.fx import Interpreter
-from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import (
-    ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
+    ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_false, sym_eq
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
@@ -40,70 +36,73 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transfor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs, Source
+from torch._guards import TracingContext, DuplicateInputs
 
-
-original_zip = zip
-
-def strict_zip(*iterables, strict=True, **kwargs):
-    if not strict:
-        return original_zip(*iterables, **kwargs)
-
-    shortest_length = min(len(it) for it in iterables)
-    for iterable in iterables:
-        if len(iterable) != shortest_length:
-            raise ValueError("The iterables have different lengths and strict mode is enabled.")
-
-    return original_zip(*iterables, **kwargs)
+from ._aot_autograd.utils import (  # noqa: F401
+    strict_zip,
+    _get_symint_hints,
+    KNOWN_TYPES,
+    partial_flatten_asdict,
+    normalize_as_list,
+    _get_autocast_states,
+    make_boxed_func,
+    make_boxed_compiler,
+    call_func_at_runtime_with_args,
+    create_tree_flattened_fn,
+    maybe_to_fresh_input,
+)
+from ._aot_autograd.logging_utils import (  # noqa: F401
+    graph_being_compiled,
+    nth_graph,
+    model_name,
+    set_model_name,
+    get_aot_compilation_context,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+    track_graph_compiling,
+    callback_set,
+    setup_stacktrace_preservation_hooks,
+    describe_input,
+    format_guard_bug_msg,
+)
+from ._aot_autograd.functional_utils import (  # noqa: F401
+    is_fun,
+    to_fun,
+    from_fun,
+    sync_functional_tensor,
+    has_metadata_mutation,
+    has_data_mutation,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
+    gen_alias_from_base,
+    has_same_metadata,
+    was_tensor_updated,
+    was_tensor_metadata_updated,
+    assert_functional_graph,
+)
+from ._aot_autograd.schemas import (  # noqa: F401
+    OutputType,
+    OutputAliasInfo,
+    MutationType,
+    InputAliasInfo,
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+    SubclassMeta,
+    TensorAlias,
+    BackwardSignature,
+    GraphOutputName,
+    GraphInputName,
+    FQN,
+    GraphSignature,
+    AOTConfig,
+    SubclassTracingInfo,
+)
 
 zip = strict_zip
 
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
-
-MutationType = Enum(
-    "MutationType", ("none", "metadata_only", "data", "data_and_metadata")
-)
-OutputType = Enum(
-    "OutputType", (
-        # output is not an alias
-        "non_alias",
-        # output aliases an input
-        "alias_of_input",
-        # output **is** an input tensor
-        "is_input",
-        # output has a ._base tensor, which is a graph intermediate.
-        # We need to return its ._base as a graph output,
-        # so its requires_grad info is populated correctly.
-        # Instructs the runtime code to regenerate the current output
-        # from a base tensor, graph_intermediates[base_idx]
-        "alias_of_intermediate_save_as_output",
-        # Same as above; but we don't need to explicitly add its ._base
-        # as a graph output, because it already **is** a graph output.
-        "alias_of_intermediate",
-        # Same as above; but the output's ._base is **already** a user output.
-        # Instructs the runtime code to regenerate the current output from
-        # a base tensor, user_outputs[base_idx]
-        "alias_of_intermediate_base_is_user_output",
-        # See Note [Intermediate Bases Optimization]
-        "unsafe_view_alias",
-        # output is an alias, but has a custom autograd.Function backward.
-        # In this case, we don't want to do view-replay, since we won't be able to replay the custom function.
-        # Instead, we'll treat this output "normally", and trace its backward into the graph.
-        "custom_function_view",
-    )
-)
-
-def partial_asdict(obj: Any) -> Any:
-    if dataclasses.is_dataclass(obj):
-        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
-    elif isinstance(obj, (list, tuple)):
-        return obj.__class__([partial_asdict(item) for item in obj])
-    elif isinstance(obj, dict):
-        return {k: partial_asdict(v) for k, v in obj.items()}
-    else:
-        return obj
 
 aten = torch.ops.aten
 
@@ -119,76 +118,6 @@ aten = torch.ops.aten
 # one counter is allocated per entire compiled block (but this block
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
 AOT_COUNTER = itertools.count()
-
-KNOWN_TYPES = tuple(
-    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
-)
-
-# Set up hooks so that during backward the fx's stack_trace is properly set
-callback_set = False
-
-def setup_stacktrace_preservation_hooks(roots: List):
-    def iter_graph(roots):
-        if not roots:
-            return
-        seen = set()
-        q = collections.deque()
-        for node in roots:
-            if node is not None:
-                seen.add(node)
-                q.append(node)
-
-        while q:
-            node = q.popleft()
-            for fn, _idx in node.next_functions:
-                if fn in seen or fn is None:
-                    continue
-                seen.add(fn)
-                q.append(fn)
-
-            yield node
-
-    def get_callback(saved_stack_):
-        def callback():
-            global callback_set
-            fx_traceback.set_stack_trace(saved_stack_)
-            callback_set = False
-
-        return callback
-
-    def get_prehook(stack_, seq_nr):
-        def prehook(grad_output):
-            global callback_set
-
-            if not callback_set:
-                torch.autograd.variable.Variable._execution_engine.queue_callback(
-                    get_callback(fx_traceback.format_stack())
-                )
-                callback_set = True
-
-            fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_grad_fn_seq_nr(seq_nr)
-
-        return prehook
-
-    def get_posthook(special_stack_, seq_nr):
-        def posthook(grad_input, grad_output):
-            fx_traceback.set_stack_trace(special_stack_)
-            fx_traceback.reset_grad_fn_seq_nr()
-
-        return posthook
-
-    for node in iter_graph(roots):
-        forward_node_stack = node.metadata.get("traceback_", [])
-        node.register_prehook(get_prehook(forward_node_stack,
-                              node._sequence_nr()))
-
-        special_stack = forward_node_stack.copy()
-        special_stack.append(
-            "Gradient addition node due to multiple use of tensor around:"
-        )
-        node.register_hook(get_posthook(special_stack, node._sequence_nr()))
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -432,585 +361,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-# This class stores info about every user output.
-@dataclass(frozen=True)
-class OutputAliasInfo:
-    # Tells us if this output is:
-    # (1) a regular (non-aliased) output
-    # (2) an alias of a forward input
-    # (3) **is** a forward input (special case of "alias_of_input")
-    # (4) an alias of an intermediate (aka an alias of an output of the inner traced forward)
-    # (5) an alias of an intermediate, that explicitly requires returning the intermediate
-    #     as a graph output
-    # (6) an alias of an intermediate, where that intermediate is also a user output
-    output_type: OutputType
-    # The raw type of the output (torch.Tensor, SymInt, etc)
-    raw_type: type
-    # If (1) above, then
-    # - base_idx is None
-    # If (2) or (3) above, then
-    # - Tells us that the base of this alias is user_fwd_input[base_idx]
-    #   (This is an index into the inputs *before* we make synthetic bases)
-    # If (4) or (5) above, then
-    # - Tells us that the base of this alias is output_graph_intermediates[base_idx]
-    #   here, this refers to the index of the *direct* traced
-    # If (6) above, then:
-    # - Tells us that the base of this alias is output_user_fwds[base_idx]
-    #   here, this refers to the index of the *direct* traced
-    base_idx: Optional[int]
-    # If it is a Tensor, what the dynamic dims are (otherwise is None)
-    dynamic_dims: Optional[Set[int]]
-    # requires_grad
-    requires_grad: bool
 
-
-class MutationType(Enum):
-    NOT_MUTATED = 1
-    MUTATED_IN_GRAPH = 2
-    MUTATED_OUT_GRAPH = 3
-
-
-# This class tells us info about user inputs.
-@dataclass(frozen=True)
-class InputAliasInfo:
-    is_leaf: bool
-    mutates_data: bool
-    mutates_metadata: bool
-    mutations_hidden_from_autograd: bool
-    # This can only happen from a call to aten.set_() on a graph input.
-    mutates_storage_metadata: bool
-    requires_grad: bool
-    mutation_type: MutationType
-
-    def __post_init__(self):
-        if self.mutates_storage_metadata:
-            # For convenience, we guarantee that this is always true.
-            # In practice, If we call .set_(), then at runtime there is no need
-            # to additionally fix  up the tensor metadata, since our runtime
-            # call to inp.set_(updated_inp) will already have the right metadata
-            assert self.mutates_metadata
-
-
-@dataclasses.dataclass
-class SubclassCreationMeta:
-    """
-    Used for AOTDispatch.
-    This dataclass gives us the information we need to reconstruct a tensor subclass
-    from our flat inputs.
-    Why is this important? The graph that we'd like to trace out contains flat tensor inputs,
-    But the user's original model may have subclass inputs and outputs.
-    So we need to wrap/unwrap subclasses as necessary to translate between the user's
-    view (subclass inps/outs), and the backend compiler's view (graph with no subclass args).
-
-    Complications arise mostly from the fact that a subclass can hold more than one inner tensor;
-    So for a given subclass input/output, we need to carefully track which indices map
-    to the subclass tensor in the corresponding "dense-tensor-only" graph.
-    """
-
-    # In the inner graph that only takes in dense tensor inputs,
-    # this maps to the first index of "tensors that should go in this subclass wrapper"
-    flat_tensor_start_idx: int
-    # The number of tensors that live in this subclass wrapper
-    arg_count: int
-    # Stores the original subclass itself.
-    # This is needed because we need the autograd metadata on the original subclass
-    # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
-    #  so holding onto this at runtime shouldn't leak memory)
-    original_subclass: torch.Tensor
-    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
-    # We need to keep them around to plumb them into __tensor_unflatten__.
-    meta: Any
-    inner_keys: List[any]
-
-    def creation_fn(self, all_args, *, is_runtime: bool):
-        curr_args = all_args[self.flat_tensor_start_idx:self.flat_tensor_start_idx + self.arg_count]
-        assert len(curr_args) == len(self.inner_keys), f'inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}'
-        out = type(self.original_subclass).__tensor_unflatten__(dict(zip(self.inner_keys, curr_args)), self.meta)
-        if not is_runtime:
-            # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
-            # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
-            # We don't trace through the autograd engine at runtime though, so no need
-            # to compute this extra metadata then!
-            torch._mirror_autograd_meta_to(self.original_subclass, out)
-
-        return out
-
-    def __post_init__(self):
-        # sanity assert to make sure we don't leak memory
-        assert is_fake(self.original_subclass)
-
-
-# This class encapsulates all aliasing + mutation info we need about the forward graph
-# See a more detailed overview of the edge case handling at
-# https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
-@dataclass(eq=False)
-class ViewAndMutationMeta:
-    # length = # user inputs
-    # This gives us info about every input, and what sort of mutation happened to it (if any)
-    input_info: List[InputAliasInfo]
-
-    # length = # user outputs
-    # This gives us info about every output (mostly around whether it aliases other tensors)
-    output_info: List[OutputAliasInfo]
-
-    # length = the number of intermediate bases appended as outputs to the end of the forward graph.
-    # Note: this is not necessarily the same thing as:
-    #   len([x for x in output_info if x.output_type == OutputType.alias_of_intermediate])
-    # Because outputs might share a ._base, or an output's ._base might itself be
-    # another user output (in both cases, we won't redundantly append bases to the end of the graph)
-    num_intermediate_bases: int
-
-    # For inference only: instructs us to keep data-only input mutations directly in the graph
-    keep_input_mutations: bool
-
-    # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
-    #        + (# intermediate bases)
-    # These are the FakeTensor (or potential SymInt) outputs that we traced from our
-    # metadata pass of the user's forward function.
-    # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
-    # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
-    # pass once, and re-use the output throughout AOTAutograd
-    traced_tangents: List[Any]
-
-    # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
-    # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
-    # Given a (potentially larger) list of plain torch tensors.
-
-    # Taking subclass_inp_meta as an example:
-    #   subclass_inp_meta[i] = j (an int) tells us:
-    #     "The i'th user input is not a subclass, and corresponds to inputs[j] of the plain-tensor graph."
-    #   subclass_inp_meta[i] = SubclassCreationMeta(flat_tensor_start_idx=3, arg_count=2)
-    #     "The i'th user input is subclass holding two inner tensors, which are
-    #      inputs[3] and inputs[4] of the plain-tensor graph".
-
-    # length = # user inputs
-    subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
-    # So, the full set of outputs to the forward graph looks something like:
-    # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
-    # where the first 3 of those 4 can be subclasses
-    # (but not saved_for_bw tensors, since these are internal to the compiler
-    # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
-    # This list contains subclass information on all of the fw graph outputs
-    # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: List[Union[int, SubclassCreationMeta]]
-    # length = # backward graph inputs
-    subclass_tangent_meta: List[Union[int, SubclassCreationMeta]]
-    # TODO: we should kill this
-    # (need to default it to not break internal)
-    is_train: bool = False
-    # We're plumbing this requires_subclass_dispatch here is because it's painful to support input mutations
-    # on subclasses, and that info isn't easily available.
-    requires_subclass_dispatch: bool = False
-
-    num_symints_saved_for_bw: Optional[int] = None
-
-    # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
-    # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
-    # that is intended to be in effect prior to running the graph, in keeping with
-    # equivalence to eager mode. It is the responsibility of upstream graph acquisition
-    # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
-    grad_enabled_mutation: Optional[bool] = None
-
-    def __post_init__(self):
-        # pre-compute the indices of the inputs that are mutated.
-        # When keep_input_mutations is set, we don't need to worry about our epilogue
-        # handling data-only mutations, because we keep them directly in the graph.
-
-        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on requires_subclass_dispatch argument but this is not easy to do because you would
-        # have to pass around this argument multiple level down.
-        if not self.requires_subclass_dispatch:
-            mutated_inp_runtime_indices = [
-                i for i, m in enumerate(self.input_info)
-                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
-            ]
-        else:
-            mutated_inp_runtime_indices = [
-                i for i, m in enumerate(self.input_info)
-                if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-            ]
-
-        mutated_graph_handled_indices = [
-            i for i, m in enumerate(self.input_info)
-            if m.mutation_type == MutationType.MUTATED_IN_GRAPH and not self.requires_subclass_dispatch
-        ]
-        self.mutated_graph_handled_indices = mutated_graph_handled_indices
-        self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
-
-        aliased_out_indices = [
-            i
-            for i, m in enumerate(self.output_info)
-            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
-        ]
-        unsafe_view_out_indices = [
-            i for i, m in enumerate(self.output_info) if m.output_type is OutputType.unsafe_view_alias
-        ]
-
-        # This is pre-computed in post_init for perf.
-        # It contains the index of every element
-        # of input_info that corresponds to a mutation (data or metadata or both)
-        self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
-        self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
-
-        # This is pre-computed for perf.
-        # It contains the index of every element
-        # of output_info that corresponds to an alias (either of an input or intermediate)
-        self.aliased_out_indices = aliased_out_indices
-        self.unsafe_view_out_indices = unsafe_view_out_indices
-        self.num_outputs = len(self.output_info)
-        self.num_outputs_non_aliased = len(
-            [x for x in self.output_info
-             if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]]
-        )
-        self.num_outputs_aliased_to_inputs = len(
-            [
-                x
-                for x in self.output_info
-                if x.output_type in [
-                    OutputType.alias_of_input,
-                    OutputType.is_input,
-                ]
-            ]
-        )
-        self.num_unsafe_view_outputs = len(self.unsafe_view_out_indices)
-        self.num_outputs_aliased_to_intermediates = len(
-            [
-                x
-                for x in self.output_info
-                if x.output_type in [
-                    OutputType.alias_of_intermediate,
-                    OutputType.alias_of_intermediate_save_as_output,
-                    OutputType.alias_of_intermediate_base_is_user_output,
-                ]
-            ]
-        )
-        self.num_outputs_aliased = (
-            self.num_outputs_aliased_to_inputs + self.num_outputs_aliased_to_intermediates
-        )
-
-        self.dynamic_outputs = any(
-            o.dynamic_dims for o in self.output_info
-        )
-        # See Note: [AOTAutograd Backward Guards]
-        # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
-        # Eventually, we should kill this and replace with real backward guards.
-        # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
-        self.output_types = [torch.Tensor if isinstance(x, FakeTensor) else type(x) for x in self.traced_tangents]
-
-        self.is_rng_op_functionalized = config.functionalize_rng_ops
-        # All of the above metadata is collected by tracing the fw function.
-        # However, extra outputs for rng offsets behave differently. Both fwd
-        # and bwd graphs have their own outputs for the total consumed offsets.
-        # Unlike mutated inputs, we don't have to worry about sending the right
-        # set of tensors between fwd and bwd. Fwd and bwd offsets are
-        # independent and simpler to handle. Therefore, we track them
-        # separately.
-        self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
-
-        # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
-        self.num_forward_returns = self.num_mutated_inp_runtime_indices + self.num_outputs + self.num_intermediate_bases
-        # In case of functionalization of rng ops, the fw_module returns one
-        # additional output for rng offset. This rng offset is used right
-        # away to advance the rng state, and is not passed on to the raw
-        # outputs. However, we need to know the exact boundary to identify
-        # which tensors to be saved for the bwd graph.  num_forward captures
-        # this information.
-        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
-
-    @property
-    def tensors_saved_for_backwards_slice(self):
-        assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
-        else:
-            return slice(self.num_forward, None)
-
-    @property
-    def symints_saved_for_backwards_slice(self):
-        assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(-self.num_symints_saved_for_bw, None)
-        else:
-            return slice(0, 0)  # empty slice
-
-    def __eq__(self, other):
-        if not isinstance(other, ViewAndMutationMeta):
-            return NotImplemented
-        return (self.input_info == other.input_info and
-                self.output_info == other.output_info and
-                self.num_intermediate_bases == other.num_intermediate_bases and
-                self.keep_input_mutations == other.keep_input_mutations and
-                self.is_rng_op_functionalized == other.is_rng_op_functionalized and
-                self.num_outputs_rng_offset == other.num_outputs_rng_offset and
-                len(self.traced_tangents) == len(other.traced_tangents) and
-                all(x.shape == y.shape and x.dtype == y.dtype for x, y, in zip(self.traced_tangents, other.traced_tangents)))
-
-@dataclass(eq=False)
-class SubclassMeta:
-    # A copy of all forward metadata, but computed on the *dense* tensor forward (after desugaring subclasses)
-    # So for example, if the user had a model containing two `TwoTensor` inputs,
-    # Then `SubclassMeta.fw_metadata.input_infos` would have length 4 here.
-    fw_metadata: ViewAndMutationMeta
-
-    # Note: [Computing Subclass Metadata about grad_inputs]
-    # Given a list of flattened, plain tensor grad_inputs, this tells us how to reconstruct the grad_input subclasses
-    #
-    # You might think: why not just assume that all grad_inputs will have the same subclass-ness as the original inputs?
-    # (AOTAutograd generally assumes other properties, e.g. that grad_outputs are contiguous)
-    #
-    # This doesn't really work though. take this example:
-    #
-    # def f(DoubleTensor, DenseTensor):
-    #     return DoubleTensor  * DenseTensor
-    #
-    # In the above example, the .grad field of *both* DoubleTensor and DenseTensor will be a DoubleTensor.
-    # When we trace out a joint fw-bw graph, we'll end up returning two subclasses for the two grad_inputs.
-    # This means that our backward graph will return 4 outputs (two dense tensors for each DoubleTensor grad_input)
-    # and we need to properly store the metadata that tells us how to turn these 4 outputs back into DoubleTensors.
-    #
-    # Note that this info **cannot** easily be figured out from ViewAndMutationMeta.
-    # We can only compute this info by tracing the entire joint and examining the grad_inputs that we computed.
-    #
-    # See Note: [AOTAutograd Backward Guards]
-    # This will also eventually require us to install backward guards,
-    # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
-    #
-    # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
-
-    def __init__(self):
-        # The fields in this class get set after its construction.
-        pass
-
-
-# This class exists because:
-# - the autograd.Function.forward() in aot autograd returns outputs that might alias inputs
-# - we only care about the metadata on those aliases, so we can regenerate them.
-#   We do not want them to participate in the autograd.Function.
-# We do that by wrapping them in an opaque class, so the autograd.Function
-# does not know to treat them as tensors.
-@dataclass(frozen=True)
-class TensorAlias:
-    alias: torch.Tensor
-
-
-def has_same_metadata(t1, t2):
-    return (
-        definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(sym_eq(t1.stride(), t2.stride()))
-        and definitely_true(t1.storage_offset() == t2.storage_offset())
-        and t1.is_conj() == t2.is_conj()
-        and t1.is_neg() == t2.is_neg()
-    )
-
-
-def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires_grad):
-    # Try to do view-replay if possible.
-    # fall back to .as_strided() if we can't.
-    if target_meta_tensor._base is not None:
-        # The base that we want to replay our view off of might have a different shape than the view's original base.
-        b = target_meta_tensor._base
-        abt = aliased_base_tensor
-        # Don't unnecessarily call as_strided if nothing changed; as_strided's
-        # backward is poorly implemented and slow
-        if abt is not b and (
-            abt.size() != b.size() or
-            abt.stride() != b.stride() or
-            abt.storage_offset() != b.storage_offset()
-        ):
-            reshaped_base_tensor = aliased_base_tensor.as_strided(
-                b.size(), b.stride(), b.storage_offset()
-            )
-        else:
-            reshaped_base_tensor = aliased_base_tensor
-        out = target_meta_tensor._view_func(reshaped_base_tensor)
-        # This shape mismatch can happen due to a bug in inplace/view handling in autograd.
-        # Try putting a breakpoint here and running
-        # `test/functorch/test_aotdispatch TestAOTAutograd.test_output_all_alias_types`
-        # Also, https://github.com/pytorch/pytorch/issues/49825
-        #
-        # As a stopgap, we'll fall back to as_strided.
-        if out is not None and out.shape == target_meta_tensor.shape:
-            if aliased_base_tensor.requires_grad and not target_requires_grad:
-                out = out.detach()
-            elif not aliased_base_tensor.requires_grad and target_requires_grad:
-                out.requires_grad_(True)
-            return out
-    size = target_meta_tensor.size()
-    stride = target_meta_tensor.stride()
-    storage_offset = target_meta_tensor.storage_offset()
-    if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
-        aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
-            size, stride, storage_offset
-        )
-    elif not aliased_base_tensor.is_complex() and target_meta_tensor.is_complex():
-        aliased_out = torch.view_as_complex(aliased_base_tensor).as_strided(
-            size, stride, storage_offset
-        )
-    else:
-        aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
-    # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    if aliased_base_tensor.requires_grad and not target_requires_grad:
-        aliased_out = aliased_out.detach()
-    elif not aliased_base_tensor.requires_grad and target_requires_grad:
-        aliased_out.requires_grad_(True)
-    # For outputs aliasing inputs, we need to check if the dtype has changed.
-    # as_strided() is the "most generic" view, but it does not cover cross-dtype views
-    if aliased_out.dtype != target_meta_tensor.dtype:
-        aliased_out = aliased_out.view(target_meta_tensor.dtype)
-    return aliased_out
-
-def to_fun(t):
-    if isinstance(t, Tensor):
-        if is_traceable_wrapper_subclass(t):
-            # See Note [Functionalization always runs last]
-            # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
-            # goes at the bottom.
-            # recurse here, so we can support nested wrapper subclasses
-            out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
-            torch._mirror_autograd_meta_to(t, out)
-            return out
-        else:
-            return FunctionalTensor.to_functional(t)
-    else:
-        return t
-
-def sync_functional_tensor(t):
-    if is_traceable_wrapper_subclass(t):
-        attrs, ctx = t.__tensor_flatten__()
-        for attr in attrs:
-            sync_functional_tensor(getattr(t, attr))
-    else:
-        torch._sync(t)
-
-# When subclasses are involved, t here will usually look something like:
-# SubclassA(SubclassB(FunctionalTensor(_to_functional_tensor(FakeTensor))))
-def from_fun(t):
-    if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
-        # See Note [Functionalization always runs last]
-        # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
-        # goes at the bottom.
-        # recurse here, so we can support nested wrapper subclasses
-        out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
-        torch._mirror_autograd_meta_to(t, out)
-        return out
-
-    if not isinstance(t, FunctionalTensor):
-        # quick sanity assert
-        if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)
-        return t
-    sync_functional_tensor(t)
-    return torch._from_functional_tensor(t.elem)
-
-def is_fun(t):
-    if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
-        # See Note [Functionalization always runs last]
-        # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
-        # goes at the bottom.
-        # recurse here, so we can support nested wrapper subclasses
-        t_attrs, _ = t.__tensor_flatten__()
-        t_inners = [getattr(t, attr) for attr in t_attrs]
-        any_fun = any(is_fun(x) for x in t_inners)
-        all_fun = all(is_fun(x) for x in t_inners)
-        assert any_fun == all_fun
-        return any_fun
-
-    return isinstance(t, FunctionalTensor)
-
-# t here is either
-# (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
-# (2) A traceable tensor subclass that holds a FunctionalTensor
-# (3) Not a tensor
-def has_data_mutation(t):
-    if is_traceable_wrapper_subclass(t):
-        attrs, _ = t.__tensor_flatten__()
-        # A tensor subclass was updated if any of its inner elements were updated
-        return any(has_data_mutation(getattr(t, attr)) for attr in attrs)
-    else:
-        if isinstance(t, torch.Tensor):
-            assert isinstance(t, FunctionalTensor)
-            return torch._functionalize_has_data_mutation(t.elem)
-        return False
-
-def are_all_mutations_hidden_from_autograd(t):
-    if is_traceable_wrapper_subclass(t):
-        attrs, _ = t.__tensor_flatten__()
-        # If all inner elements are mutations hidden from autograd, then it is a mutation hidden from autograd.
-        return all(are_all_mutations_hidden_from_autograd(getattr(t, attr)) for attr in attrs)
-    elif isinstance(t, torch.Tensor):
-        assert isinstance(t, FunctionalTensor)
-        return torch._functionalize_are_all_mutations_hidden_from_autograd(t.elem)
-    else:
-        return False
-
-# f_arg here is either
-# (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
-# (2) A traceable tensor subclass that holds a FunctionalTensor
-# (3) Not a tensor
-# Assumption: arg promises to be the "original" tensor wrapped by f_arg
-# Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
-# - check_only_storage_mutation=True: only return true if there was a storage mutation
-# - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
-def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
-    if is_traceable_wrapper_subclass(f_arg):
-        attrs, _ = f_arg.__tensor_flatten__()
-        # A tensor subclass was updated if any of its inner elements were updated
-        f_inner_ts = [getattr(f_arg, attr) for attr in attrs]
-        inner_ts = [getattr(arg, attr) for attr in attrs]
-        return any(has_metadata_mutation(f_inner_t, inner_t, check_only_storage_mutation=check_only_storage_mutation)
-                   for f_inner_t, inner_t in zip(f_inner_ts, inner_ts))
-    else:
-        if not isinstance(f_arg, torch.Tensor):
-            assert not isinstance(arg, torch.Tensor)
-            return False
-        assert isinstance(f_arg, FunctionalTensor)
-        assert isinstance(arg, FakeTensor)
-
-        arg_after = torch._from_functional_tensor(f_arg.elem)
-        # This is true if the current tensor experienced at least one set_() call
-        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)
-        # However, multiple set_() calls can cancel out. So we also check whether the
-        # storage of the tensor has changed.
-        # Note: if an input experienced two set_() calls that cancel out, **and**
-        # it experiences an data mutation, we pessimistically think that the set_()
-        # call is necessary here. We could in theory fix this, but this will
-        # hopefully never happen in user code, and is not needed for fsdp.
-        same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(arg_after.untyped_storage())
-        has_storage_metadata_mutation = maybe_storage_changed and not same_storages
-        if check_only_storage_mutation:
-            return has_storage_metadata_mutation
-
-        # storage metadata mutation is a type of metadata mutation, so return true if we saw one
-        if has_storage_metadata_mutation:
-            return True
-
-        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)
-        # This is true if the current tensor experienced at least one metadata mutation.
-        # So if false, we know there was no metadata mutation
-        if not maybe_metadata_mutated:
-            return False
-
-        # However, multi metadata mutations can cancel out.
-        # So we also check if the concrete sizes/strides on the tensor have changed.
-        same_sizes = arg.shape == arg_after.shape
-        same_strides = arg.stride() == arg_after.stride()
-        same_offsets = arg.storage_offset() == arg_after.storage_offset()
-        has_metadata_mutation_ = maybe_metadata_mutated and not (same_sizes and same_strides and same_offsets)
-        # We consider a tensor to have been metadata mutated if its storage was mutated through a set_() call.
-        return has_metadata_mutation_
-
-
-def _get_hints(exprs):
-    """
-    Get the hints of a list/tuple of int/SymInt.
-    """
-    if isinstance(exprs, (list, tuple)):
-        return type(exprs)(_get_hints(e) for e in exprs)
-    elif isinstance(exprs, torch.SymInt):
-        return exprs.node.shape_env.size_hint(exprs.node.expr)
-    else:
-        return exprs
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
@@ -1044,14 +395,6 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
         idx += cnt
     return infos
 
-def _get_autocast_states():
-    return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
-        torch.is_autocast_cache_enabled(),
-    ]
 
 
 # This is a version of functionalization that is specifically designed
@@ -1131,6 +474,7 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(f_arg, arg, check_only_storage_mutation=True)
             mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(f_arg)
+            mutations_under_no_grad_or_inference_mode = mutates_data and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
 
             # Here, we're saying that if an input experienced a set call, inp.set_(other),
             # then we can effectively not have to worry about whether its data was mutated.
@@ -1157,12 +501,14 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 mutates_storage_metadata=mutates_storage_metadata,
+                mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                 requires_grad=requires_grad,
                 mutation_type=_get_mutation_type(
                     keep_input_mutations,
                     mutates_data,
                     mutates_metadata,
                     mutations_hidden_from_autograd,
+                    mutations_under_no_grad_or_inference_mode,
                     requires_grad
                 )
             ))
@@ -1435,6 +781,7 @@ from a multi-output view call")
                 mutates_data=info.mutates_data,
                 mutates_metadata=info.mutates_metadata,
                 mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
                 requires_grad=info.requires_grad
                 # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
                 # this can also include metadata mutations, and inputs that do not require grad,
@@ -1507,191 +854,6 @@ from a multi-output view call")
         return metadata
 
     return inner
-
-
-@dataclass
-class BackwardSignature:
-    """
-    Provides information about the backward section of an exported
-    joint forward-backward graph.
-    For a particular fx GraphModule, this class contains information on:
-    (1) A mapping from each gradient (backwards output) to the parameter
-        it corresponds to (forward input)
-    (2) A mapping from each gradient (backwards output) to the user input
-        it corresponds to (forward input)
-    (3) Which of the forward outputs corresponds to the loss, that we backprop on.
-
-    Each string name is the `node.name` of the corresponding node in the fx graph.
-    """
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
-
-GraphOutputName = NewType('GraphOutputName', str)
-GraphInputName = NewType('GraphInputName', str)
-FQN = NewType('FQN', str)
-
-@dataclass
-class GraphSignature:
-    """
-    Provides information about an exported module.
-    For a particular fx GraphModule, this class contains information on:
-    (1) Which graph inputs are parameters, buffers, or user inputs
-    (2) (for params/buffers) a mapping from the name of each graph argument
-        to its parameter/buffer FQN in the original nn.Module.
-    (3) If there are input mutations, these are represented as extra outputs
-        in the fx GraphModule. We provide a mapping from these
-        extra output names to the names of the actual inputs.
-    (4) The pytree metadata on how to flatten/unflatten inputs and outputs.
-        The corresponding FX GraphModule only accepts and returns
-        pytree-flattened inputs/outputs.
-    (5) (Optionally) if the FX is a joint forward-backward graph, we provide
-        a signature on the backward section of the joint graph.
-    """
-
-    parameters: List[FQN]
-    buffers: List[FQN]
-
-    user_inputs: List[GraphInputName]
-    user_outputs: List[GraphOutputName]
-    inputs_to_parameters: Dict[GraphInputName, FQN]
-    inputs_to_buffers: Dict[GraphInputName, FQN]
-
-    # If the user's module mutates a buffer,
-    # it's represented in the graph as an extra graph output.
-    # This dict is a mapping from
-    # "graph outputs that correspond to updated buffers"
-    # to the FQN names of those mutated buffers.
-    buffers_to_mutate: Dict[GraphOutputName, FQN]
-
-    in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec
-
-    backward_signature: Optional[BackwardSignature]
-
-    @classmethod
-    def from_tracing_metadata(
-        cls,
-        *,
-        in_spec: pytree.TreeSpec,
-        out_spec: pytree.TreeSpec,
-        graph_input_names: List[str],
-        graph_output_names: List[str],
-        view_mutation_metadata: ViewAndMutationMeta,
-        named_parameters: List[str],
-        named_buffers: List[str],
-        num_user_inputs: int,
-        num_user_outputs: int,
-        loss_index: Optional[int],
-        backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
-        graph_inputs = graph_input_names
-        graph_outputs = graph_output_names
-        parameters = list(named_parameters)
-        buffers = list(named_buffers)
-
-        # Calling convention assumptions:
-        # (1) graph inputs = (params, buffers, user_inputs)
-        # (2) graph outputs = (mutated_inputs, user_outs, param_gradients)
-        # (If we are capturing an inference graph, this convention is identical
-        #  except that param_gradients is empty)
-        user_inputs = graph_inputs[len(parameters) + len(buffers) :]
-        assert num_user_inputs == len(user_inputs)
-        assert len(graph_inputs) == (len(parameters) + len(buffers) + len(user_inputs))
-
-        inputs_to_parameters = dict(zip(graph_inputs[: len(parameters)], parameters))
-        inputs_to_buffers = dict(zip(
-            graph_inputs[len(parameters) : len(parameters) + len(buffers)],
-            buffers,
-        ))
-
-        state_names = [*parameters, *buffers]
-        mutated_buffers = []
-        for idx, input_info in enumerate(view_mutation_metadata.input_info):
-            if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
-                buffer_name = state_names[idx]
-                mutated_buffers.append(buffer_name)
-
-        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inp_runtime_indices
-
-        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
-        buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
-
-        start, stop = stop, stop + num_user_outputs
-        user_outputs = graph_outputs[start:stop]
-
-        unused_outputs = len(graph_outputs) - stop
-        if backward_signature is not None:
-            unused_outputs -= len(backward_signature.gradients_to_parameters) + len(
-                backward_signature.gradients_to_user_inputs
-            )
-        assert unused_outputs == 0
-
-        return GraphSignature(
-            parameters=parameters,
-            buffers=buffers,
-            user_inputs=user_inputs,
-            user_outputs=user_outputs,
-            inputs_to_buffers=inputs_to_buffers,
-            inputs_to_parameters=inputs_to_parameters,
-            buffers_to_mutate=buffers_to_mutate,
-            in_spec=in_spec,
-            out_spec=out_spec,
-            backward_signature=backward_signature,
-        )
-
-@dataclasses.dataclass
-class AOTConfig:
-    """
-    Configuration for AOTDispatcher
-    """
-
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: Dict[Callable, Callable]
-    num_params_buffers: int
-    aot_id: int
-    keep_inference_input_mutations: bool
-    is_export: bool = False
-    no_tangents: bool = False
-    dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
-    inference_compiler: Optional[Callable] = None
-    enable_log: bool = True
-
-# This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
-# When tracing the joint forward + backward, for any inputs in the graph that are mutated,
-# we need to clone them first (and similarly for metadata-only mutations, we need to view them first).
-# The idea is that when we trace the backward, we need to pass in the *original* primals
-# to autograd.grad(), before they were mutated.
-# Note: when we have synthetic base inputs, we need to clone them *before* creating views off of them.
-# This means that "idx" here represents the index of the (potentially) synthetic base.
-# What we need to do is:
-# (1) map the current (post-synthetic-base calling convention) input argument index
-#     to int index pre-synthetic-base-calling-convention.
-# (2) There could be multiple, if this index corresponds to a synthetic base
-#     that has multiple input aliases.
-# (3) If any of those corresponding inputs get metadata mutations, then we clone the base.
-def maybe_to_fresh_input(idx, t, meta):
-    if not isinstance(t, Tensor):
-        return t
-    if idx in meta.mutated_inp_runtime_indices:
-        # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
-        if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the mutation
-            return t.clone()
-        # No need to do anything for  meta.input_info[idx].mutates_storage_metadata,
-        # Because autograd doesn't support set_()
-        if meta.input_info[idx] and meta.input_info[idx].mutates_metadata:
-            # Make sure the primal we pass to autograd.grad()
-            # sees the tensor before the metadata mutation
-            return t.view(t.shape)
-    return t
 
 # This function returns a new function that returns mutated inputs as outputs.
 # if keep_data_input_mutations is set, then we assume that data-only mutations
@@ -1910,43 +1072,6 @@ def create_functionalized_fn(
             # Run the joint
             f_outs = fn(*f_args)
 
-        if trace_joint:
-            # We support a limited amount of mutation of graph inputs during the backward pass.
-            # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
-            # Here, we perform extra checks for primals that were mutated in the **backward**
-            # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
-            # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
-            #   during the forward, because the handling is different: some input mutations from the the forward
-            #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
-            #   types of mutations in the backward we would need a bw-only runtime epilogue.
-            # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
-            #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
-            #   require an extra round of tracing though, so it's more efficient to do in-line here.
-            assert isinstance(args, tuple) and len(args) == 2 and isinstance(args[0], (list, tuple))
-            # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
-            primals_before = args[0]
-            primals_after = pytree.tree_map(from_fun, f_args[0])
-            for before, after, inpt_info in zip(primals_before, primals_after, meta.input_info):
-                # Ban metadata mutations on fw inputs during the bw
-                if not inpt_info.mutates_metadata:
-                    assert not was_metadata_updated(before, after), \
-                        "Found a graph input that had its metadata mutated in the backward. This is not supported"
-                # Allow data mutations on fw inputs during the bw, but only if they do not require grad
-                # So we can guarantee that we can keep the mutations in the graph
-                if was_updated(before, after) and not inpt_info.mutates_data:
-                    assert not inpt_info.requires_grad, \
-                        "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
-                    before.copy_(after)
-            # Now that we covered mutations to *forward* inputs during the backward,
-            # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
-            # Today, we will just error in all cases of this happening unless someone needs us to support it.
-            tangents_before = args[1]
-            tangents_after = pytree.tree_map(from_fun, f_args[1])
-            for before, after in zip(tangents_before, tangents_after):
-                assert not was_metadata_updated(before, after) and not was_updated(before, after), \
-                    "Found an input to the backward that was mutated during the backward pass. This is not supported"
-
         if aot_config.keep_inference_input_mutations:
             # Note: This is a bit annoying. There's a layering issue here, where:
             # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
@@ -1982,7 +1107,14 @@ def create_functionalized_fn(
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
                     if meta.input_info[i].mutations_hidden_from_autograd:
+                        # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(inpt_old):
+                            inpt_old.copy_(inpt_new)
+                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                        # Under no_grad = run under no_grad (we still bump the VC though)
+                        # (inference_mode will also bump the VC, as long as the tensor in question
+                        # was created outside of inference_mode)
+                        with torch.no_grad():
                             inpt_old.copy_(inpt_new)
                     else:
                         inpt_old.copy_(inpt_new)
@@ -2011,98 +1143,8 @@ def create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     return fx_g
 
 
-def normalize_as_list(x):
-    if isinstance(x, tuple):
-        return list(x)
-    elif isinstance(x, list):
-        return x
-    return [x]
-
-
 aot_autograd_decompositions = {}
 
-
-# This is a list since looking forward, we can have this arbitrarily nested.
-graph_being_compiled: List[str] = []
-# TODO: It would be nice to reset the numbering every time aot_id goes
-# up, but this is annoying to do right now (because we don't know if
-# an aot_id will come back from the dead), so right now this also happens
-# to be a globally unique number too (at the cost of wobbling if you change
-# how the graphs compile)
-nth_graph: int = 0
-model_name: str = "model"
-
-
-def set_model_name(name):
-    global model_name
-    model_name = name
-
-
-def get_aot_compilation_context() -> Tuple[List[str], str, int]:
-    return list(graph_being_compiled), model_name, nth_graph
-
-
-def get_aot_graph_name() -> str:
-    """
-    Returns the name of the graph being compiled.
-    """
-    global model_name, graph_being_compiled, nth_graph
-    return f"{model_name}__{'_'.join(graph_being_compiled)}_{nth_graph}"
-
-
-get_graph_being_compiled = get_aot_graph_name
-
-
-@contextmanager
-def track_graph_compiling(aot_config, graph_name):
-    global graph_being_compiled
-    # TODO: Don't shove the aot_id in here; set it in the context
-    graph_being_compiled = [f"{aot_config.aot_id}_{graph_name}"]
-    try:
-        yield
-    finally:
-        global nth_graph
-        nth_graph += 1
-        graph_being_compiled = []
-
-
-def make_boxed_func(f):
-    def g(args):
-        return f(*args)
-
-    g._boxed_call = True
-    return g
-
-
-def make_boxed_compiler(compiler):
-    @wraps(compiler)
-    def f(fx_g, inps):
-        out_f = compiler(fx_g, inps)
-        fx_g = make_boxed_func(out_f)
-        return fx_g
-
-    return f
-
-
-def call_func_with_args(f, args, steal_args=False, disable_amp=False):
-    if not steal_args:
-        args = list(args)
-    assert isinstance(args, list)
-
-    context = torch._C._DisableAutocast if disable_amp else nullcontext
-    with context():
-        if hasattr(f, "_boxed_call"):
-            out = normalize_as_list(f(args))
-        else:
-            # TODO: Please remove soon
-            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-            warnings.warn(
-                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
-                "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
-            )
-            out = normalize_as_list(f(*args))
-    return out
 
 def aot_dispatch_base_graph(
     flat_fn,
@@ -2219,29 +1261,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     return compiled_fn
 
 
-# Returns the number of detected copy_
-def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False) -> int:
-    placeholders = set()
-    copy_count = 0
-    # NB: It would also be nice to verify that the mutations all happen at the
-    # end, but we also do some administrative views after mutations so this
-    # isn't actually true.  (TODO: Could this cause problems for Inductor?)
-    for n in fx_g.nodes:
-        if n.op == "placeholder":
-            placeholders.add(n)
-        if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is aten.copy_.default:
-                suffix = True
-                # Can only copy_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
-                copy_count += 1
-            else:
-                assert not n.target._schema.is_mutable, \
-                    f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
-    return copy_count
-
-
 def are_differentiable_views(view1, view2):
     if view1 is view2:
         return True
@@ -2348,10 +1367,15 @@ def _check_if_mutation_can_be_in_graph(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if keep_input_mutations:
-        return mutates_data and ((not mutates_metadata and not requires_grad) or mutations_hidden_from_autograd)
+        return mutates_data and (
+            (not mutates_metadata and not requires_grad) or
+            mutations_hidden_from_autograd or
+            mutations_under_no_grad_or_inference_mode
+        )
     return False
 
 
@@ -2360,6 +1384,7 @@ def _get_mutation_type(
     mutates_data,
     mutates_metadata,
     mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
     requires_grad
 ):
     if (not mutates_data) and (not mutates_metadata):
@@ -2370,6 +1395,7 @@ def _get_mutation_type(
         mutates_data,
         mutates_metadata,
         mutations_hidden_from_autograd,
+        mutations_under_no_grad_or_inference_mode,
         requires_grad
     ):
         return MutationType.MUTATED_IN_GRAPH
@@ -2594,14 +1620,6 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
-def format_guard_bug_msg(aot_config, expected):
-    return (
-        f"At compilation time, graph {aot_config.aot_id} was compiled under the "
-        f"assumption that {expected}, but at runtime this was not the case.  "
-        "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
-    )
-
-
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: List[bool],
@@ -2686,11 +1704,14 @@ def create_synthetic_base_metadata(
         mutates_metadata = False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
         mutations_hidden_from_autograd = all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices)
+        mutations_under_no_grad_or_inference_mode = all(
+            m.input_info[x].mutations_under_no_grad_or_inference_mode for x in outer_indices)
         mutation_type = _get_mutation_type(
             m.keep_input_mutations,
             mutates_data,
             mutates_metadata,
             mutations_hidden_from_autograd,
+            mutations_under_no_grad_or_inference_mode,
             requires_grad
         )
 
@@ -2703,6 +1724,7 @@ def create_synthetic_base_metadata(
             mutates_metadata=mutates_metadata,
             mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
             mutates_storage_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_storage_metadata,
+            mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             mutation_type=mutation_type,
@@ -3134,8 +2156,8 @@ fw_metadata={str(fw_metadata)}
             is_train=fw_metadata.is_train,
         )(*flat_args_with_synthetic_bases)
         assert ref_fw_metadata == fw_metadata_updated, (
-            f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
-            f'\nactual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+            f'ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, '
+            f'\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}'
         )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
@@ -3171,12 +2193,6 @@ fw_metadata={str(fw_metadata)}
     return wrapped_compiled_fn
 
 
-def describe_input(i, aot_config):
-    if i < aot_config.num_params_buffers:
-        return f"parameter/buffer {i}"
-    else:
-        return f"input {i - aot_config.num_params_buffers}"
-
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
 # that needs to run after the compiled function.
 #
@@ -3205,7 +2221,7 @@ def create_runtime_wrapper(
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
-                all_outs = call_func_with_args(
+                all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args_,
                     disable_amp=disable_amp,
@@ -3216,7 +2232,7 @@ def create_runtime_wrapper(
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
             with torch.no_grad():
-                all_outs = call_func_with_args(
+                all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
@@ -3611,11 +2627,6 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
     )
     return metadata
 
-
-SubclassTracingInfo = collections.namedtuple("SubclassTracingInfo", [
-    "plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"
-])
-
 # Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
 # Also returns:
 # - the new set of arguments to pass into this function (now that tensor subclasses have been eliminated)
@@ -3957,7 +2968,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
                 # value. Using the hints to avoid that.
-                if _get_hints(ph_arg.stride()) != real_stride:
+                if _get_symint_hints(ph_arg.stride()) != real_stride:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -4020,7 +3031,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
-            fw_outs = call_func_with_args(
+            fw_outs = call_func_at_runtime_with_args(
                 CompiledFunction.compiled_fw,
                 args,
                 disable_amp=disable_amp,
@@ -4260,7 +3271,7 @@ Got grad_output types: {str(grad_output_types)}"""
                             bw_module, placeholder_list
                         )
 
-                out = call_func_with_args(
+                out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
                     all_args,
                     steal_args=True,
@@ -4583,32 +3594,6 @@ fw_metadata={str(fw_metadata)}""")
         return compiled_fn
 
 
-# Inspired by autodidax (thanks!)
-class PytreeThunk:
-    spec = None
-    # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
-
-    def set(self, spec):
-        assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
-        ):
-            self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
-            self.is_really_simple = True
-
-    def unflatten(self, x):
-        if self.is_really_simple:
-            return x[0]
-        if self.is_simple:
-            return x
-        return pytree.tree_unflatten(x, self.spec)
-
 
 def create_functional_call(mod, params_spec, params_len):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
@@ -4637,42 +3622,6 @@ def create_functional_call(mod, params_spec, params_len):
         return out
     return functional_call
 
-# Creates a function that returns flattened inputs and outputs
-# Also returns the output tree spec, which is needed to recover the "unflattened"
-# output tree structure later.
-def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThunk]:
-    if kwargs is None:
-        kwargs = {}
-    # Save the args_spec for flat_tensor_args to unflatten while tracing
-    _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
-    out_spec = PytreeThunk()
-
-    def flat_fn(*flat_args):
-        # The input are flattened tensor args. Prepare the args in the
-        # order that original function expects. Add static args as well.
-        # They will appear as tensor constants in the traced graph.
-        nonlocal out_spec
-        args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
-        tree_out = fn(*args, **kwargs)
-        flat_out, spec = pytree.tree_flatten(tree_out)
-        for i in flat_out:
-            is_known_type = False
-            for j in KNOWN_TYPES:
-                if isinstance(i, j):
-                    is_known_type = True
-                    break
-            if not is_known_type:
-                raise RuntimeError(
-                    f"Found {type(i)} in output, which is not a known type. "
-                    "If this type holds tensors, you need to register a pytree for it. "
-                    "See https://github.com/pytorch/functorch/issues/475 for a brief "
-                    "explanation why. If you don't need to register a pytree, please "
-                    "leave a comment explaining your use case and we'll make this more "
-                    "ergonomic to deal with"
-                )
-        out_spec.set(spec)
-        return flat_out
-    return flat_fn, out_spec
 
 def _graph_input_names(gm):
     return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
