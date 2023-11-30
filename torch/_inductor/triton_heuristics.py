@@ -630,7 +630,9 @@ def end_graph():
                 file.write(f"{summary_str}\n\n")
         except Exception as e:
             log.warning(
-                "failed to write profile bandwidth result into %s: %s", output_file, f"{e}"
+                "failed to write profile bandwidth result into %s: %s",
+                output_file,
+                f"{e}",
             )
 
 
