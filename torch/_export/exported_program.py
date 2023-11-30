@@ -428,8 +428,3 @@ def _process_constraints(
         range_constraints[symbol] = ValueRanges(min_val, max_val)
 
     return range_constraints, equality_constraints
-
-
-def combine_args_kwargs(args, kwargs):
-    kwargs = kwargs or {}
-    return (args, kwargs)
