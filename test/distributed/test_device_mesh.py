@@ -90,7 +90,7 @@ class DeviceMeshTest(DTensorTestBase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1."
+            "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
         ):
             local_rank = mesh_2d.get_local_rank()
 
