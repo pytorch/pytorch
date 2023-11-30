@@ -1606,11 +1606,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             qconfig_mapping,
         )
 
-    def test_move_exported_model_to_eval(self):
+    def _test_move_exported_model_to_eval_dropout(self, inplace=False):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.dropout = torch.nn.Dropout(0.5)
+                self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
             def forward(self, x):
                 return self.dropout(x)
@@ -1622,7 +1622,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Assert that dropout op exists and is in train mode
         dropout_node = None
         for n in m.graph.nodes:
-            if n.target == torch.ops.aten.native_dropout.default:
+            if n.target == torch.ops.aten.native_dropout.default or n.target == torch.ops.aten.dropout_.default:
                 dropout_node = n
                 break
         self.assertTrue(dropout_node is not None)
@@ -1633,8 +1633,20 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         # Assert that dropout op is now replaced with a clone op
         targets = [n.target for n in m.graph.nodes]
-        self.assertTrue(torch.ops.aten.clone.default in targets)
-        self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+        if inplace:
+            dropout_eval_node = None
+            for node in m.graph.nodes:
+                if node.target == torch.ops.aten.dropout_.default:
+                    dropout_eval_node = node
+            self.assertTrue(dropout_eval_node is not None)
+            self.assertFalse(dropout_eval_node.args[2])
+        else:
+            self.assertTrue(torch.ops.aten.clone.default in targets)
+            self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+
+    def test_move_exported_model_to_eval(self):
+        self._test_move_exported_model_to_eval_dropout(inplace=False)
+        self._test_move_exported_model_to_eval_dropout(inplace=True)
 
     def test_bn_move_exported_model_to_eval(self):
         class M(torch.nn.Module):
