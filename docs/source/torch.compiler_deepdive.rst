@@ -81,7 +81,7 @@ guards:
    hasattr(L['a'], '_dynamo_dynamic_indices') == False
    hasattr(L['b'], '_dynamo_dynamic_indices') == False
    utils_device.CURRENT_DEVICE == None
-   ___skip_backend_check() or ___current_backend() == ___lookup_backend(140355900538256)
+   ___skip_backend_check() or ___current_backend() == G['___dynamo_cached_backends'][140355900538256]
    check_tensor(L['a'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[10], stride=[1])
    check_tensor(L['b'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[10], stride=[1])
 
@@ -258,7 +258,7 @@ The output is:
    hasattr(L['a'], '_dynamo_dynamic_indices') == False
    hasattr(L['b'], '_dynamo_dynamic_indices') == False
    utils_device.CURRENT_DEVICE == None
-   ___skip_backend_check() or ___current_backend() == ___lookup_backend(140215810860528)
+   ___skip_backend_check() or ___current_backend() == G['___dynamo_cached_backends'][140355900538256]
    ___check_tensors(L['a'], L['b'], tensor_check_names=tensor_check_names)
 
 Only when all the conditions are satisfied, the guard function returns true, and the compiled code is executed.

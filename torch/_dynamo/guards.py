@@ -199,8 +199,8 @@ class GuardBuilder(GuardBuilderBase):
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
-        self.scope["G"]["___cached_backends"] = self.scope["G"].get(
-            "___cached_backends", {}
+        self.scope["G"]["___dynamo_cached_backends"] = self.scope["G"].get(
+            "___dynamo_cached_backends", {}
         )
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -594,9 +594,9 @@ class GuardBuilder(GuardBuilderBase):
         """Guard on backend matching based on id of current_backend"""
         assert guard.source is GuardSource.GLOBAL
         backend = torch._dynamo.eval_frame.guarded_backend_cache.current_backend
-        self.get("G['___cached_backends']")[id(backend)] = backend
+        self.get("G['___dynamo_cached_backends']")[id(backend)] = backend
         code = [
-            f"(___skip_backend_check() or ___current_backend() == G['___cached_backends'][{id(backend)}])"
+            f"(___skip_backend_check() or ___current_backend() == G['___dynamo_cached_backends'][{id(backend)}])"
         ]
         self._produce_guard_code(guard, code)
 
