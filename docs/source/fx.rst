@@ -1149,6 +1149,7 @@ API Reference
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
 .. py:module:: torch.fx.experimental.symbolic_shapes
+.. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.experimental.unification.match

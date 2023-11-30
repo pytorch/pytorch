@@ -29,7 +29,8 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, _create_scaling_case, _create_scaling_models_optimizers
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
+    _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -80,8 +81,23 @@ class TestCuda(TestCase):
         torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
-        pinned_t = torch.ones(1 << 21).pin_memory()
-        self.assertTrue(pinned_t.is_pinned())
+        try:
+            pinned_t = torch.ones(1 << 21).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+            pinned_t = torch.ones(1 << 24).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+        except RuntimeError as e:
+            # Some GPUs don't support same address space on host and device side
+            pass
+
+    def test_pinned_memory_with_cudaregister_multithread(self):
+        num_threads = 4
+        threads = [threading.Thread(target=self.test_pinned_memory_with_cudaregister)
+                   for t in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     def test_cudart_register(self):
         t = torch.ones(20)
@@ -281,6 +297,7 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async")
+    @unittest.skipIf(_get_torch_cuda_version() >= (12, 2), "skipped as explicit workspace allocation is removed")
     def test_cublas_workspace_explicit_allocation(self):
         a = torch.randn(7, 7, device='cuda', requires_grad=False)
         default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8

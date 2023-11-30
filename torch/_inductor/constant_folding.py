@@ -97,7 +97,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
 
         args, kwargs = self.fetch_args_kwargs_from_env(node)
-        flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+        flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
 
         if self.unknown_value in flattened_inputs:
             return self.unknown_value
@@ -137,7 +137,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
             self.add_node_replacement(node, out)
 
-            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+            flattened_node_inps = pytree.arg_tree_leaves(*node.args, **node.kwargs)
 
             for n in flattened_node_inps:
                 if not isinstance(n, torch.fx.Node):
@@ -178,7 +178,8 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     erased_params = []
     for node in gm.graph.nodes:
         if node.op == "get_attr" and len(node.users) == 0:
-            delattr(gm, node.target)
+            if hasattr(gm, node.target):
+                delattr(gm, node.target)
             erased_params.append(node)
 
     for node in erased_params:

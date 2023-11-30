@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/inductor/aoti_model_runner.h>
+#include <torch/csrc/inductor/aoti_model_container_runner.h>
 #ifdef USE_CUDA
-#include <torch/csrc/inductor/aoti_model_runner_cuda.h>
+#include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -31,12 +31,12 @@ void test_aoti(const std::string& device) {
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
-  std::unique_ptr<torch::inductor::AOTIModelRunner> runner;
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   if (device == "cuda") {
-    runner = std::make_unique<torch::inductor::AOTIModelRunnerCuda>(
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
         model_so_path.c_str());
   } else if (device == "cpu") {
-    runner = std::make_unique<torch::inductor::AOTIModelRunnerCpu>(
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
         model_so_path.c_str());
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;

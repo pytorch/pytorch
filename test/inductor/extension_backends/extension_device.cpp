@@ -116,6 +116,20 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   return dst;
 }
 
+at::Tensor custom_empty_memory_format(at::IntArrayRef size,
+                                      c10::optional<at::ScalarType> dtype,
+                                      c10::optional<at::Layout> layout,
+                                      c10::optional<at::Device> device,
+                                      c10::optional<bool> pin_memory,
+                                      c10::optional<at::MemoryFormat> memory_format) {
+  constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
+  return at::detail::empty_generic(size,
+                                   &global_custom_alloc,
+                                   private_use_ks,
+                                   c10::dtype_or_default(dtype),
+                                   memory_format);
+}
+
 at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, c10::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt) {
   op_counter += 1;
 
@@ -139,6 +153,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("to.Device", &custom_to_device);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
+  m.impl("empty.memory_format", &custom_empty_memory_format);
   m.impl("empty_strided", &custom_empty_strided);
 }
 

@@ -42,6 +42,7 @@ class Container(Module):
 
 class Sequential(Module):
     r"""A sequential container.
+
     Modules will be added to it in the order they are passed in the
     constructor. Alternatively, an ``OrderedDict`` of modules can be
     passed in. The ``forward()`` method of ``Sequential`` accepts any
@@ -105,7 +106,7 @@ class Sequential(Module):
                 self.add_module(str(idx), module)
 
     def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
-        """Get the idx-th item of the iterator"""
+        """Get the idx-th item of the iterator."""
         size = len(self)
         idx = operator.index(idx)
         if not -size <= idx < size:
@@ -217,7 +218,7 @@ class Sequential(Module):
         return input
 
     def append(self, module: Module) -> 'Sequential':
-        r"""Appends a given module to the end.
+        r"""Append a given module to the end.
 
         Args:
             module (nn.Module): module to append
@@ -278,7 +279,7 @@ class ModuleList(Module):
             self += modules
 
     def _get_abs_string_index(self, idx):
-        """Get the absolute index for the list of modules"""
+        """Get the absolute index for the list of modules."""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
             raise IndexError(f'index {idx} is out of range')
@@ -325,7 +326,7 @@ class ModuleList(Module):
         return combined
 
     def __repr__(self):
-        """A custom repr for ModuleList that compresses repeated module representations"""
+        """Return a custom repr for ModuleList that compresses repeated module representations."""
         list_of_reprs = [repr(item) for item in self]
         if len(list_of_reprs) == 0:
             return self._get_name() + '()'
@@ -374,7 +375,7 @@ class ModuleList(Module):
         self._modules[str(index)] = module
 
     def append(self, module: Module) -> 'ModuleList':
-        r"""Appends a given module to the end of the list.
+        r"""Append a given module to the end of the list.
 
         Args:
             module (nn.Module): module to append
@@ -388,7 +389,7 @@ class ModuleList(Module):
         return v
 
     def extend(self, modules: Iterable[Module]) -> Self:
-        r"""Appends modules from a Python iterable to the end of the list.
+        r"""Append modules from a Python iterable to the end of the list.
 
         Args:
             modules (iterable): iterable of modules to append
@@ -478,8 +479,7 @@ class ModuleDict(Module):
         return key in self._modules
 
     def clear(self) -> None:
-        """Remove all items from the ModuleDict.
-        """
+        """Remove all items from the ModuleDict."""
         self._modules.clear()
 
     def pop(self, key: str) -> Module:
@@ -494,25 +494,21 @@ class ModuleDict(Module):
 
     @_copy_to_script_wrapper
     def keys(self) -> Iterable[str]:
-        r"""Return an iterable of the ModuleDict keys.
-        """
+        r"""Return an iterable of the ModuleDict keys."""
         return self._modules.keys()
 
     @_copy_to_script_wrapper
     def items(self) -> Iterable[Tuple[str, Module]]:
-        r"""Return an iterable of the ModuleDict key/value pairs.
-        """
+        r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
     @_copy_to_script_wrapper
     def values(self) -> Iterable[Module]:
-        r"""Return an iterable of the ModuleDict values.
-        """
+        r"""Return an iterable of the ModuleDict values."""
         return self._modules.values()
 
     def update(self, modules: Mapping[str, Module]) -> None:
-        r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a
-        mapping or an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ModuleDict` with key-value pairs from a mapping, overwriting existing keys.
 
         .. note::
             If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
@@ -583,7 +579,7 @@ class ParameterList(Module):
             self += values
 
     def _get_abs_string_index(self, idx):
-        """Get the absolute index for the list of modules"""
+        """Get the absolute index for the list of modules."""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
             raise IndexError(f'index {idx} is out of range')
@@ -636,7 +632,7 @@ class ParameterList(Module):
         return keys
 
     def append(self, value: Any) -> 'ParameterList':
-        """Appends a given value at the end of the list.
+        """Append a given value at the end of the list.
 
         Args:
             value (Any): value to append
@@ -647,7 +643,7 @@ class ParameterList(Module):
         return self
 
     def extend(self, values: Iterable[Any]) -> Self:
-        """Appends values from a Python iterable to the end of the list.
+        """Append values from a Python iterable to the end of the list.
 
         Args:
             values (iterable): iterable of values to append
@@ -766,8 +762,7 @@ class ParameterDict(Module):
         return reversed(list(self._keys))
 
     def copy(self) -> 'ParameterDict':
-        """Returns a copy of this :class:`~torch.nn.ParameterDict` instance.
-        """
+        """Return a copy of this :class:`~torch.nn.ParameterDict` instance."""
         # We have to use an OrderedDict because the ParameterDict constructor
         # behaves differently on plain dict vs OrderedDict
         return ParameterDict(OrderedDict((k, self[k]) for k in self._keys))
@@ -776,7 +771,9 @@ class ParameterDict(Module):
         return key in self._keys
 
     def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
-        """If key is in the ParameterDict, return its value.
+        """Set the default for a key in the Parameterdict.
+
+        If key is in the ParameterDict, return its value.
         If not, insert `key` with a parameter `default` and return `default`.
         `default` defaults to `None`.
 
@@ -784,14 +781,12 @@ class ParameterDict(Module):
             key (str): key to set default for
             default (Any): the parameter set to the key
         """
-
         if key not in self:
             self[key] = default
         return self[key]
 
     def clear(self) -> None:
-        """Remove all items from the ParameterDict.
-        """
+        """Remove all items from the ParameterDict."""
         for k in self._keys.copy():
             del self[k]
 
@@ -806,9 +801,7 @@ class ParameterDict(Module):
         return v
 
     def popitem(self) -> Tuple[str, Any]:
-        """Remove and return the last inserted `(key, parameter)` pair
-        from the ParameterDict
-        """
+        """Remove and return the last inserted `(key, parameter)` pair from the ParameterDict."""
         k, _ = self._keys.popitem()
         # We need the key in the _keys to be able to access/del
         self._keys[k] = None
@@ -817,8 +810,7 @@ class ParameterDict(Module):
         return k, val
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
-        r"""Return the parameter associated with key if present.
-        Otherwise return default if provided, None if not.
+        r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
 
         Args:
             key (str): key to get from the ParameterDict
@@ -827,7 +819,7 @@ class ParameterDict(Module):
         return self[key] if key in self else default
 
     def fromkeys(self, keys: Iterable[str], default: Optional[Any] = None) -> 'ParameterDict':
-        r"""Return a new ParameterDict with the keys provided
+        r"""Return a new ParameterDict with the keys provided.
 
         Args:
             keys (iterable, string): keys to make the new ParameterDict from
@@ -836,23 +828,19 @@ class ParameterDict(Module):
         return ParameterDict((k, default) for k in keys)
 
     def keys(self) -> Iterable[str]:
-        r"""Return an iterable of the ParameterDict keys.
-        """
+        r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 
     def items(self) -> Iterable[Tuple[str, Any]]:
-        r"""Return an iterable of the ParameterDict key/value pairs.
-        """
+        r"""Return an iterable of the ParameterDict key/value pairs."""
         return ((k, self[k]) for k in self._keys)
 
     def values(self) -> Iterable[Any]:
-        r"""Return an iterable of the ParameterDict values.
-        """
+        r"""Return an iterable of the ParameterDict values."""
         return (self[k] for k in self._keys)
 
     def update(self, parameters: Union[Mapping[str, Any], 'ParameterDict']) -> None:
-        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
-        mapping or an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::
             If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or

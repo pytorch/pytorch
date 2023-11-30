@@ -629,6 +629,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   if (size1 > 0 && THPUtils_checkLong(arg)) {
     return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
   }
+  if (size1 > 0 && torch::is_symint(py::handle(arg))) {
+    return std::vector<int64_t>(
+        size1,
+        py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
+  }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);

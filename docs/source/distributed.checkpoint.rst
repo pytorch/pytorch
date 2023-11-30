@@ -76,7 +76,15 @@ an experimental feature and is subject to change.
 
 .. autofunction:: torch.distributed.checkpoint.state_dict.get_state_dict
 
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_model_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_optimizer_state_dict
+
 .. autofunction:: torch.distributed.checkpoint.state_dict.set_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_model_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_optimizer_state_dict
 
 .. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
    :members:

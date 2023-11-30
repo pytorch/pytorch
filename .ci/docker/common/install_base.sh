@@ -9,10 +9,7 @@ install_ubuntu() {
   #   "$UBUNTU_VERSION" == "18.04"*
   # instead of
   #   "$UBUNTU_VERSION" == "18.04"
-  if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
-    cmake3="cmake=3.10*"
-    maybe_libiomp_dev="libiomp-dev"
-  elif [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
+  if [[ "$UBUNTU_VERSION" == "20.04"* ]]; then
     cmake3="cmake=3.16*"
     maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then

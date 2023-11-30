@@ -161,7 +161,8 @@ def _draw_single_box(
 
 
 def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
-    """Outputs three `Summary` protocol buffers needed by hparams plugin.
+    """Output three `Summary` protocol buffers needed by hparams plugin.
+
     `Experiment` keeps the metadata of an experiment, such as the name of the
       hyperparameters and the name of the metrics.
     `SessionStartInfo` keeps key-value pairs of the hyperparameters
@@ -349,7 +350,8 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
 
 
 def scalar(name, tensor, collections=None, new_style=False, double_precision=False):
-    """Outputs a `Summary` protocol buffer containing a single scalar value.
+    """Output a `Summary` protocol buffer containing a single scalar value.
+
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
       name: A name for the generated node. Will also serve as the series name in
@@ -429,7 +431,8 @@ def tensor_proto(tag, tensor):
 
 def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
     # pylint: disable=line-too-long
-    """Outputs a `Summary` protocol buffer with a histogram.
+    """Output a `Summary` protocol buffer with a histogram.
+
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -461,7 +464,8 @@ def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_c
 
 def histogram(name, values, bins, max_bins=None):
     # pylint: disable=line-too-long
-    """Outputs a `Summary` protocol buffer with a histogram.
+    """Output a `Summary` protocol buffer with a histogram.
+
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -536,7 +540,8 @@ def make_histogram(values, bins, max_bins=None):
 
 
 def image(tag, tensor, rescale=1, dataformats="NCHW"):
-    """Outputs a `Summary` protocol buffer with images.
+    """Output a `Summary` protocol buffer with images.
+
     The summary has up to `max_images` summary values containing images. The
     images are built from `tensor` which must be 3-D with shape `[height, width,
     channels]` and where `channels` can be:
@@ -574,7 +579,7 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
 def image_boxes(
     tag, tensor_image, tensor_boxes, rescale=1, dataformats="CHW", labels=None
 ):
-    """Outputs a `Summary` protocol buffer with images."""
+    """Output a `Summary` protocol buffer with images."""
     tensor_image = make_np(tensor_image)
     tensor_image = convert_to_HWC(tensor_image, dataformats)
     tensor_boxes = make_np(tensor_boxes)
@@ -606,7 +611,7 @@ def draw_boxes(disp_image, boxes, labels=None):
 
 
 def make_image(tensor, rescale=1, rois=None, labels=None):
-    """Convert a numpy representation of an image to Image protobuf"""
+    """Convert a numpy representation of an image to Image protobuf."""
     from PIL import Image
 
     height, width, channel = tensor.shape
@@ -859,7 +864,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
 def _get_tensor_summary(
     name, display_name, description, tensor, content_type, components, json_config
 ):
-    """Creates a tensor summary with summary metadata.
+    """Create a tensor summary with summary metadata.
 
     Args:
       name: Uniquely identifiable name of the summary op. Could be replaced by
@@ -916,7 +921,7 @@ def _get_tensor_summary(
 
 
 def _get_json_config(config_dict):
-    """Parses and returns JSON string from python dictionary."""
+    """Parse and returns JSON string from python dictionary."""
     json_config = "{}"
     if config_dict is not None:
         json_config = json.dumps(config_dict, sort_keys=True)
@@ -927,7 +932,7 @@ def _get_json_config(config_dict):
 def mesh(
     tag, vertices, colors, faces, config_dict, display_name=None, description=None
 ):
-    """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
+    """Output a merged `Summary` protocol buffer with a mesh/point cloud.
 
     Args:
       tag: A name for this summary operation.
