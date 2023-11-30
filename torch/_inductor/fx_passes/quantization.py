@@ -134,6 +134,25 @@ qlinear_pt2e_pattern = CallFunction(
     KeywordArg("postop_algorithm"),
 )
 
+def get_qlinear(users=1):
+    return CallFunction(
+        torch.ops.onednn.qlinear_pointwise.default,
+        KeywordArg("x"),
+        KeywordArg("x_scale"),
+        KeywordArg("x_zp"),
+        KeywordArg("packed_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("b"),
+        KeywordArg("output_scale"),
+        KeywordArg("output_zero_point"),
+        KeywordArg("output_dtype"),
+        KeywordArg("postop_name"),
+        KeywordArg("postop_args"),
+        KeywordArg("postop_algorithm"),
+        _users=users,
+    )
+
 dequantize_accum_pattern = CallFunction(
     aten.mul.Tensor,
     CallFunction(
