@@ -25,7 +25,8 @@ Note:
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Collection, Optional, Tuple, Union
+import itertools
+from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
 
 import onnx_test_common
 
@@ -755,21 +756,38 @@ def _run_test_output_match(
                 )
 
 
-def _get_test_class_name(cls, num, params_dict) -> str:
-    del cls  # unused
-    del num  # unused
-    return params_dict["name"]
+def _parameterized_class_attrs_and_values():
+    input_values = []
+    input_values.extend(
+        itertools.product(
+            (opset for opset in onnx_test_common.FX_TESTED_OPSETS),
+            (
+                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+            ),
+        )
+    )
+    return {
+        "attrs": ["opset_version", "model_type"],
+        "input_values": input_values,
+    }
+
+
+def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+    """Combine class name with the parameterized arguments.
+
+    This function is passed to `parameterized.parameterized_class` as the
+    `class_name_func` argument.
+    """
+    suffixes = []
+    for k, v in input_dicts.items():
+        suffixes.append(f"{k}_{v}")
+    return f"{cls.__name__}_{'_'.join(suffixes)}"
 
 
 @parameterized.parameterized_class(
-    [
-        {
-            "name": f"TestOnnxModelOutputConsistency_opset{opset}",
-            "opset_version": opset,
-        }
-        for opset in onnx_test_common.FX_TESTED_OPSETS
-    ],
-    class_name_func=_get_test_class_name,
+    **_parameterized_class_attrs_and_values(),
+    class_name_func=_parameterize_class_name,
 )
 class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """Test output consistency between exported ONNX models and PyTorch eager mode.
@@ -812,28 +830,30 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         _run_test_output_match(self, device, dtype, op)
 
 
+# TODO(titaiwang): refactor this
+# https://github.com/pytorch/pytorch/issues/105338
 for opset in onnx_test_common.FX_TESTED_OPSETS:
-    # The name needs to match the parameterized_class name.
-    test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
-    onnx_test_common.add_decorate_info(
-        OPS_DB,
-        test_class_name,
-        "test_output_match",
-        opset=opset,
-        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-    )
+    for model_type in onnx_test_common.TorchModelType:
+        # The name needs to match the parameterized_class name.
+        test_class_name = f"TestOnnxModelOutputConsistency_opset_version_{opset}_model_type_TorchModelType.{model_type.name}"
+        onnx_test_common.add_decorate_info(
+            OPS_DB,
+            test_class_name,
+            "test_output_match",
+            opset=opset,
+            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+        )
 
-    onnx_test_common.add_decorate_info(
-        OPS_DB,
-        test_class_name,
-        "test_output_match_complex",
-        opset=opset,
-        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-    )
-
-    common_device_type.instantiate_device_type_tests(
-        globals()[test_class_name], globals(), only_for="cpu"
-    )
+        onnx_test_common.add_decorate_info(
+            OPS_DB,
+            test_class_name,
+            "test_output_match_complex",
+            opset=opset,
+            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+        )
+        common_device_type.instantiate_device_type_tests(
+            globals()[test_class_name], globals(), only_for="cpu"
+        )
 
 if __name__ == "__main__":
     common_utils.run_tests()
