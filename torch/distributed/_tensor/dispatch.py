@@ -26,9 +26,9 @@ from torch.distributed._tensor.tp_conv import (
 )
 
 try:
-    from torch.utils._pytree.api import cxx as pytree
+    from torch.utils import _cxx_pytree as pytree
 except ImportError:
-    from torch.utils._pytree.api import python as pytree  # type: ignore[no-redef]
+    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 
