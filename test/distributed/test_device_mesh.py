@@ -143,7 +143,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        self.assertEqual(hash(mesh), hash(mesh2))
+        self.assertNotEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
@@ -259,6 +259,14 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
         self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
+
+        mesh_0_2 = DeviceMesh(self.device_type, [0, 2])
+        mesh_1_3 = DeviceMesh(self.device_type, [1, 3])
+
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_0_2), None)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_1_3), None)
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
