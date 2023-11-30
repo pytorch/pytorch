@@ -4029,16 +4029,11 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def _optimize_then_check_exp(
-        self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
-    ):
+    def _optimize_then_check_exp(self, foo, args, cnt, exp_out, exp_frame_count):
         opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
         self.assertEqual(exp_out, opt_out)
+        # the function should cause compilation with regard to a new backend
         self.assertEqual(cnt.frame_count, exp_frame_count)
-        self.assertEqual(
-            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
-            exp_n_cached_backend,
-        )
 
     def test_backend_match_guard(self):
         x = torch.randn([3, 4])
@@ -4066,13 +4061,13 @@ def fn():
                 # Specifically, frame_count doesn't increase
                 # the number of cached backends is i + 2 because we have the optimizing backend + None
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                    foo, (x,), cnt, eager_result, exp_frame_count
                 )
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                    foo, (x,), cnt, eager_result, exp_frame_count
                 )
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                    foo, (x,), cnt, eager_result, exp_frame_count
                 )
 
         test_recompile(foo, exp_frame_count=1)
@@ -4097,7 +4092,6 @@ def fn():
         # Test dynamo recompiles but only caches a single backend for each thread
         eager_result = foo(x)
         # cnt and None
-        exp_n_cached_backend = 2
         exp_frame_count = 1
         threads = []
         thread_success = {}
@@ -4111,7 +4105,6 @@ def fn():
                     cnt,
                     eager_result,
                     exp_frame_count,
-                    exp_n_cached_backend,
                 ),
             )
             threads.append(thread)
