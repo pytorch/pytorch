@@ -2314,11 +2314,20 @@ void Reducer::update_process_group(
   process_group_ = std::move(new_process_group);
 }
 
-void Reducer::force_bucket_rebuild() {
+void Reducer::reset_state() {
   std::lock_guard<std::mutex> lock(mutex_);
+  // Force rebuild of buckets.
   has_rebuilt_bucket_ = false;
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
+
+  // Ensure forward can run despite previous backward not succeeding.
+  expect_autograd_hooks_ = false;
+  require_finalize_ = false;
+
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  div_factor_ = kUnsetDivFactor;
 }
 
 } // namespace c10d

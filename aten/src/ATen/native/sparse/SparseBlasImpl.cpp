@@ -23,7 +23,33 @@
 #include <ATen/Parallel.h>
 #endif
 
+
 namespace at::native::sparse::impl {
+
+namespace {
+
+bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& strided) {
+  // Triton works only with blocksizes which are powers of 2.
+  const auto is_power_of_2 = [](int64_t v) -> bool {
+    return !(v & (v - 1));
+  };
+  return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(compressed.layout(), "operands_support_triton_mm_kernel", [&] { return false; },
+     [&] {
+       const auto blocksize = at::sparse_csr::getBlockSize(compressed);
+       // Dtype and blocksize checks for potential Triton usage.
+       return ((strided.scalar_type() == ScalarType::Half
+                || strided.scalar_type() == ScalarType::BFloat16)
+               && compressed.scalar_type() == strided.scalar_type()
+               && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
+               && (blocksize[0] >= 16) && (blocksize[1] >= 16)
+               // lhs is retiled to (b0, b1) while rhs is to (b1, b0),
+               // so the result is tiled to (b0, b0) and we need to make
+               // sure that strided.size(-1) is divisible by b0.
+               && strided.size(-1) % blocksize[0] == 0);
+     });
+}
+
+}
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {
   const auto compressed_layout = compressed.layout();
@@ -78,20 +104,8 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
 
 // No stable support for ROCM in Triton yet.
 #ifndef USE_ROCM
-  // Triton works only with blocksizes which are powers of 2.
-  const auto is_power_of_2 = [](int64_t v) -> bool {
-    return !(v & (v - 1));
-  };
 
-  // Dtype and blocksize checks for potential Triton usage.
-  if ((strided.scalar_type() == ScalarType::Half
-    || strided.scalar_type() == ScalarType::BFloat16)
-   && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
-   && (blocksize[0] >= 16) && (blocksize[1] >= 16)
-   // lhs is retiled to (b0, b1) while rhs is to (b1, b0),
-   // so the result is tiled to (b0, b0) and we need to make
-   // sure that dense.size(-1) is divisible by b0.
-   && n % blocksize[0] == 0) {
+  if (operands_support_triton_mm_kernel(compressed, strided)) {
     const auto triton_schema = c10::Dispatcher::singleton()
       .findSchema({"triton::_triton_bsr_dense_mm_out", ""});
     if (triton_schema.has_value()) {
@@ -218,6 +232,30 @@ Tensor& _compressed_row_strided_addmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+
+// No stable support for ROCM in Triton yet.
+#ifndef USE_ROCM
+  if (operands_support_triton_mm_kernel(mat1, mat2)) {
+    const auto triton_schema = c10::Dispatcher::singleton()
+      .findSchema({"triton::_triton_bsr_dense_addmm_out", ""});
+    if (triton_schema.has_value()) {
+      const auto triton_kernel = triton_schema.value().typed<Tensor&(const Tensor&, const Tensor&, const Tensor&, const Scalar&, const Scalar&, Tensor&)>();
+      if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+        try {
+          return triton_kernel.call(self, mat1, mat2, beta, alpha, result);
+        } catch (std::runtime_error& e) {
+          const std::string msg = e.what();
+          if (msg != std::string("Unable to cast NotImplemented to Tensor")) {
+            throw std::runtime_error(msg);
+          }
+        } /* else triton_kernel returned NotImplemented, continue
+             with the generic method below */
+      }
+    } /* else the schema is not defined and/or the key is not
+           overwritten, so skip and execute the code below. */
+  }
+#endif
+
   auto alpha_val = alpha.toComplexDouble();
   auto beta_val = beta.toComplexDouble();
   // If result is not the same as self, it could always be used as out argument to mm.
