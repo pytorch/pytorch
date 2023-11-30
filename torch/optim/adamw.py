@@ -27,7 +27,6 @@ class AdamW(Adam):
                          maximize=maximize, capturable=capturable, differentiable=differentiable,
                          fused=fused, decoupled_weight_decay=True)
 
-    @_use_grad_for_differentiable
     def step(self, closure=None):
         super().step(closure)
 
