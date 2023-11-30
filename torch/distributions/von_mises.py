@@ -167,7 +167,9 @@ class VonMises(Distribution):
         """
         shape = self._extended_shape(sample_shape)
         x = torch.empty(shape, dtype=self._loc.dtype, device=self.loc.device)
-        return _rejection_sample(self._loc, self._concentration, self._proposal_r, x).to(self.loc.dtype)
+        return _rejection_sample(
+            self._loc, self._concentration, self._proposal_r, x
+        ).to(self.loc.dtype)
 
     def expand(self, batch_shape):
         try:
