@@ -185,6 +185,15 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
+
+- func: _same_storage(Tensor(a!) self, Tensor b) -> bool
+
+- func: _data_ptr_allocated(Tensor(a!) self) -> bool
+
+- func: _same_storage_size(Tensor(a!) self, int size) -> bool
+
+- func: _storage_size_allocated(Tensor(a!) self) -> bool
+
 - func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range_for_size
