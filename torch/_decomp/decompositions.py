@@ -4343,6 +4343,7 @@ def _weight_norm_interface(x, y, dim):
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
 
+
 @register_decomposition(aten.take)
 @out_wrapper()
 def take(self, index):
@@ -4352,6 +4353,7 @@ def take(self, index):
     # https://github.com/pytorch/pytorch/issues/55143
     index = torch.where(index < 0, index + numel, index)
     return flattened.gather(dim=0, index=index)
+
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
