@@ -140,7 +140,7 @@ class ObserverBase(ABC, nn.Module):
     def __init__(self, dtype, is_dynamic=False):
         super().__init__()
         self.dtype = dtype
-        self.is_dynamic = False
+        self.is_dynamic = is_dynamic
 
     @abstractmethod
     def forward(self, x):
@@ -210,6 +210,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -467,12 +468,17 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs,
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
+            )
+        if is_dynamic:
+            raise NotImplementedError(
+                "MinMaxObserver doesn't support dynamic quantization"
             )
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
@@ -488,6 +494,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -586,6 +593,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=is_dynamic,
         **kwargs
     ) -> None:
         if not is_per_tensor(qscheme):
@@ -595,6 +603,11 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                 but got: {qscheme}"
             )
         self.averaging_constant = averaging_constant
+        if is_dynamic and self.averaging_constant != 1:
+            raise NotImplementedError(
+                "MovingAverageMinMaxObserver doesn't support dynamic quantization for "
+                f"averaging constant of {self.averaging_constant}"
+            )
         super().__init__(
             dtype=dtype,
             qscheme=qscheme,
@@ -602,6 +615,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             quant_min=quant_min,
             quant_max=quant_max,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs
         )
 
@@ -663,12 +677,17 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs,
     ) -> None:
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
+        if is_dynamic:
+            raise NotImplementedError(
+                "PerChannelMinMaxObserver doesn't support dynamic quantization"
             )
         super().__init__(
             dtype=dtype,
@@ -678,6 +697,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -856,12 +876,17 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_min=None,
         quant_max=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=is_dynamic,
         **kwargs
     ) -> None:
         if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
+        if is_dynamic:
+            raise NotImplementedError(
+                "MovingAveragePerChannelMinMaxObserver doesn't support dynamic quantization"
             )
         super().__init__(
             ch_axis=ch_axis,
@@ -871,6 +896,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             quant_min=quant_min,
             quant_max=quant_max,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs
         )
         self.averaging_constant = averaging_constant
@@ -943,12 +969,17 @@ class HistogramObserver(UniformQuantizationObserverBase):
         quant_max=None,
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
         **kwargs,
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
+            )
+        if is_dynamic:
+            raise NotImplementedError(
+                "HistogramObserver doesn't support dynamic quantization"
             )
         # bins: The number of bins used for histogram calculation.
         super().__init__(
@@ -959,6 +990,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
             eps=eps,
+            is_dynamic=is_dynamic,
             **kwargs
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -1315,9 +1347,14 @@ class FixedQParamsObserver(ObserverBase):
         qscheme=torch.per_tensor_affine,
         quant_min=0,
         quant_max=255,
+        is_dynamic=False,
         **kwargs,
     ):
-        super().__init__(dtype=dtype, **kwargs)
+        if is_dynamic:
+            raise NotImplementedError(
+                "FixedQParamsObserver doesn't support dynamic quantization"
+            )
+        super().__init__(dtype=dtype, is_dynamic=is_dynamic, **kwargs)
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
@@ -1361,7 +1398,7 @@ class PlaceholderObserver(ObserverBase):
         quant_min=None, quant_max=None, qscheme=None, eps=None,
         is_dynamic=False,
     ) -> None:
-        super().__init__(dtype=dtype)
+        super().__init__(dtype=dtype, is_dynamic=is_dynamic)
         if qscheme is None:
             qscheme = torch.per_tensor_affine
         if eps is None:
@@ -1383,7 +1420,6 @@ class PlaceholderObserver(ObserverBase):
                     `compute_dtype` will be deprecated in a future release \
                     of PyTorch."
             )
-        self.is_dynamic = is_dynamic
 
     def forward(self, x):
         return x
@@ -1410,8 +1446,8 @@ class RecordingObserver(ObserverBase):
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
-    def __init__(self, dtype=torch.quint8, **kwargs):
-        super().__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
+    def __init__(self, dtype=torch.quint8):
+        super().__init__(dtype=dtype, is_dynamic=False)  # type: ignore[call-arg]
         self.tensor_val = []
 
     def forward(self, x):
@@ -1442,7 +1478,7 @@ class NoopObserver(ObserverBase):
     """
 
     def __init__(self, dtype=torch.float16, custom_op_name="") -> None:
-        super().__init__(dtype=dtype)
+        super().__init__(dtype=dtype, is_dynamic=False)
         self.dtype = dtype
         self.custom_op = custom_op_name
 
@@ -1467,7 +1503,7 @@ class ReuseInputObserver(ObserverBase):
     Note: this is only enabled in FX Graph Mode Quantization
     """
     def __init__(self):
-        super().__init__(torch.quint8)
+        super().__init__(torch.quint8, is_dynamic=False)
 
     def forward(self, x):
         return x
