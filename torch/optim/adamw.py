@@ -1,5 +1,5 @@
 from torch import Tensor
-from .optimizer import (_use_grad_for_differentiable, _capturable_doc, _differentiable_doc,
+from .optimizer import (_capturable_doc, _differentiable_doc,
                         _foreach_doc, _fused_doc, _maximize_doc, ParamsT)
 from typing import List, Optional, Tuple, Union
 from .adam import Adam, adam
