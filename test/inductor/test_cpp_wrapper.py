@@ -129,9 +129,11 @@ def make_test_case(
     condition=True,
     slow=False,
     func_inputs=None,
-    code_string_count={},
+    code_string_count=None,
 ):
     test_name = f"{name}_{device}" if device else name
+    if code_string_count is None:
+        code_string_count = {}
 
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
