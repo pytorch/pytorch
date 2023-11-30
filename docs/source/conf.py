@@ -694,6 +694,9 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
+    # torch.export.dynamic_shapes
+    "Dim",
+    "dynamic_dim",
     # torch.functional
     "align_tensors",
     "atleast_1d",
@@ -2781,9 +2784,6 @@ coverage_ignore_classes = [
     # torch.export.exported_program
     "ConstantArgument",
     "ExportedProgram",
-    # torch.export.dynamic_shapes
-    "Dim",
-    "dynamic_dim",
     # torch.fx.experimental.accelerator_partitioner
     "DAG",
     "DAGNode",
