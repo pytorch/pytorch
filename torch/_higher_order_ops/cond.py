@@ -441,18 +441,17 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
             f = false_fn(*args)
             return torch.where(p, t[0], f[0])
 
-    else:
-        # Ideally, PyTorch should vmap true_fn/false_fn and call cond again:
-        #    torch.cond(pred, true_fn_vmap, false_fn_vmap, tensors)
-        # but this doesn't work as "cond" internally tries to compile each
-        # function using torch.compile, and there are some odd corner cases
-        # with vmap + compiler.
-        # Nonetheless, as the predicate is known at this stage, PyTorch can
-        # just vmap the right function
-        fn = true_fn if pred else false_fn
+        with interpreter.lower():
+            result = torch.vmap(fn, in_dims=in_dims)(*tensors)
 
-    with interpreter.lower():
-        result = torch.vmap(fn, in_dims=in_dims)(*tensors)
+    else:
+        # predicate is known at this stage and it is a boolean expression or a
+        # tensor with one element.
+        true_fn = torch.vmap(true_fn, in_dims=in_dims)
+        false_fn = torch.vmap(false_fn, in_dims=in_dims)
+
+        with interpreter.lower():
+            result = cond_op(pred, true_fn, false_fn, tensors)
 
     if not isinstance(result, tuple):
         result = (result,)

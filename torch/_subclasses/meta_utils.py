@@ -7,7 +7,6 @@ import torch
 from torch._C._functorch import (
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
-    _add_batch_dim,
     current_level,
     is_batchedtensor,
     peek_interpreter_stack,
