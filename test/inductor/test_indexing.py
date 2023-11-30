@@ -268,6 +268,8 @@ class ExprPrinterTests(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-    run_inductor_tests()
+    if HAS_CPU or HAS_CUDA:
+        run_tests("sympy")

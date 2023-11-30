@@ -2,8 +2,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <iostream>
-
 namespace py = pybind11;
 
 namespace torch {

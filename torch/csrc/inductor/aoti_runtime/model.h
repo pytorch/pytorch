@@ -241,8 +241,9 @@ class AOTInductorModelBase {
     for (size_t i = 0; i < num_constants; i++) {
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
-      uint8_t* internal_ptr =
-          constant_ptr(constants_internal_offset[i], bytes_read, data_size);
+      uint8_t* internal_ptr = (data_size != 0)
+          ? constant_ptr(constants_internal_offset[i], bytes_read, data_size)
+          : nullptr;
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
