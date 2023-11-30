@@ -74,6 +74,7 @@
 
 - name: OSS CI / pytorchbot
   patterns:
+  - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .ci/docker/ci_commit_pins/triton.txt
@@ -84,6 +85,19 @@
   - EasyCLA
   - Lint
   - pull
+  - inductor
+
+- name: OSS CI /pytorchbot / Executorch
+  patterns:
+  - .ci/docker/ci_commit_pins/executorch.txt
+  approved_by:
+  - pytorchbot
+  ignore_flaky_failures: false
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull / linux-jammy-py3-clang12-executorch / build
+  - pull / linux-jammy-py3-clang12-executorch / test (executorch, 1, 1, linux.2xlarge)
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
