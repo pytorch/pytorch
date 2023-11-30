@@ -107,12 +107,9 @@ class AOTInductorModelContainer {
     }
     auto num_constants = models_[0]->num_constants();
 
-    // auto constants_map = get_inactive_map();
-    // auto constants_array = get_inactive_array();
-    auto constants_blob = get_inactive_blob();
-    auto* constants_blob_ptr = static_cast<uint8_t*>(constant_blob.get());
+    auto* constants_blob_ptr = static_cast<uint8_t*>(get_inactive_blob_ptr());
 
-    auto constants_map = get_inactive_map();
+    auto inactive_constants_map = get_inactive_map();
 
     for (size_t idx = 0; idx < num_constants; idx++) {
       auto constant_name = std::string(models_[0]->constant_name(idx));
@@ -161,11 +158,11 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map->emplace(constant_name, tensor_handle);
+      inactive_constants_map->emplace(constant_name, tensor_handle);
     }
 
     // Update the inactive constant array.
-    update_array_from_map(get_inactive_array(), constants_map);
+    update_array_from_map(get_inactive_array(), inactive_constants_map);
 #endif // USE_CUDA
   }
 
@@ -181,6 +178,17 @@ class AOTInductorModelContainer {
 
   void swap_constants_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
+    // Need to wait?
+    auto constants_map = get_inactive_map();
+    auto constants_array = get_inactive_array();
+
+    for (auto& model : models_) {
+      model->update_constants_map(
+          constants_map, /* remap_constants_array = */ false);
+      model->update_constants_array(constants_array);
+    }
+
+    use_secondary = !use_secondary;
   }
 
   size_t num_inputs() const {
@@ -268,20 +276,20 @@ class AOTInductorModelContainer {
 
   // This mutex is used to protect execution of model.
   // We acquire the mutex in shared mode if we allow concurrent execution.
-  // We acquire the mutex in unique mode when we want exclusive access of the model.
-  // One such case is when we want to do a weight swapping. We want to make sure
-  // no one is executing the model.
+  // We acquire the mutex in unique mode when we want exclusive access of the
+  // model. One such case is when we want to do a weight swapping. We want to
+  // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
 #ifdef USE_CUDA
-  CUDAPtr get_inactive_blob() {
+  void* get_inactive_blob_ptr() {
     if (use_secondary) {
-      return constant_blob_;
+      return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
         constant_blob_secondary_ = RAII_cudaMalloc(blob_size_);
       }
-      return constant_blob_secondary_;
+      return constant_blob_secondary_.get();
     }
   }
 #endif // USE_CUDA
