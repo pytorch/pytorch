@@ -1775,7 +1775,6 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
         )
 
         symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
-        tx.output.tracing_context.tensor_to_context[e] = symbolic_context
 
         log.debug(
             "wrap_to_fake %s %s %s",
@@ -1790,12 +1789,35 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-        tx.output.tracked_fakes.append(TrackedFake(fake_e, source, symbolic_context))
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[e] = {
-            "size": fake_e.size(),
-            "stride": fake_e.stride(),
-        }
+
+        # list of (fake_tensor, real_tensor, source, symbolic_context)
+        tracking_info = [(fake_e, e, source, symbolic_context)]
+        if is_traceable_wrapper_subclass(fake_e):
+            attrs, _ = fake_e.__tensor_flatten__()
+            for attr in attrs:
+                fake_inner = getattr(fake_e, attr)
+                inner = getattr(e, attr)
+                tracking_info.append(
+                    (
+                        fake_inner,
+                        inner,
+                        AttrSource(source, attr),
+                        symbolic_context.inner_contexts[attr],
+                    )
+                )
+
+                # no need to fake-ify the inner tensors again later on
+                tx.fake_mode.fake_tensor_converter.set_tensor_memo(inner, fake_inner)
+
+        for fake, real, source, symbolic_context in tracking_info:
+            tx.output.tracing_context.tensor_to_context[real] = symbolic_context
+            tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+            tx.output.tracked_fakes_id_to_source[id(real)].append(source)
+            tx.output.tensor_weakref_to_sizes_strides[real] = {
+                "size": fake.size(),
+                "stride": fake.stride(),
+            }
+
         return fake_e
     else:
         return e
