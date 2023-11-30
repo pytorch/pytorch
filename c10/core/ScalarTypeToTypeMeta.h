@@ -27,7 +27,7 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
 /**
  * typeMetaToScalarType(), lifted to optional
  */
-static inline optional<at::ScalarType> optTypeMetaToScalarType(
+static inline optional<at::ScalarType> c10::optTypeMetaToScalarType(
     optional<caffe2::TypeMeta> type_meta) {
   if (!type_meta.has_value()) {
     return c10::nullopt;
