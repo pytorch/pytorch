@@ -3385,6 +3385,30 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+    
+    def test_sdpa(self, device):
+        sen1 = torch.randn(11, 1024, dtype=torch.float16, device=device)
+        sen2 = torch.randn(13, 1024, dtype=torch.float16, device=device)
+        x_d = sen1.unsqueeze(0)
+        x_nt = torch.nested.as_nested_tensor([sen1], layout=torch.jagged)
+
+        query = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
+        key = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
+        value = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
+
+        q_d = query(x_d)
+        k_d = key(k_d)
+        v_d = value(v_d)
+
+        q_nt = query(x_nt)
+        k_nt = key(k_nt)
+        v_nt = value(v_nt)
+
+        attn_d = torch.nn.functional.scaled_dot_product_attention(q_d, k_d, v_d)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt)
+
+        self.assertEqual(attn_d, attn_nt.unbind()[0].unsqueeze(0))
+
 
 
 instantiate_parametrized_tests(TestNestedTensor)
