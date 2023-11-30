@@ -398,6 +398,34 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"std::abs({self._print(expr.args[0])})"
 
+    def _print_cos(self, expr):
+        assert len(expr.args) == 1
+        return f"std::cos({self._print(expr.args[0])})"
+
+    def _print_cosh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::cosh({self._print(expr.args[0])})"
+
+    def _print_sin(self, expr):
+        assert len(expr.args) == 1
+        return f"std::sin({self._print(expr.args[0])})"
+
+    def _print_sinh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::sinh({self._print(expr.args[0])})"
+
+    def _print_tan(self, expr):
+        assert len(expr.args) == 1
+        return f"std::tan({self._print(expr.args[0])})"
+
+    def _print_tanh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::tanh({self._print(expr.args[0])})"
+
+    def _print_atan(self, expr):
+        assert len(expr.args) == 1
+        return f"std::atan({self._print(expr.args[0])})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint

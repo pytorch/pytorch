@@ -68,6 +68,9 @@ def handlers():
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
     }
+    for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
+        HANDLERS[getattr(sympy, name)] = name
+
     return HANDLERS
 
 
