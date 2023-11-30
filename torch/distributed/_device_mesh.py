@@ -178,7 +178,7 @@ class DeviceMesh:
 
         # private field to pre-generate DeviceMesh's hash
         self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
         # Skip process group initialization if xla device.
         # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -354,8 +354,8 @@ class DeviceMesh:
                 )
             return dim_groups
 
-    def size(self, dim: Optional[int] = None) -> int:
-        return self.mesh.numel() if dim is None else self.mesh.size(dim)
+    def size(self, mesh_dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
 
     @property
     def ndim(self) -> int:

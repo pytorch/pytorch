@@ -59,7 +59,7 @@ def _check_input_constraints_for_graph(
 
 
 def register_dataclass_as_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
