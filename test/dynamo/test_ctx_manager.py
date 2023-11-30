@@ -667,6 +667,32 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
         self.assertTrue(same(ref2, res2))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_decorator(self):
+        def autocast_func(orig_func):
+            @torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        mm_bf16 = autocast_func(mm)
+
+        def fn(a, b):
+            return mm_bf16(a, b)
+
+        a_float32 = torch.rand((8, 8), device="cuda")
+        b_float32 = torch.rand((8, 8), device="cuda")
+
+        ref = fn(a_float32, b_float32)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(a_float32, b_float32)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(res.dtype == torch.bfloat16)
+
     def test_generic_context_manager(self):
         def fn(x):
             with CutomizedCtxManager(True):
