@@ -165,7 +165,6 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
                     "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
                 )
                 tensor._typed_storage()._resize_(size.numel())
-        return tensor
 
 
 def _free_storage(tensor: torch.Tensor):
@@ -190,7 +189,6 @@ def _free_storage(tensor: torch.Tensor):
                     f"tensor shape: {tensor.shape}",
                 )
                 tensor._typed_storage()._resize_(0)
-        return tensor
 
 
 

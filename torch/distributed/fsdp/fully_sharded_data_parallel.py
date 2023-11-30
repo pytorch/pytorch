@@ -968,7 +968,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         **kwargs,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """Return an iterator over module buffers, yielding both the name of the buffer and the buffer itself.
+
         Intercepts buffer names and removes all occurrences of the FSDP-specific flattened buffer prefix
+        when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):

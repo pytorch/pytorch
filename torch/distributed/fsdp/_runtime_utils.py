@@ -731,7 +731,7 @@ def _post_backward_hook(
     gradient (accumulating with any existing gradient).
     """
     _log_post_backward_hook(state, handle, log)
-    # flat_param = handle.flat_param
+    flat_param = handle.flat_param
     assert flat_param is handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(

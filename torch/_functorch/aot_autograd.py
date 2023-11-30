@@ -2449,7 +2449,6 @@ def merge_view_inputs(
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
-    # return fwd_inputs, None
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
