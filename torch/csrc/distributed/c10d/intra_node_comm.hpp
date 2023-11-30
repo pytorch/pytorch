@@ -26,18 +26,32 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
   ~IntraNodeComm();
 
+  /**
+   * Rendezvous via shared memory given a rendezvous ID.
+   * Use this if we know all participants are from the same host.
+   */
   static c10::intrusive_ptr<IntraNodeComm> rendezvous(
       const std::string& rdzvId,
       size_t rank,
       size_t worldSize);
 
+  /**
+   * Rendezvous via c10::Store. This variant properly handles the case where
+   * not all participants are from the same host, in which case nullptr is
+   * returned to all participants.
+   */
   static c10::intrusive_ptr<IntraNodeComm> rendezvousViaStore(
       c10::intrusive_ptr<c10d::Store> store,
       const std::string& prefix,
       size_t rank,
       size_t worldSize);
 
+  /**
+   * Selects a AllReduceAlgo that we think will outperform nccl.
+   * Returns AllReduceAlgo::NONE if we don't think we can outperform nccl.
+   */
   AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);
+
   at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
 
  private:

@@ -448,15 +448,8 @@ IntraNodeComm::IntraNodeComm(
       rank_(rank),
       worldSize_(worldSize) {}
 
-IntraNodeComm::~IntraNodeComm() {
-  // TODO
-}
+IntraNodeComm::~IntraNodeComm() {}
 
-/**
- * Rendezvous via shared memory given a rendezvous ID.
- *
- * Use this if we know all participants are from the same host.
- */
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
@@ -551,13 +544,6 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
 #endif
 }
 
-/**
- * Rendezvous via c10::Store.
- *
- * Use this if we don't know if all participants are from the same host. This
- * function returns nullptr for all participants if not all of them are from
- * the same host.
- */
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     c10::intrusive_ptr<c10d::Store> store,
     const std::string& prefix,
