@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.utils.attention import CausalVariant, CausalBias
+from torch.nn.utils.attention import CausalVariant, CausalBias, TensorBias
 from torch.nn.parameter import Parameter
 import unittest
 from unittest import expectedFailure as xfail
@@ -3097,6 +3097,29 @@ class TestAttnMasks(NNTestCase):
 
         self.run_test(device, True, make_q_tensor, make_kv_tensor,
                       CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
+
+    @parametrize("shape", [SdpaShape(16, 16, 128, 16), SdpaShape(16, 16, 52, 32)])
+    def test_tensor_bias(self, device, shape):
+        make_tensor = partial(torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True)
+        attn_bias = TensorBias(
+            torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
+        )
+        self.run_test(device, False, make_tensor, make_tensor, attn_bias)
+
+    @parametrize("shape", [SdpaShape(16, 16, 128, 16), SdpaShape(16, 16, 52, 32)])
+    @xfail
+    def test_tensor_bias_compile(self, device, shape):
+        make_tensor = partial(torch.rand, shape, device=device, dtype=torch.float16, requires_grad=True)
+        attn_bias = TensorBias(
+            torch.rand(shape.batch, shape.num_heads, shape.seq_len, shape.seq_len, dtype=torch.float16, device=device)
+        )
+        self.run_test(device, True, make_tensor, make_tensor, attn_bias)
+
+    def test_attn_bias_invalid_func(self, device):
+        bias = TensorBias(torch.rand(16, 16, 128, dtype=torch.float16, device=device))
+        with self.assertRaisesRegex(RuntimeError, "AttnBias only supports scaled_dot_product_attention"):
+            torch.add(bias, torch.rand_like(bias.bias))
+
 
 
 if NOTEST_CPU:
