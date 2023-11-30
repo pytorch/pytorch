@@ -5252,15 +5252,14 @@ def meta__flash_attention_forward(
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_seqlen_batch_q = query.size(2)
+    max_seqlen_batch_q = query.size(1)
+    num_heads = query.size(2)
     head_dim = query.size(3)
 
-    max_seqlen_batch_k = key.size(2)
+    max_seqlen_batch_k = key.size(1)
 
     # Cuda Path
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
+    attention = torch.empty_like(query)
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
