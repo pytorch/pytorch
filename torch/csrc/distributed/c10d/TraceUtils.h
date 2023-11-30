@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -343,6 +344,11 @@ struct NCCLTraceBuffer {
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     EventList *start_, *end_;
+
+    // timestamp when the entry was created, likely close to the time the work
+    // was 'enqueued'- not necessarily started
+    c10::time_t time_created_;
+
     const char* state_ = "scheduled";
 
     // size information for input/output tensors
@@ -383,7 +389,8 @@ struct NCCLTraceBuffer {
         profiling_name,
         std::move(traceback),
         std::move(start),
-        std::move(end)};
+        std::move(end),
+        c10::getTime()};
 
     for (const auto& input : inputs) {
       c10::IntArrayRef sizes = input.sizes();
@@ -470,6 +477,7 @@ struct NCCLTraceBuffer {
     c10::IValue profiling_name_s = "profiling_name";
     c10::IValue input_sizes_s = "input_sizes";
     c10::IValue output_sizes_s = "output_sizes";
+    c10::IValue time_created_s = "time_created_us";
 
     c10::IValue frames_s = "frames";
     c10::IValue state_s = "state";
@@ -499,6 +507,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_s, int64_t(e.pg_id_));
       dict.insert(seq_id_s, int64_t(e.seq_id_));
       dict.insert(profiling_name_s, e.profiling_name_);
+      dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
