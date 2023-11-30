@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
+#include <torch/version.h>
 
 #ifndef _WIN32
 #include <cxxabi.h>
@@ -168,11 +169,6 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       [this]() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
-
-  RegisterValidator(
-      "PT_GIT_COMMIT",
-      [this]() { return GetPyTorchGitCommit(); },
-      [this](auto&& k) { return ValidatePyTorchGitCommit(std::forward<decltype(k)>(k)); });
 }
 
 std::unordered_map<std::string, std::string> TuningResultsValidator::GetAllValidators() const {
@@ -188,16 +184,15 @@ static bool CheckMandatoryKeys(
     const TuningResultsValidator::GetValidateFuncs& gv_funcs,
     const std::unordered_map<std::string, std::string>& to_check) {
   bool passed = true;
-  std::ostringstream oss;
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
     if (gv_funcs.find(k) == gv_funcs.end()) {
       passed = false;
-      oss << "key=\"" << k << "\" is not registered for Get and Validate. ";
+      TUNABLE_LOG("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
     if (to_check.find(k) == to_check.end()) {
       passed = false;
-      oss << "key=\"" << k << "\" is not provided for validation. ";
+      TUNABLE_LOG("key=\"", k, "\" is not provided for validation. ");
     }
   }
   return passed;
@@ -219,12 +214,11 @@ static bool CheckKeysMatching(
                         provided_keys.cbegin(), provided_keys.cend(),
                         std::inserter(intersection, intersection.end()));
   bool matched = true;
-  std::ostringstream oss;
   if (intersection.size() != required_keys.size()) {
     matched = false;
     for (const auto& k : required_keys) {
       if (intersection.find(k) == intersection.end()) {
-        oss << "Unmatched validator: \"" << k << "\" is required, but the tuning results does not provide it. ";
+        TORCH_WARN("Unmatched validator: \"", k, "\" is required, but the tuning results does not provide it. ");
       }
     }
   }
@@ -232,7 +226,7 @@ static bool CheckKeysMatching(
     matched = false;
     for (const auto& k : provided_keys) {
       if (intersection.find(k) == intersection.end()) {
-        oss << "Unmatched validator: \"" << k << "\" is provided, but onnxruntime is unable to consume it. ";
+        TORCH_WARN("Unmatched validator: \"", k, "\" is provided, but pytorch is unable to consume it. ");
       }
     }
   }
@@ -240,8 +234,7 @@ static bool CheckKeysMatching(
 }
 
 TuningStatus TuningResultsValidator::ValidateAll(
-        const std::unordered_map<std::string,
-        std::string>& to_validate) const {
+        const std::unordered_map<std::string, std::string>& to_validate) const {
   if (!CheckMandatoryKeys(validators_, to_validate)) {
     return FAIL;
   }
@@ -251,9 +244,16 @@ TuningStatus TuningResultsValidator::ValidateAll(
 
   for (const auto& [key, value] : to_validate) {
     const auto& it = validators_.find(key);
-    TORCH_CHECK(it != validators_.cend());
+    if (it == validators_.cend()) {
+      TORCH_WARN("Failed to lookup validator using key ", key);
+      for (const auto& [key2, val2] : validators_) {
+        TORCH_WARN("available key ", key2);
+      }
+      return FAIL;
+    }
     const ValidateFunc& validator = it->second.second;
-    if (!validator(value)) {
+    if (validator(value) != OK) {
+      TORCH_WARN("Failed validator: ", key);
       return FAIL;
     }
   }
@@ -262,27 +262,20 @@ TuningStatus TuningResultsValidator::ValidateAll(
 }
 
 void TuningResultsValidator::RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf) {
-  TORCH_CHECK(validators_.find(key) == validators_.end());
-  validators_[key] = std::make_pair(gf, vf);
+  if (validators_.find(key) != validators_.end()) {
+    TORCH_WARN("Attempting to re-register validator with key ", key);
+  }
+  else {
+    validators_[key] = std::make_pair(gf, vf);
+  }
 }
 
 std::string TuningResultsValidator::GetPyTorchVersion() const {
-  return "TODO.PyTorchVersion";
+  return TORCH_VERSION;
 }
 
 TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& value) const {
   if (value == GetPyTorchVersion()) {
-    return OK;
-  }
-  return FAIL;
-}
-
-std::string TuningResultsValidator::GetPyTorchGitCommit() const {
-  return "TODO.PyTorchGitCommit";
-}
-
-TuningStatus TuningResultsValidator::ValidatePyTorchGitCommit(const std::string& value) const {
-  if (value == GetPyTorchGitCommit()) {
     return OK;
   }
   return FAIL;
@@ -300,11 +293,16 @@ TuningContext::TuningContext() :
 }
 
 TuningContext::~TuningContext() {
-  if (IsTunableOpEnabled()
-      && IsTuningEnabled()
-      && !GetFilename().empty()
-      && results_count_from_input_file_ != GetTuningResultsManager().GetSize()) {
-    WriteFile(GetFilename());
+  if (IsTunableOpEnabled() && IsTuningEnabled() && !GetFilename().empty()) {
+    if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
+      if (results_count_from_input_file_ > 0) {
+        TUNABLE_LOG("additional tuning results available, rewriting file ", GetFilename());
+      }
+      else {
+        TUNABLE_LOG("writing file ", GetFilename());
+      }
+      WriteFile(GetFilename());
+    }
   }
 }
 
@@ -377,7 +375,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
   return manager_;
 }
 
-const TuningResultsValidator& TuningContext::GetTuningResultsValidator() const {
+TuningResultsValidator& TuningContext::GetTuningResultsValidator() {
   return validator_;
 }
 
@@ -409,6 +407,7 @@ std::string TuningContext::GetFilename() const {
 void TuningContext::ReadFile(const std::string& filename) {
   TUNABLE_LOG("reading tuning results from ", filename);
   ResultsMap results;
+  std::unordered_map<std::string, std::string> validators;
   std::string line;
   std::ifstream file(filename);
   while (std::getline(file, line)) {
@@ -419,15 +418,31 @@ void TuningContext::ReadFile(const std::string& filename) {
       parts.push_back(part);
     }
     if (parts.size() >= 3) {
-      results[parts[0]][parts[1]] = atoi(parts[2].c_str());
+      if (parts[0] == "Validator") {
+        validators[parts[1]] = parts[2];
+        TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
+      }
+      else {
+        results[parts[0]][parts[1]] = atoi(parts[2].c_str());
+      }
     }
   }
-  manager_.Load(results);
+  if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {
+    manager_.Load(results);
+    results_count_from_input_file_ = manager_.GetSize();
+  }
+  else {
+    TUNABLE_LOG("results validator check failed");
+  }
 }
 
 void TuningContext::WriteFile(const std::string& filename) {
   std::ofstream file(filename, std::ios::out | std::ios::trunc);
   TORCH_CHECK(file.good(), "error opening tuning results file for writing ", filename);
+  auto validators = GetTuningResultsValidator().GetAllValidators();
+  for (const auto& [key, val] : validators) {
+    file << "Validator," << key << "," << val << std::endl;
+  }
   auto results = GetTuningResultsManager().Dump();
   for (const auto& [op_sig, kernelmap] : results) {
     for (const auto& [param_sig, index] : kernelmap) {

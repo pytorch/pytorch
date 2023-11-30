@@ -100,11 +100,8 @@ class TuningResultsValidator {
     std::string GetPyTorchVersion() const;
     TuningStatus ValidatePyTorchVersion(const std::string& value) const;
 
-    std::string GetPyTorchGitCommit() const;
-    TuningStatus ValidatePyTorchGitCommit(const std::string& value) const;
-
   public:
-    static constexpr const std::array mandatory_keys{"PT_VERSION", "PT_GIT_COMMIT"};
+    static constexpr const std::array mandatory_keys{"PT_VERSION"};
 
   private:
     GetValidateFuncs validators_;
@@ -135,7 +132,7 @@ class TuningContext {
 
     TuningResultsManager& GetTuningResultsManager();
 
-    const TuningResultsValidator& GetTuningResultsValidator() const;
+    TuningResultsValidator& GetTuningResultsValidator();
 
     TuningResults GetTuningResults();
 

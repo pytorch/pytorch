@@ -122,7 +122,7 @@ class TunableOp {
       // > if the operand of typeid refers to the
       // > object under construction or destruction, typeid yields the std::type_info object representing the constructor
       // > or destructor’s class.
-      // So delay the op signature generation. See https://github.com/microsoft/onnxruntime/pull/14709
+      // So delay the op signature generation.
       std::call_once(signature_init_once_, [this]() { signature_ = CreateSignature(); });
       return signature_;
     }
