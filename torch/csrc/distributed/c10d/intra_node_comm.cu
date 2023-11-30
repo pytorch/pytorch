@@ -15,7 +15,7 @@ static constexpr uint32_t kNumelPerThread =
 ;
 static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
 
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if defined(USE_ROCM)
 using __nv_bfloat162 = uint16_t;
 #endif
 
