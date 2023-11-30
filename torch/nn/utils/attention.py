@@ -1,4 +1,4 @@
-""" Defines utilities for interacting with scaled_dot_product_attention"""
+"""Defines utilities for interacting with scaled_dot_product_attention"""
 import math
 from enum import auto, IntEnum
 from typing import Optional
@@ -69,7 +69,7 @@ class CausalVariant(IntEnum):
 
 class CausalBias:
     """
-    A bias representing causal attention patterns, derived from AttnBias.
+    A bias representing causal attention patterns
 
     This class is used for defining causal (triangular) attention biases.
     """
@@ -154,8 +154,6 @@ class CausalBias:
     ) -> torch.Tensor:
         r"""
         Handles the logic for computing attention with the specified causal bias.
-
-        Depending on the configuration, this method either directly computes the attention
 
         Args:
             query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
