@@ -2686,6 +2686,10 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
     ASSERT_THROWS_WITH(
         AdaptiveLogSoftmaxWithLoss(options),
         "div_value should not be equal to 0");
+
+    options =
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.25);
+    ASSERT_TRUE(AdaptiveLogSoftmaxWithLoss(options));
   }
 }
 
