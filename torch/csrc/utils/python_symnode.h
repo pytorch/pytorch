@@ -95,6 +95,20 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
+  bool is_singleton() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_singleton")().is(py::handle(Py_True));
+  }
+
+  void* singleton_dummy() override {
+    py::gil_scoped_acquire acquire;
+    auto tmp = getPyObj().attr("singleton_dummy")().cast<c10::optional<at::Tensor>>();
+    if (!tmp.has_value()) {
+      return nullptr;
+    }
+    return (void*) tmp->unsafeGetTensorImpl();
+  }
+
   bool has_hint() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));

@@ -9,6 +9,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -128,6 +129,35 @@ inline at::Tensor from_blob(
     return at::from_blob(data, sizes, options.requires_grad(c10::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
+}
+
+inline at::Tensor zeros_symint(c10::SymIntArrayRef size, at::TensorOptions options = {}) {
+  std::cout << "zeros_symint" << std::endl;
+  at::AutoDispatchBelowADInplaceOrView guard;
+  at::TensorImpl* ptr = nullptr;
+  for (const auto& s : size) {
+    if (!s.is_heap_allocated()) {
+      continue;
+    }
+    auto _ptr = (at::TensorImpl*) s.toSymNode()->singleton_dummy();
+
+    if (_ptr != nullptr) {
+      TORCH_CHECK(ptr == nullptr, "zeros(): only one singleton dimension supported");
+      ptr = _ptr;
+    }
+  }
+  if (ptr != nullptr) {
+    // Todo update this.
+    auto p = c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{});
+    auto dummy = at::Tensor(p);
+
+    auto ret = _nested_zeros_symint(size, dummy, options);
+    dummy.unsafeReleaseTensorImpl(); // don't decref!
+    p.release();
+    return ret;
+  }
+  std::cout << "did not detect singleton" << std::endl;
+  return autograd::make_variable(at::zeros_symint(size, at::TensorOptions(options).requires_grad(c10::nullopt)), /*requires_grad=*/options.requires_grad());
 }
 
 ${function_definitions}

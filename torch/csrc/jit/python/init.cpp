@@ -105,6 +105,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
@@ -1288,6 +1289,20 @@ void initJITBindings(PyObject* module) {
           "singleton_int",
           [](const c10::SymNode& node) {
             return node->singleton_int();
+          })
+      .def(
+          "singleton_values",
+          [](const c10::SymNode& node) {
+            TORCH_CHECK(node->singleton_int());
+            auto p = dynamic_cast<c10::SingletonSymNodeImpl*>(node.get());
+            return p->singleton_values();
+          })
+      .def(
+          "singleton_sum_offsets",
+          [](const c10::SymNode& node) {
+            TORCH_CHECK(node->singleton_int());
+            auto p = dynamic_cast<c10::SingletonSymNodeImpl*>(node.get());
+            return p->singleton_sum_offsets();
           })
       .def(
           "singleton_coeff",

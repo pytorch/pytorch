@@ -6364,6 +6364,12 @@
   dispatch:
     CompositeExplicitAutograd: zeros_symint
 
+- func: _nested_zeros(SymInt[] size, Tensor dummy, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  category_override: factory
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: zeros_nested_symint
+
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: zeros_out

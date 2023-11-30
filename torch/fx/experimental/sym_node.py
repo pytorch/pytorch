@@ -77,6 +77,14 @@ class SymNode:
     ):
         self._expr = expr
         self.shape_env = shape_env
+        # Symbolic SingletonInt have pytype int, but will return true for
+        # is_singleton. All SingletonInt hold a singleton_dummy which is a
+        # global instance to a NestedTensor class necessary for dispatch to
+        # the python dispatch of NestedTensor because only python NT can be
+        # compiled.
+        self._singleton_values = None
+        self._singleton_dummy = None
+        self._singleton_sum_offsets = None
         self.pytype = pytype
         # What's the difference between hint and constant?
         #
@@ -170,6 +178,27 @@ class SymNode:
 
     def is_bool(self):
         return self.pytype is bool
+
+    def is_singleton(self):
+        return self._is_singleton
+
+    def singleton_dummy(self):
+        # TODO: multiplication with scalar is the only operation that produces
+        # a singleton from singleton. If I multiply, I need to propagate all
+        # the attributes.
+        # TODO: we don't assert is None yet, because we didn't check for is_singleton yet
+        # Also assert that this is fake?
+        return self._singleton_dummy
+
+    def singleton_values(self):
+        assert self._singleton_values is not None
+        # assert that this is fake?
+        return self._singleton_values
+
+    def singleton_sum_offsets(self):
+        assert self._singleton_sum_offsets is not None
+        # assert that this is fake?
+        return self._singleton_sum_offsets
 
     def wrap_int(self, num):
         assert type(num) is int

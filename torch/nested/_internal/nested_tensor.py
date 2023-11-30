@@ -11,14 +11,16 @@ _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_symint(tensor, *, coeff=1):
+def get_tensor_symint(tensor, *, coeff=1, sum_offsets=None):
     global _tensor_id_counter
     if tensor not in _tensor_symint_registry:
+        assert sum_offsets is not None
         _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff
+            _tensor_id_counter, coeff, tensor, get_nt_dummy(), sum_offsets
         )
         _tensor_id_counter += 1
-    return _tensor_symint_registry[tensor]
+    ret = _tensor_symint_registry[tensor]
+    return ret
 
 
 class NestedTensor(torch.Tensor):
@@ -51,6 +53,7 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         lengths=None,
+        is_dummy=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -73,17 +76,27 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, is_dummy=False, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
 
+        self._values = values
+        self._offsets = offsets
+        self._lengths = lengths
+
+        if is_dummy:
+            # Avoid infinite recursion
+            # Initialize the _values, _offsets, etc because they are checked
+            # when dispatching to jagged funcs in torch dispatch.
+            return
+
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        ragged_size = get_tensor_symint(ragged_source, coeff=1, sum_offsets=values.shape[0])
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
@@ -96,9 +109,6 @@ class NestedTensor(torch.Tensor):
                 "NestedTensor values cannot require grad, please "
                 "detach before passing to NestedTensor constructor"
             )
-        self._values = values
-        self._offsets = offsets
-        self._lengths = lengths
 
         # collapsed ragged dim must always be dynamic
         torch._dynamo.mark_dynamic(self, self._ragged_idx)
@@ -160,6 +170,12 @@ class NestedTensor(torch.Tensor):
             # with the ragged_size.
             # TODO: Utilize ragged_idx
             ragged_size = outer_size[1]
+            # Ordinarily, the ragged int is created the first time get_tensor_symint
+            # is called with its corresponding tensor, which enforces that the
+            # ragged int has all the extra metadata. We must replicate that here.
+            ragged_size.node._singleton_values = offsets
+            ragged_size.node._singleton_dummy = get_nt_dummy()
+            ragged_size.node._singleton_sum_offsets = values.shape[0]
             _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(
@@ -196,6 +212,18 @@ class NestedTensor(torch.Tensor):
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
 
+
+_nt_dummy = None
+
+def get_nt_dummy():
+    global _nt_dummy
+    if _nt_dummy is None:
+        _nt_dummy = NestedTensor(
+            values=torch.randn(1, 1, device="meta"),
+            offsets=torch.randn(1, device="meta"),
+            is_dummy=True,
+        )
+    return _nt_dummy
 
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):

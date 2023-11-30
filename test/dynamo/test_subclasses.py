@@ -1076,6 +1076,19 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             )
             out = compile_fn(nt_view)
 
+    def test_zeros(self):
+        # Need more extensive testing with various settings dtype/device etc.
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+
+        def fn(nt):
+            out = torch.zeros(nt.shape)
+            return out
+
+        compile_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        out = compile_fn(x)
+
+        self.assertEqual(out, torch.zeros(x.shape))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

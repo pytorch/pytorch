@@ -70,7 +70,7 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, values_, dummy_, sum_offsets_));
 }
 
 } // namespace c10

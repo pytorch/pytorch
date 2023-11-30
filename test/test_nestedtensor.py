@@ -2979,7 +2979,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1, sum_offsets=1)
         self.assertEqual(nt.size(), (3, singleton_int, 3))
         self.assertEqual(nt.shape, (3, singleton_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3302,6 +3302,15 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
+
+    def test_zeros(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            out = torch.zeros(nt.shape)
+            self.assertEqual(out, nt * 0)
 
     @torch._dynamo.config.patch(suppress_errors=True)
     def test_layer_norm_2(self, device):
