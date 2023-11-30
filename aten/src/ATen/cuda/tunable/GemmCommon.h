@@ -28,10 +28,9 @@ inline std::string BlasOpToString(BlasOp op) {
       return "N";
     case BlasOp::T:
       return "T";
-    // following is unreachable, compiler is producing false-positive warning, unfortunately.
-    default:
-      AT_ASSERT("unreachable");
   }
+  TORCH_CHECK(false, "unrecognized BlasOp");
+  return "N";
 }
 
 template <typename T>

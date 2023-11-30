@@ -61,42 +61,75 @@ bool IsZero(c10::complex<float> v) {
   return v == 0.0f;
 }
 
+template <typename T>
+std::string TypeName(T v) {
+  return "unknown";
+}
+
+template <>
+std::string TypeName(float v) {
+  return "float";
+}
+
+template <>
+std::string TypeName(double v) {
+  return "double";
+}
+
+template <>
+std::string TypeName(BFloat16 v) {
+  return "BFloat16";
+}
+
+template <>
+std::string TypeName(Half v) {
+  return "Half";
+}
+
+template <>
+std::string TypeName(c10::complex<double> v) {
+  return "c10::complex<double>";
+}
+
+template <>
+std::string TypeName(c10::complex<float> v) {
+  return "c10::complex<float>";
+}
+
+
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
   GemmTunableOp() {
-    this->RegisterOp(DefaultGemmOp<T>);
+    this->RegisterOp(std::string("Default"), DefaultGemmOp<T>);
 
 #ifdef USE_ROCM
-    for (auto&& [_, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
-      this->RegisterOp(std::move(op));
+    for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
+      this->RegisterOp(std::move(name), std::move(op));
     }
 #endif
 
-#ifdef USE_ROCM && ROCM_VERSION >= 50700
+#if defined(USE_ROCM) && ROCM_VERSION >= 50700
     // disallow tuning of hipblaslt with c10::complex
     if constexpr (
         !std::is_same_v<T, c10::complex<float>> &&
         !std::is_same_v<T, c10::complex<double>>) {
-      for (auto&& [_, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-        this->RegisterOp(std::move(op));
+      for (auto&& [name, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+        this->RegisterOp(std::move(name), std::move(op));
       }
     }
 #endif
 
 //#ifdef USE_COMPOSABLE_KERNEL
-//    for (auto&& [_, op] : GetCKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-//      ORT_UNUSED_PARAMETER(_);
-//      this->RegisterOp(std::move(op));
+//    for (auto&& [name, op] : GetCKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+//      this->RegisterOp(std::move(name), std::move(op));
 //    }
 //
-//    for (auto&& [_, op] : GetCKStreamKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-//      ORT_UNUSED_PARAMETER(_);
-//      this->RegisterOp(std::move(op));
+//    for (auto&& [name, op] : GetCKStreamKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+//      this->RegisterOp(std::move(name), std::move(op));
 //    }
-//    for (auto&& [_, op] : GetCKSplitKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-//      ORT_UNUSED_PARAMETER(_);
-//      this->RegisterOp(std::move(op));
+//    for (auto&& [name, op] : GetCKSplitKGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+//      this->RegisterOp(std::move(name), std::move(op));
 //    }
 //#endif
   }
@@ -124,6 +157,10 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       c10::hip::HIPCachingAllocator::raw_delete(params->c);
       delete params;
     }
+  }
+
+  std::string Signature() override {
+    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 

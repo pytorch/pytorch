@@ -270,12 +270,12 @@ auto GetHipBlasLtTypeStringAndOps(ActivationType activation_type = ActivationTyp
 
       if (status == HIPBLAS_STATUS_SUCCESS) {
         if (ret_workspace_size >= workspace_size) {
-          std::cerr << c10::str("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " workspace too large") << std::endl;
+          //TUNABLE_LOG("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " workspace too large");
           return FAIL;
         }
       }
       else {
-        std::cerr << c10::str("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " not supported") << std::endl;
+        //TUNABLE_LOG("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " not supported");
         return FAIL;
       }
 

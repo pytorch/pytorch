@@ -188,7 +188,7 @@ auto GetRocBlasGemmTypeStringAndOps() {
           rocblas_gemm_flags_none);
 
       if (status != rocblas_status_success) {
-        //std::cerr << c10::str("[rocBLAS] Solution #", i, " (original ", solution, ") failed: ", rocblas_status_to_string(status)) << std::endl;
+        //TUNABLE_LOG("[rocBLAS] Solution #", i, " (original ", solution, ") failed: ", rocblas_status_to_string(status));
         return FAIL;
       }
 

@@ -15,7 +15,6 @@
 #include <cxxabi.h>
 #endif
 
-#include <iostream>
 #include <type_traits>
 
 namespace at::cuda::tunable {
@@ -90,8 +89,7 @@ class TunableOp {
         // Usage is enabled, then we are free to use previous tuning result.
         id = mgr.Lookup(op_sig, params_sig);
         if (id > static_cast<int>(ops_.size())) {
-          std::cerr << "Invalid TunableOp kernel id for " << op_sig
-            << ", id:" << id << ", registered op:" << ops_.size() << std::endl;
+          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", id, ", registered op:", ops_.size());
           mgr.Delete(op_sig, params_sig);
           id = -1;
         }
@@ -119,7 +117,7 @@ class TunableOp {
       // Do nothing if we are not playing around with params
     }
 
-    std::string Signature() {
+    virtual std::string Signature() {
       // According to C++17 standard https://wg21.link/n4659 section 15.7.4
       // > if the operand of typeid refers to the
       // > object under construction or destruction, typeid yields the std::type_info object representing the constructor
@@ -136,8 +134,9 @@ class TunableOp {
       default_id_ = id;
     }
 
-    void RegisterOp(Callable<ParamsT>&& op) {
+    void RegisterOp(std::string&& name, Callable<ParamsT>&& op) {
       this->ops_.emplace_back(std::move(op));
+      this->op_names_.emplace_back(std::move(name));
     }
 
     int NumberOfOps() {
@@ -176,9 +175,10 @@ class TunableOp {
       TuningContext* ctx = at::cuda::getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      std::cerr << "finding fastest for " << op_sig << '(' << params_sig << ')' << std::endl;
+      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')');
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       int id = -1;
+      std::string id_name = "";
 
       constexpr const int max_tuning_iter = 100;
       constexpr const int approx_num_iter = 3;
@@ -187,7 +187,7 @@ class TunableOp {
         auto& candidate = const_cast<Callable<ParamsT>&>(candidates[i]);
         auto status = IsSupported(candidate, params);
         if (status != OK) {
-            std::cerr << "├──unsupported id=" << i << ", " << op_sig << '(' << params_sig << ")" << std::endl;
+          TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
@@ -195,21 +195,21 @@ class TunableOp {
 
         auto approx_duration = Profile(candidate, params, approx_num_iter);
         if (approx_duration > 2 * min_duration_ms) {
-            std::cerr << "├──skip slow instance id=" << i << std::endl;
+          TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
         int tuning_iter = std::max(1, int(std::min(double(max_tuning_iter), ctx->GetMaxTuningDurationMs() / approx_duration)));
 
         auto duration_ms = Profile(candidate, params, tuning_iter);
         if (duration_ms < min_duration_ms) {
-            std::cerr << "├──found better instance, new best id=" << i << ", old id=" << id << ". "
-            << duration_ms << "ms, " << tuning_iter << " iters." << std::endl;
+          TUNABLE_LOG("├──found better instance, new best id=", i, ", old id=", id, ". " , duration_ms, "ms, ", tuning_iter, " iters. ", op_names_[i]);
           min_duration_ms = duration_ms;
           id = static_cast<int>(i);
+          id_name = op_names_[i];
         }
       }
       TORCH_CHECK(id >= 0, "Could not find viable op");
-      std::cerr << "└──found fastest with id=" << id << " for " << op_sig << '(' << params_sig << ")" << std::endl;
+      TUNABLE_LOG("└──found fastest with id=", id, " for ", op_sig, '(', params_sig, ") ", id_name);
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       return id;
     }
@@ -235,6 +235,7 @@ class TunableOp {
     int default_id_{0};
 
     std::vector<Callable<ParamsT>> ops_;
+    std::vector<std::string> op_names_;
 };
 
 struct OpParams {

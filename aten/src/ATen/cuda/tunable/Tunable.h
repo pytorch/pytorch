@@ -10,6 +10,7 @@
 #pragma once
 
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -19,6 +20,14 @@
 #include <vector>
 
 namespace at::cuda::tunable {
+
+static void TunableLog(const std::string& msg) {
+  static const char *env = getenv("PYTORCH_TUNABLEOP_VERBOSE");
+  if (env != nullptr && strcmp(env, "1") == 0) {
+    std::cerr << msg << std::endl;
+  }
+}
+#define TUNABLE_LOG(...) TunableLog(c10::str(__VA_ARGS__))
 
 enum TuningStatus {
   OK = 0,

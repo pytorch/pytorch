@@ -19,7 +19,6 @@
 
 #include <chrono>
 #include <functional>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -75,14 +74,14 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
   auto it = kernel_map.find(params_signature);
   if (it != kernel_map.end()) {
     if (it->second != best_id) {
-      std::cerr << op_signature << "(" << params_signature << ") already has a best kernel "
-        << "id=" << it->second << " selected, want to add a different best kernel id=" << best_id
-        << ", the new kernel id will be ignored." << std::endl;
+      TUNABLE_LOG(op_signature, "(", params_signature, ") already has a best kernel ",
+          "id=", it->second, " selected, want to add a different best kernel id=",best_id,
+          ", the new kernel id will be ignored.");
     }
     return;
   }
 
-  std::cerr << op_signature << "(" << params_signature << ") -> " << best_id << std::endl;
+  TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best_id);
   kernel_map[params_signature] = best_id;
 }
 
@@ -110,7 +109,7 @@ void TuningResultsManager::Delete(const std::string& op_signature, const std::st
     return;
   }
 
-  std::cerr << op_signature << "(" << params_signature << ")" << std::endl;
+  TUNABLE_LOG(op_signature, "(", params_signature, ")");
   it->second.erase(it2);
 }
 
@@ -121,7 +120,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
   auto it = results.find(op_signature);
   if (it == results.end()) {
     for (const auto& [param_sig, kernel_id] : kernel_map) {
-        std::cerr << op_signature << "(" << param_sig << ") -> " << kernel_id << std::endl;
+      TUNABLE_LOG(op_signature, "(", param_sig, ") -> ", kernel_id);
     }
     results[op_signature] = kernel_map;
     return;
@@ -282,38 +281,38 @@ TuningContext::TuningContext() : enable_{false}, tuning_enable_{false}, max_tuni
 }
 
 void TuningContext::EnableTunableOp() {
-  std::cerr << "Enable TunableOp" << std::endl;
+  TUNABLE_LOG("Enable TunableOp");
   enable_ = true;
 }
 
 void TuningContext::DisableTunableOp() {
-  std::cerr << "Disable TunableOp" << std::endl;
+  TUNABLE_LOG("Disable TunableOp");
   enable_ = false;
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    TORCH_WARN_ONCE("PYTORCH_TUNABLEOP_ENABLED=1");
+    TUNABLE_LOG("PYTORCH_TUNABLEOP_ENABLED=1");
     return true;
   }
   return enable_;
 }
 
 void TuningContext::EnableTuning() {
-  std::cerr << "Enable Tuning for TunableOp" << std::endl;
+  TUNABLE_LOG("Enable Tuning for TunableOp");
   tuning_enable_ = true;
 }
 
 void TuningContext::DisableTuning() {
-  std::cerr << "Disable Tuning for TunableOp" << std::endl;
+  TUNABLE_LOG("Disable Tuning for TunableOp");
   tuning_enable_ = false;
 }
 
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    TORCH_WARN_ONCE("PYTORCH_TUNABLEOP_TUNING=1");
+    TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
     return true;
   }
   return tuning_enable_;
