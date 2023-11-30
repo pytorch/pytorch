@@ -629,7 +629,9 @@ def end_graph():
                     file.write(bw_info_str + "\n")
                 file.write(f"{summary_str}\n\n")
         except Exception as e:
-            log.warning("failed to write profile bandwidth result into %s", output_file)
+            log.warning(
+                "failed to write profile bandwidth result into %s: %s", output_file, f"{e}"
+            )
 
 
 class DebugAutotuner(CachingAutotuner):
