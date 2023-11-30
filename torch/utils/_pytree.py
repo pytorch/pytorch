@@ -345,7 +345,7 @@ _odict_unflatten = _ordereddict_unflatten
 
 def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
     values, dict_context = _dict_flatten(d)
-    return values, (d.default_factory, dict_context)
+    return values, [d.default_factory, dict_context]
 
 
 def _defaultdict_unflatten(
@@ -382,7 +382,7 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     default_factory = getattr(module, default_factory_name)
 
     dict_context = dumpable_context["dict_context"]
-    return default_factory, dict_context
+    return [default_factory, dict_context]
 
 
 _private_register_pytree_node(
