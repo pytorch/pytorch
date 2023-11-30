@@ -25,17 +25,6 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
 }
 
 /**
- * typeMetaToScalarType(), lifted to optional
- */
-static inline optional<at::ScalarType> c10::optTypeMetaToScalarType(
-    optional<caffe2::TypeMeta> type_meta) {
-  if (!type_meta.has_value()) {
-    return c10::nullopt;
-  }
-  return type_meta->toScalarType();
-}
-
-/**
  * convenience: equality across TypeMeta/ScalarType conversion
  */
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
