@@ -524,7 +524,6 @@ class SubclassCreationMeta:
     inner_keys: List[any]
     outer_size: Tuple[int]
     outer_stride: Tuple[int]
-    outer_storage_offset: int
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[self.flat_tensor_start_idx:self.flat_tensor_start_idx + self.arg_count]
@@ -536,7 +535,6 @@ class SubclassCreationMeta:
             self.meta,
             self.outer_size,
             self.outer_stride,
-            self.outer_storage_offset,
         )
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
@@ -1059,7 +1057,6 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
                 inner_keys=attrs,
                 outer_size=a.shape,
                 outer_stride=a.stride(),
-                outer_storage_offset=a.storage_offset(),
             ))
         else:
             infos.append(idx)
