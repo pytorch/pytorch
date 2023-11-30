@@ -1345,7 +1345,7 @@ class TestBinaryUfuncs(TestCase):
                 (100, 100), low=1, high=range_high, dtype=dtype, device=device
             )
 
-        exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+        exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3, True, False]
         complex_exponents = [
             -2.5j,
             -1.0j,

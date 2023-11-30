@@ -1272,7 +1272,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Verification
         self.assertEqual(torch.arange(self.world_size), output_t)
 
-    @requires_nccl()
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     def test_comm_split_optimization(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
