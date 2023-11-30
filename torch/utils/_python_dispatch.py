@@ -154,7 +154,7 @@ def is_traceable_wrapper_subclass(t):
             attrs: list of attribute name strings for inner tensors
             ctx: dict containing any other subclass-specific metadata needed for unflattening
 
-        t = MySubClass.__tensor_unflatten__(inner_tensors, ctx, outer_size)
+        t = MySubClass.__tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride)
             inner_tensors: dict mapping attribute name -> tensor for each inner tensor
             ctx: dict with subclass metadata in the form that __tensor_flatten__() produces
             outer_size: expected (possibly symbolic) size that the returned subclass
