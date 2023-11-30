@@ -598,10 +598,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_force_bucket_rebuild",
-          [](::c10d::Reducer& reducer) {
-            return reducer.force_bucket_rebuild();
-          },
+          "_reset_state",
+          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
@@ -2294,9 +2292,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions)
-          .def_property_readonly(
-              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2362,13 +2358,10 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-#ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-#endif
-      ;
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color);
 
 #endif
 
