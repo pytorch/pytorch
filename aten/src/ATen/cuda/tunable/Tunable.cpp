@@ -351,6 +351,10 @@ void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
+  if (env != nullptr) {
+    return atoi(env);
+  }
   return max_tuning_duration_ms_;
 }
 
