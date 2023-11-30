@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import io
+
 import tempfile
 
 import onnx
@@ -263,6 +265,48 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             diagnostics.levels.NONE,
             expected_node="aten.clone.default",
         )
+
+    def test_missing_complex_onnx_variant_raises_errors_in_dispatcher(self):
+        registry = torch.onnx.OnnxRegistry()
+
+        # NOTE: simulate unsupported nodes
+        aten_mul_tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="mul", overload="Tensor"
+        )
+
+        # Only keep real aten.mul to test missing complex aten.mul
+        registry._registry[aten_mul_tensor] = [
+            onnx_func
+            for onnx_func in registry._registry[aten_mul_tensor]
+            if not onnx_func.is_complex
+        ]
+
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul.Tensor(input, input)
+
+        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as e:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+
+        try:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            assert_has_diagnostics(
+                e.onnx_program.diagnostic_context,
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                expected_node="aten.mul.Tensor",
+            )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
@@ -551,6 +595,33 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             exported_program,
             x,
         )
+
+    def test_aten_linalg_vector_norm_with_reducel2(self):
+        class Net(nn.Module):
+            def forward(self, x):
+                x = F.normalize(x)
+                return x
+
+        f = io.BytesIO()
+        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
+        self.assertTrue("ReduceL2" in onnx_nodes)
+
+    def test_exported_program_as_input_with_model_signature(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        onnx_program = torch.onnx.dynamo_export(
+            exported_program,
+            x,
+        )
+
+        self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
 
 
 if __name__ == "__main__":

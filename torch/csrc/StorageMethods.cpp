@@ -247,7 +247,9 @@ static PyObject* THPStorage_fromBuffer(
 
   const bool is_endian_independent = (scalar_type == at::kByte) ||
       (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
-      (scalar_type == at::kFloat8_e4m3fn);
+      (scalar_type == at::kFloat8_e5m2fnuz) ||
+      (scalar_type == at::kFloat8_e4m3fn) ||
+      (scalar_type == at::kFloat8_e4m3fnuz);
 
   TORCH_CHECK(
       is_endian_independent || (byte_order_str != nullptr),
@@ -642,8 +644,6 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
   at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
 
   if (map_allocator == nullptr) {
-    TORCH_WARN(
-        "Only storages with data pointers created via at::MapAllocator have a filename.");
     Py_RETURN_NONE;
   }
   std::string filename = map_allocator->filename();

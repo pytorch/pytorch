@@ -646,9 +646,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 kwargs["value_type"] = type(value)
 
         super().__init__(value=value, **kwargs)
-        if self.source and self.source.is_nn_module():
-            # force guard checks even when `not config.guard_nn_modules``
-            self.source = NotNNModuleSource(self.source)
 
     @staticmethod
     @functools.lru_cache(None)

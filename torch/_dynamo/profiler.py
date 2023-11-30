@@ -51,7 +51,7 @@ class ProfileResult:
         self.total: ProfileMetrics = total or ProfileMetrics()
         self.unique_graphs: int = unique_graphs
 
-    def __iadd__(self, other: ProfileMetrics):
+    def __iadd__(self, other: "ProfileResult"):
         self.captured += other.captured
         self.total += other.total
         self.unique_graphs += other.unique_graphs

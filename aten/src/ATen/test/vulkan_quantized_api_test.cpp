@@ -4,7 +4,10 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Convert.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
 #include <ATen/native/vulkan/ops/Mm.h>
@@ -13,6 +16,8 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <random>
+#include <math.h>
+#include <iostream>
 #include <ATen/native/quantized/PackedParams.h>
 
 #include <cstdio>
@@ -27,6 +32,14 @@ using namespace at::native::vulkan::api::utils;
  */
 
 namespace {
+
+using namespace at::native::vulkan;
+
+#ifdef USE_VULKAN_FP16_INFERENCE
+constexpr float kTolerance = 1e-2;
+#else
+constexpr float kTolerance = 1e-5;
+#endif
 
 bool checkRtol(
     const at::Tensor& diff,
@@ -86,7 +99,7 @@ void showRtol(const at::Tensor& a, const at::Tensor& b,
           std::cout << std::setw(5) << x;
           if (diff.max().item<double>() == diff_xy) {
             std::cout << " : " << diff_xy;
-            if (xpos && xpos) {
+            if (xpos && ypos) {
               *xpos = x;
               *ypos = y;
               return;
@@ -124,6 +137,28 @@ inline std::vector<c10::IValue> callOpByName(
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
+
+using namespace at::native::vulkan;
+using at::native::vulkan::api::utils::ivec3;
+using at::native::vulkan::api::utils::ivec4;
+using at::native::vulkan::api::utils::vec4;
+
+std::ostream& operator<<(std::ostream& os, const vec4& v) {
+  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ivec3& v) {
+  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ivec4& v) {
+  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ")";
+  return os;
 }
 
 } // namespace
@@ -1397,7 +1432,7 @@ TEST_F(VulkanAPITest, quantized_add_dif_params) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, conv2d) {
+void test_conv2d(bool bias_quantized) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
   constexpr std::array<int64_t, 2u> padding{1, 1};
@@ -1476,7 +1511,7 @@ TEST_F(VulkanAPITest, conv2d) {
   const auto output_vulkan = at::native::vulkan::ops::quantized_conv2d(
       out_vulkan,
       weight_q,
-      bias_q,
+      bias_quantized ? bias_q : bias_cpu,
       stride,
       padding,
       dilation,
@@ -1499,6 +1534,11 @@ TEST_F(VulkanAPITest, conv2d) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d) {
+  test_conv2d(false);
+  test_conv2d(true);
 }
 
 TEST_F(VulkanAPITest, conv2d_pw) {
@@ -2214,6 +2254,53 @@ void quantized_binary_op_test_set(const char* op_name) {
         rand_pos_int(100)};
     test_quantized_binary_op(false, true, op_name, tensor_shape, tensor_shape);
   }
+}
+
+void test_max_pool2d(
+    const at::IntArrayRef input_shape,
+    const c10::ScalarType dtype) {
+  const auto in_cpu = produce_random_tensor(input_shape);
+
+  const auto input_quant_params = compute_quant_params(in_cpu, dtype);
+  double scale = std::get<0>(input_quant_params);
+  scale = safe_downcast<float>(scale);
+  int zero_point = std::get<1>(input_quant_params);
+
+  auto in_cpu_quantized = at::quantize_per_tensor(in_cpu,
+      scale,
+      zero_point,
+      dtype);
+
+  const auto out_cpu_quantized = at::max_pool2d(in_cpu_quantized, {3, 4}, {2, 1}, {1, 1}, {1, 1}, false);
+  auto in_vk_quantized = at::quantize_per_tensor(in_cpu.vulkan(),
+      scale,
+      zero_point,
+      dtype);
+
+  const auto out_vk_quantized = at::max_pool2d(in_vk_quantized, {3, 4}, {2, 1}, {1, 1}, {1,1}, false);
+
+  const auto out_cpu_deq = at::dequantize(out_cpu_quantized);
+  const auto out_vk_deq = at::dequantize(out_vk_quantized);
+  const auto out_vk_deq_cpu = out_vk_deq.cpu();
+
+  const auto check = almostEqual(out_vk_deq_cpu, out_cpu_deq, safe_downcast<float>(scale));
+
+  if (!check) {
+    showRtol(out_cpu_deq, out_vk_deq_cpu);
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, max_pool2d_qint8) {
+  c10::InferenceMode mode;
+  test_max_pool2d({1, 3, 72, 96}, c10::ScalarType::QInt8);
+  test_max_pool2d({5, 13, 55, 68}, c10::ScalarType::QInt8);
+}
+
+TEST_F(VulkanAPITest, max_pool2d_quint8) {
+  c10::InferenceMode mode;
+  test_max_pool2d({5, 13, 55, 68}, c10::ScalarType::QUInt8);
+  test_max_pool2d({5, 13, 55, 19}, c10::ScalarType::QUInt8);
 }
 
 TEST_F(VulkanAPITest, quantized_add_tests) {
@@ -3119,7 +3206,7 @@ bool _test_quantized_linear(
   auto out_vk_dequant = at::dequantize(out_vk_quant);
   auto out_vk_to_cpu_dequant = vulkan_to_cpu(out_vk_dequant, out_cpu_dequant);
 
-  const auto check = almostEqual(out_cpu_dequant, out_vk_to_cpu_dequant, out_scale);
+  const auto check = almostEqual(out_cpu_dequant, out_vk_to_cpu_dequant, safe_downcast<float>(out_scale));
   if (!check) {
     long xpos = -1, ypos = -1;
     if (input_cpu.sizes().size() == 2) {
@@ -3252,6 +3339,184 @@ TEST_F(VulkanAPITest, linear_4d_small) {
 
 TEST_F(VulkanAPITest, linear_4d_large) {
   test_quantized_linear({9, 13, 11, 17}, {23, 17}, {23});
+}
+
+// The following code is not directly releated to quantization. We put it here
+// since we are not able to run this test on GH's CI: for some unknown reason,
+// we are not able to reference symbols in the vulkan directory, hence the build
+// on GH fails. Moving the test here so we are still able to run it on
+// internally on devserver and laptops.
+
+bool texel_almost_equal(int expected, float actual) {
+  // -1 is a don't care value.
+  return (expected == -1) || (fabs(expected - actual) < kTolerance);
+}
+
+bool texel_almost_equal(const ivec4& expected, const vec4& actual) {
+  return (
+      texel_almost_equal(expected.data[0], actual.data[0]) &&
+      texel_almost_equal(expected.data[1], actual.data[1]) &&
+      texel_almost_equal(expected.data[2], actual.data[2]) &&
+      texel_almost_equal(expected.data[3], actual.data[3]));
+}
+
+TEST_F(VulkanAPITest, extract_texel_test) {
+  int n = 3;
+  int c = 5;
+  int h = 6;
+  int w = 7;
+  int hw = h * w;
+  int chw = c * h * w;
+
+  // The input tensor is a consecutive range of whole numbers from [0, n * c * h
+  // * w)
+  auto cpu =
+      at::range(0, n * c * h * w - 1, at::device(at::kCPU).dtype(at::kFloat))
+          .reshape({n, c, h, w});
+  auto vk = cpu.vulkan();
+
+  // By default, we are using channel-packed 3d tensors.
+  // The x and y are typical plane.
+  // The z channel is packed with batch and channel, e.g. every 4 channels are
+  // packed into one texel. Hence, to access a tensor at batch nn and channel
+  // cc, we will calculate the z coordinate = nn * ceil(c / 4) + cc / 4, where c
+  // is the channel count.
+  // We always start a new batch on a new z. Hence, when c cannot be divided by
+  // 4, there are some undefined values in the padding area. We use -1 to
+  // indicate that we are not performing comparsion on those values.
+  std::tuple<ivec3, ivec4> test_cases[]{
+      {{0, 0, 0}, {0, hw, 2 * hw, 3 * hw}},
+      {{1, 0, 0}, {1, hw + 1, 2 * hw + 1, 3 * hw + 1}},
+      {{0, 0, 1}, {4 * hw, -1, -1, -1}},
+      {{0, 0, 2}, {chw, chw + hw, chw + 2 * hw, chw + 3 * hw}},
+      {{0, 1, 2}, {chw + w, chw + hw + w, chw + 2 * hw + w, chw + 3 * hw + w}},
+      {{0, 0, 3}, {chw + 4 * hw, -1, -1, -1}},
+      {{0, 1, 3}, {chw + 4 * hw + w, -1, -1, -1}},
+      {{0, 0, 4}, {2 * chw, 2 * chw + hw, 2 * chw + 2 * hw, 2 * chw + 3 * hw}},
+      {{0, 1, 4},
+       {2 * chw + w,
+        2 * chw + hw + w,
+        2 * chw + 2 * hw + w,
+        2 * chw + 3 * hw + w}},
+  };
+
+  bool has_failure = false;
+  for (const auto& test_case : test_cases) {
+    const auto [loc, expected] = test_case;
+
+    vec4 actual = ops::utils::extract_texel(vk, loc);
+    if (!texel_almost_equal(expected, actual)) {
+      std::cout << "On loc: " << loc << " expected: " << expected
+                << " actual: " << actual << std::endl;
+      has_failure = true;
+    }
+  }
+  ASSERT_TRUE(!has_failure);
+}
+
+TEST_F(VulkanAPITest, channel_to_height_packing_test) {
+  int n = 3;
+  int c = 5;
+  int h = 6;
+  int w = 7;
+  int hw = h * w;
+  int chw = c * h * w;
+
+  auto data =
+      at::range(0, n * c * h * w - 1, at::device(at::kCPU).dtype(at::kFloat))
+          .reshape({n, c, h, w});
+
+  auto v_input = at::native::vulkan::ops::convert(data.vulkan());
+  auto v_output =
+      packing::convert_image_channels_packed_to_height_packed(v_input);
+  ASSERT_EQ(
+      v_output.gpu_memory_layout(), api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED);
+
+  // This output tensor is on vulkan, since we are interested in evaluating the
+  // actual layout
+  at::Tensor output = at::native::vulkan::ops::convert(v_output);
+
+  // This tensor will be height-packed. Meaning that each texel represent
+  // consecutive elements along the height dimension, element difference within
+  // a texel is "w".
+  std::tuple<ivec3, ivec4> test_cases[]{
+      {{0, 0, 0}, {0, w, 2 * w, 3 * w}},
+      {{0, 1, 0}, {4 * w, 5 * w, -1, -1}},
+      {{1, 0, 0}, {0 * w + 1, 1 * w + 1, 2 * w + 1, 3 * w + 1}},
+      {{1, 1, 0}, {4 * w + 1, 5 * w + 1, -1, -1}},
+      {{0, 0, 4}, {4 * hw, 4 * hw + w, 4 * hw + 2 * w, 4 * hw + 3 * w}},
+      {{0, 0, 4 + 2 * c},
+       {2 * chw + 4 * hw,
+        2 * chw + 4 * hw + w,
+        2 * chw + 4 * hw + 2 * w,
+        2 * chw + 4 * hw + 3 * w}},
+  };
+
+  bool has_failure = false;
+  for (const auto& test_case : test_cases) {
+    const auto [loc, expected] = test_case;
+
+    vec4 actual = ops::utils::extract_texel(output, loc);
+    if (!texel_almost_equal(expected, actual)) {
+      std::cout << "On loc: " << loc << " expected: " << expected
+                << " actual: " << actual << std::endl;
+      has_failure = true;
+    }
+  }
+  ASSERT_TRUE(!has_failure);
+}
+
+TEST_F(VulkanAPITest, channel_to_width_packing_test) {
+  int n = 3;
+  int c = 5;
+  int h = 6;
+  int w = 7;
+  int hw = h * w;
+  int chw = c * h * w;
+
+  auto data =
+      at::range(0, n * c * h * w - 1, at::device(at::kCPU).dtype(at::kFloat))
+          .reshape({n, c, h, w});
+
+  auto v_input = at::native::vulkan::ops::convert(data.vulkan());
+  auto v_output =
+      packing::convert_image_channels_packed_to_width_packed(v_input);
+  ASSERT_EQ(
+      v_output.gpu_memory_layout(), api::GPUMemoryLayout::TENSOR_WIDTH_PACKED);
+
+  // This output tensor is on vulkan, since we are interested in evaluating the
+  // actual layout
+  at::Tensor output = at::native::vulkan::ops::convert(v_output);
+
+  // This tensor will be width-packed. Meaning that each texel represent
+  // consecutive elements along the width dimension. The  differece between
+  // consecutive texels is 1.
+  std::tuple<ivec3, ivec4> test_cases[]{
+      {{0, 0, 0}, {0, 1, 2, 3}},
+      {{1, 0, 0}, {4, 5, 6, -1}},
+      {{0, 2, 0}, {2 * w + 0, 2 * w + 1, 2 * w + 2, 2 * w + 3}},
+      {{1, 2, 0}, {2 * w + 4, 2 * w + 5, 2 * w + 6, -1}},
+      {{0, 0, 4}, {4 * hw + 0, 4 * hw + 1, 4 * hw + 2, 4 * hw + 3}},
+      {{1, 0, 4}, {4 * hw + 4, 4 * hw + 5, 4 * hw + 6, -1}},
+      {{0, 0, 4 + 2 * c},
+       {2 * chw + 4 * hw,
+        2 * chw + 4 * hw + 1,
+        2 * chw + 4 * hw + 2,
+        2 * chw + 4 * hw + 3}},
+  };
+
+  bool has_failure = false;
+  for (const auto& test_case : test_cases) {
+    const auto [loc, expected] = test_case;
+
+    vec4 actual = ops::utils::extract_texel(output, loc);
+    if (!texel_almost_equal(expected, actual)) {
+      std::cout << "On loc: " << loc << " expected: " << expected
+                << " actual: " << actual << std::endl;
+      has_failure = true;
+    }
+  }
+  ASSERT_TRUE(!has_failure);
 }
 
 } // namespace

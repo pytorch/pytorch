@@ -12,6 +12,7 @@ from torch.distributed._tensor.device_mesh import (
     DeviceMesh,
     init_device_mesh,
 )
+from torch.distributed._tensor.ops.utils import normalize_to_torch_size
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 # All public APIs from dtensor package
@@ -86,16 +87,6 @@ def _dtensor_init_helper(
     )
 
 
-def _normalize_to_torch_size(size) -> torch.Size:
-    # convert Union[Tuple[int], Tuple[Sequence[int]]] to torch.Size
-    # normalize the size argument
-    if len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = size[0]
-    else:
-        torch_size = list(size)
-    return torch.Size(torch_size)
-
-
 def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
@@ -126,7 +117,7 @@ def ones(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.ones,
@@ -169,7 +160,7 @@ def empty(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.empty,
@@ -215,7 +206,7 @@ def full(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.full,
@@ -260,7 +251,7 @@ def rand(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.rand,
@@ -304,7 +295,7 @@ def randn(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.randn,
@@ -345,7 +336,7 @@ def zeros(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    torch_size = _normalize_to_torch_size(size)
+    torch_size = normalize_to_torch_size(size)
 
     return _dtensor_init_helper(
         torch.zeros,

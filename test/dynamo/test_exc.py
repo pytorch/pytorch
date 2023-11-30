@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -43,6 +43,7 @@ from user code:
 
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
     @make_logging_test()
+    @unittest.skipIf(IS_FBCODE, "stack trace slightly different in fbcode")
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
             def f(ctx):
@@ -285,7 +286,7 @@ Failed Source Expressions:
 translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
 
 Failure occurred while running node:
-    %split : [num_users=1] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
+    %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
   ==> L['shape'][0]: -9223372036854775807

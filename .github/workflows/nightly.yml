@@ -52,3 +52,38 @@ jobs:
           branch: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-audio-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: update-audio-commit-hash
+        uses: ./.github/actions/update-commit-hash
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: audio
+          branch: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-executorch-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: update-executorch-commit-hash
+        uses: ./.github/actions/update-commit-hash
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: executorch
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
