@@ -1,7 +1,9 @@
 import logging
+import math
 from typing import Optional
 
 import torch
+import torch.nn
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
@@ -591,6 +593,35 @@ def _sdpa_nested_preprocessing(query, key, value):
     )
 
 
+def _pad_last_dim(
+    tensor: torch.Tensor, alignment_size: int, slice: bool
+) -> torch.Tensor:
+    # FlashAttentionV2 requires that head dimension be a multiple of 8
+    # This was previously done within the kernel, however
+    # This causes the kernel to maybe alias query, key, value
+    # So instead we pad the head_dimensions to be a multiple of 8
+    # in the composite region
+    last_dim_size = tensor.size(-1)
+    if last_dim_size % alignment_size == 0:
+        return tensor
+    pad_count = alignment_size - (last_dim_size % alignment_size)
+    tensor = torch.nn.functional.pad(tensor, [0, pad_count])
+    if slice:
+        return tensor[..., 0:last_dim_size]
+    return tensor
+
+
+def _calculate_scale(query, scale):
+    softmax_scale = scale if scale is not None else math.sqrt(1.0 / query.size(-1))
+    return softmax_scale
+
+
+def _post_process_flash_output(out: torch.Tensor, og_size):
+    if not out.is_nested and out.size(-1) != og_size:
+        out = out[..., 0:og_size]
+    return out
+
+
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -608,9 +639,46 @@ def jagged_scaled_dot_product_attention(
     )
 
     if backend_choice == SDPBackend.FLASH_ATTENTION:
-        raise RuntimeError(
-            "Dispatcher for nested tensors with jagged layout cannot run Flash Attention v2 just yet."
+        og_size = query.size(-1)
+        query_padded = _pad_last_dim(query, 8, False)
+        key_padded = _pad_last_dim(key, 8, False)
+        value_padded = _pad_last_dim(value, 8, False)
+        # We need to calculate the scale based off the OG head dim size
+        og_scale = _calculate_scale(query, scale)
+        (
+            query_buffer_reshaped,
+            key_buffer_reshaped,
+            value_buffer_reshaped,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
+            output_shape,
+        ) = _sdpa_nested_preprocessing(query_padded, key_padded, value_padded)
+
+        (
+            attention,
+            logsumexp,
+            philox_seed,
+            philox_offset,
+            debug_attn_mask,
+        ) = torch.ops.aten._flash_attention_forward(
+            query_buffer_reshaped,
+            key_buffer_reshaped,
+            value_buffer_reshaped,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
+            dropout_p,
+            is_causal,
+            False,
+            og_scale,
         )
+
+        # Reshape output to convert nnz to batch_size and seq_len
+        attention = attention.view(-1).reshape(*output_shape).transpose(1, 2)
+        return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
         (
             query_reshaped,
