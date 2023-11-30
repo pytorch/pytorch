@@ -9,7 +9,21 @@ from copy import deepcopy
 import torch
 from torch.nn import Parameter
 from torch.optim import (
-    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, LBFGS, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam, Optimizer
+    Adadelta,
+    Adagrad,
+    Adam,
+    Adamax,
+    AdamW,
+    ASGD,
+    LBFGS,
+    NAdam,
+    RAdam,
+    RMSprop,
+    Rprop,
+    CoRe,
+    SGD,
+    SparseAdam,
+    Optimizer,
 )
 from torch.optim.lr_scheduler import (
     StepLR,
@@ -24,7 +38,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     gradcheck,
     skipIfRocm,
-    skipIfTorchDynamo
+    skipIfTorchDynamo,
 )
 
 from torch._dynamo import disable as disable_dynamo
@@ -939,6 +953,10 @@ class TestOptim(TestCase):
             (RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
             (Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             (Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), maximize=True)),
+            (CoRe, dict(weight_decay=0.0)),
+            (CoRe, dict(betas=(0.7375, 0.8125, 250.0, -1.0)),
+            (CoRe, dict(score_history=250, frozen=0.1)),
+            (CoRe, dict(maximize=True)),
             (ASGD, dict(weight_decay=0)),
             (ASGD, dict(weight_decay=1)),
             (ASGD, dict(weight_decay=0, maximize=True)),
@@ -1000,7 +1018,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop", "RProp", "SGD"
+                "RAdam", "RMSprop", "Rprop", "CoRe", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -1836,6 +1854,43 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 Rprop(None, lr=1e-2, etas=(1.0, 0.5), foreach=foreach)
 
+    @skipIfRocm
+    @skipIfTorchDynamo()
+    def test_core(self):
+        is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(
+            0
+        ) == (8, 6)
+        for foreach in (False, True):
+            self._test_basic_cases(
+                lambda weight, bias, maximize, foreach: CoRe(
+                    [weight, bias], maximize=maximize, foreach=foreach
+                ),
+                constructor_accepts_maximize=True,
+                constructor_accepts_foreach=True,
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize, foreach: CoRe(
+                    self._build_params_dict(weight, bias),
+                    maximize=maximize,
+                    foreach=foreach,
+                ),
+                constructor_accepts_maximize=True,
+                constructor_accepts_foreach=True,
+                atol=4e-5 if is_cuda_sm86 else None,
+                rtol=3e-5 if is_cuda_sm86 else None,
+            )
+            self._test_complex_2d(lambda param: CoRe(param, foreach=foreach))
+            self._test_complex_optimizer(
+                lambda param: CoRe([param], foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: CoRe(
+                    [param], maximize=True, foreach=foreach
+                )
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
+                CoRe(None, etas=(1.0, 0.5), foreach=foreach)
+
     def test_lbfgs(self):
         self._test_basic_cases(
             lambda weight, bias: LBFGS([weight, bias]), ignore_multidevice=True
@@ -2426,6 +2481,30 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    def test_core(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["prev_1"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["prev_2"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["step_size"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["score"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                CoRe,
+                {"lr": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
     def test_adamw(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -2522,7 +2601,7 @@ class TestDifferentiableOptimizer(TestCase):
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):
         from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
-                                 asgd, adamax, adadelta, adagrad)
+                                 core, asgd, adamax, adadelta, adagrad)
         multi_optims = ((Adam, adam, "_multi_tensor_adam"),
                         (AdamW, adamw, "_multi_tensor_adamw"),
                         (NAdam, nadam, "_multi_tensor_nadam"),
@@ -2530,6 +2609,7 @@ class TestDifferentiableOptimizer(TestCase):
                         (RAdam, radam, "_multi_tensor_radam"),
                         (RMSprop, rmsprop, "_multi_tensor_rmsprop"),
                         (Rprop, rprop, "_multi_tensor_rprop"),
+                        (CoRe, core, "_multi_tensor_core"),
                         (ASGD, asgd, "_multi_tensor_asgd"),
                         (Adamax, adamax, "_multi_tensor_adamax"),
                         (Adadelta, adadelta, "_multi_tensor_adadelta"),

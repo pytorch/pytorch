@@ -586,7 +586,7 @@ class TestLazyModules(TestCase):
         optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam,
                       torch.optim.AdamW, torch.optim.Adamax,
                       torch.optim.ASGD, torch.optim.SGD, torch.optim.Rprop,
-                      torch.optim.RMSprop, torch.optim.LBFGS]
+                      torch.optim.CoRe, torch.optim.RMSprop, torch.optim.LBFGS]
 
         def run_step(module, optim):
             self.assertIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)

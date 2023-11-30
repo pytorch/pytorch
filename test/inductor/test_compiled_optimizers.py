@@ -10,7 +10,7 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SGD, SparseAdam
+# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SGD, SparseAdam, CoRe
 from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop
 
 from torch.testing._internal.common_utils import TestCase
