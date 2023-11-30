@@ -42,7 +42,7 @@ class HasMainVisiter(cst.CSTVisitor):
         )
         for child in node.children:
             if m.matches(child, m.If(test=if_main1 | if_main2)):
-                if len(m.findall(node, run_test_call | raise_block)) > 0:
+                if m.findall(child, raise_block | run_test_call):
                     self.found = True
                     break
 

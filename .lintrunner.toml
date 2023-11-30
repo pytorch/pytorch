@@ -870,7 +870,6 @@ command = [
 code = 'TEST_HAS_MAIN'
 include_patterns = [
     'test/**/test_*.py',
-    'test/**/*_test.py',
 ]
 exclude_patterns = [
     'test/run_test.py',
@@ -878,6 +877,7 @@ exclude_patterns = [
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
+    'test/fx/**',  # should be run through test/test_fx.py
     'test/bottleneck_test/test_args.py',
     'test/bottleneck_test/test_cuda.py',
     'test/distributed/_shard/test_sharder.py',
@@ -905,7 +905,10 @@ exclude_patterns = [
     'test/distributed/elastic/timer/api_test.py',
     'test/distributed/elastic/utils/data/cycling_iterator_test.py',
     'test/distributed/launcher/api_test.py',
+    'test/distributed/launcher/bin/test_script.py',
+    'test/distributed/launcher/bin/test_script_init_method.py',
     'test/distributed/launcher/bin/test_script_is_torchelastic_launched.py',
+    'test/distributed/launcher/bin/test_script_local_rank.py',
     'test/distributed/launcher/launch_test.py',
     'test/distributed/launcher/run_test.py',
     'test/distributed/optim/test_apply_optimizer_in_backward.py',
@@ -916,13 +919,6 @@ exclude_patterns = [
     'test/dynamo/test_compile.py',
     'test/dynamo/test_sources.py',
     'test/functorch/test_logging.py',
-    'test/fx/test_dce_pass.py',
-    'test/fx/test_future.py',
-    'test/fx/test_fx_const_fold.py',
-    'test/fx/test_fx_split.py',
-    'test/fx/test_pass_infra.py',
-    'test/fx/test_source_matcher_utils.py',
-    'test/fx/test_z3_gradual_types.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_extract_compiled_graph.py',
     'test/lazy/test_meta_kernel.py',
@@ -938,6 +934,7 @@ exclude_patterns = [
     'test/package/package_a/test_module.py',
     'test/package/package_a/test_nn_module.py',
     'test/package/package_c/test_module.py',
+    'test/run_test.py',
     'test/test_bundled_images.py',
     'test/test_cuda_expandable_segments.py',
     'test/test_hub.py',
