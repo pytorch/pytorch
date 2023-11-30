@@ -60,7 +60,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "guard_int", "guard_float", "guard_scalar",
+    "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext", "StatefulSymbolicContext"
@@ -137,6 +137,54 @@ def is_concrete_int(a: Union[int, SymInt]):
         return True
 
     return False
+
+def canonicalize_bool_expr(expr: sympy.Expr):
+    r""" Canonicalize a boolean expression by transforming it into a lt / le
+    inequality and moving all the non-constant terms to the rhs.
+    We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
+    recursively
+    nb. sympy.Rel.canonical is not good enough https://github.com/sympy/sympy/issues/25924
+
+    Args:
+        expr (sympy.Expr): Expression to canonicalize
+    """
+    # Canonicalise an inequality by transforming it into a lt / le
+    # inequality and moving all the non-constant terms to the rhs
+    # We canonicalise And / Ors / Not via cnf
+    # nb. Relational.canonical in sympy is broken
+    # https://github.com/sympy/sympy/issues/25924
+
+    if not isinstance(expr, (sympy.Rel, sympy.And, sympy.Or, sympy.Not, sympy.Eq, sympy.Ne)):
+        return expr
+
+    if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
+        expr = sympy.logic.boolalg.to_cnf(expr)
+    return _canonicalize_bool_expr_impl(expr)
+
+def _canonicalize_bool_expr_impl(expr: sympy.Expr):
+    if isinstance(expr, (sympy.And, sympy.Or)):
+        return type(expr)(*map(canonicalize_bool_expr, expr.args))
+
+    opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
+    if isinstance(expr, tuple(opposite.keys())):
+        lhs = expr.rhs - expr.lhs
+        t = opposite[type(expr)]
+    else:
+        assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
+        lhs = expr.lhs - expr.rhs
+        t = type(expr)
+    rhs = 0
+    if isinstance(lhs, sympy.Add):
+        cts = []
+        variables = []
+        for term in lhs.args:
+            if term.is_number:
+                cts.append(term)
+            else:
+                variables.append(term)
+        lhs = sympy.Add(*variables)
+        rhs = -sympy.Add(*cts)
+    return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]):
     r""" Utility to check if underlying object
@@ -3049,6 +3097,8 @@ class ShapeEnv:
         if compute_hint:
             expr = expr.xreplace(self.var_to_val)
 
+        expr = canonicalize_bool_expr(expr)
+
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3057,17 +3107,20 @@ class ShapeEnv:
             if s in self.var_to_val:
                 continue
             subst = {}
-            if s in self.deferred_runtime_asserts:
-                for ra in self.deferred_runtime_asserts[s]:
-                    if compute_hint:
-                        e = ra.expr.xreplace(self.var_to_val)
-                    else:
-                        e = ra.expr
-                    subst[e] = sympy.true
-                    subst[sympy.Not(e)] = sympy.false
-                    # NB: this doesn't match relations if they're flipped; e.g.,
-                    # if you have x < 5, we won't get 5 > x.  Holler if this is
-                    # a problem
+            for ra in self.deferred_runtime_asserts.get(s, ()):
+                if compute_hint:
+                    e = canonicalize_bool_expr(ra.expr.xreplace(self.var_to_val))
+                else:
+                    e = ra.expr
+                # e is already canonical
+                subst[e] = sympy.true
+                subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
+                if isinstance(e, sympy.Eq):
+                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
+                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
+                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
+                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
+
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
 
@@ -3628,6 +3681,8 @@ class ShapeEnv:
             self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
+            # canonicalise to remove equations that are trivially equal
+            expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
