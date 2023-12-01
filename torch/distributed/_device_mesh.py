@@ -375,7 +375,52 @@ class DeviceMesh:
         return tuple(self.mesh.shape)
 
     def get_rank(self) -> int:
+        """
+        Returns the current global rank.
+        """
         return get_rank()
+
+    def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
+        """
+        Returns the local rank of the given mesh_dim of the DeviceMesh.
+
+        Optional Args:
+            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+            of the mesh dimension. Default is None.
+
+        Returns:
+            An integer denotes the local rank.
+
+        Example (2 host with 4 GPUs each):
+            ```
+            # Let's initialize device mesh with mesh_shape = (2, 4) to represent
+            # the topology of cross-host(dim 0), and within-host (dim 1).
+            mesh_2d = DeviceMesh(device_type="cuda",
+                            mesh=[
+                                [0, 1, 2, 3],
+                                [4, 5, 6, 7]
+                            ])
+            ```
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
+        """
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        mesh_dim_group = self.get_group(mesh_dim)  # type: ignore[arg-type]
+        assert isinstance(
+            mesh_dim_group, ProcessGroup
+        ), "We expect ProcessGroup before calling `get_rank`!"
+        return get_rank(mesh_dim_group)  # type: ignore[arg-type]
 
     def get_coordinate(self) -> Optional[List[int]]:
         """
