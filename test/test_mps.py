@@ -8828,13 +8828,15 @@ class TestLinalgMPS(TestCaseMPS):
                       (0, 0), (3, 0, 0), ]:  # zero numel square matrices
             A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
             hermitian = True
+            # TODO: remove this once the other function is implemented
             try:
                 run_test_main(A, hermitian)
                 run_test_numpy(A, hermitian)
             except NotImplementedError as e:
                 if "is not currently implemented for the MPS device." in str(e):
-                    # skip the test
-                    unittest.skip(str(e))
+                    if 'pinv' not in str(e):
+                        # skip the test
+                        unittest.skip(str(e))
                 else:
                     raise e
 
