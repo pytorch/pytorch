@@ -1057,6 +1057,14 @@ class VariableBuilder:
             )
         )
 
+        # install guards for subclass inner tensors
+        if is_traceable_wrapper_subclass(value):
+            attrs, _ = value.__tensor_flatten__()
+            for attr in attrs:
+                inner_value = getattr(value, attr)
+                inner_source = AttrSource(self.source, attr)
+                VariableBuilder(self.tx, inner_source)(inner_value).recursive_realize()
+
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()

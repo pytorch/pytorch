@@ -768,9 +768,6 @@ class GraphModule(torch.nn.Module):
         sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
         self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
 
-    # Broken because we don't guard properly on inner tensors yet.
-    # TODO: Enable this when we do
-    @unittest.expectedFailure
     def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
         # should recompile for different scale size when dynamic=False
         sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
