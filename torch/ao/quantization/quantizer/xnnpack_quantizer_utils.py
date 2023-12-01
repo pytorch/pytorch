@@ -13,7 +13,6 @@ from torch.ao.quantization.pt2e.utils import (
     get_aten_graph_module,
 )
 from torch.ao.quantization.quantizer import (
-    FixedQParamsQuantizationSpec,
     QuantizationAnnotation,
     QuantizationSpec,
     QuantizationSpecBase,
@@ -617,9 +616,7 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
-def _is_input_large_scalar(
-    node: Node, gm: torch.fx.GraphModule
-):
+def _is_input_large_scalar(node: Node, gm: torch.fx.GraphModule):
     """Check if input is a large scalar value. So that we can skip quantization for the node
     since histc op (in HistogramObserver) only works for values up to certain upper bound
     """
