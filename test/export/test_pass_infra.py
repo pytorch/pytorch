@@ -6,7 +6,6 @@ import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
-from torch._export.constraints import constrain_as_value
 from torch._export.pass_base import _ExportPassBase
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -46,12 +45,12 @@ class TestPassInfra(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    constrain_as_value(b, min=2, max=5)
+                    torch._constrain_as_value(b, min=2, max=5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    constrain_as_value(c, min=2, max=5)
+                    torch._constrain_as_value(c, min=2, max=5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])

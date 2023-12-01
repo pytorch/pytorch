@@ -277,6 +277,9 @@ public:
   Vectorized<float> i0e() const {
     return map(calc_i0e);
   }
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
+  }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];

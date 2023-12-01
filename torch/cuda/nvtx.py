@@ -1,3 +1,5 @@
+r"""This package adds support for NVIDIA Tools Extension (NVTX) used in profiling."""
+
 from contextlib import contextmanager
 
 try:
@@ -22,8 +24,7 @@ __all__ = ["range_push", "range_pop", "range_start", "range_end", "mark", "range
 
 def range_push(msg):
     """
-    Pushes a range onto a stack of nested range span.  Returns zero-based
-    depth of the range that is started.
+    Push a range onto a stack of nested range span.  Returns zero-based depth of the range that is started.
 
     Args:
         msg (str): ASCII message to associate with range
@@ -32,10 +33,7 @@ def range_push(msg):
 
 
 def range_pop():
-    """
-    Pops a range off of a stack of nested range spans.  Returns the
-    zero-based depth of the range that is ended.
-    """
+    """Pop a range off of a stack of nested range spans.  Returns the  zero-based depth of the range that is ended."""
     return _nvtx.rangePop()
 
 

@@ -20,7 +20,7 @@ def calculate_ap(predictions, labels):
         sortind = np.argsort(-scores, kind='mergesort')
         truth = label[sortind]
         precision = np.cumsum(truth) / num_range
-        ap[k] = precision[truth.astype(np.bool)].sum() / max(1, truth.sum())
+        ap[k] = precision[truth.astype(bool)].sum() / max(1, truth.sum())
     return ap
 
 

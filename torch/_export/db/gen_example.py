@@ -24,5 +24,5 @@ if __name__ == "__main__":
     root_dir = examples.__name__.replace(".", "/")
     assert os.path.exists(root_dir)
     with open(os.path.join(root_dir, sys.argv[1] + ".py"), "w") as f:
-        print("Wrting to", f.name, "...")
+        print("Writing to", f.name, "...")
         f.write(TEMPLATE.format(case_name=sys.argv[1]))
