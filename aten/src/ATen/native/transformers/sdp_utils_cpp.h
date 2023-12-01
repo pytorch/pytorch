@@ -80,10 +80,7 @@ inline bool has_for_nested_inputs(sdp_params const& params) {
 }
 
 inline bool has_for_dense_inputs(sdp_params const& params) {
-  return
-      (!params.query.is_nested() || !(params.query.layout() != c10::kStrided)) ||
-      (!params.key.is_nested() || !(params.key.layout() == c10::kStrided)) ||
-      (!params.value.is_nested() || !(params.value.layout() == c10::kStrided));
+  return !params.query.is_nested() || !params.key.is_nested() || !params.value.is_nested();
 }
 
 template <typename dtype_vector>
