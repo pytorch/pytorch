@@ -10,6 +10,31 @@ from torch.distributed.distributed_c10d import ProcessGroup
 log = logging.getLogger(__name__)
 
 
+# usage
+# if dist.get_rank() == 0:
+#    ForkedPdb().set_trace()
+# dist.barrier()
+
+import pdb
+import sys
+
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open("/dev/stdin")
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
+
 def _refresh_per_optimizer_state() -> Dict[str, Any]:
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
@@ -207,6 +232,10 @@ class ShardedGradScaler(GradScaler):
         per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))  # type: ignore[var-annotated]
         with torch.no_grad():
             for group in optimizer.param_groups:
+                if torch.distributed.get_rank() == 0:
+                    ForkedPdb().set_trace()
+                torch.distributed.barrier()
+
                 for param in group["params"]:
                     if param.grad is None:
                         continue
@@ -283,6 +312,9 @@ class ShardedGradScaler(GradScaler):
         future_handles = []
 
         for v in optimizer_state["found_inf_per_device"].values():
+            if torch.distributed.get_rank() == 0:
+                ForkedPdb().set_trace()
+            torch.distributed.barrier()
             if v.device.type == "cpu":
                 v_on_cuda = v.cuda()
                 future_handles.append(

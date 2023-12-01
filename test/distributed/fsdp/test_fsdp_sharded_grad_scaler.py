@@ -196,6 +196,132 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
             )
 
+    @skip_if_lt_x_gpu(2)
+    @parametrize(params, configs, subtest_name)
+    def test_fsdp_ddp_parity_with_grad_scaler_inf(
+        self,
+        cpu_offload: CPUOffload,
+        sharding_strategy: Optional[ShardingStrategy],
+        mixed_precision: Optional[str],
+        use_orig_params: Optional[str],
+    ):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        mp = (
+            MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            )
+            if mixed_precision is not None
+            else None
+        )
+        # the ``NonUniformReqGradNWM`` model requires we set `init_scale`
+        # more conservatively than default to avoid infs with the initial steps
+        if use_orig_params == "enable_use_orig_params":
+            use_orig = True
+            model_cls = NonUniformReqGradNWM
+            sharded_grad_scaler_kwargs = {"init_scale": 2.0**11}
+        else:
+            use_orig = False
+            model_cls = NestedWrappedModule  # type: ignore[assignment]
+            sharded_grad_scaler_kwargs = None
+        for cuda_init_mode in init_modes:
+            self._test_fsdp_parity(
+                model_cls,
+                FSDPInitMode.RECURSIVE,
+                cuda_init_mode=cuda_init_mode,
+                cpu_offload=cpu_offload,
+                sharding_strategy=sharding_strategy,
+                mixed_precision=mp,
+                enable_sharded_grad_scaler=True,
+                use_orig_params=use_orig,
+                sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
+                override_grad_with_inf=True,
+            )
+
+    def _build_model_and_optim(
+        self,
+        lin_dim: int = 4,
+        build_extra_ddp: bool = False,
+        offload_policy: OffloadPolicy = OffloadPolicy(),
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            MLP(lin_dim, torch.device("cpu"), dim_multiplier=3),
+            MLP(lin_dim, torch.device("cpu")),
+            MLP(lin_dim, torch.device("cpu"), dim_multiplier=3),
+        )
+
+        if build_extra_ddp:
+            ref_model = copy.deepcopy(model).cuda()
+            replicate(ref_model, device_ids=[self.rank])
+            ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+
+        # TODO(weifengpy): move to common utils
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            offload_policy=offload_policy,
+        )
+
+        for mlp in model:
+            fully_shard_fn(mlp)
+        fully_shard_fn(model)
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+
+        if build_extra_ddp:
+            return model, optim, ref_model, ref_optim
+        else:
+            return model, optim
+
+    def test_sharded_grad_scaler_found_inf(
+        self,
+    ):
+        lin_dim = 4
+        model, optim, ref_model, ref_optim = self._build_model_and_optim(lin_dim, build_extra_ddp=True, offload_policy=offload_policy)
+        grad_scaler = ShardedGradScaler(init_scale=2.0)
+        ref_grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+        scaled_losses: List[torch.Tensor] = []
+        torch.manual_seed(42 + self.rank + 1)
+
+        for iter in range(10):
+            x = torch.rand((32, lin_dim), device="cuda")
+            for _model, _optim, _grad_scaler in ((ref_model, ref_optim, ref_grad_scaler), (model, optim, grad_scaler)):
+                _optim.zero_grad()
+                loss = _model(x).sum()
+                scaled_loss = _grad_scaler.scale(loss)
+                scaled_losses.append(scaled_loss)
+                scaled_loss.backward()
+
+                orig_params = [
+                    param.detach().clone() for param in _model.parameters()
+                ]
+
+                param = next(_model.parameters())
+                if _model == ref_model:
+                    param.grad.data.fill_(float('inf'))
+                else:
+                    # other ranks should find infs from rank 0
+                    # after collectives
+                    if dist.get_rank() == 0:
+                        param.grad._local_tensor.data.fill_(float('inf'))
+
+                    # if dist.get_rank() == 1:
+                    #     ForkedPdb().set_trace()
+                    # dist.barrier()
+
+                step_return = _grad_scaler.step(_optim)
+                self.assertIsNone(step_return, f"should return None from optim.step() when found inf but got {step_return}")
+                _grad_scaler.update()
+
+                # params remains the same after skipping optim.step
+                for param, orig_param in zip(_model.parameters(), orig_params):
+                    if _model == ref_model:
+                        self.assertEqual(param, orig_param)
+                    else:
+                        self.assertEqual(param._local_tensor, orig_param._local_tensor, f"iter: {iter} rank: {dist.get_rank()} {param._local_tensor} vs {orig_param._local_tensor}")
+
+            self.assertEqual(scaled_losses[0], scaled_losses[1], f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}")
+
 
 instantiate_parametrized_tests(TestShardGradScaler)
 instantiate_parametrized_tests(TestShardedGradScalerParityWithDDP)
