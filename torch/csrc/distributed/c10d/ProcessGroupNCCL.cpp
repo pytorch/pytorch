@@ -2641,7 +2641,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "broadcast", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -2704,7 +2704,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "_broadcast_oop", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -2746,7 +2746,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "reduce", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -2810,7 +2810,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "_reduce_oop", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -3468,7 +3468,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      dstRank, // rank
+      dstRank, // dst rank
       "send", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -3506,7 +3506,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      srcRank, // rank
+      srcRank, // src rank
       "recv", // colName
       tensor.numel(), // inSize
       tensor.numel(), // outSize
@@ -3666,7 +3666,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "gather", // colName
       tensor.numel(), // inSize
       tensor.numel() * this->getSize(), // outSize
@@ -3753,7 +3753,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      rank_, // rank
+      opts.rootRank, // root rank
       "scatter", // colName
       tensor.numel(), // inSize
       tensor.numel() * this->getSize(), // outSize

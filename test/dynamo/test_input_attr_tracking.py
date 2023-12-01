@@ -312,7 +312,6 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.op_count, 6)
         self.assertExpectedInline(
             """\
-
 class GraphModule(torch.nn.Module):
     def forward(self, L_y_ : torch.Tensor, L_x_ : torch.Tensor):
         l_y_ = L_y_
@@ -330,7 +329,7 @@ class GraphModule(torch.nn.Module):
 
         mul = set_ * l_y_;  set_ = l_y_ = None
         return (mul,)
-        """,
+""",
             actual,
         )
 
