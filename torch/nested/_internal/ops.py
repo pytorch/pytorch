@@ -896,3 +896,20 @@ def _nested_zeros(func, *args, **kwargs):
     sum_offsets = singleton.node.singleton_sum_offsets()
 
     return NestedTensor(torch.zeros([sum_offsets, *Ds], **new_kwargs), offsets)
+
+@register_jagged_func(
+    torch.ops.aten._nested_empty.default,
+    "size: any, dummy: jt, dtype: any?, layout: any?, device: any?, pin_memory: any?, memory_format: any?",
+)
+def _nested_empty(func, *args, **kwargs):
+    print("empty")
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    new_kwargs.pop("dummy")
+    # TODO: don't assume that the ragged_idx == 1
+    _unused_B, singleton, *Ds = new_kwargs.pop("size")
+    offsets = singleton.node.singleton_values()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+
+    return NestedTensor(torch.empty([sum_offsets, *Ds], **new_kwargs), offsets)

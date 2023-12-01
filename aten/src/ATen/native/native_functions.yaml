@@ -2355,6 +2355,12 @@
     CompositeExplicitAutograd: empty_permuted_symint
   autogen: empty_permuted.out
 
+- func: _nested_empty(SymInt[] size, Tensor dummy, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  category_override: factory
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: empty_nested_symint
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor

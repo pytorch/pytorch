@@ -131,33 +131,28 @@ inline at::Tensor from_blob(
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
+// TODO: remove this once we update codegen to generate these
 inline at::Tensor zeros_symint(c10::SymIntArrayRef size, at::TensorOptions options = {}) {
-  std::cout << "zeros_symint" << std::endl;
   at::AutoDispatchBelowADInplaceOrView guard;
-  at::TensorImpl* ptr = nullptr;
-  for (const auto& s : size) {
-    if (!s.is_heap_allocated()) {
-      continue;
-    }
-    auto _ptr = (at::TensorImpl*) s.toSymNode()->singleton_dummy();
-
-    if (_ptr != nullptr) {
-      TORCH_CHECK(ptr == nullptr, "zeros(): only one singleton dimension supported");
-      ptr = _ptr;
-    }
-  }
-  if (ptr != nullptr) {
-    // Todo update this.
-    auto p = c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{});
-    auto dummy = at::Tensor(p);
-
-    auto ret = _nested_zeros_symint(size, dummy, options);
-    dummy.unsafeReleaseTensorImpl(); // don't decref!
-    p.release();
-    return ret;
+  auto ret = c10::try_call_with_dummy([size, options](at::Tensor dummy) {
+    return _nested_zeros_symint(size, dummy, options);
+  }, size);
+  if (ret.has_value()) {
+    return ret.value();
   }
   std::cout << "did not detect singleton" << std::endl;
   return autograd::make_variable(at::zeros_symint(size, at::TensorOptions(options).requires_grad(c10::nullopt)), /*requires_grad=*/options.requires_grad());
+}
+
+inline at::Tensor empty_symint(c10::SymIntArrayRef size, at::TensorOptions options = {}, c10::optional<at::MemoryFormat> memory_format = c10::nullopt) {  at::AutoDispatchBelowADInplaceOrView guard;
+  auto ret = c10::try_call_with_dummy([size, options, memory_format](at::Tensor dummy) {
+    return _nested_empty_symint(size, dummy, options, memory_format);
+  }, size);
+  if (ret.has_value()) {
+    return ret.value();
+  }
+  std::cout << "did not detect singleton" << std::endl;
+  return autograd::make_variable(at::empty_symint(size, at::TensorOptions(options).requires_grad(c10::nullopt), memory_format), /*requires_grad=*/options.requires_grad());
 }
 
 ${function_definitions}

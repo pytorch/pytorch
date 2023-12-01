@@ -3,8 +3,7 @@
 #include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
-#include <iostream>
-#include "ATen/core/TensorBody.h"
+#include <ATen/core/TensorBody.h>
 
 namespace c10 {
 
@@ -194,5 +193,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   at::Tensor dummy_;
   int64_t sum_offsets_;
 };
+
+TORCH_API std::optional<at::Tensor> try_call_with_dummy(std::function<at::Tensor(at::Tensor)> fn, c10::SymIntArrayRef size);
 
 } // namespace c10

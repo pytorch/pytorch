@@ -240,6 +240,16 @@ at::Tensor zeros_nested_symint(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+at::Tensor empty_nested_symint(
+    c10::SymIntArrayRef size,
+    const at::Tensor& dummy,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> memory_format) {
+  TORCH_INTERNAL_ASSERT(false);
+}
 
 } // namespace native
 } // namespace at
