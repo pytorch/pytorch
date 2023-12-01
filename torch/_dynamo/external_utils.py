@@ -34,5 +34,6 @@ class FakeContext:
         # and will no longer call into c++
         self.saved_tensors = saved_tensors
 
-def call_backward(backward, *args):
-    return backward(FakeContext(backward.saved_tensors), *args)
+def call_backward(obj, saved_tensors, *args):
+    ctx = FakeContext(saved_tensors)
+    return obj._forward_cls.backward(ctx, *args)

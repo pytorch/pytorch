@@ -431,9 +431,9 @@ variable_list compiled_autograd(
         saved.hack_use_compiled_apply = true;
       }
       outputs = call.node->apply_with_saved(inputs, saved);
-      if (call.node->name() == "MyFnBackward") {
-        compiler_call.backward_ctx = saved.hack_backward_obj;
-      }
+      // if (call.node->name() == "MyFnBackward") {
+        // compiler_call.backward_ctx = saved.hack_backward_obj;
+      // }
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -488,8 +488,10 @@ variable_list compiled_autograd(
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
-  PyObject* pybackwards = PyTuple_New(static_cast<Py_ssize_t>(1));
-  PyTuple_SET_ITEM(pybackwards, 0, compiler_call.backwards[0].release());
+  PyObject* pybackwards = PyTuple_New(static_cast<Py_ssize_t>(compiler_call.backwards.size()));
+  for (uint i=0; i<compiler_call.backwards.size(); i++) {
+    PyTuple_SET_ITEM(pybackwards, i, compiler_call.backwards[i].release());
+  }
   THPObjectPtr backwards(pybackwards);
   std::cout << "calling compiled_fn (graph) start" << std::endl;
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(

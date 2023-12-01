@@ -59,6 +59,8 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
     def test_compiled_autograd_key(self):
+        # torch._dynamo.config.cache_size_limit = 1
+        # torch._dynamo.config.error_on_recompile = True
         def fn():
             class MyFn(torch.autograd.Function):
                 @staticmethod
