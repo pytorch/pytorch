@@ -290,9 +290,9 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
 
 def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
     sorted_keys, original_copy = context
-    d = original_copy.copy()
+    d: Dict[Any, Any] = original_copy.copy()
     d.update(zip(sorted_keys, values))
-    return d  # type: ignore[[no-any-return]
+    return d
 
 
 def _dict_serialize(context: Context) -> DumpableContext:
