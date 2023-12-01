@@ -3234,6 +3234,12 @@ class ShapeEnv:
             # divisions simplified away
             if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                 expr = new_expr
+        if expr.has(Mod):
+            for mod in expr.atoms(Mod):
+                # TODO: we should be able to simplify factors of the modulus too, e.g. knowing x % 4 == 0
+                # implies x % 2 == 0
+                if self.replace(mod) in self.divisible:
+                    expr = expr.replace(mod, sympy.Integer(0))
         return expr
 
     @lru_cache(256)

@@ -1215,7 +1215,14 @@ class Reduction(Loops):
         """
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
-        block_size = FloorDiv(reduction_numel + (split - 1), split)
+        rnumel_hint, split_hint = V.graph.sizevars.size_hints([reduction_numel, split])
+        if rnumel_hint % split_hint == 0:
+            V.graph.sizevars.guard_multiple_of(reduction_numel, split)
+            # This is the same thing as CeilDiv(rnumel, split) when rnumel is divisible by split,
+            # but this simplification makes the reduction kernel easier to fuse.
+            block_size = FloorDiv(reduction_numel, split)
+        else:
+            block_size = FloorDiv(reduction_numel + (split - 1), split)
         default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
             inner_fn, reduction_ranges, reduction_numel, split, block_size, default

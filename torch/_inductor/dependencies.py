@@ -251,7 +251,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
         new_vars, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-        index = sympy_subs(sympy.expand(index), replacement)
+        index = V.graph.sizevars.simplify_with_ranges(
+            sympy_subs(sympy.expand(index), replacement), dict(zip(new_vars, new_sizes))
+        )
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]

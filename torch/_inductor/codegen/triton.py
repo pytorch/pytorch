@@ -2270,7 +2270,7 @@ class TritonScheduling(BaseScheduling):
 
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
-            if numel1 == numel2 * rnumel2:
+            if numel1 == V.graph.sizevars.shape_env.simplify(numel2 * rnumel2):
                 if not all(
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
@@ -2314,7 +2314,8 @@ class TritonScheduling(BaseScheduling):
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
             return (node_numel == numel and node_rnumel == rnumel) or (
-                node_numel == numel * rnumel and node_rnumel == 1
+                node_numel == V.graph.sizevars.shape_env.simplify(numel * rnumel)
+                and node_rnumel == 1
             )
 
         def fits_outside_reduction(n):

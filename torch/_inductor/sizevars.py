@@ -7,7 +7,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
@@ -227,7 +227,11 @@ class SizeVarAllocator:
             assert len(index) == len(sizes)
             return [i for i, s in zip(index, sizes) if s is not None]
 
-        return [x for x in sizes if x is not None], reindex, prune
+        return (
+            [self.shape_env.simplify(x) for x in sizes if x is not None],
+            reindex,
+            prune,
+        )
 
     # Note - [On Statically Known]
     #
@@ -306,7 +310,7 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        expr = sympy.Eq(numerator % denominator, 0)
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.is_expr_static_and_true(expr)
 
     # The guard functions require you to ALREADY KNOW that a particular
@@ -327,6 +331,9 @@ class SizeVarAllocator:
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
+
+    def guard_multiple_of(self, numerator: Expr, denominator: Expr) -> None:
+        assert self.shape_env.evaluate_expr(sympy.Eq(Mod(numerator, denominator), 0))
 
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
