@@ -46,13 +46,10 @@ class GuardFn(Protocol):
 @dataclasses.dataclass
 class GuardedCode:
     code: types.CodeType
-    check_fn: GuardFn
-    interpreter_agnostic_check_fn: GuardFn
     frame: types.FrameType
     name: str
     compiled_fn: Any
     global_alias_table: Dict[str, str]
-    instructions: List[Any]
     resume_fn_name: str
     resume_fn_code: types.CodeType
     unique_id: int
@@ -68,16 +65,12 @@ class GuardedCode:
         else:
             resume_fn_code_attrs = None
 
-        guard_py_code = self.interpreter_agnostic_check_fn.pycode
         # annoying
         unique_id = torch._dynamo.bytecode_transformation._unique_id_counter
         guarded_code_struct = (
             code_attrs,
-            guard_py_code,
             self.name,
-            self.compiled_fn,
             self.global_alias_table,
-            self.instructions,
             self.resume_fn_name,
             resume_fn_code_attrs,
             unique_id
@@ -94,7 +87,6 @@ class GuardedCode:
                 fn_name,
                 compiled_fn,
                 global_alias_table,
-                instructions,
                 resume_fn_name,
                 resume_fn_code_attrs,
                 unique_id_serialized,
@@ -110,11 +102,6 @@ class GuardedCode:
             for alias, name in global_alias_table.items():
                 frame.f_globals[alias] = eval(name, frame.f_globals)
 
-            check_fn = torch._dynamo.guards.CheckFunctionManager.guard_fn_from_pycode(
-                guard_code, frame.f_globals
-            )
-            # cg = PyCodegen()
-            # torch._dynamo.bytecode_transformations.clean_and_assemble_instructions(instructions, keys, code_options)[1]
             code_obj = types.CodeType(*attributes)
             if resume_fn_code_attrs:
                 resume_fn_code_obj = types.CodeType(*resume_fn_code_attrs)
@@ -122,23 +109,16 @@ class GuardedCode:
             else:
                 resume_fn_code_obj = None
 
-            if check_fn(frame.f_locals):
-                return GuardedCode(
-                    code_obj,
-                    check_fn,
-                    check_fn,
-                    frame,
-                    fn_name,
-                    compiled_fn,
-                    global_alias_table,
-                    instructions,
-                    resume_fn_name,
-                    resume_fn_code_obj,
-                    unique_id,
-                    can_serialize=True,
-                )
-            else:
-                return None
+            return GuardedCode(
+                code_obj,
+                frame,
+                fn_name,
+                compiled_fn,
+                global_alias_table,
+                resume_fn_name,
+                resume_fn_code_obj,
+                unique_id,
+            )
         except Exception as e:
             return None
 

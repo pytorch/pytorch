@@ -499,7 +499,6 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        output.to_serialize["instructions"] = instructions
 
     @dynamo_timed(phase_name="entire_frame_compile")
     def compile_inner(
@@ -575,39 +574,17 @@ def _compile(
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(
-            output,
-            hooks.guard_fail_fn if hooks else None,
-            interpreter_agnostic=False,
-        )
-
-        can_serialize = True
-        try:
-            interpreter_agnostic_check_fn = CheckFunctionManager(
-                output,
-                hooks.guard_fail_fn if hooks else None,
-                interpreter_agnostic=True,
-            )
-        except RuntimeError as e:
-            # Failed to produce interpreter agnostic guards!
-            interpreter_agnostic_check_fn = None
-            can_serialize = False
-
 
         serialize_table = output.to_serialize
         guarded_code = GuardedCode(
             code=out_code,
-            check_fn=check_fn.check_fn,
-            interpreter_agnostic_check_fn=interpreter_agnostic_check_fn.check_fn if interpreter_agnostic_check_fn else None,
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
-            instructions=serialize_table["instructions"],
             resume_fn_name=serialize_table.get("resume_fn_name", None),
             resume_fn_code=serialize_table.get("resume_fn_code", None),
             frame=frame,
-            unique_id=torch._dynamo.bytecode_transformation._unique_id_counter
-            can_serialize=can_serialize,
+            unique_id=torch._dynamo.bytecode_transformation._unique_id_counter,
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
