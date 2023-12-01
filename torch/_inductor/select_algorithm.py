@@ -265,7 +265,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(  # type: ignore[attr-defined]
+        V.ops.store(
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -373,7 +373,6 @@ class TritonTemplateKernel(TritonKernel):
                 grid=grid,
             )
         else:
-            call_args = ", ".join(call_args)  # type: ignore[assignment]
             stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -386,7 +385,7 @@ class TritonTemplateKernel(TritonKernel):
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
-                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
             )
 
 
@@ -649,7 +648,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
+            torch._C._dynamo.guards.assert_size_stride(
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
