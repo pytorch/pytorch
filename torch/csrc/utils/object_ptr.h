@@ -8,9 +8,7 @@ class TORCH_PYTHON_API THPPointer {
  public:
   THPPointer() : ptr(nullptr){};
   explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
-  THPPointer(THPPointer&& p) noexcept {
-    free();
-    ptr = p.ptr;
+  THPPointer(THPPointer&& p) noexcept : ptr(p.ptr) {
     p.ptr = nullptr;
   };
 
