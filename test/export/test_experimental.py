@@ -76,6 +76,27 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(torch.allclose(graph_res_2, eager_res_1))
         self.assertTrue(torch.allclose(graph_res_3, eager_res_2))
 
+    def test_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x.cos()
+
+                def false_fn(x):
+                    return x.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(3, 4)
+        from torch.fx.experimental.proxy_tensor import make_fx
+        gm, _ = aot_export_module(M(), (inp,), trace_joint=False)
+        print(gm)
+
+
 
 if __name__ == '__main__':
     run_tests()

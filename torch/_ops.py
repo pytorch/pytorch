@@ -153,6 +153,7 @@ class OperatorBase:
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
             # Mode is unused (there's a global FunctionalTensorMode that we can access)
+            print("HI", args, kwargs)
             return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
@@ -555,6 +556,8 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
+        # if key == torch._C.DispatchKey.PreDispatch:
+        #     breakpoint()
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 

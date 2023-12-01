@@ -41,14 +41,11 @@ def strict_mode(callable, operands):
     if torch._dynamo.is_compiling():
         return strict_mode_op(callable, operands)
 
-    with _disable_current_modes():
-        def func(x):
-            return FunctionalTensor.from_functional(x)
-
-        operands_not_functional = pytree.tree_map_only(FunctionalTensor, func, operands)
-        with _set_compilation_env():
-            gm = torch.export.export(callable, operands_not_functional).module()
-    return gm(*operands)
+    with _set_compilation_env():
+        with torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(strict_mode_op, backend="eager", fullgraph=True)(
+                callable, operands
+            )
 
 
 strict_mode_op = HigherOrderOperator("strict_mode")
@@ -63,8 +60,26 @@ strict_mode_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(strict_mode_op, deferred_error=True)
 )
 
+@strict_mode_op.py_impl(ProxyTorchDispatchMode)
+def inner(mode, callable, operands):
+    if mode.enable_tracing:
+        return trace_strict_mode(mode, strict_mode_op, callable, operands)
+    else:
+        return strict_mode_op(callable, operands)
+
 @strict_mode_op.py_impl(FakeTensorMode)
 def strict_mode_fake_tensor_mode(mode, callable, operands):
     with mode:
         true_outs = callable(*operands)
     return true_outs
+
+@strict_mode_op.py_functionalize_impl
+def strict_mode_func(ctx, callable, inputs):
+    unwrapped_inputs = ctx.unwrap_tensors(inputs)
+    with ctx.redispatch_to_next():
+        functional_callable = ctx.functionalize(callable)
+
+        cond_return = strict_mode_op(
+            functional_callable, unwrapped_inputs
+        )
+        return ctx.wrap_tensors(cond_return)

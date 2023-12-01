@@ -150,6 +150,8 @@ class TestGenericProxyTensor(TestCase):
     def test_pre_dispatch_mode_stack(self):
         def f(a):
             b = torch.ones(4, 4)
+            b = b + 4
+            b = b + 1
             return torch.matmul(a, b)
         # We expect to see matmul in the trace - it should NOT be decomposed into mm.
         # Also, torch.ones() doesn't show up in the trace.
@@ -160,7 +162,9 @@ class TestGenericProxyTensor(TestCase):
         from torch._dispatch.python import enable_python_dispatcher
         with enable_python_dispatcher():
             out1 = f(inp)
+        #breakpoint()
         fx_g = make_fx(f, pre_dispatch=True)(inp)
+        breakpoint()
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
