@@ -33,15 +33,13 @@ def round(number, ndigits=None):
     if isinstance(number, (bool, torch.SymBool, int, torch.SymInt)):
         return number
     elif not isinstance(number, (float, torch.SymFloat)):
-        raise TypeError
+        raise TypeError(f"round is not support for inputs of type {type(number)}.")
 
     if ndigits is None:
         result = _round_half_to_even(number)
         return torch.sym_int(result) if isinstance(number, torch.SymFloat) else int(result)
-    elif ndigits >= 0:
-        return _round_half_to_even(number * 10 ** ndigits) * 10 ** -ndigits
     else:
-        raise ValueError()
+        return _round_half_to_even(number * 10 ** ndigits) * 10 ** -ndigits
 
 
 def _round_half_to_even(x):
