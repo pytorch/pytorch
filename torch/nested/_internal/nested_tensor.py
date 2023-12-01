@@ -281,7 +281,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
+        return gO.values(), None, None, None
 
 
 # Not actually a view!
@@ -299,7 +299,7 @@ class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
+        return gO.values(), None, None, None, None
 
 
 # Need to make it obvious that users should be passing in offsets
