@@ -144,14 +144,14 @@ class DeviceMesh:
     Example (2 host with 4 GPUs each):
         The following program runs on each process/rank in an SPMD manner:
         ```
-        # Initialize device mesh as (2, 4) to represent the topology
-        # of cross-host(dim 0), and within-host (dim 1).
-        mesh = DeviceMesh(device_type="cuda",
-                          mesh=[
-                            [0, 1, 2, 3],
-                            [4, 5, 6, 7]
-                          ])
+            # Initialize device mesh as (2, 4) to represent the topology
+            # of cross-host(dim 0), and within-host (dim 1).
+            mesh = DeviceMesh(
+                device_type="cuda",
+                mesh=[[0, 1, 2, 3],[4, 5, 6, 7]],
+            )
         ```
+
         A reduction over the first dimension of mesh will reduce across
         columns (0, 4), .. and (3, 7), a reduction over the second dimension
         of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7).
@@ -305,21 +305,20 @@ class DeviceMesh:
 
         Example (2 host with 4 GPUs each):
         ```
-        # Below is a DeviceMesh with mesh_shape of (2, 4) and mesh_dim_name of ("dp", "tp")
-        mesh = DeviceMesh(device_type="cuda",
-                          mesh=[
-                            [0, 1, 2, 3],
-                            [4, 5, 6, 7]
-                          ],
-                          mesh_dim_names=["dp", "tp"])
-                          )
+            # Below is a DeviceMesh with mesh_shape of (2, 4) and mesh_dim_name of ("dp", "tp").
+            mesh = DeviceMesh(
+                device_type="cuda",
+                mesh=[[0, 1, 2, 3],[4, 5, 6, 7]],
+            )
         ```
+
         Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
         Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
         Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
         Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
         Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
         Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
+
         """
         if self.mesh.ndim <= 1:
             raise RuntimeError(
@@ -338,9 +337,10 @@ class DeviceMesh:
         returns a single ProcessGroup if mesh_dim is specified or the given mesh has
         only one mesh dimension.
 
-        Optional Args:
-            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+        Args:
+            mesh_dim (str/int, optional): it can be the name of the mesh dimension or the index
             of the mesh dimension. Default is None.
+
         Returns:
             A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
             a DeviceMesh with more than 1 dimension; otherwise, returns a single
@@ -385,8 +385,8 @@ class DeviceMesh:
         """
         Returns the local rank of the given mesh_dim of the DeviceMesh.
 
-        Optional Args:
-            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+        Args:
+            mesh_dim (str/int, optional): it can be the name of the mesh dimension or the index
             of the mesh dimension. Default is None.
 
         Returns:
@@ -395,13 +395,12 @@ class DeviceMesh:
         Example (2 host with 4 GPUs each):
             The following program runs on each process/rank in an SPMD manner:
             ```
-            # Let's initialize device mesh with mesh_shape = (2, 4) to represent
-            # the topology of cross-host(dim 0), and within-host (dim 1).
-            mesh_2d = DeviceMesh(device_type="cuda",
-                            mesh=[
-                                [0, 1, 2, 3],
-                                [4, 5, 6, 7]
-                            ])
+                # Let's initialize device mesh with mesh_shape = (2, 4) to represent
+                # the topology of cross-host(dim 0), and within-host (dim 1).
+                mesh = DeviceMesh(
+                    device_type="cuda",
+                    mesh=[[0, 1, 2, 3],[4, 5, 6, 7]],
+                )
             ```
 
             Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
@@ -410,6 +409,7 @@ class DeviceMesh:
             Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
             Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
             Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
+
         """
         if self.ndim > 1 and mesh_dim is None:
             raise RuntimeError(
