@@ -1156,7 +1156,7 @@ class ConstructorMoverPass:
                 if (
                     self.allow_cpu_device(user)
                     and node_device
-                    and node_device.type == "cuda"
+                    and node_device.type == self.target
                 ):
                     del cpu_indeg[user]
                 else:
