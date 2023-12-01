@@ -53,12 +53,12 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
   pip install pandas
   log_folder="test/.torchbench_logs"
   device="cpu"
-  modes = ("accuracy" "performance")
-  compilers = ("dynamo-onnx" "torchscript-onnx")
-  suites = ("huggingface" "timm_models")
+  modes=("accuracy" "performance")
+  compilers=("dynamo-onnx" "torchscript-onnx")
+  suites=("huggingface" "timm_models")
 
   mkdir -p "${log_folder}"
-  for mode in "${modes[@]}""; do
+  for mode in "${modes[@]}"; do
     for compiler in "${compilers[@]}"; do
       for suite in "${suites[@]}"; do
         output_file="${log_folder}/${compiler}_${suite}_float32_inference_${device}_${mode}.csv"

@@ -90,6 +90,8 @@ SKIP = {
     "clip",
     # multi gpu not always available in benchmark runners
     "simple_gpt_tp_manual",
+    # TIMEOUT, hits cache size limit with recompiles
+    "DALLE2_pytorch",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
