@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -25,43 +24,15 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-
-#include <torch/csrc/jit/serialization/pickler.h>
-#include <torch/csrc/profiler/combined_traceback.h>
-
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/torch.h>
 
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
-
-DebugInfoWriter::DebugInfoWriter(int rank) {
-  std::string fileName = getCvarString(
-      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(fileName, rank);
-}
-
-DebugInfoWriter::~DebugInfoWriter() = default;
-
-void DebugInfoWriter::write(const std::string& ncclTrace) {
-  // Open a file for writing. The ios::binary flag is used to write data as
-  // binary.
-  std::ofstream file(filename_, std::ios::binary);
-
-  // Check if the file was opened successfully.
-  if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
-    return;
-  }
-
-  file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Wrote finished ";
-}
 
 namespace {
 
@@ -318,31 +289,6 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 
 } // namespace
 
-namespace {
-std::string pickle_str(const c10::IValue& v) {
-  std::vector<char> result;
-  {
-    auto writer = [&](const char* data, size_t size) {
-      result.insert(result.end(), data, data + size);
-    };
-    torch::jit::Pickler pickler(
-        writer, nullptr, nullptr, nullptr, nullptr, false);
-    pickler.protocol();
-    pickler.pushIValue(v);
-    pickler.stop();
-  }
-  return std::string(result.begin(), result.end());
-}
-c10::Dict<c10::IValue, c10::IValue> new_dict() {
-  return c10::Dict<c10::IValue, c10::IValue>(
-      c10::AnyType::get(), c10::AnyType::get());
-}
-c10::List<c10::IValue> new_list() {
-  return c10::List<c10::IValue>(c10::AnyType::get());
-}
-
-} // namespace
-
 // Map from each communicator to its device index.
 // This map is used when register/deregister cache segments from cache
 // allocator. See design notes below:
@@ -391,208 +337,6 @@ void cacheAllocatorDeregisterHook(
     }
   }
 }
-
-struct NCCLTraceBuffer {
-  static NCCLTraceBuffer* get() {
-    // intentionally leak on exit
-    // because this will hold python state that may get destructed
-    static NCCLTraceBuffer* instance = new NCCLTraceBuffer();
-    return instance;
-  }
-  NCCLTraceBuffer() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    enabled_ = max_entries_ > 0;
-  }
-  using EventList = std::vector<at::cuda::CUDAEvent>;
-  struct Entry {
-    size_t id_; // incremented id in the trace buffer
-                // used to figure out where in the circular entries
-                // buffer this entry will be located to
-                // update state information
-    size_t pg_id_;
-    size_t seq_id_; // as tracked by the process group
-    const char* profiling_name_;
-
-    std::shared_ptr<torch::CapturedTraceback> traceback_;
-    // we borrow pointser to start_ and end_ so we can query the state
-    // on reporting. However, once the event is completed, the call
-    // to `complete` will clear these.
-    EventList *start_, *end_;
-    const char* state_ = "scheduled";
-
-    // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
-    c10::SmallVector<int, 4> output_dims_;
-    c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
-  };
-
-  bool enabled_ = false;
-  std::mutex mutex_;
-  std::vector<Entry> entries_;
-  size_t max_entries_ = 0;
-  size_t next_ = 0;
-  size_t id_ = 0;
-
-  c10::optional<size_t> record(
-      size_t pg_id,
-      size_t seq_id,
-      const char* profiling_name,
-      const std::vector<at::Tensor>& inputs,
-      const std::vector<at::Tensor>& outputs,
-      EventList* start,
-      EventList* end) {
-    if (!enabled_) {
-      return c10::nullopt;
-    }
-    auto traceback = torch::CapturedTraceback::gather(true, true, true);
-    std::lock_guard<std::mutex> guard(mutex_);
-
-    auto te = Entry{
-        id_,
-        pg_id,
-        seq_id,
-        profiling_name,
-        std::move(traceback),
-        std::move(start),
-        std::move(end)};
-
-    for (const auto& input : inputs) {
-      c10::IntArrayRef sizes = input.sizes();
-      te.input_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    for (const auto& output : outputs) {
-      c10::IntArrayRef sizes = output.sizes();
-      te.output_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    if (entries_.size() < max_entries_) {
-      entries_.emplace_back(std::move(te));
-    } else {
-      entries_[next_++] = std::move(te);
-      if (next_ == max_entries_) {
-        next_ = 0;
-      }
-    }
-    return id_++;
-  }
-
-  std::vector<Entry> dump_entries() {
-    std::lock_guard<std::mutex> guard(mutex_);
-    std::vector<Entry> result;
-    result.reserve(entries_.size());
-    result.insert(result.end(), entries_.begin() + next_, entries_.end());
-    result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
-    // query any remaining events
-    for (auto& r : result) {
-      if (r.start_ != nullptr) {
-        bool started = true;
-        for (auto& ev : *r.start_) {
-          if (!ev.query()) {
-            started = false;
-            break;
-          }
-        }
-        if (started) {
-          r.state_ = "started";
-        }
-        r.start_ = nullptr;
-      }
-      if (r.end_ != nullptr) {
-        bool completed = true;
-        for (auto& ev : *r.end_) {
-          if (!ev.query()) {
-            completed = false;
-            break;
-          }
-        }
-        if (completed) {
-          r.state_ = "completed";
-        }
-        r.end_ = nullptr;
-      }
-    }
-    return result;
-  }
-
-  void complete(c10::optional<size_t> id) {
-    if (!enabled_ || !id) {
-      return;
-    }
-    std::lock_guard<std::mutex> guard(mutex_);
-    auto& entry = entries_.at(*id % max_entries_);
-    if (entry.id_ == *id) {
-      entry.state_ = "completed";
-      entry.start_ = entry.end_ = nullptr;
-    }
-  }
-
-  std::string dump() {
-    auto result = dump_entries();
-    auto entries = new_list();
-    c10::IValue pg_id_s = "pg_id";
-    c10::IValue seq_id_s = "seq_id";
-    c10::IValue profiling_name_s = "profiling_name";
-    c10::IValue input_sizes_s = "input_sizes";
-    c10::IValue output_sizes_s = "output_sizes";
-
-    c10::IValue frames_s = "frames";
-    c10::IValue state_s = "state";
-    c10::IValue line_s = "line";
-    c10::IValue name_s = "name";
-    c10::IValue filename_s = "filename";
-
-    std::vector<torch::CapturedTraceback*> tracebacks;
-    for (auto& e : result) {
-      tracebacks.push_back(e.traceback_.get());
-    }
-    torch::SymbolizedTracebacks stracebacks = torch::symbolize(tracebacks);
-    std::vector<c10::IValue> all_frames;
-    for (const auto& f : stracebacks.all_frames) {
-      auto d = new_dict();
-      d.insert(name_s, f.funcname);
-      d.insert(filename_s, f.filename);
-      d.insert(line_s, int64_t(f.lineno));
-      all_frames.emplace_back(std::move(d));
-    }
-
-    for (auto i : c10::irange(result.size())) {
-      auto& e = result.at(i);
-      auto& tb = stracebacks.tracebacks.at(i);
-      auto dict = new_dict();
-      dict.insert(pg_id_s, int64_t(e.pg_id_));
-      dict.insert(seq_id_s, int64_t(e.seq_id_));
-      dict.insert(profiling_name_s, e.profiling_name_);
-
-      auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-        auto sizes = new_list();
-        for (auto dim : dims) {
-          auto arg_sizes = new_list();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
-            arg_sizes.push_back(*it++);
-          }
-          sizes.push_back(arg_sizes);
-        }
-        return sizes;
-      };
-
-      dict.insert(input_sizes_s, read_sizes(e.input_dims_));
-      dict.insert(output_sizes_s, read_sizes(e.output_dims_));
-      dict.insert(state_s, e.state_);
-      auto frames = new_list();
-      for (int64_t frame : tb) {
-        frames.push_back(all_frames.at(frame));
-      }
-      dict.insert(frames_s, frames);
-      entries.push_back(dict);
-    }
-    return pickle_str(entries);
-  }
-};
 
 std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump();
@@ -841,7 +585,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
             rank_,
             "] Work ",
             (*this),
-            " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
+            " timed out in blocking wait (TORCH_NCCL_BLOCKING_WAIT=1).");
         LOG(ERROR) << exceptionMsg;
         break;
       }
@@ -953,10 +697,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  blockingWait_ = getCvarBool(NCCL_BLOCKING_WAIT, false);
+  blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
-      getCvarInt(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
-  desyncDebug_ = getCvarBool(NCCL_DESYNC_DEBUG, false) ||
+      getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
+  desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
+  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
@@ -964,42 +710,44 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
       getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) > 0);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
   useTensorRegisterAllocatorHook_ =
-      getCvarBool(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
+      getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
   if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
     LOG(INFO)
         << "[Rank " << rank_
-        << "] disables NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+        << "] disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
   }
 #endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
-      LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
-                << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
-                << "should not both be enabled. "
-                << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+      LOG(INFO)
+          << "[Rank " << rank_ << "] TORCH_NCCL_BLOCKING_WAIT and "
+          << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
+          << "should not both be enabled. "
+          << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
       asyncErrorHandling_ = NoHandling;
       desyncDebug_ = false;
     }
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
-      LOG(INFO) << "[Rank " << rank_
-                << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
-                << "must both be enabled. "
-                << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
+          << "must both be enabled. "
+          << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
     }
   }
 
-  if (getCvarBool(ENABLE_NCCL_HEALTH_CHECK, false)) {
+  if (getCvarBool(TORCH_ENABLE_NCCL_HEALTH_CHECK, false)) {
     // Perform health check by initializing dummy communicators and destroying
     // them. This will help indicate any NCCL-related issues prior to the first
     // collective.
@@ -1021,16 +769,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion()
-            << ", NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
-            << ", NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
 #endif
             << ", TORCH_NCCL_ENABLE_MONITORING: "
@@ -1062,28 +811,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         &cacheAllocatorDeregisterHook);
     allocatorHooksAttached = true;
   }
-
-#ifdef USE_NCCL_WITH_UCC
-  static c10::once_flag initialize_ucc_lib_flag;
-  c10::call_once(initialize_ucc_lib_flag, [&] {
-    uccLib_ = loadTorchUCC();
-    if (uccLib_ != nullptr) {
-      LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    }
-  });
-
-  if (uccLib_ != nullptr) {
-    LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    typedef c10::intrusive_ptr<Backend> fn(
-        const c10::intrusive_ptr<Store>& store, int rank, int size);
-    auto createProcessGroupUCC =
-        reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
-    if (createProcessGroupUCC != nullptr) {
-      uccPG_ = createProcessGroupUCC(store, rank_, size_);
-      LOG(INFO) << "[Rank " << rank_ << "] ProcessGroupUCC created.";
-    }
-  }
-#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1163,7 +890,7 @@ void ProcessGroupNCCL::registerOnCompletionHook(
       ValueError,
       enableTiming_.load(),
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
-      "events which require setting NCCL_ENABLE_TIMING environment variable. "
+      "events which require setting TORCH_NCCL_ENABLE_TIMING environment variable. "
       "This is only available for NCCL version >= 2.4.");
   onCompletionHook_ = std::move(hook);
   onCompletionHookThread_ = std::thread(&ProcessGroupNCCL::runHookLoop, this);
@@ -1531,30 +1258,44 @@ void ProcessGroupNCCL::workCleanupLoop() {
         }
 
         // Report desync state in case of timeout
-        if (desyncDebug_ && timedOut) {
+        if (timedOut) {
           try {
-            // Set shutdown mode, so the heartbeat monitor thread will not
-            // abort process immediately.
-            collectiveDebugInfoMode_.store(true);
-            // Store debug info to storage. (By default to local disk)
-            auto dumpingDebugInfo = tryWriteDebugInfo();
-            auto desyncMsg = getNCCLWatchdogDebugInfo();
-            LOG(ERROR) << desyncMsg;
-            if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
-              std::this_thread::sleep_for(
-                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
-              // At this point, we either have already waited for
-              // `kWatchdogThreadSleepMillis * 30` or the thread has finished so
-              // that we mark the thread detach and the dump of debug info
-              // becomes "best effort".
-              dumpingDebugInfo->detach();
+            if (desyncDebug_ || dumpOnTimeout_) {
+              // Set shutdown mode, so the heartbeat monitor thread will not
+              // abort process immediately.
+              collectiveDebugInfoMode_.store(true);
             }
+
+            c10::optional<std::thread> dumpingDebugInfo;
+            if (dumpOnTimeout_) {
+              // Store debug info to storage. (By default to local disk)
+              dumpingDebugInfo = tryWriteDebugInfo();
+            }
+
+            if (desyncDebug_) {
+              auto desyncMsg = getNCCLWatchdogDebugInfo();
+              LOG(ERROR) << desyncMsg;
+            }
+
+            if (dumpOnTimeout_) {
+              // Store debug info to storage. (By default to local disk)
+              if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+                // At this point, we either have already waited for
+                // `kWatchdogThreadSleepMillis * 30` or the thread has finished
+                // so that we mark the thread detach and the dump of debug info
+                // becomes "best effort".
+                dumpingDebugInfo->detach();
+              }
+            }
+
           } catch (const std::exception& e) {
-            LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "
+            LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
-                << "Failed to rerieve NCCL_DESYNC_DEBUG report with unknown error."
+                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
                 << " Please file an issue.";
           }
         }
@@ -1574,7 +1315,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        NCCLTraceBuffer::get()->complete(work.trace_id_);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -1896,11 +1637,40 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     int deviceIndex = devices[i].index();
 
     gpuGuard.set_index(deviceIndex);
-#ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
-#else
-    ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
+#ifdef NCCL_HAS_COMM_SPLIT
+    if (options_->split_from) {
+      TORCH_CHECK(
+          options_->split_color != 0,
+          "Must specify a non-zero color when splitting");
+      // Find a valid, healthy communicator to split from if possible.
+      std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
+      auto& other_comms = options_->split_from->devNCCLCommMap_;
+      auto dit = other_comms.find(devicesKey);
+      if (dit != other_comms.end() && !dit->second.empty()) {
+        TORCH_INTERNAL_ASSERT(
+            dit->second.size() == ncclComms.size(),
+            "split_from->devNCCLCommMap_ should be empty or the same size as ncclComms!");
+        if (dit->second[i] && !dit->second[i]->isAborted()) {
+          ncclComms[i] = NCCLComm::split(
+              dit->second[i].get(),
+              options_->split_color,
+              rank,
+              options_->config);
+        }
+      }
+    }
 #endif
+
+    // To simplify conditioonal nesting, just create the ncclComms[i]
+    // entry if it hasn't been yet rather than untangling the
+    // conditions that might have resulted in a split above.
+    if (!ncclComms[i]) {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+#else
+      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
+#endif
+    }
 
     // Creates the NCCL streams
     streamVal.push_back(
@@ -1946,9 +1716,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
       std::make_tuple(devicesKey),
       std::make_tuple(devices.size()));
 
-  // Hold the lock before modifying the cache.
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // Record the communicators based on ncclUniqueId.
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComms);
 
@@ -1992,7 +1759,18 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   it = devNCCLCommMap_.find(devicesKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
+
   return it->second;
+}
+
+uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
+  uint64_t ret = 0;
+  for (const auto& i : ncclIdToCommMap_) {
+    for (const auto& j : i.second) {
+      ret += j->getCommSplitCounter();
+    }
+  }
+  return ret;
 }
 
 namespace {
@@ -4093,18 +3871,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base",
       avoidRecordStreams);
-}
-
-#ifdef USE_NCCL_WITH_UCC
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
-#endif
-
-bool ProcessGroupNCCL::isUCCAvailable() const {
-#ifdef USE_NCCL_WITH_UCC
-  return (uccPG_ != nullptr);
-#else
-  return false;
-#endif
 }
 
 } // namespace c10d

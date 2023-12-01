@@ -51,6 +51,7 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
 }
 
 if TEST_WITH_ROCM:
@@ -234,6 +235,26 @@ class TestInductorDynamic(TestCase):
             return y + z
 
         f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_inf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == math.inf
+
+        f(torch.tensor([3.0], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_float_item_neginf(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return x.item() == -math.inf
+
+        f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)

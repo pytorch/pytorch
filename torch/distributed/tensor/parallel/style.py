@@ -19,7 +19,7 @@ class ParallelStyle(ABC):
     """
     The parallel style contract defines how the module or submodule should be parallelized.
 
-    It only defines the `apply` method for `parallelize_module` to use, this allows maximum
+    It only defines the ``apply`` method for ``parallelize_module`` to use, this allows maximum
     flexibility for different kind of style implementations.
     """
 
@@ -30,8 +30,9 @@ class ParallelStyle(ABC):
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partition the column of a nn.Module and allow the parallelized module to run colwise sharded computation.
-    Users can compose it with RowwiseParallel to achieve the sharding of more complicated modules.
+    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Users can compose it together with RowwiseParallel to achieve the sharding of more complicated modules.
+    (i.e. MLP, Attention)
 
     Keyword Args:
         input_layouts (Placement, optional):
@@ -39,14 +40,11 @@ class ColwiseParallel(ParallelStyle):
             become a DTensor. If not specified, we assume the input tensor to be replicated.
         output_layouts (Placement, optional):
             The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
-            with the desired layout. If not specified, we assume the output tensor to be sharded on the last dimension.
+            with the user desired layout. If not specified, the output tensor is sharded on the last dimension.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module output, default: True.
     Returns:
         A ParallelStyle object that represents Colwise sharding of the nn.Module.
-
-    .. warning::
-        ColwiseParallel now only support ``nn.Linear`` and ``nn.Embedding``.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
@@ -77,7 +75,6 @@ class ColwiseParallel(ParallelStyle):
         # 1. requires replicate input
         # 2. shard output on last dim
         self.desired_input_layouts = (Replicate(), )
-        self.desired_output_layouts = (Shard(-1), )
         self.use_local_output = use_local_output
 
     def _prepare_input_fn(self, inputs, device_mesh):
@@ -114,8 +111,8 @@ class ColwiseParallel(ParallelStyle):
 
     def _prepare_output_fn(self, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        if outputs.placements != self.desired_output_layouts:
-            outputs = outputs.redistribute(placements=self.desired_output_layouts)
+        if outputs.placements != self.output_layouts:
+            outputs = outputs.redistribute(placements=self.output_layouts)
         # back to local tensor
         return outputs.to_local() if self.use_local_output else outputs
 
@@ -131,8 +128,9 @@ class ColwiseParallel(ParallelStyle):
 
 class RowwiseParallel(ParallelStyle):
     """
-    Partition the row of a nn.Module and allow the parallelized module to run rowwise sharded computation.
+    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear only.
     Users can compose it with ColwiseParallel to achieve the sharding of more complicated modules.
+    (i.e. MLP, Attention)
 
     Keyword Args:
         input_layouts (Placement, optional):
@@ -140,14 +138,11 @@ class RowwiseParallel(ParallelStyle):
             become a DTensor. If not specified, we assume the input tensor to be sharded on the last dimension.
         output_layouts (Placement, optional):
             The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
-            with the desired layout. If not specified, we assume the output tensor to be replicated.
+            with the user desired layout. If not specified, the output tensor is replicated.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module output, default: True.
     Returns:
         A ParallelStyle object that represents Rowwise sharding of the nn.Module.
-
-    .. warning::
-        RowwiseParallel now only support ``nn.Linear``.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
@@ -159,7 +154,7 @@ class RowwiseParallel(ParallelStyle):
         >>> parallelize_module(
         >>>     module=block, # this can be a submodule or module
         >>>     ...,
-        >>>     parallelize_plan={"w2": RownwiseParallel()},
+        >>>     parallelize_plan={"w2": RowwiseParallel()},
         >>> )
         >>> ...
     """
@@ -176,9 +171,8 @@ class RowwiseParallel(ParallelStyle):
         self.output_layouts = (output_layouts or Replicate(), )
         # rowwise linear runtime sharding:
         # 1. shard input on last dim
-        # 2. partial output, to replicate -> allreduce
+        # 2. partial output, to replicate -> allreduce, to shard -> reduce_scatter
         self.desired_input_layouts = (Shard(-1), )
-        self.desired_output_layouts = (Replicate(), )
         self.use_local_output = use_local_output
 
     def _prepare_input_fn(self, inputs, device_mesh):
@@ -201,8 +195,8 @@ class RowwiseParallel(ParallelStyle):
             ))
 
     def _prepare_output_fn(self, outputs, device_mesh):
-        if outputs.placements != self.desired_output_layouts:
-            outputs = outputs.redistribute(placements=self.desired_output_layouts)
+        if outputs.placements != self.output_layouts:
+            outputs = outputs.redistribute(placements=self.output_layouts)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if self.use_local_output else outputs
 
@@ -218,13 +212,14 @@ class RowwiseParallel(ParallelStyle):
 
 class PrepareModuleInput(ParallelStyle):
     """
-    Annotate the input tensors of nn.Module to DTensors according to input_layouts, and perform layout redistribution
-    according to the desired_input_layouts.
+    Configure the nn.Module's inputs to convert the input tensors of the nn.Module to DTensors at runtime according to
+    input_layouts, and perform layout redistribution according to the desired_input_layouts.
 
     Keyword Args:
         input_layouts (Union[Placement, Tuple[Placement]]):
-            The DTensor layouts of input tensors for the nn.Module, this is used to annotate the input tensors to
-            become a DTensor. if some inputs are not tensor, `None` need to be specified as a placeholder.
+            The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
+            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, `None` need to be specified
+            as a placeholder.
         desired_input_layouts (Union[Placement, Tuple[Placement]]):
             The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
             have the desired DTensor layouts. This argument needs to have the same length with `input_layouts`.
@@ -286,13 +281,14 @@ class PrepareModuleInput(ParallelStyle):
 
 class PrepareModuleOutput(ParallelStyle):
     """
-    Annotate the output tensors of nn.Module with DTensors according to output_layouts, and perform layout redistribution
-    according to the desired_output_layouts.
+    Configure the nn.Module's outputs to convert the output tensors of the nn.Module to DTensors at runtime according to
+    output_layouts, and perform layout redistribution according to the desired_output_layouts.
 
     Keyword Args:
         output_layouts (Union[Placement, Tuple[Placement]]):
-            The DTensor layouts of output tensors for the nn.Module, this is used to annotate the output tensors to
-            a DTensor if they are `torch.Tensor`. if some outputs are not tensor, `None` need to be specified as a placeholder.
+            The DTensor layouts of output tensors for the nn.Module, this is used to convert the output tensors to
+            DTensors if they are `torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
+            `None` need to be specified as a placeholder.
         desired_output_layouts (Union[Placement, Tuple[Placement]]):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.

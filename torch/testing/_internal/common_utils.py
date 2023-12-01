@@ -274,6 +274,14 @@ def get_tracked_input() -> Optional[TrackedInput]:
         return None
     return test_fn.tracked_input
 
+def clear_tracked_input():
+    test_fn = extract_test_fn()
+    if test_fn is None:
+        return
+    if not hasattr(test_fn, "tracked_input"):
+        return None
+    test_fn.tracked_input = None
+
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
@@ -289,17 +297,14 @@ class TrackedInputIter:
         return self
 
     def __next__(self):
-        try:
-            input_idx, input_val = next(self.child_iter)
-            self._set_tracked_input(
-                TrackedInput(
-                    index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
-                )
+        # allow StopIteration to bubble up
+        input_idx, input_val = next(self.child_iter)
+        self._set_tracked_input(
+            TrackedInput(
+                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
             )
-            return input_val
-        except StopIteration as e:
-            self._clear_tracked_input()
-            raise e
+        )
+        return input_val
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -307,11 +312,6 @@ class TrackedInputIter:
         if not hasattr(self.test_fn, "tracked_input"):
             return
         self.test_fn.tracked_input = tracked_input
-
-    def _clear_tracked_input(self):
-        if self.test_fn is not None and hasattr(self.test_fn, "tracked_input"):
-            self.test_fn.tracked_input = None
-        self.test_fn = None
 
 class _TestParametrizer:
     """
@@ -1406,6 +1406,28 @@ def markDynamoStrictTest(cls_or_func):
 
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
     return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
+
+def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT executor"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+
+    return decorator
+
 
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
@@ -2716,7 +2738,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition", save_config=False)(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", save_config=False)(super_run)
+                super_run = torch._dynamo.optimize("eager", save_config=False, nopython=strict_mode)(super_run)
 
             super_run(result=result)
 

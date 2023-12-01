@@ -2088,11 +2088,12 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(start, end)
-        if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
-            sizevars.guard_equals(end, new_size[dim])
-            return x
+        if free_unbacked_symbols(start) or free_unbacked_symbols(end):
+            end = sympy.Min(end, new_size[dim])
+            start = sympy.Min(start, end)
+        else:
+            end = sizevars.evaluate_min(end, new_size[dim])
+            start = sizevars.evaluate_min(start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -2521,7 +2522,7 @@ class MutationLayout(Layout):
         return self.get_buffer().layout
 
     @classmethod
-    def realize_into(cls, src, dst):
+    def realize_into(cls, src, dst, unsafe_alias=False):
         dst.realize()
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
@@ -2535,20 +2536,22 @@ class MutationLayout(Layout):
         # be fused into a single kernel by the scheduler.
         # NOTE: We cannot change src's layout to mutate dst directly as this
         # would alias src to dst, which is not correct as further mutations to
-        # dst would effect users of src.
+        # dst would effect users of src. However if there are no more users of
+        # dst, we can alias src to dst.
         src.realize_hint()
 
-        src = Pointwise.create(
-            device=src.get_device(),
-            dtype=src.get_dtype(),
-            inner_fn=src.make_loader(),
-            ranges=[
-                V.graph.sizevars.guard_equals(a, b)
-                for a, b in zip(src.get_size(), dst.get_size())
-            ],
-        ).data
-        src.realize()
+        if not unsafe_alias:
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=src.get_dtype(),
+                inner_fn=src.make_loader(),
+                ranges=[
+                    V.graph.sizevars.guard_equals(a, b)
+                    for a, b in zip(src.get_size(), dst.get_size())
+                ],
+            ).data
 
+        src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
         return src.data
@@ -3830,13 +3833,20 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel, configs, self.kwargs
         )
 
+        args = self.codegen_kwargs()
+        if V.graph.cpp_wrapper:
+            # in C++ wrapper, we don't pass constexpr args, as they don't
+            # get added as parameters to the PTX code compiled from the
+            # user-defined Triton kernel (only non-constexpr args do)
+            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
+
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
             configs,
-            self.codegen_kwargs(),
+            args,
         )
 
     def should_allocate(self):
@@ -4282,9 +4292,9 @@ class FallbackKernel(ExternKernelAlloc):
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.cpp_kernel = kernel._schema.name
-        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
-            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overload_name}"
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
@@ -4513,7 +4523,7 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
-                self.cpp_kernel_overlad_name,
+                self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
                 self.outputs,
@@ -4990,7 +5000,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._convolution_pointwise.binary",
             cpp_kernel="mkldnn::_convolution_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5016,7 +5026,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -5080,7 +5090,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
             cpp_kernel="mkldnn::_convolution_pointwise_",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary_"
         # TODO: op.call: input[0] should be at::Tensor&
         self.cpp_op_schema = """
@@ -5106,11 +5116,11 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
 
     def get_mutation_names(self):
-        return [self.inputs[1].get_name()]
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -5155,7 +5165,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args=constant_args,
         )
         mark_node_as_mutating(packed, inputs[1])
-        return packed
+        # This op mutates in place which means that the result is not the
+        # target but rather the input that is being mutated
+        # init reorders the inputs, so inputs[1] becomes packed.inputs[0]
+        return packed.inputs[0]
 
 
 class MKLPackedLinear(ExternKernelAlloc):
@@ -5291,7 +5304,7 @@ class LinearBinary(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._linear_pointwise.binary",
             cpp_kernel="mkldnn::_linear_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "linear_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5309,7 +5322,7 @@ class LinearBinary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
 
     @classmethod
@@ -5732,7 +5745,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             kernel="torch.ops.onednn.qconv2d_pointwise.binary",
             cpp_kernel="onednn::qconv2d_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "qconv2d_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5817,7 +5830,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             conv_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -7002,9 +7015,9 @@ class _CollectiveKernel(FallbackKernel):
         from .codegen.wrapper import get_cpp_op_schema
 
         self.cpp_kernel = kernel._schema.name
-        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
-            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overload_name}"
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
