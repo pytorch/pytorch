@@ -760,6 +760,39 @@ def speedup_experiment_onnx(
 
         return onnxrt_model_iter_fn
 
+    def timed_onnx(model, onnx_model: OnnxModelFromTorchScript, inputs):
+        if current_device == "cpu" or onnx_model.is_cpu():
+            onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
+        else:
+            onnxrt_model_iter_fn = create_onnx_input_binded_fn(
+                onnx_model, inputs, expected_output
+            )
+        return timed(
+            model,
+            onnxrt_model_iter_fn,
+            inputs,
+            return_result=True,
+            times=times,
+            collect_outputs=args.collect_outputs,
+        )
+
+    # Insert ONNX warm-up
+    inputs = (
+        randomize_input(copy.deepcopy(example_inputs))
+        if should_randomize_input
+        else example_inputs
+    )
+    _, expected_output = timed(
+        model,
+        model_iter_fn,
+        inputs,
+        return_result=True,
+        times=times,
+        collect_outputs=args.collect_outputs,
+    )
+    for _ in range(2):
+        timed_onnx(model, onnx_model, inputs)
+
     for rep in range(args.repeat):
         inputs = (
             randomize_input(copy.deepcopy(example_inputs))
@@ -775,21 +808,7 @@ def speedup_experiment_onnx(
             collect_outputs=args.collect_outputs,
         )
 
-        if current_device == "cpu" or onnx_model.is_cpu():
-            onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
-        else:
-            onnxrt_model_iter_fn = create_onnx_input_binded_fn(
-                onnx_model, inputs, expected_output
-            )
-
-        timings[rep, 1], actual_output = timed(
-            model,
-            onnxrt_model_iter_fn,
-            inputs,
-            return_result=True,
-            times=times,
-            collect_outputs=args.collect_outputs,
-        )
+        timings[rep, 1], actual_output = timed_onnx(model, onnx_model, inputs)
 
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
@@ -1924,7 +1943,7 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
-            raise NotImplementedError("Eager model failed to run") from e
+            raise NotImplementedError("eager_fail_to_run") from e
 
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
@@ -3578,9 +3597,10 @@ def run(runner, args, original_dir=None):
                 except NotImplementedError as e:
                     import traceback
 
+                    mode = "train" if self.args.training else "eval"
+                    print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    print("eager_validation_fail")
-                    write_csv_when_exception(name, "eager_validation_fail", device)
+                    write_csv_when_exception(name, str(e), device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
