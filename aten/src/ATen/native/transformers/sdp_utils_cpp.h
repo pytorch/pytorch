@@ -47,6 +47,7 @@ struct sdp_params {
   c10::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
+  c10::optional<int64_t> num_kv_groups;
 };
 
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params);
