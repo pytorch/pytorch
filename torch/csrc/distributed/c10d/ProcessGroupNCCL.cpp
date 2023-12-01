@@ -1770,9 +1770,9 @@ void check_gpu_single_tensor(
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
     if (p2p) {
       TORCH_WARN_ONCE(
-          "Detected non-contiguous tensor in P2P operations. It is user
-          responsibility to guarantee that source and destination tensors have
-          the same contiguity format.");
+          "Detected non-contiguous tensor in P2P operations. It is user "
+          "responsibility to guarantee that source and destination tensors have "
+          "the same contiguity format.");
     } else {
       C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
     }
@@ -1820,9 +1820,9 @@ void check_gpu_tensors_different_devices(
     if (!t.is_contiguous(t.suggest_memory_format())) {
       if (p2p) {
         TORCH_WARN_ONCE(
-            "Detected non-contiguous tensor in P2P operations. It is user
-            responsibility to guarantee that source and destination tensors have
-            the same contiguity format.");
+            "Detected non-contiguous tensor in P2P operations. It is user "
+            "responsibility to guarantee that source and destination tensors have "
+            "the same contiguity format.");
       } else {
         C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
       }
