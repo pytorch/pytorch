@@ -895,7 +895,6 @@ def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
         return x.requires_grad
     return False
 
-
 def _is_make_fx_tracing():
     if not torch.jit.is_scripting():
         torch_dispatch_mode_stack = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
@@ -1106,10 +1105,12 @@ class MultiheadAttention(Module):
           head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
-            `batch_first` argument is ignored for unbatched inputs.
+            `batch_first` argument is ignored for unbatched inputs, and for nested tensor inputs (which are always
+             batch first).
         """
 
         is_batched = query.dim() == 3
+        batch_first = self.batch_first or query.is_nested
 
         why_not_fast_path = ''
         if not is_batched:
@@ -1141,6 +1142,8 @@ class MultiheadAttention(Module):
 
         if not atfp_mha_enabled():
             why_not_fast_path = "AT FastPath backend manager for enable_mha is False"
+        elif not is_batched:
+            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
             # When lifting this restriction, don't forget to either
             # enforce that the dtypes all match or test cases where
@@ -1157,8 +1160,6 @@ class MultiheadAttention(Module):
             why_not_fast_path = "training is enabled"
         elif (self.num_heads % 2) != 0:
             why_not_fast_path = "self.num_heads is not even"
-        elif not self.batch_first:
-            why_not_fast_path = "batch_first was not True"
         elif self.bias_k is not None:
             why_not_fast_path = "self.bias_k was not None"
         elif self.bias_v is not None:
@@ -1195,11 +1196,14 @@ class MultiheadAttention(Module):
             elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
-            if not why_not_fast_path:
-                merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
 
+            if not why_not_fast_path:
                 if self.in_proj_bias is not None and self.in_proj_weight is not None:
-                    return torch._native_multi_head_attention(
+                    if not self.batch_first:
+                        query = key = value = query.transpose(1, 0)
+
+                    merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
+                    attn_output_fast, attn_output_weights_fast = torch._native_multi_head_attention(
                         query,
                         key,
                         value,
@@ -1213,6 +1217,10 @@ class MultiheadAttention(Module):
                         need_weights,
                         average_attn_weights,
                         mask_type)
+                    if self.batch_first:
+                        return attn_output_fast, attn_output_weights_fast
+                    else:
+                        return attn_output_fast.transpose(1, 0), attn_output_weights_fast
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1257,6 +1265,7 @@ class MultiheadAttention(Module):
                 attn_mask=attn_mask,
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal)
+
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
@@ -1292,8 +1301,12 @@ class MultiheadAttention(Module):
             # Always expands attn_mask to 4D
             if attn_mask.dim() == 3:
                 attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
-            else:  # attn_mask.dim() == 2:
+            elif attn_mask.dim() == 2:
                 attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            else:
+                assert attn_mask.dim() == 4, "attn_mask must be 2D, 3D, or $D"
+                assert key_padding_mask is None, "4D mask is defined to include key padding mask"
+                attn_mask_expanded = attn_mask
             merged_mask = attn_mask_expanded
 
             if key_padding_mask is not None:
