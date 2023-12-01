@@ -879,10 +879,8 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
-            if (
-                key in kernel.__annotations__
-                and "constexpr" in kernel.__annotations__[key]
-            ):
+            idx = kernel.arg_names.index(key)
+            if idx in kernel.constexprs:
                 constants[key] = arg
                 continue
             if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
@@ -1876,7 +1874,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            or self.can_cache_buffer_in_thread_local(buffer)
+            or (V.graph.aot_mode and self.can_cache_buffer_in_thread_local(buffer))
             else f"{buffer.get_name()}.reset();"
         )
 
