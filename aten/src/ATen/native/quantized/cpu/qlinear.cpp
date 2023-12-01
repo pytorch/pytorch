@@ -967,7 +967,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto bias_desc = with_bias ?
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
       tensor::desc();
-  dnnl::algorithm post_op_algo;
+  dnnl::algorithm post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
   if (post_op_name == "gelu"){
     if (post_op_algorithm == "None"){
       post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
