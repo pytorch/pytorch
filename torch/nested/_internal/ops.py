@@ -742,7 +742,7 @@ def transpose_int(func, *args, **kwargs):
             _outer_to_inner_dim(len(new_size), dim0),
             _outer_to_inner_dim(len(new_size), dim1),
         )
-        t_stride = tuple(inp._strides[0], *inp._values.stride())
+        t_stride = (inp._strides[0], *inp._values.stride())
         return NestedTensor(inp.values(), **extract_kwargs(inp), _strides=t_stride)
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
