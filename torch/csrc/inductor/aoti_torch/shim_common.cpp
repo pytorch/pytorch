@@ -312,7 +312,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     int64_t padding_size,
     int64_t* dilation_ptr,
     int64_t dilation_size,
-    bool transposed,
+    int transposed,
     int64_t* output_padding_ptr,
     int64_t output_padding_size,
     int64_t groups,
@@ -335,7 +335,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
         stride,
         padding,
         dilation,
-        transposed,
+        static_cast<bool>(transposed),
         output_padding,
         groups);
     at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));

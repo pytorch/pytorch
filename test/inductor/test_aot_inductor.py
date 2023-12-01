@@ -1435,8 +1435,8 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
+        # FIXME: failed with Segfault while exiting the Python runtime
+        "test_missing_cubin": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
@@ -1468,8 +1468,6 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
