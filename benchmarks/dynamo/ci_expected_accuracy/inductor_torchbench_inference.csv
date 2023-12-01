@@ -10,7 +10,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,fail_to_run,21
+DALLE2_pytorch,timeout,0
 
 
 
