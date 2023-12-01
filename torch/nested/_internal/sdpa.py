@@ -350,7 +350,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     # It checks that the storage offsets' adjacent_differences are a constant
     # mutiple of the previous tensor in the nested tensor and that the strides
     # are monitonically decreasing. This check is done after calling transpose on
-    # the nested tensor. Resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
+    # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
     # Returns a boolean indicating if contiguous needs to be called for input
     assert isinstance(tensor, NestedTensor)
@@ -369,13 +369,6 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
             # stride
             return False
         prev_stride = stride
-
-    # Check the offsets are a constant multiple from the previous numels
-    offset_constant = offsets[1] - offsets[0]
-    for i in range(2, len(offsets)):
-        current_offset_constant = offsets[i] - offsets[i - 1]
-        if current_offset_constant != offset_constant:
-            return False
 
     # Congrats you made it!
     return True

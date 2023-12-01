@@ -112,7 +112,7 @@ class NestedTensor(torch.Tensor):
         # SDPA metadata
         def get_sdpa_extreme_seqlen(func, tensor):
             yield int(func(tensor).item())
-        print(kwargs)
+
         self._max_seqlen = kwargs.get(
             "_max_seqlen",
             get_sdpa_extreme_seqlen(
@@ -224,7 +224,7 @@ class NestedTensor(torch.Tensor):
             requires_grad=meta["requires_grad"],
             _max_seqlen=meta["max_seqlen"],
             _min_seqlen=meta["min_seqlen"],
-            _ragged_idx=meta["ragged_idx"]
+            _ragged_idx=meta["ragged_idx"],
         )
 
     @classmethod

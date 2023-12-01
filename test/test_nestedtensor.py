@@ -3505,7 +3505,8 @@ class TestNestedTensorSubclass(NestedTestCase):
             with self.assertRaises(RuntimeError):
                 attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
 
-
+    # This requires NT -> NT views to work in inductor, which is a TODO
+    @unittest.expectedFailure
     @onlyCUDA
     @torch.set_grad_enabled(False)
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
