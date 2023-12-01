@@ -36,7 +36,7 @@ def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
-    num_chunks = device_mesh.size(dim=0)
+    num_chunks = device_mesh.size(mesh_dim=0)
 
     if tensor.placements[0].is_shard():
         shard_dim = cast(DShard, placement).dim
