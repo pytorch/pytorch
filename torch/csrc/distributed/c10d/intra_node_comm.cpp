@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef USE_CUDA
+#ifndef USE_ROCM
 #include <c10/cuda/driver_api.h>
 #include <cuda_runtime.h>
 #include <nvml.h>
@@ -291,7 +291,7 @@ static NvlMesh getNvlMesh(size_t worldSize) {
   using namespace c10::cuda;
 
   NvlMesh nvlMesh = {};
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   auto driverApi = DriverAPI::get();
   if (driverApi == nullptr) {
     return nvlMesh;
@@ -456,7 +456,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,
     size_t rank,
     size_t worldSize) {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
@@ -551,7 +551,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     const std::string& prefix,
     size_t rank,
     size_t worldSize) {
-#ifdef USE_CUDA
+#ifndef USE_ROCM
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
