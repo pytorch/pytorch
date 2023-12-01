@@ -634,7 +634,7 @@ def _compile(
 
         guarded_code = GuardedCode(
             code=out_code,
-            check_fn=check_fn,
+            check_fn=check_fn.check_fn,
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
@@ -754,14 +754,20 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, serialize=False):
             result = None
             if serialize:
                 unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
+                recompiles_log.debug(f"Cache Lookup - {unique_frame_id}")
                 guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
                 if guarded_code:
                     result = guarded_code
             if not result:
+                if serialize:
+                    recompiles_log.debug(f"Cache Miss - {unique_frame_id}")
                 result = inner_convert(frame, cache_entry, hooks, frame_state)
                 if serialize:
                     # Will raise if it cannot serialize
                     _placeholder_remote_write(unique_frame_id, guarded_code=result)
+            else:
+                if serialize:
+                    recompiles_log.debug(f"Cache Hit - {unique_frame_id}")
 
             counters["frames"]["ok"] += 1
             return result

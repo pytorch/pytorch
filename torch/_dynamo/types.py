@@ -65,12 +65,13 @@ class GuardedCode:
         # annoying
         unique_id = torch._dynamo.bytecode_transformation._unique_id_counter
         guarded_code_struct = (
-            code_attrs,
-            self.name,
-            self.global_alias_table,
-            self.resume_fn_name,
-            resume_fn_code_attrs,
-            unique_id
+            code_attrs, # code_attrs
+            self.name, # name
+            self.compiled_fn, # compiled fn
+            self.global_alias_table, # aliases
+            self.resume_fn_name, # resume fn name
+            resume_fn_code_attrs, # resume fn
+            unique_id # id
         )
         pickle.dump(guarded_code_struct, file)
 
@@ -79,14 +80,13 @@ class GuardedCode:
         try:
             serialized = file.read()
             (
-                attributes,
-                guard_code,
-                fn_name,
-                compiled_fn,
-                global_alias_table,
-                resume_fn_name,
-                resume_fn_code_attrs,
-                unique_id_serialized,
+                attributes, # code_attrs
+                fn_name, # name
+                compiled_fn, # compiled_fn
+                global_alias_table, # aliases
+                resume_fn_name, # resume fn name
+                resume_fn_code_attrs, # resume fn
+                unique_id_serialized, # id
             ) = pickle.loads(serialized)
 
             if next(torch._dynamo.bytecode_transformation._unique_id_counter) > next(unique_id_serialized):
@@ -106,23 +106,20 @@ class GuardedCode:
             else:
                 resume_fn_code_obj = None
 
-            def yolo_check_fn():
-                pycode = """
-                def yolo():
-                    return True
-                yolo()
-                """
+            def compile_function_from_string(func_str):
+                namespace = {}
+                exec(func_str, namespace)
+                return namespace['function']
 
-                out: Dict[str, Any] = dict()
-                exec(pycode, frame.f_globals, out)
-                guard_fn = out["___make_guard_fn"]()
-                guard_fn.pycode = pycode
-                breakpoint()
-                return guard_fn
+            yolo_guard = """\
+def function(*args, **kwargs):
+    return True
+"""
 
+            check_fn = compile_function_from_string(yolo_guard)
             return GuardedCode(
                 code_obj,
-                yolo_check_fn(),
+                check_fn,
                 frame,
                 fn_name,
                 compiled_fn,

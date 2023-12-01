@@ -429,7 +429,8 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config
+            # TODO(voz): Enable w/ serialize
+            # new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
         assert callable(fn)
@@ -454,7 +455,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            print("CALLL _FN - ", fn)
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()

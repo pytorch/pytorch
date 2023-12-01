@@ -2305,6 +2305,8 @@ def attrs_code_object(code_obj):
     if not isinstance(code_obj, types.CodeType):
         raise TypeError("Object must be a code object")
 
+    # TODO(voz): Audit which of these we need, surely not most
+    # for how we use it.
     attributes = (
         code_obj.co_argcount,
         code_obj.co_posonlyargcount,
