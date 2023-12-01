@@ -18,6 +18,9 @@ from torch.distributed.distributed_c10d import (
 )
 
 
+__all__ = ["init_device_mesh", "DeviceMesh"]
+
+
 logger = logging.getLogger(__name__)
 
 # only import numpy typing when type checking
