@@ -63,8 +63,8 @@ static inline std::vector<int64_t> padding_r(
 static inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
   auto input_size = input.sizes().vec();
   auto input_stride = input.strides().vec();
-  IntArrayRef input_default_contiguous_strides = c10::contiguous_strides(input_size);
-  if (input.is_contiguous() && input_stride != input_default_contiguous_strides) {
+  auto input_default_contiguous_strides = c10::contiguous_strides(input_size);
+  if (input.is_contiguous() && input_stride != c10::IntArrayRef(input_default_contiguous_strides)) {
      return input.as_strided(input_size, input_default_contiguous_strides);
   }
   return input;
