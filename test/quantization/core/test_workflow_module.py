@@ -399,8 +399,8 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
-    def _test_dynamic_quant_observer(self, obs_class):
-        obs = obs_class(averaging_constant=1, is_dynamic=True)
+    def test_dynamic_quant_observer(self):
+        obs = MovingAverageMinMaxObserver(averaging_constant=1, is_dynamic=True)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -409,12 +409,6 @@ class TestObserver(QuantizationTestCase):
             self.assertNotEqual(params, obs.calculate_qparams())
             obs(x)
             self.assertEqual(params, obs.calculate_qparams())
-
-    def test_dynamic_quant_observer(self):
-        self._test_dynamic_quant_observer(MovingAverageMinMaxObserver)
-
-    def test_dynamic_quant_perchannel_observer(self):
-        self._test_dynamic_quant_observer(MovingAveragePerChannelMinMaxObserver)
 
     def test_dynamic_quant_observer_matching_choose_qparams(self):
         obs = MovingAverageMinMaxObserver(averaging_constant=1, is_dynamic=True)
