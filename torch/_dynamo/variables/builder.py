@@ -1807,9 +1807,6 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                     )
                 )
 
-                # no need to fake-ify the inner tensors again later on
-                tx.fake_mode.fake_tensor_converter.set_tensor_memo(inner, fake_inner)
-
         for fake, real, source, symbolic_context in tracking_info:
             tx.output.tracing_context.tensor_to_context[real] = symbolic_context
             tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
