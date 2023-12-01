@@ -5,6 +5,8 @@ import io
 
 import tempfile
 
+from typing import Mapping, Tuple
+
 import onnx
 import pytorch_test_common
 import torch
@@ -307,6 +309,63 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 diagnostics.levels.ERROR,
                 expected_node="aten.mul.Tensor",
             )
+
+    def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
+        self,
+    ):
+        class SubModule(torch.nn.Module):
+            def forward(self, x, y, bias):
+                output = x @ y
+                return output + bias
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submodule = SubModule()
+
+            def forward(self, x, y, bias):
+                return self.submodule(x, y, bias)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+        bias = torch.randn(4)
+        onnx_program = torch.onnx.dynamo_export(
+            Module(),
+            x,
+            y,
+            bias,
+            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
+        )
+        model_proto = onnx_program.model_proto
+
+        # Assert value_info for values inside local function can be retrieved
+        def _assert_node_outputs_has_value_info(
+            node: onnx.NodeProto,
+            value_infos: Mapping[str, onnx.ValueInfoProto],
+            local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
+            prefix: str = "",
+        ):
+            for output in node.output:
+                output_prefix = f"{prefix}/{output}" if prefix else output
+                self.assertIn(output_prefix, value_infos)
+            if node.domain.startswith("pkg.onnxscript.torch_lib"):
+                # No shape info available for values inside torchlib functions.
+                return
+            if (
+                function := local_functions.get((node.domain, node.op_type))
+            ) is not None:
+                for node in function.node:
+                    node_prefix = (
+                        f"{prefix}/{function.name}" if prefix else function.name
+                    )
+                    _assert_node_outputs_has_value_info(
+                        node, value_infos, local_functions, node_prefix
+                    )
+
+        type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
+        functions = {(f.domain, f.name): f for f in model_proto.functions}
+        for node in model_proto.graph.node:
+            _assert_node_outputs_has_value_info(node, type_infos, functions)
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):

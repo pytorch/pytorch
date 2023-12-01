@@ -13,6 +13,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
 from torch.fx.node import _get_qualified_name
@@ -70,7 +71,7 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(python_type):
+def convert_arg_type(python_type: str):
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
     if python_type == "Tensor":
@@ -94,7 +95,7 @@ def convert_arg_type(python_type):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(python_type):
+def convert_return_type(python_type: str):
     # TODO: support alias
     python_to_cpp = {
         "Tensor": "at::Tensor",
@@ -112,12 +113,12 @@ def get_cpp_op_schema(kernel):
     arg_names = [x.name for x in kernel._schema.arguments]
     returns = [repr(x.real_type) for x in kernel._schema.returns]
 
-    num_retunrs = len(returns)
-    assert num_retunrs > 0, "must have at least one return value"
+    num_returns = len(returns)
+    assert num_returns > 0, "must have at least one return value"
 
-    if num_retunrs == 1:
+    if num_returns == 1:
         cpp_return_value = convert_return_type(returns[0])
-    elif num_retunrs > 1:
+    elif num_returns > 1:
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
@@ -577,7 +578,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.write_triton_header_once()
-                self.wrapper_call.writeline("start_graph()")
+                self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
@@ -606,11 +607,12 @@ class WrapperCodeGen(CodeGen):
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
-                self.wrapper_call.writeline("end_graph()")
+                self.generate_end_graph()
 
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
@@ -711,6 +713,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
                 )
+
+    def finalize_prefix(self):
+        pass
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -882,7 +887,13 @@ class WrapperCodeGen(CodeGen):
                 continue
             if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                 signature.append(
-                    TensorArg(key, arg.codegen_reference(), arg.get_dtype())
+                    TensorArg(
+                        key,
+                        arg.codegen_reference(),
+                        arg.get_dtype(),
+                        # For ReinterpretView, we do not want to check alignment
+                        not isinstance(arg, ReinterpretView),
+                    )
                 )
             else:
                 signature.append(SizeArg(key, arg))
@@ -980,6 +991,12 @@ class WrapperCodeGen(CodeGen):
             f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
         )
         stack.enter_context(self.wrapper_call.indent())
+
+    def generate_start_graph(self):
+        self.wrapper_call.writeline("start_graph()")
+
+    def generate_end_graph(self):
+        self.wrapper_call.writeline("end_graph()")
 
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
@@ -1226,6 +1243,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_dtypes = set()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1588,6 +1606,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
+    def finalize_prefix(self):
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.aot_inductor.abi_compatible:
+            for dtype in self.used_cached_dtypes:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
+
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
@@ -1868,6 +1894,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
+    def generate_start_graph(self):
+        pass
+
+    def generate_end_graph(self):
+        pass
+
     def generate_inf_and_nan_checker(self, nodes):
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
@@ -1889,7 +1921,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
+            dtype_str = str(dtype).split(".")[-1]
+            self.used_cached_dtypes.add(dtype_str)
+            return f"cached_torch_dtype_{dtype_str}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
@@ -2332,8 +2366,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def val_to_arg_str(self, val):
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            # TODO: add abi-compatible support
-            return "c10::nullopt"
+            if config.aot_inductor.abi_compatible:
+                return "nullptr"
+            else:
+                return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
                 return "1" if val else "0"
@@ -2514,6 +2550,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 self.writeline(f"float {var_name} = {arg};")
             elif any(str(arg) == s.name for s in dynamic_symbols):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif arg == "nullptr":
+                self.writeline(f"auto {var_name} = nullptr;")
+            elif arg == "c10::nullopt":
+                self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
                 if config.aot_inductor.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
@@ -2564,7 +2604,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"cuda kernel parameters for {name} should already exist at this moment"
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
+        cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
         assert cubin_path is not None and os.path.exists(
             cubin_path
         ), f"cubin file should already exist at this moment: {cubin_path}"
