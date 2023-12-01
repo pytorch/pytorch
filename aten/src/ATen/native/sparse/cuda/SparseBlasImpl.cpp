@@ -485,9 +485,7 @@ void block_sparse_mm(
   // NOTE: the code below allows arbitrary block sizes
   // and might be potentially faster than cuSPARSE implementation
   // especially for not very sparse inputs.
-  if (mat1.scalar_type() == ScalarType::Half
-      || mat1.scalar_type() == ScalarType::BFloat16
-      || mat1.scalar_type() == ScalarType::Float) {
+  if (mat1.scalar_type() == ScalarType::Half || mat1.scalar_type() == ScalarType::BFloat16) {
     at::native::sparse::impl::_compressed_row_strided_addmm_out(
         input,
         mat1,
