@@ -1876,7 +1876,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            or self.can_cache_buffer_in_thread_local(buffer)
+            or (V.graph.aot_mode and self.can_cache_buffer_in_thread_local(buffer))
             else f"{buffer.get_name()}.reset();"
         )
 
