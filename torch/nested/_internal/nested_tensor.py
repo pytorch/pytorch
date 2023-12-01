@@ -43,6 +43,8 @@ class NestedTensor(torch.Tensor):
     _stride: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
+    # SDPA Metadata
+    _max_seqlen: int
 
     @staticmethod
     def __new__(
@@ -84,7 +86,7 @@ class NestedTensor(torch.Tensor):
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
-        self._ragged_idx = 1 if "_ragged_idx" not in kwargs else kwargs["_ragged_idx"]
+        self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
 
@@ -95,11 +97,7 @@ class NestedTensor(torch.Tensor):
         self._size = tuple(nested_size)
 
         stride = values.stride()
-        self._strides = (
-            (ragged_size * stride[0], *stride)
-            if "_strides" not in kwargs
-            else kwargs["_strides"]
-        )
+        self._strides = (ragged_size * stride[self._ragged_idx - 1], *stride)
 
         if values.requires_grad:
             raise ValueError(

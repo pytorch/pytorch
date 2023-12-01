@@ -2111,14 +2111,10 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-make_fallback(
-    torch.ops.aten._flash_attention_forward.default, sdpa_constraint, warn=False
-)
-make_fallback(
-    torch.ops.aten._flash_attention_backward.default, sdpa_constraint, warn=False
-)
-make_fallback(torch.ops.aten._efficient_attention_forward.default)
-make_fallback(torch.ops.aten._efficient_attention_backward.default)
+make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)

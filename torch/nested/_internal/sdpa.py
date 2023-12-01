@@ -309,7 +309,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
     log.warning("Flash attention kernel not used because:")
     can_use_flash_attention(params, debug=True)
     _can_use_flash_sdpa_jagged(params, debug=True)
-    raise ValueError("No available kernel. Aborting execution.")
+    return SDPBackend.ERROR
 
 
 def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
@@ -385,145 +385,146 @@ def _view_as_dense(
     return tensor.view(Nnz, num_heads, head_dim)
 
 
-def _sdpa_nested_preprocessing_with_broadcast(query, key, value):
-    # Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
-    # Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
-    # Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
-    q_batch_size = query.size(0)
-    k_batch_size = key.size(0)
-    v_batch_size = value.size(0)
+# TODO: Next iteration should add test cases and check it works
+# def _sdpa_nested_preprocessing_with_broadcast(query, key, value):
+#     # Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
+#     # Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
+#     # Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
+#     q_batch_size = query.size(0)
+#     k_batch_size = key.size(0)
+#     v_batch_size = value.size(0)
 
-    output_batch_size = max(q_batch_size, k_batch_size, v_batch_size)
+#     output_batch_size = max(q_batch_size, k_batch_size, v_batch_size)
 
-    q_num_heads = query.size(1)
-    k_num_heads = key.size(1)
-    v_num_heads = value.size(1)
+#     q_num_heads = query.size(1)
+#     k_num_heads = key.size(1)
+#     v_num_heads = value.size(1)
 
-    output_num_heads = max(q_num_heads, k_num_heads, v_num_heads)
+#     output_num_heads = max(q_num_heads, k_num_heads, v_num_heads)
 
-    head_dim_qk = query.size(3)
-    head_dim_v = value.size(3)
+#     head_dim_qk = query.size(3)
+#     head_dim_v = value.size(3)
 
-    q_t = query.transpose(1, 2)
-    k_t = key.transpose(1, 2)
-    v_t = value.transpose(1, 2)
+#     q_t = query.transpose(1, 2)
+#     k_t = key.transpose(1, 2)
+#     v_t = value.transpose(1, 2)
 
-    # Checks in sdp_utils ensure that if {*}_batch_size/{*}_num_heads !=
-    # output_batch_size/num_heads then they are 1
-    q_batch_size_needs_broadcast = q_batch_size != output_batch_size
-    k_batch_size_needs_broadcast = k_batch_size != output_batch_size
-    v_batch_size_needs_broadcast = v_batch_size != output_batch_size
+#     # Checks in sdp_utils ensure that if {*}_batch_size/{*}_num_heads !=
+#     # output_batch_size/num_heads then they are 1
+#     q_batch_size_needs_broadcast = q_batch_size != output_batch_size
+#     k_batch_size_needs_broadcast = k_batch_size != output_batch_size
+#     v_batch_size_needs_broadcast = v_batch_size != output_batch_size
 
-    # If {*}_batch_size_needs_broadcast, then
-    # (1) max_seqlen_batch_{*} is given by {*}_t.size(1)
-    #     this is because needs_broadcast indicates that the batch_size is 1
-    #     and hence there is only 1 value for seq_len
-    # (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1),
-    # ..., outut_batch_size * {*}_t.size(1)]
-    # (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1)
+#     # If {*}_batch_size_needs_broadcast, then
+#     # (1) max_seqlen_batch_{*} is given by {*}_t.size(1)
+#     #     this is because needs_broadcast indicates that the batch_size is 1
+#     #     and hence there is only 1 value for seq_len
+#     # (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1),
+#     # ..., outut_batch_size * {*}_t.size(1)]
+#     # (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1)
 
-    if q_batch_size_needs_broadcast or not q_t.is_nested:
-        max_seqlen_batch_q = q_t.size(1)
-        cumulative_sequence_length_q = torch.arange(
-            0,
-            (output_batch_size + 1) * max_seqlen_batch_q,
-            max_seqlen_batch_q,
-            device=q_t.device,
-            dtype=torch.int32,
-        )
-        Nnz_q = output_batch_size * max_seqlen_batch_q
-    else:
-        (
-            cumulative_sequence_length_q,
-            max_seqlen_batch_q,
-            Nnz_q,
-        ) = _cumulative_and_max_seq_len_nnz(q_t)
+#     if q_batch_size_needs_broadcast or not q_t.is_nested:
+#         max_seqlen_batch_q = q_t.size(1)
+#         cumulative_sequence_length_q = torch.arange(
+#             0,
+#             (output_batch_size + 1) * max_seqlen_batch_q,
+#             max_seqlen_batch_q,
+#             device=q_t.device,
+#             dtype=torch.int32,
+#         )
+#         Nnz_q = output_batch_size * max_seqlen_batch_q
+#     else:
+#         (
+#             cumulative_sequence_length_q,
+#             max_seqlen_batch_q,
+#             Nnz_q,
+#         ) = _cumulative_and_max_seq_len_nnz(q_t)
 
-    if k_batch_size_needs_broadcast and v_batch_size_needs_broadcast:
-        assert k_t.size(1) == v_t.size(1)
-        max_seqlen_batch_kv = k_t.size(1)
-        cumulative_sequence_length_kv = torch.arange(
-            0,
-            (output_batch_size + 1) * max_seqlen_batch_kv,
-            max_seqlen_batch_kv,
-            device=k_t.device,
-            dtype=torch.int32,
-        )
-        Nnz_kv = output_batch_size * max_seqlen_batch_kv
-    else:
-        cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv = (
-            _cumulative_and_max_seq_len_nnz(v_t)
-            if k_batch_size_needs_broadcast
-            else _cumulative_and_max_seq_len_nnz(k_t)
-        )
+#     if k_batch_size_needs_broadcast and v_batch_size_needs_broadcast:
+#         assert k_t.size(1) == v_t.size(1)
+#         max_seqlen_batch_kv = k_t.size(1)
+#         cumulative_sequence_length_kv = torch.arange(
+#             0,
+#             (output_batch_size + 1) * max_seqlen_batch_kv,
+#             max_seqlen_batch_kv,
+#             device=k_t.device,
+#             dtype=torch.int32,
+#         )
+#         Nnz_kv = output_batch_size * max_seqlen_batch_kv
+#     else:
+#         cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv = (
+#             _cumulative_and_max_seq_len_nnz(v_t)
+#             if k_batch_size_needs_broadcast
+#             else _cumulative_and_max_seq_len_nnz(k_t)
+#         )
 
-    q_num_heads_needs_broadcast = q_num_heads != output_num_heads
-    k_num_heads_needs_broadcast = k_num_heads != output_num_heads
-    v_num_heads_needs_broadcast = v_num_heads != output_num_heads
+#     q_num_heads_needs_broadcast = q_num_heads != output_num_heads
+#     k_num_heads_needs_broadcast = k_num_heads != output_num_heads
+#     v_num_heads_needs_broadcast = v_num_heads != output_num_heads
 
-    if not q_t.is_nested:
-        query_buffer_reshaped = q_t.expand(
-            output_batch_size, q_t.size(1), output_num_heads, head_dim_qk
-        )
-        query_buffer_reshaped = query_buffer_reshaped.reshape(
-            Nnz_q, output_num_heads, head_dim_qk
-        )
-    else:
-        if not q_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(q_t):
-            q_t = q_t.contiguous()
-        # If we are broadcasting then Nnz_q will be the output_batch_size since
-        # seq_len is 1
-        effective_batch_size_q = (
-            output_batch_size if q_batch_size_needs_broadcast else Nnz_q
-        )
-        query_buffer_reshaped = _view_as_dense(
-            q_t, effective_batch_size_q, output_num_heads, head_dim_qk
-        )
+#     if not q_t.is_nested:
+#         query_buffer_reshaped = q_t.expand(
+#             output_batch_size, q_t.size(1), output_num_heads, head_dim_qk
+#         )
+#         query_buffer_reshaped = query_buffer_reshaped.reshape(
+#             Nnz_q, output_num_heads, head_dim_qk
+#         )
+#     else:
+#         if not q_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(q_t):
+#             q_t = q_t.contiguous()
+#         # If we are broadcasting then Nnz_q will be the output_batch_size since
+#         # seq_len is 1
+#         effective_batch_size_q = (
+#             output_batch_size if q_batch_size_needs_broadcast else Nnz_q
+#         )
+#         query_buffer_reshaped = _view_as_dense(
+#             q_t, effective_batch_size_q, output_num_heads, head_dim_qk
+#         )
 
-    # If the physical layout of the NestedTensor's storage
-    # is not: batch, {seq_len}, num_heads, head_dim then we need
-    # to call contiguous
-    if not k_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(k_t):
-        k_t = k_t.contiguous()
-    if not v_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(v_t):
-        v_t = v_t.contiguous()
+#     # If the physical layout of the NestedTensor's storage
+#     # is not: batch, {seq_len}, num_heads, head_dim then we need
+#     # to call contiguous
+#     if not k_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(k_t):
+#         k_t = k_t.contiguous()
+#     if not v_t.is_contiguous() and not _is_safe_to_get_storage_as_tensor(v_t):
+#         v_t = v_t.contiguous()
 
-    effective_batch_size_k = (
-        output_batch_size if k_batch_size_needs_broadcast else Nnz_kv
-    )
-    key_buffer_reshaped = _view_as_dense(
-        k_t, effective_batch_size_k, output_num_heads, head_dim_qk
-    )
+#     effective_batch_size_k = (
+#         output_batch_size if k_batch_size_needs_broadcast else Nnz_kv
+#     )
+#     key_buffer_reshaped = _view_as_dense(
+#         k_t, effective_batch_size_k, output_num_heads, head_dim_qk
+#     )
 
-    effective_batch_size_v = (
-        output_batch_size if v_batch_size_needs_broadcast else Nnz_kv
-    )
-    value_buffer_reshaped = _view_as_dense(
-        v_t, effective_batch_size_v, output_num_heads, head_dim_v
-    )
+#     effective_batch_size_v = (
+#         output_batch_size if v_batch_size_needs_broadcast else Nnz_kv
+#     )
+#     value_buffer_reshaped = _view_as_dense(
+#         v_t, effective_batch_size_v, output_num_heads, head_dim_v
+#     )
 
-    if not q_batch_size_needs_broadcast:
-        output_shape = q_t._size
-        if head_dim_v != head_dim_qk:
-            output_shape[-1] = head_dim_v
-        if q_num_heads_needs_broadcast:
-            output_shape[1] = output_num_heads
-    else:
-        output_shape = torch.empty(3, dtype=torch.int64, device=torch.device("cpu"))
-        output_shape[0] = q_t.size(1)
-        output_shape[1] = output_num_heads
-        output_shape[2] = head_dim_v
+#     if not q_batch_size_needs_broadcast:
+#         output_shape = q_t._size
+#         if head_dim_v != head_dim_qk:
+#             output_shape[-1] = head_dim_v
+#         if q_num_heads_needs_broadcast:
+#             output_shape[1] = output_num_heads
+#     else:
+#         output_shape = torch.empty(3, dtype=torch.int64, device=torch.device("cpu"))
+#         output_shape[0] = q_t.size(1)
+#         output_shape[1] = output_num_heads
+#         output_shape[2] = head_dim_v
 
-    return (
-        query_buffer_reshaped,
-        key_buffer_reshaped,
-        value_buffer_reshaped,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_kv,
-        max_seqlen_batch_q,
-        max_seqlen_batch_kv,
-        output_shape,
-    )
+#     return (
+#         query_buffer_reshaped,
+#         key_buffer_reshaped,
+#         value_buffer_reshaped,
+#         cumulative_sequence_length_q,
+#         cumulative_sequence_length_kv,
+#         max_seqlen_batch_q,
+#         max_seqlen_batch_kv,
+#         output_shape,
+#     )
 
 
 def _sdpa_nested_preprocessing(query, key, value):
@@ -541,7 +542,10 @@ def _sdpa_nested_preprocessing(query, key, value):
     if not (q_batch_size == k_batch_size and q_batch_size == v_batch_size) or not (
         q_num_heads == k_num_heads and k_num_heads == v_num_heads
     ):
-        return _sdpa_nested_preprocessing_with_broadcast(query, key, value)
+        raise RuntimeError(
+            "This path is currently not implemented for jagged layout NT."
+        )
+        # return _sdpa_nested_preprocessing_with_broadcast(query, key, value)
 
     num_heads = query.size(1)
     head_dim_qk = query.size(3)

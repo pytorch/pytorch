@@ -185,7 +185,6 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
-        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -723,8 +722,7 @@ def transpose_int(func, *args, **kwargs):
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
-    # use the inputs with raggedness in dim 1. Therefore, when requesting this transpose,
-    # move things around but don't change anything in _values
+    # use the inputs with raggedness in dim 1.
     if dim0 == inp._ragged_idx or dim1 == inp._ragged_idx:
         if dim0 == 0 or dim1 == 0:
             raise ValueError(
@@ -734,16 +732,16 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
-        inp._ragged_idx = to_dim
-        new_size = list(inp._size)
-        new_size[dim0], new_size[dim1] = new_size[dim1], new_size[dim0]
-        inp._size = tuple(new_size)
-        inp._values.transpose_(
-            _outer_to_inner_dim(len(new_size), dim0),
-            _outer_to_inner_dim(len(new_size), dim1),
-        )
         t_stride = (inp._strides[0], *inp._values.stride())
-        return NestedTensor(inp.values(), **extract_kwargs(inp), _strides=t_stride)
+        return NestedTensor(
+            inp.values().transpose(
+                _outer_to_inner_dim(len(inp._size), dim0),
+                _outer_to_inner_dim(len(inp._size), dim1),
+            ),
+            **extract_kwargs(inp),
+            _strides=t_stride,
+            _ragged_idx=to_dim,
+        )
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
     new_kwargs["dim1"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim1"], "transpose")
