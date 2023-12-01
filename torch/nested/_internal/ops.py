@@ -110,7 +110,6 @@ def check_ragged_dim_same(
 # returns True if the raggedness-relevant portions of the NT shape
 # match those of the specified size
 def raggedness_matches(nt, size):
-    breakpoint()
     end = nt._ragged_idx + 1
     return list(nt._size[:end]) == list(size[:end])
 
