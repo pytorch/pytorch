@@ -121,13 +121,14 @@ def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.
     return query_ref, key_ref, value_ref
 
 def get_platform_specific_sdpa():
-    if TEST_WITH_ROCM:
-        return [SDPBackend.FLASH_ATTENTION]
-    if TEST_CUDA and SM80OrLater:
-        return [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-    if TEST_CUDA:
-        return [SDPBackend.EFFICIENT_ATTENTION]
-    return [SDPBackend.MATH]  # Should be empty, but an empty list causes "An empty arg_values was passed to @parametrize"
+    ret = []
+    if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+        ret.append(SDPBackend.FLASH_ATTENTION)
+    if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+        ret.append(SDPBackend.EFFICIENT_ATTENTION)
+    if not ret:
+        ret.append(SDPBackend.MATH) # Placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
+    return ret
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
@@ -1442,7 +1443,8 @@ class TestSDPAFailureModes(NNTestCase):
                 _ = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False)
 
-    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
+    # Note: do not truncate the list according to platforms. These tests should always raise errors.
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_different_datatypes(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Different datatypes
@@ -1453,7 +1455,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
         # Different devices
         shape = (1, 4, 8, 16)
@@ -1462,7 +1464,7 @@ class TestSDPAFailureModes(NNTestCase):
         value = torch.randn(shape, dtype=torch.float16, device='cpu')
         self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @parametrize("kernel", [SDPBackend.MATH] + PLATFORM_SPECIFIC_SDPA)
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_1_dimensional_inputs(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # 1 dimensional input
@@ -2483,9 +2485,9 @@ class TestSDPACudaOnly(NNTestCase):
             if not is_power_of_2(seq_len_q) or not is_power_of_2(seq_len_k) or not is_power_of_2(head_dim):
                 self.skipTest("Flash attention on ROCM only supports power of two seq_len_q seq_len_k headdim, for now.")
             if head_dim < 16 or seq_len_q < 16 or seq_len_k < 16:
-                self.skipTest("Flash attention on ROCM only supports power seq_len_q, seq_len_k, headdim >= 16, for now.")
+                self.skipTest("Flash attention on ROCM only supports power of two seq_len_q, seq_len_k, headdim >= 16, for now.")
             if head_dim > 128:
-                self.skipTest("Flash attention on ROCM only supports power headdim <= 128, for now.")
+                self.skipTest("Flash attention on ROCM only supports power of two headdim <= 128, for now.")
 
         if isSM86or89Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
