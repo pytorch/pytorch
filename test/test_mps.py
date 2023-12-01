@@ -38,7 +38,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes, precisionOverride
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
