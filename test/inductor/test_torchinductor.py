@@ -3619,11 +3619,10 @@ class CommonTemplate:
 
         self.common(
             fn,
-            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
             (
                 torch.randn(
                     [16, 16],
-                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                    dtype=torch.float32,
                 ),
             ),
             # Mismatched elements: 9 / 256 (3.5%)
