@@ -76,7 +76,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
 
   // We check the whether the cumulative_sequence_length_q is defined
   // in order to determine whether we are using varlen or dense forward
-  if (cumulative_sequence_length_q.defined()) {
+  if (cumulative_sequence_length_q.defined() && cumulative_sequence_length_q.numel() > 0) {
     // Varlen forward
     auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_varlen_bwd(
         contiguous_grad_out,
