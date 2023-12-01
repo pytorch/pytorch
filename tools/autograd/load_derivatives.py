@@ -798,7 +798,7 @@ def saved_variables(
         ),
         # replace zeros_like(self) with self_info
         (
-            r"zeros_like\({}\)",
+            r"at::zeros_like\({}\)",
             {
                 "suffix": "_info",
                 "nctype": lambda name: NamedCType(name, BaseCType(typeAndSizeT)),
