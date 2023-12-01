@@ -859,6 +859,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.checkpoint.utils
 .. py:module:: torch.distributed.collective_utils
 .. py:module:: torch.distributed.constants
+.. py:module:: torch.distributed.device_mesh
 .. py:module:: torch.distributed.distributed_c10d
 .. py:module:: torch.distributed.elastic.agent.server.api
 .. py:module:: torch.distributed.elastic.agent.server.local_elastic_agent
