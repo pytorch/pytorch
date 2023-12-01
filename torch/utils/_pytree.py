@@ -16,14 +16,17 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import importlib
 import json
 import threading
 import warnings
-from collections import deque, namedtuple, OrderedDict
+from collections import defaultdict, deque, namedtuple, OrderedDict
 from typing import (
     Any,
     Callable,
     cast,
+    DefaultDict,
+    Deque,
     Dict,
     Iterable,
     List,
@@ -78,8 +81,8 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
@@ -123,7 +126,7 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
 def register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -151,6 +154,10 @@ def register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
+    with _NODE_REGISTRY_LOCK:
+        if cls in SUPPORTED_NODES:
+            raise ValueError(f"{cls} is already registered as pytree node.")
+
     _private_register_pytree_node(
         cls,
         flatten_fn,
@@ -176,7 +183,7 @@ def register_pytree_node(
 
 
 def _register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     to_str_fn: Optional[ToStrFunc] = None,  # deprecated
@@ -229,7 +236,7 @@ def _register_pytree_node(
 
 
 def _private_register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -243,7 +250,11 @@ def _private_register_pytree_node(
     """
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
-            raise ValueError(f"{cls} is already registered as pytree node.")
+            # TODO: change this warning to an error after OSS/internal stabilize
+            warnings.warn(
+                f"{cls} is already registered as pytree node. "
+                "Overwriting the previous registration.",
+            )
 
         node_def = NodeDef(
             cls,
@@ -318,22 +329,76 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return context
 
 
-def _odict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
+def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
-def _odict_unflatten(
+def _ordereddict_unflatten(
     values: Iterable[Any],
     context: Context,
 ) -> GenericOrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
+_odict_flatten = _ordereddict_flatten
+_odict_unflatten = _ordereddict_unflatten
+
+
+def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
+    values, dict_context = _dict_flatten(d)
+    return values, [d.default_factory, dict_context]
+
+
+def _defaultdict_unflatten(
+    values: Iterable[Any],
+    context: Context,
+) -> DefaultDict[Any, Any]:
+    default_factory, dict_context = context
+    return defaultdict(default_factory, _dict_unflatten(values, dict_context))
+
+
+def _defaultdict_serialize(context: Context) -> DumpableContext:
+    default_factory, dict_context = context
+    json_defaultdict = {
+        "default_factory_module": default_factory.__module__,
+        "default_factory_name": default_factory.__qualname__,
+        "dict_context": dict_context,
+    }
+    return json_defaultdict
+
+
+def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
+    assert isinstance(dumpable_context, dict)
+    assert set(dumpable_context) == {
+        "default_factory_module",
+        "default_factory_name",
+        "dict_context",
+    }
+
+    default_factory_module = dumpable_context["default_factory_module"]
+    default_factory_name = dumpable_context["default_factory_name"]
+    assert isinstance(default_factory_module, str)
+    assert isinstance(default_factory_name, str)
+    module = importlib.import_module(default_factory_module)
+    default_factory = getattr(module, default_factory_name)
+
+    dict_context = dumpable_context["dict_context"]
+    return [default_factory, dict_context]
+
+
+def _deque_flatten(deq: Deque[Any]) -> Tuple[List[Any], Context]:
+    return list(deq), deq.maxlen
+
+
+def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
+    return deque(values, maxlen=context)
+
+
 _private_register_pytree_node(
-    dict,
-    _dict_flatten,
-    _dict_unflatten,
-    serialized_type_name="builtins.dict",
+    tuple,
+    _tuple_flatten,
+    _tuple_unflatten,
+    serialized_type_name="builtins.tuple",
 )
 _private_register_pytree_node(
     list,
@@ -342,13 +407,13 @@ _private_register_pytree_node(
     serialized_type_name="builtins.list",
 )
 _private_register_pytree_node(
-    tuple,
-    _tuple_flatten,
-    _tuple_unflatten,
-    serialized_type_name="builtins.tuple",
+    dict,
+    _dict_flatten,
+    _dict_unflatten,
+    serialized_type_name="builtins.dict",
 )
 _private_register_pytree_node(
-    namedtuple,
+    namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten,
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
@@ -357,9 +422,23 @@ _private_register_pytree_node(
 )
 _private_register_pytree_node(
     OrderedDict,
-    _odict_flatten,
-    _odict_unflatten,
+    _ordereddict_flatten,
+    _ordereddict_unflatten,
     serialized_type_name="collections.OrderedDict",
+)
+_private_register_pytree_node(
+    defaultdict,
+    _defaultdict_flatten,
+    _defaultdict_unflatten,
+    serialized_type_name="collections.defaultdict",
+    to_dumpable_context=_defaultdict_serialize,
+    from_dumpable_context=_defaultdict_deserialize,
+)
+_private_register_pytree_node(
+    deque,
+    _deque_flatten,
+    _deque_unflatten,
+    serialized_type_name="collections.deque",
 )
 
 
@@ -518,12 +597,12 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     return tree_flatten(tree)[1]
 
 
-def tree_map(func: Any, tree: PyTree) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(tree)
     return tree_unflatten([func(i) for i in flat_args], spec)
 
 
-def tree_map_(func: Any, tree: PyTree) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args = tree_leaves(tree)
     deque(map(func, flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
@@ -905,8 +984,8 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return str_spec
 
 
-def treespec_loads(data: str) -> TreeSpec:
-    protocol, json_schema = json.loads(data)
+def treespec_loads(serialized: str) -> TreeSpec:
+    protocol, json_schema = json.loads(serialized)
 
     if protocol in _SUPPORTED_PROTOCOLS:
         return _SUPPORTED_PROTOCOLS[protocol].json_to_treespec(json_schema)

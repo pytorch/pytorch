@@ -248,6 +248,22 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+        # Should turn into pointwise even if only some of inputs are pointwise.
+        def f(a, b):
+            out = torch.cat([a.cos(), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+        # Should not turn into pointwise if all inputs are not pointwise
+        def f(a, b):
+            out = torch.cat([torch.mm(a, a), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
+
     def test_index(self):
         def f(a, b):
             return a[b]
