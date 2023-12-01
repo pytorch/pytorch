@@ -728,8 +728,6 @@ def _placeholder_remote_write(unique_frame_id, guarded_code):
     with open(file_path, "wb") as file:
         guarded_code.serialize(file)
 
-    print("Wrote to!", file_path)
-
 
 def _placeholder_remote_fetch(unique_frame_id, frame):
     try:

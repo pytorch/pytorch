@@ -53,12 +53,8 @@ class GuardedCode:
     resume_fn_name: str
     resume_fn_code: types.CodeType
     unique_id: int
-    can_serialize: bool
 
     def serialize(self, file):
-        if not self.can_serialize:
-            raise RuntimeError("Cannot serialize this guarded code")
-
         code_attrs = torch._dynamo.utils.attrs_code_object(self.code)
         if self.resume_fn_code:
             resume_fn_code_attrs = torch._dynamo.utils.attrs_code_object(self.resume_fn_code)
