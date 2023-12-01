@@ -526,11 +526,11 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
+            with torchdynamo.config.patch(allow_rnn=True):
+                model_graph = capture_pre_autograd_graph(
+                    model_graph,
+                    example_inputs,
+                )
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
@@ -590,11 +590,11 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx(*example_inputs)
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
-            torchdynamo.config.allow_rnn = True
-            model_graph = capture_pre_autograd_graph(
-                model_graph,
-                example_inputs,
-            )
+            with torchdynamo.config.patch(allow_rnn=True):
+                model_graph = capture_pre_autograd_graph(
+                    model_graph,
+                    example_inputs,
+                )
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
@@ -707,14 +707,13 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        # not quantized
         node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
         }
         node_list = [
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.mul.Tensor,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
             M(),

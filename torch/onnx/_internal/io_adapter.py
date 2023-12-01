@@ -175,7 +175,7 @@ def _assert_identical_pytree_spec(
         raise ValueError(f"{error_message}\nExpect {spec1}.\nActual {spec2}.")
 
 
-class BindInputStep:
+class BindInputStep(InputAdaptStep):
     """Bind the input arguments to the model signature."""
 
     def __init__(self, model_signature: inspect.Signature):
@@ -213,7 +213,7 @@ class BindInputStep:
         return (), bound.arguments
 
 
-class MergeKwargsIntoArgsInputStep:
+class MergeKwargsIntoArgsInputStep(InputAdaptStep):
     """Merge the input kwargs into the input args."""
 
     def apply(
@@ -233,7 +233,7 @@ class MergeKwargsIntoArgsInputStep:
         return tuple(model_args) + tuple(model_kwargs.values()), {}
 
 
-class LiftParametersAndBuffersIntoArgsInputStep:
+class LiftParametersAndBuffersIntoArgsInputStep(InputAdaptStep):
     """Append parameters and buffers to model's positional argument list."""
 
     def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
@@ -256,7 +256,7 @@ class LiftParametersAndBuffersIntoArgsInputStep:
         return (*model_args, *self.inputs), model_kwargs
 
 
-class ConvertComplexToRealRepresentationInputStep:
+class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
     """Convert complex dtype tensors to real representation tensors.
 
     ONNX does not support complex dtype tensors. Thus, we convert complex dtype tensors
@@ -290,7 +290,7 @@ class ConvertComplexToRealRepresentationInputStep:
         )
 
 
-class RemoveNoneInputStep:
+class RemoveNoneInputStep(InputAdaptStep):
     """Remove `None` from arguments.
 
     This adapt step assumes ``model_kwargs`` is empty. It also assumes ``model_args``
@@ -318,7 +318,7 @@ class RemoveNoneInputStep:
         return tuple(arg for arg in model_args if arg is not None), {}
 
 
-class RemoveNonTensorInputStep:
+class RemoveNonTensorInputStep(InputAdaptStep):
     """Remove the non-tensor input arguments.
 
     Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
@@ -382,7 +382,7 @@ class RemoveNonTensorInputStep:
         )
 
 
-class FlattenInputWithTreeSpecValidationInputStep:
+class FlattenInputWithTreeSpecValidationInputStep(InputAdaptStep):
     """Flatten nested collection types and return a flat list of elements.
 
     ONNX can't represent collection types (e.g., dictionary, tuple of tuple of tensor,
@@ -426,7 +426,7 @@ class FlattenInputWithTreeSpecValidationInputStep:
         return flattened_args, {}
 
 
-class FlattenOutputStep:
+class FlattenOutputStep(OutputAdaptStep):
     """Flatten nested collection types and return a flat list of elements.
 
     ONNX can't represent collection types (e.g., dictionary, tuple of tuple of tensor,
@@ -446,7 +446,7 @@ class FlattenOutputStep:
         return flattened_outputs
 
 
-class ConvertComplexToRealRepresentationOutputStep:
+class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
     """Convert complex dtype tensors to real representation tensors.
 
     ONNX does not support complex dtype tensors. Thus, we convert complex dtype tensors
@@ -472,7 +472,7 @@ class ConvertComplexToRealRepresentationOutputStep:
         ]
 
 
-class FlattenOutputWithTreeSpecValidationOutputStep:
+class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
     """Same as ``FlattenOutputStep``, with additional `TreeSpec` validation.
 
     This class stores the `SpecTree` output produced when `adapt` was called the first
@@ -507,7 +507,7 @@ class FlattenOutputWithTreeSpecValidationOutputStep:
         return flattened_outputs
 
 
-class PrependParamsAndBuffersAotAutogradInputStep:
+class PrependParamsAndBuffersAotAutogradInputStep(InputAdaptStep):
     """Prepend model parameters and buffers to the user input.
 
     :func:`torch.export.export` lifts model parameters and buffers as model input, thus, they

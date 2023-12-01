@@ -1,16 +1,33 @@
 # Owner(s): ["module: inductor"]
 import logging
+import os
 import pathlib
 import re
 import shutil
+import sys
+import unittest
 
 import torch
 from torch._inductor import config, test_operators
-from torch.testing._internal.inductor_utils import filesize, TestCase
+
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
+def filesize(filename: pathlib.Path):
+    assert filename.exists(), f"{filename} is missing"
+    return os.stat(filename).st_size
 
 
 @config.patch("trace.enabled", True)
-class TestDebugTrace(TestCase):
+class TestDebugTrace(test_torchinductor.TestCase):
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):

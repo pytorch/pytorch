@@ -14,9 +14,7 @@ from ..pattern_matcher import (
 )
 
 if config.is_fbcode():
-    from torch._inductor.fb.utils import (  # type: ignore[import]  # noqa: F401
-        get_everpaste_url,
-    )
+    from torch._inductor.fb.utils import get_everpaste_url
 
 try:
     # importing this will register fbgemm lowerings for inductor

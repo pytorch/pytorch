@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
 
 #include <c10/util/Exception.h>
@@ -19,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+
 namespace sdp {
 
 constexpr int32_t num_backends = 3;
@@ -39,10 +39,10 @@ enum class CustomMaskType {
 };
 
 struct sdp_params {
-  const at::Tensor& query;
-  const at::Tensor& key;
-  const at::Tensor& value;
-  const c10::optional<at::Tensor> attn_mask;
+  at::Tensor query;
+  at::Tensor key;
+  at::Tensor value;
+  c10::optional<at::Tensor> attn_mask;
   double dropout;
   bool is_causal;
 };
