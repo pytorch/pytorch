@@ -866,7 +866,11 @@ class TestSparseCompressed(TestCase):
 
         nnz = 2 ** 31
         with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in nnz'):
-            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int32),
+            # nnz cannot be stored in int32 crow_indices
+            # but the `crow_indices[..., -1] == nnz`` check happens after the overflow validation
+            # So we can use `nnz - 1` here to avoid `value cannot be converted to type int32 without overflow`
+            # during construction of crow_indices
+            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz - 1], dtype=torch.int32),
                                     torch.arange(nnz // 2, dtype=torch.int32).repeat(2),
                                     torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
         torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int64),
