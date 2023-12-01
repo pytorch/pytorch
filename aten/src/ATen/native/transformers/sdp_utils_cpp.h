@@ -79,6 +79,13 @@ inline bool has_for_nested_inputs(sdp_params const& params) {
       (params.value.is_nested() && params.value.layout() == c10::kStrided);
 }
 
+inline bool has_for_dense_inputs(sdp_params const& params) {
+  return
+      (!params.query.is_nested() || !(params.query.layout() != c10::kStrided)) ||
+      (!params.key.is_nested() || !(params.key.layout() == c10::kStrided)) ||
+      (!params.value.is_nested() || !(params.value.layout() == c10::kStrided));
+}
+
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
     sdp_params const& params,
@@ -248,7 +255,6 @@ inline bool check_for_dropout(sdp_params const& params, bool debug) {
 }
 
 inline bool check_requires_grad_and_nested(sdp_params const& params, bool debug) {
-  // If we fail both checks then we return false
   if (input_requires_grad(params)) {
     if (debug) {
       TORCH_WARN(

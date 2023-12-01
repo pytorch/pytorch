@@ -3573,7 +3573,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('le', device_type='cuda'),
         xfail('lt', device_type='cuda'),
         xfail('ne', device_type='cuda'),
-        
+
         # RuntimeError: aten::_flash_attention_forward hit the vmap fallback which is currently disabled
         xfail('torch.ops.aten._flash_attention_forward'),  # randomness
     }

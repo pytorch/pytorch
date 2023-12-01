@@ -84,12 +84,22 @@ class NestedTensor(torch.Tensor):
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        self._ragged_idx = 1 if "_ragged_idx" not in kwargs else kwargs["_ragged_idx"]
         B = offsets.shape[0] - 1
-        Ds = values.shape[1:]
-        self._size = (B, ragged_size, *Ds)
+        Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
+
+        nested_size = [B]
+        nested_size.extend(Ds[: self._ragged_idx - 1])
+        nested_size.append(ragged_size)
+        nested_size.extend(Ds[self._ragged_idx - 1 :])
+        self._size = tuple(nested_size)
+
         stride = values.stride()
-        self._strides = (ragged_size * stride[0], *stride)
-        self._ragged_idx = 1
+        self._strides = (
+            (ragged_size * stride[0], *stride)
+            if "_strides" not in kwargs
+            else kwargs["_strides"]
+        )
 
         if values.requires_grad:
             raise ValueError(

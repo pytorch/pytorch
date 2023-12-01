@@ -3385,29 +3385,54 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
-    
+
     def test_sdpa(self, device):
-        sen1 = torch.randn(11, 1024, dtype=torch.float16, device=device)
-        sen2 = torch.randn(13, 1024, dtype=torch.float16, device=device)
-        x_d = sen1.unsqueeze(0)
+        batch_size = 1
+        emb_dims = 1024
+        n_heads = 8
+        head_dims = emb_dims // n_heads
+        sen1 = torch.randn(11, emb_dims, dtype=torch.float16, device=device)
+        sen2 = torch.randn(13, emb_dims, dtype=torch.float16, device=device)
+
+        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
+        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
+        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
+
+        # Simplest case: 1 sentence, no batching
+        x_d1 = sen1.unsqueeze(0)
         x_nt = torch.nested.as_nested_tensor([sen1], layout=torch.jagged)
 
-        query = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
-        key = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
-        value = torch.nn.Linear(1024, 1024, bias=False, device=device, dtype=torch.float16)
+        q_d1 = query(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d1 = key(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d1 = value(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
 
-        q_d = query(x_d)
-        k_d = key(k_d)
-        v_d = value(v_d)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
 
-        q_nt = query(x_nt)
-        k_nt = key(k_nt)
-        v_nt = value(v_nt)
+        attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
 
-        attn_d = torch.nn.functional.scaled_dot_product_attention(q_d, k_d, v_d)
-        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt)
+        self.assertEqual(attn_d1, attn_nt.unbind()[0].unsqueeze(0))
 
-        self.assertEqual(attn_d, attn_nt.unbind()[0].unsqueeze(0))
+        # Simple case: 2 sentences, no extra params
+        x_d2 = sen2.unsqueeze(0)
+        x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
+
+        q_d2 = query(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+
+        attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+
+        attn_nts = attn_nt.unbind()
+        self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0))
+        self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0))
 
 
 

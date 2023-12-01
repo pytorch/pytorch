@@ -289,7 +289,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
-  else {
+  if (has_for_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
@@ -347,7 +347,7 @@ TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool de
       }
     }
   }
-  else {
+  if (has_for_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,

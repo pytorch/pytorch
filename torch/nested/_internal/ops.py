@@ -185,6 +185,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -725,6 +726,10 @@ def transpose_int(func, *args, **kwargs):
     # use the inputs with raggedness in dim 1. Therefore, when requesting this transpose,
     # move things around but don't change anything in _values
     if dim0 == inp._ragged_idx or dim1 == inp._ragged_idx:
+        if dim0 == 0 or dim1 == 0:
+            raise ValueError(
+                "Transpose is not supported on the batch dimension for jagged NT"
+            )
         if dim0 == inp._ragged_idx:
             to_dim = dim1
         else:
@@ -733,6 +738,12 @@ def transpose_int(func, *args, **kwargs):
         new_size = list(inp._size)
         new_size[dim0], new_size[dim1] = new_size[dim1], new_size[dim0]
         inp._size = tuple(new_size)
+        inp._values.transpose_(
+            _outer_to_inner_dim(len(new_size), dim0),
+            _outer_to_inner_dim(len(new_size), dim1),
+        )
+        t_stride = tuple(inp._strides[0], *inp._values.stride())
+        return NestedTensor(inp.values(), **extract_kwargs(inp), _strides=t_stride)
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
     new_kwargs["dim1"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim1"], "transpose")
