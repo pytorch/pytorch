@@ -243,6 +243,8 @@ class CausalVariant(IntEnum):
 
     Note that these variants are equivalent to each other when the sequence lengths of the query and key/value
     tensors are equal since the triangular matrix is square.
+
+    .. warning:: This enum is a prototype and subject to change.
     """
 
     UPPER_LEFT = auto()
@@ -254,6 +256,8 @@ class CausalBias(AttnBias):
     A bias representing causal attention patterns
 
     This class is used for defining causal (triangular) attention biases.
+
+    .. warning:: This class is a prototype and subject to change.
     """
 
     def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
@@ -311,14 +315,12 @@ class CausalBias(AttnBias):
             return self._upper_left(device)
         elif self.variant == CausalVariant.LOWER_RIGHT:
             return self._lower_right(device)
-
+        
     def needs_materialization(self) -> bool:
         """
         Indicates whether the bias needs materialization.
-
         For CausalBias, this is always False as the bias is defined procedurally
         and does not require explicit materialization into a tensor before use.
-
         Returns:
             bool: False, indicating no materialization is required.
         """
@@ -388,7 +390,7 @@ class CausalBias(AttnBias):
                     key,
                     value,
                     dropout_p,
-                    is_causal=True,
+                    is_causal=True,  # TODO: Flash accepts causal = True and for this particular op it means lower right
                     return_debug_mask=False,
                     scale=og_scale,
                 )[0]
@@ -413,9 +415,9 @@ class CausalBias(AttnBias):
                     seqlen_k=None,
                 )[0].transpose(1, 2)
             else:
-                # TODO This will warn with the reason why we cant use efficient attention
-                # Should this default to on?
+                # Raise warnings as to why we cant run the efficient kernels
                 can_use_efficient_attention(sdpa_params, True)
+                can_use_flash_attention(sdpa_params, True)
                 # We cant use efficient attention the only support for lower right is via materialization
                 return scaled_dot_product_attention(
                     query,

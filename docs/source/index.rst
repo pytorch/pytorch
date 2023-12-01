@@ -93,6 +93,7 @@ Features described in this documentation are classified by release status:
    torch.package <package>
    profiler
    nn.init
+   nn.utils.attention
    onnx
    optim
    complex_numbers
@@ -105,7 +106,6 @@ Features described in this documentation are classified by release status:
    torch.nested <nested>
    sparse
    storage
-   nn.utils.attention
    torch.testing <testing>
    torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>

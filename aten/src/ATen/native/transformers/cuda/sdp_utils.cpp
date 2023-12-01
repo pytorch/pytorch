@@ -228,7 +228,6 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   }
   return true;
 }
-} // namespace
 
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
@@ -247,7 +246,26 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   return true;
 }
 
+bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
+  // Check that all tensors are on the GPU device
+  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // directly from python we need to ensure that the tensors are on cuda
+  if (params.query.device().type() != at::DeviceType::CUDA) {
+    if (debug) {
+      TORCH_WARN(
+          "All tensors need to be on cuda device. Got query on device: ",
+          params.query.device(),
+          ", key on device: ",
+          params.key.device(),
+          ", value on device: ",
+          params.value.device());
+    }
+    return false;
+  }
+  return true;
+}
 
+} // namespace
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
@@ -258,6 +276,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   // Replace with std::to_array when we migrate to c++20
   constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
+      check_all_tensors_on_device,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
       check_for_attn_mask,
@@ -300,6 +319,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
+      check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
       check_tensor_shapes,
