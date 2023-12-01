@@ -3701,7 +3701,64 @@ class NCCLTraceTest(MultiProcessTestCase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
+class NCCLTraceTestShortTimeout(NCCLTraceTest):
+    timeout_sec = 3
 
+    def setUp(self):
+        super().setUp()
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
+        self.tempdir = tempfile.TemporaryDirectory()
+        # will be cleaned up (reliably?) on gc?
+        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self.tempdir.name + "/trace"
+        self._spawn_processes()
+
+    def _create_process_group_nccl(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=NCCLTraceTestShortTimeout.timeout_sec))
+        pg = c10d.distributed_c10d._get_default_group()
+        return pg
+
+    def _trace_name(self, rank):
+        return self.tempdir + "trace_" + rank
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_timeout_dumps(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            for c in self.children_pipes:
+                self.assertEqual(c.recv(), 'next')
+
+            # allow extra time for both timeout interval and dump process
+            time.sleep(2 * NCCLTraceTestShortTimeout.timeout_sec)
+            with open(self._trace_name(rank=0)) as f:
+                t = pickle.loads(f)
+                self.assertEqual(len(t), 2)
+                self.assertEqual(t[0]['seq_id'], 1)
+                self.assertEqual(t[0]['state'], 'completed')
+                self.assertEqual(t[1]['seq_id'], 2)
+                self.assertEqual(t[1]['state'], 'started')
+
+            self.assertFalse(os.exists(self._trace_name(rank=1)))
+            return
+
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        with torch.cuda.device(device):
+            a = torch.full((3, 4), float(self.rank), device=device)
+
+            pg.allreduce(a).wait()
+            if self.rank == 0:
+                pg.allreduce(a).wait()
+
+            # at this point, the parent can sit back and wait for the timeout that
+            # should be triggered on rank0 due to other ranks not joining the second
+            # allreduce
+            self.parent.send('next')
 
 if __name__ == "__main__":
     assert (
