@@ -73,6 +73,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
 
+    if config.pre_grad_custom_pass is not None:
+        config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
