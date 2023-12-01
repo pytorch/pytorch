@@ -124,7 +124,7 @@ def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
         return False
 
     # This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
-    if not torch.all(param.offsets().diff()):
+    if param.min_seqlen() == 0:
         if debug:
             log.warning(
                 "Fused kernels do not support seq_len == 0, %s has a seq len of 0.",
@@ -258,12 +258,14 @@ def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
 
 def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     if (
-        not params.query.is_contiguous()
-        or not params.key.is_contiguous()
-        or not params.value.is_contiguous()
+        not params.query.transpose(1, 2).is_contiguous()
+        or not params.key.transpose(1, 2).is_contiguous()
+        or not params.value.transpose(1, 2).is_contiguous()
     ):
         if debug:
-            log.warning("If inputs are nested tensors they must be contiguous.")
+            log.warning(
+                "If inputs are nested tensors they must be contiguous after transposing."
+            )
         return False
     if params.is_causal:
         if debug:
@@ -309,6 +311,8 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
     log.warning("Flash attention kernel not used because:")
     can_use_flash_attention(params, debug=True)
     _can_use_flash_sdpa_jagged(params, debug=True)
+    log.warning("Math attention kernel not used because:")
+    _can_use_math_sdpa_jagged(params, debug=True)
     return SDPBackend.ERROR
 
 
@@ -326,17 +330,17 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
     if qkv.lengths() is None:
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
         # TODO: Explore performance impact when compiling
-        max_seqlen = torch.max(qkv.offsets().diff()).item()
+        max_seqlen = qkv.max_seqlen()
         n_elem = qkv.values().shape[0]
     else:
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
         batch_size = qkv.size(0)
-        max_seqlen = qkv.values().size(0) // batch_size
+        max_seqlen = qkv.max_seqlen()
         n_elem = int(cumulative_seqlen[-1].item())
     # TODO: Explore performance impact when compiling
-    return cumulative_seqlen, int(max_seqlen), n_elem
+    return cumulative_seqlen, max_seqlen, n_elem
 
 
 def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):

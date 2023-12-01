@@ -110,6 +110,7 @@ def check_ragged_dim_same(
 # returns True if the raggedness-relevant portions of the NT shape
 # match those of the specified size
 def raggedness_matches(nt, size):
+    breakpoint()
     end = nt._ragged_idx + 1
     return list(nt._size[:end]) == list(size[:end])
 
@@ -185,6 +186,8 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "_max_seqlen": arg._max_seqlen,
+        "_min_seqlen": arg._min_seqlen,
     }
     return kwargs
 
@@ -732,14 +735,12 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
-        t_stride = (inp._strides[0], *inp._values.stride())
         return NestedTensor(
             inp.values().transpose(
                 _outer_to_inner_dim(len(inp._size), dim0),
                 _outer_to_inner_dim(len(inp._size), dim1),
             ),
             **extract_kwargs(inp),
-            _strides=t_stride,
             _ragged_idx=to_dim,
         )
 

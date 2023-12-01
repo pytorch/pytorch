@@ -235,7 +235,7 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params const& params, bool deb
 
 inline bool check_nested_tensor(sdp_params const& params, bool debug) {
   // Return false if have nested tensor
-  if (!has_for_dense_inputs(params)) {
+  if (!has_only_dense_inputs(params)) {
     if (debug) {
       TORCH_WARN(
           "Both fused kernels of cpp version currently do not support Nested Tensor inputs.");
