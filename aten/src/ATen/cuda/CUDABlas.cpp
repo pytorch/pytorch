@@ -571,7 +571,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #endif
 
 // hipblaslt custom types were a temporary work-around
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_TYPES
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_DATA_TYPE
 hipblasltDatatype_t hipToLt(hipDataType type) {
     switch (type) {
         case HIP_R_32F: return HIPBLASLT_R_32F;
@@ -593,7 +593,12 @@ hipblasltDatatype_t hipToLt(hipDataType type) {
         default: TORCH_CHECK(false);
     }
 }
+#define HIPTOLT(type) hipToLt(type)
+#else
+#define HIPTOLT(type) type
+#endif
 
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_COMPUTE_TYPE
 hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
     switch (type) {
         case HIPBLAS_COMPUTE_32F: return HIPBLASLT_COMPUTE_F32;
@@ -604,11 +609,8 @@ hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
         default: TORCH_CHECK(false);
     }
 }
-
-#define HIPTOLT(type) hipToLt(type)
 #define HIPCOMPTOLT(type) hipblasToLt(type)
 #else
-#define HIPTOLT(type) type
 #define HIPCOMPTOLT(type) type
 #endif
 
