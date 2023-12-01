@@ -57,6 +57,7 @@
 #include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/CallOnce.h>
 
 // OORT headers
 #include <oort/attn_fwd.h>
@@ -66,18 +67,29 @@
 
 namespace pytorch_flash {
 
+namespace {
+
+c10::once_flag fa_gcn_arch_override_flag;
+const char* fa_override_arch = nullptr;
+
+void init_fa_override_arch() {
+  fa_override_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+}
+
 void check_gpu_arch() {
   auto dprops = at::cuda::getCurrentDeviceProperties();
 
   constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  const char* arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
-  if (arch) {
-      TORCH_CHECK(mi200 == arch,
-                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName) + " override as " + arch);
+  c10::call_once(fa_gcn_arch_override_flag, init_fa_override_arch);
+  if (fa_override_arch) {
+      TORCH_CHECK(mi200 == fa_override_arch,
+                  "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName) + " override as " + fa_override_arch);
   } else {
       TORCH_CHECK(mi200 == dprops->gcnArchName,
                   "FlashAttention only supports MI200/MI250 GPUs (gfx90a:sramecc+:xnack-), current gcnArchName: " + std::string(dprops->gcnArchName));
   }
+}
+
 }
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")

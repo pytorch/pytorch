@@ -14,6 +14,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/util/CallOnce.h>
 
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
@@ -176,6 +177,13 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
+c10::once_flag gcn_arch_override_flag;
+const char* over_arch = nullptr;
+
+void init_gcn_arch_override() {
+  over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+}
+
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
@@ -184,7 +192,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
 #if USE_ROCM
   constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
   const char* real_arch = dprops->gcnArchName;
-  const char* over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  c10::call_once(gcn_arch_override_flag, init_gcn_arch_override);
   const char* arch = over_arch ? over_arch : real_arch;
   if (mi200 != arch) {
     if (debug) {
