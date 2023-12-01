@@ -706,8 +706,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               q_t,
               k_t,
               v_t,
-              Tensor(),
-              Tensor(),
+              c10::nullopt,
+              c10::nullopt,
               max_seqlen_batch_q,
               max_seqlen_batch_k,
               dropout_p,
@@ -777,8 +777,8 @@ _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
+    const c10::optional<Tensor>& cumulative_sequence_length_q,
+    const c10::optional<Tensor>& cumulative_sequence_length_k,
     int64_t max_seqlen_batch_q,
     int64_t max_seqlen_batch_k,
     double dropout_p,
@@ -793,9 +793,13 @@ _flash_attention_forward(
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
   // 2. The Varseqlen path
+  TORCH_CHECK(
+      cumulative_sequence_length_q.has_value() ==
+          cumulative_sequence_length_k.has_value(),
+      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
   Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
       philox_seed, philox_offset, debug_attn_mask;
-  if (cumulative_sequence_length_q.defined() && cumulative_sequence_length_q.numel() > 0) {
+  if (cumulative_sequence_length_q.has_value()) {
     std::tie(
         output,
         q_padded,
@@ -810,8 +814,8 @@ _flash_attention_forward(
             key,
             value,
             out,
-            cumulative_sequence_length_q,
-            cumulative_sequence_length_k,
+            cumulative_sequence_length_q.value(),
+            cumulative_sequence_length_k.value(),
             max_seqlen_batch_q,
             max_seqlen_batch_k,
             dropout_p,
