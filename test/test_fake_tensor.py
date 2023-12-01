@@ -206,9 +206,7 @@ class FakeTensorTest(TestCase):
         b = torch._C._functorch._add_batch_dim(x, 0, 0)
         mode = FakeTensorMode()
         fake_b = mode.from_tensor(b)
-        self.assertEqual(fake_b.shape, (4, 5))
-        self.assertEqual(fake_b.device, b.device)
-        self.assertTrue(isinstance(fake_b, FakeTensor))
+        prims.utils.compare_tensor_meta(b, fake_b, check_strides=True)
 
     def test_constructor(self):
         with FakeTensorMode():
