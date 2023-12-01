@@ -249,14 +249,10 @@ def tree_flatten(tree: PyTree) -> Tuple[List[Any], TreeSpec]:
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_flatten(tree)
     ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
-    >>> tree_flatten(tree, none_is_leaf=False)
-    ([1, 2, 3, 4, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': None, 'd': *}))
     >>> tree_flatten(1)
     ([1], PyTreeSpec(*, NoneIsLeaf))
     >>> tree_flatten(None)
     ([None], PyTreeSpec(*, NoneIsLeaf))
-    >>> tree_flatten(None, none_is_leaf=False)
-    ([], PyTreeSpec(None))
 
     For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
     dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
@@ -266,8 +262,6 @@ def tree_flatten(tree: PyTree) -> Tuple[List[Any], TreeSpec]:
     >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', *), ('d', *)]), NoneIsLeaf))
-    >>> tree_flatten(tree, none_is_leaf=False)
-    ([2, 3, 4, 1, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', None), ('d', *)])))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -318,14 +312,10 @@ def tree_leaves(tree: PyTree) -> List[Any]:
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_leaves(tree)
     [1, 2, 3, 4, None, 5]
-    >>> tree_leaves(tree, none_is_leaf=False)
-    [1, 2, 3, 4, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
     [None]
-    >>> tree_leaves(None, none_is_leaf=False)
-    []
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -344,14 +334,10 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_structure(tree)
     PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
-    >>> tree_structure(tree, none_is_leaf=False)
-    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': None, 'd': *})
     >>> tree_structure(1)
     PyTreeSpec(*, NoneIsLeaf)
     >>> tree_structure(None)
     PyTreeSpec(*, NoneIsLeaf)
-    >>> tree_structure(None, none_is_leaf=False)
-    PyTreeSpec(None)
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -375,10 +361,6 @@ def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
     {'x': 8, 'y': (43, 65)}
     >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
     {'x': False, 'y': (False, False), 'z': True}
-    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64), 'z': None}, none_is_leaf=False)
-    {'x': 8, 'y': (43, 65), 'z': None}
-    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None}, none_is_leaf=False)
-    {'x': False, 'y': (False, False), 'z': None}
 
     Args:
         func (callable): A function that takes a single argument, to be applied at the corresponding
@@ -663,8 +645,6 @@ def broadcast_prefix(prefix_tree: PyTree, full_tree: PyTree) -> List[Any]:
     [1, 2, 3, 3]
     >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
     [1, 2, 3, 3, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}], none_is_leaf=False)
-    [1, 2, 3, 3, 3]
 
     Args:
         prefix_tree (pytree): A pytree with the same structure as a prefix of ``full_tree``.
