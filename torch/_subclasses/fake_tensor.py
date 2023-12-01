@@ -1363,8 +1363,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
 
 class _DispatchCacheKey(list):
     """
-    Key for the FakeTensor dispatch cache. (Copied from) _HashedSeq from
-    functools.lru_cache.
+    Key for the FakeTensor dispatch cache. Inspired by (copied from)
+    _HashedSeq from the functools.lru_cache implementation.
     """
 
     __slots__ = "hashvalue"
@@ -1381,7 +1381,7 @@ class _DispatchCacheKey(list):
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
-    1) We need to create a new FakeTensor given Tensor metadata. 2 )The op is an
+    1) We need to create a new FakeTensor given Tensor metadata. 2) The op is an
     in-place op and we need to alias the given input.
     """
 
@@ -1399,7 +1399,7 @@ class _BypassDispatchCache(Exception):
 
 
 @dataclass(frozen=True)
-class FakeTensorDispatchCacheInfo:
+class DispatchCacheInfo:
     """
     Information about the state of the FakeTensor dispatch cache.
     """
@@ -1525,11 +1525,11 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
 
     @classmethod
-    def cache_info(cls) -> FakeTensorDispatchCacheInfo:
+    def cache_info(cls) -> DispatchCacheInfo:
         """
         Query the state of the dispatch cache.
         """
-        return FakeTensorDispatchCacheInfo(
+        return DispatchCacheInfo(
             FakeTensorMode.cache_hits,
             FakeTensorMode.cache_misses,
             dict(FakeTensorMode.cache_bypasses),
@@ -1555,7 +1555,7 @@ class FakeTensorMode(TorchDispatchMode):
     ):
         """
         Lookup a cache entry for the given arguments. If none exists, dispatch
-        and cache the result.
+        and cache the result (if the result is cache-able).
         """
         try:
             key = self._cache_key(func, args, kwargs)
@@ -1570,16 +1570,10 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             FakeTensorMode.cache_misses += 1
             output = self._dispatch_impl(func, types, args, kwargs)
-            # Some ops return tuples of Tensors, but it's rare, so avoid
-            # the complexity of caching other types. Also avoid caching
-            # FakeTensors with constants since they can be invalidated.
-            # TODO: support caching sparse outputs?
-            if (
-                isinstance(output, FakeTensor)
-                and output.constant is None
-                and not output.is_sparse
-            ):
-                FakeTensorMode.cache[key] = self._make_cache_entry(args, output)
+            try:
+                self._create_cache_entry(key, args, output)
+            except _BypassDispatchCache as e:
+                FakeTensorMode.cache_bypasses[e.reason] += 1
 
         return output
 
@@ -1663,19 +1657,38 @@ class FakeTensorMode(TorchDispatchMode):
             # output tensor.
             return (type(arg), arg)
 
-    def _make_cache_entry(
-        self, args: Tuple[Any], output: FakeTensor
+    def _create_cache_entry(
+        self, key: _DispatchCacheKey, args: Tuple[Any], output: FakeTensor
     ) -> _DispatchCacheEntry:
         """
-        Create an entry to cache the given 'output' Tensor.
+        Create an entry in the cache for the given 'output' Tensor.
         """
-        # If this is an in-place op, we need to record which input arg is aliased.
+        # Some ops return tuples of Tensors, but it's rare, so avoid
+        # the complexity of caching other types.
+        if not isinstance(output, FakeTensor):
+            raise _BypassDispatchCache("non-FakeTensor output")
+
+        # Avoid caching FakeTensors with constants attached since those
+        # can be invalidated.
+        if output.constant is not None:
+            raise _BypassDispatchCache("constant attribute")
+
+        # TODO: support caching sparse outputs?
+        if output.is_sparse:
+            raise _BypassDispatchCache("sparse output")
+
+        # If this is an in-place op, we just record which input arg is aliased.
+        entry = None
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
-                return _DispatchCacheEntry(None, idx)
+                entry = _DispatchCacheEntry(None, idx)
+                break
 
-        # Otherwise, store the output tensor's metadata.
-        return _DispatchCacheEntry(extract_tensor_metadata(output), None)
+        # Otherwise, record the output tensor's metadata.
+        if not entry:
+            entry = _DispatchCacheEntry(extract_tensor_metadata(output), None)
+
+        FakeTensorMode.cache[key] = entry
 
     def _output_from_cache_entry(
         self, entry: _DispatchCacheEntry, func: OpOverload, args: Tuple[Any]
