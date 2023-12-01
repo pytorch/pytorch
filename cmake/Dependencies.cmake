@@ -624,6 +624,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable AVXVNNI for now, older clang versions seem not to support it
     # (clang 12 is wher avx-vnni support is added)
     set(XNNPACK_ENABLE_AVXVNNI OFF CACHE BOOL "")
+    set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
