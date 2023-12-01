@@ -733,7 +733,6 @@ def mps_ops_modifier(ops):
         'nn.functional.norm': None,
         'ormqr': None,
         'pca_lowrank': None,
-        'pinverse': None,
         'qr': None,
         'quantile': None,
         'rsub': None,
