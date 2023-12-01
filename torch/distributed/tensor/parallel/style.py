@@ -192,17 +192,19 @@ class RowwiseParallel(ParallelStyle):
         return input_tensor
 
     def _partition_fn(self, name, module, device_mesh):
-        assert isinstance(module, nn.Linear), "Only support nn.Linear"
-        # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
-        # means Rowwise as Linear is input * weight^T + bias, where
-        # weight would become Shard(0)
-        module.register_parameter("weight", nn.Parameter(
-            distribute_tensor(module.weight, device_mesh, [Shard(1)])
-        ))
-        if module.bias is not None:
-            module.register_parameter("bias", nn.Parameter(
-                distribute_tensor(module.bias, device_mesh, [Replicate()])
+        if isinstance(module, nn.Linear):
+            # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
+            # means Rowwise as Linear is input * weight^T + bias, where
+            # weight would become Shard(0)
+            module.register_parameter("weight", nn.Parameter(
+                distribute_tensor(module.weight, device_mesh, [Shard(1)])
             ))
+            if module.bias is not None:
+                module.register_parameter("bias", nn.Parameter(
+                    distribute_tensor(module.bias, device_mesh, [Replicate()])
+                ))
+        else:
+            raise NotImplementedError("RowwiseParallel currently only support nn.Linear!")
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
