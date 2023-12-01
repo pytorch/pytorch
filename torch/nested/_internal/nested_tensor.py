@@ -142,10 +142,12 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
+        # inner tensors: _values, _offsets, [_lengths], [_base]
+        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 4
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
+        base = inner_tensors.get("_base", None)
 
         # Note that we cannot simply check if is_fake(values) because
         # during aot autograd, FunctionalTensors are not fake but hold
@@ -158,12 +160,22 @@ class NestedTensor(torch.Tensor):
             ragged_size = outer_size[1]
             _tensor_symint_registry[ragged_source] = ragged_size
 
-        return NestedTensor(
-            values,
-            offsets=offsets,
-            lengths=lengths,
-            requires_grad=meta["requires_grad"],
-        )
+        if base is None:
+            return NestedTensor(
+                values,
+                offsets=offsets,
+                lengths=lengths,
+                requires_grad=meta["requires_grad"],
+            )
+
+        # return a view
+        values = base.as_strided(values.shape, values.stride(), values.storage_offset())
+        if lengths is None:
+            # Typical dense -> NT view case
+            return nested_view_from_values_offsets(values, offsets)
+        else:
+            # base is a dense tensor that is the result of narrow()
+            return nested_view_from_values_offsets_lengths(values, offsets, lengths)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
