@@ -619,7 +619,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
     # these new ISA features may not be supported on older compilers
     set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
-    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+    # set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
 
     # Disable AVXVNNI for now, older clang versions seem not to support it
     # (clang 12 is wher avx-vnni support is added)
