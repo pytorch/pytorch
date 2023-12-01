@@ -10,7 +10,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        set_guard_fail_hook,
         skip_code,
         unsupported,
     )
@@ -250,41 +249,36 @@ def mark_static_address(t, guard=True):
         raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
 
     if guard:
-        t._dynamo_static_input_type = "guarded"
+        t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
     else:
-        t._dynamo_static_input_type = "unguarded"
+        t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
-# Note: it's preferable to not make `import torch` eagerly import other libs.
-# However, we want to provide a grace period to make borderline versions of einops
-# compatible with torch.compile.
+# Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
+    import einops
+
     try:
-        import einops
+        # requires einops > 0.6.1, torch >= 2.0
+        from einops._torch_specific import (  # noqa: F401
+            _ops_were_registered_in_torchdynamo,
+        )
 
-        try:
-            # requires einops > 0.6.1, torch >= 2.0
-            from einops._torch_specific import (  # noqa: F401
-                _ops_were_registered_in_torchdynamo,
-            )
-
-            # einops > 0.6.1 will call the op registration logic as it is imported.
-            pass
-        except ImportError:
-            # einops <= 0.6.1
-            allow_in_graph(einops.rearrange)
-            allow_in_graph(einops.reduce)
-            if hasattr(einops, "repeat"):
-                allow_in_graph(einops.repeat)  # available since einops 0.2.0
-            if hasattr(einops, "einsum"):
-                allow_in_graph(einops.einsum)  # available since einops 0.5.0
-            if hasattr(einops, "pack"):
-                allow_in_graph(einops.pack)  # available since einops 0.6.0
-            if hasattr(einops, "unpack"):
-                allow_in_graph(einops.unpack)  # available since einops 0.6.0
-    except ImportError:
+        # einops > 0.6.1 will call the op registration logic as it is imported.
         pass
+    except ImportError:
+        # einops <= 0.6.1
+        allow_in_graph(einops.rearrange)
+        allow_in_graph(einops.reduce)
+        if hasattr(einops, "repeat"):
+            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+        if hasattr(einops, "einsum"):
+            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+        if hasattr(einops, "pack"):
+            allow_in_graph(einops.pack)  # available since einops 0.6.0
+        if hasattr(einops, "unpack"):
+            allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-_allow_in_graph_einops()
+allowed_functions.add_module_init_func("einops", _allow_in_graph_einops)

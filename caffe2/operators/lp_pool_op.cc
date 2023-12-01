@@ -230,7 +230,7 @@ OPERATOR_SCHEMA(LpPool)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-`LpPool` consumes an input blob and applies max pooling across the the blob according to kernel sizes, stride sizes, pad lengths and dilation. $L_p$ pooling consists of taking the $L_p$ norm of a subset of the input tensor according to the kernel size and downsampling the data into the output blob for further processing.
+`LpPool` consumes an input blob and applies max pooling across the blob according to kernel sizes, stride sizes, pad lengths and dilation. $L_p$ pooling consists of taking the $L_p$ norm of a subset of the input tensor according to the kernel size and downsampling the data into the output blob for further processing.
 
 Pooling layers reduce the spatial dimensionality of the input blob. Each of the output blob's dimensions will reduce according to:
 

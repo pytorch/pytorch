@@ -56,13 +56,13 @@ Below you can find a small example showcasing this::
 
 .. _tf32_on_ampere:
 
-TensorFloat-32(TF32) on Ampere devices
---------------------------------------
+TensorFloat-32 (TF32) on Ampere (and later) devices
+---------------------------------------------------
 
 Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
 defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
-available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
+available on NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
 and batched matrix multiplies) and convolutions.
 
 TF32 tensor cores are designed to achieve better performance on matmul and convolutions on
@@ -80,11 +80,12 @@ matmuls and convolutions are controlled separately, and their corresponding flag
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
   torch.backends.cudnn.allow_tf32 = True
 
+The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float_32_matmul_precision`.
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
 matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
 affine grid and grid sample, adaptive log softmax, GRU and LSTM.
 
-To get an idea of the precision and speed, see the example code below:
+To get an idea of the precision and speed, see the example code and benchmark data (on A100) below:
 
 .. code:: python
 
@@ -108,9 +109,12 @@ To get an idea of the precision and speed, see the example code below:
   error = (ab_fp32 - ab_full).abs().max()  # 0.0031
   relative_error = error / mean  # 0.000039
 
-From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
-compared to double precision is approximately 2 orders of magnitude larger.  If full FP32 precision
-is needed, users can disable TF32 by:
+From the above example, we can see that with TF32 enabled, the speed is ~7x faster on A100, and that
+relative error compared to double precision is approximately 2 orders of magnitude larger. Note that
+the exact ratio of TF32 to single precision speed depends on the hardware generation, as properties
+such as the ratio of memory bandwidth to compute as well as the ratio of TF32 to FP32 matmul throughput
+may vary from generation to generation or model to model.
+If full FP32 precision is needed, users can disable TF32 by:
 
 .. code:: python
 
@@ -260,7 +264,42 @@ used.  For example, the following code is incorrect::
 When the "current stream" is the default stream, PyTorch automatically performs
 necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
-ensure proper synchronization.
+ensure proper synchronization.  The fixed version of this example is::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # NEW!
+    with torch.cuda.stream(s):
+        B = torch.sum(A)
+    A.record_stream(s)  # NEW!
+
+There are two new additions.  The :meth:`torch.cuda.Stream.wait_stream` call
+ensures that the ``normal_()`` execution has finished before we start running
+``sum(A)`` on a side stream.  The :meth:`torch.Tensor.record_stream` (see for
+more details) ensures that we do not deallocate A before ``sum(A)`` has
+completed.  You can also manually wait on the stream at some later point in
+time with ``torch.cuda.default_stream(cuda).wait_stream(s)`` (note that it
+is pointless to wait immediately, since that will prevent the stream execution
+from running in parallel with other work on the default stream.)  See the
+documentation for :meth:`torch.Tensor.record_stream` on more details on when
+to use one or another.
+
+Note that this synchronization is necessary even when there is no
+read dependency, e.g., as seen in this example::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # STILL REQUIRED!
+    with torch.cuda.stream(s):
+        A.normal_(0.0, 1.0)
+        A.record_stream(s)
+
+Despite the computation on ``s`` not reading the contents of ``A`` and no
+other uses of ``A``, it is still necessary to synchronize, because ``A``
+may correspond to memory reallocated by the CUDA caching allocator, with
+pending operations from the old (deallocated) memory.
 
 .. _bwd-cuda-stream-semantics:
 

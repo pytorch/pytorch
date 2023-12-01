@@ -96,11 +96,10 @@ def _get_metric_name(fn):
 
 def prof(fn=None, group: str = "torchelastic"):
     r"""
-    @profile decorator publishes duration.ms, count, success, failure
-    metrics for the function that it decorates. The metric name defaults
-    to the qualified name (``class_name.def_name``) of the function.
-    If the function does not belong to a class, it uses the leaf module name
-    instead.
+    @profile decorator publishes duration.ms, count, success, failure metrics for the function that it decorates.
+
+    The metric name defaults to the qualified name (``class_name.def_name``) of the function.
+    If the function does not belong to a class, it uses the leaf module name instead.
 
     Usage
 
@@ -176,7 +175,7 @@ def profile(group=None):
 
 def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchelastic"):
     """
-    Publishes a metric data point.
+    Publish a metric data point.
 
     Usage
 
@@ -185,7 +184,6 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
      put_metric("metric_name", 1)
      put_metric("metric_name", 1, "metric_group_name")
     """
-
     getStream(metric_group).add_value(metric_name, metric_value)
 
 
@@ -198,8 +196,6 @@ def publish_metric(metric_group: str, metric_name: str, metric_value: int):
 
 
 def get_elapsed_time_ms(start_time_in_seconds: float):
-    """
-    Returns the elapsed time in millis from the given start time.
-    """
+    """Return the elapsed time in millis from the given start time."""
     end_time = time.time()
     return int((end_time - start_time_in_seconds) * 1000)

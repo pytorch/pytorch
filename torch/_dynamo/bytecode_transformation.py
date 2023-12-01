@@ -4,7 +4,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple
 
 from .bytecode_analysis import (
     get_indexof,
@@ -22,7 +22,7 @@ class InstructionExnTabEntry:
     depth: int
     lasti: bool
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"InstructionExnTabEntry(start={self.start.short_inst_repr()}, "
             f"end={self.end.short_inst_repr()}, "
@@ -30,7 +30,7 @@ class InstructionExnTabEntry:
             f"depth={self.depth}, lasti={self.lasti})"
         )
 
-    def __eq__(self, o):
+    def __eq__(self, o) -> bool:
         return (
             self.start is o.start
             and self.end is o.end
@@ -56,17 +56,17 @@ class Instruction:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return id(self)
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return id(self) == id(other)
 
-    def short_inst_repr(self):
+    def short_inst_repr(self) -> str:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
 
 
-def convert_instruction(i: dis.Instruction):
+def convert_instruction(i: dis.Instruction) -> Instruction:
     return Instruction(
         i.opcode,
         i.opname,
@@ -80,11 +80,13 @@ def convert_instruction(i: dis.Instruction):
 
 
 class _NotProvided:
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "_NotProvided"
 
 
-def create_instruction(name, *, arg=None, argval=_NotProvided, target=None):
+def create_instruction(
+    name, *, arg=None, argval=_NotProvided, target=None
+) -> Instruction:
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
     This is to prevent ambiguity, e.g. does
@@ -110,12 +112,12 @@ def create_instruction(name, *, arg=None, argval=_NotProvided, target=None):
 
 
 # Python 3.11 remaps
-def create_jump_absolute(target):
+def create_jump_absolute(target) -> Instruction:
     inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
     return create_instruction(inst, target=target)
 
 
-def create_load_global(name, push_null):
+def create_load_global(name, push_null) -> Instruction:
     """
     `name` is the name of the global to be loaded.
     `push_null` specifies whether or not a NULL should be pushed to the stack
@@ -140,13 +142,13 @@ def create_load_global(name, push_null):
     )
 
 
-def create_dup_top():
+def create_dup_top() -> Instruction:
     if sys.version_info >= (3, 11):
         return create_instruction("COPY", arg=1)
     return create_instruction("DUP_TOP")
 
 
-def create_rot_n(n):
+def create_rot_n(n) -> List[Instruction]:
     """
     Returns a "simple" sequence of instructions that rotates TOS to the n-th
     position in the stack. For Python < 3.11, returns a single ROT_*
@@ -175,7 +177,7 @@ def create_rot_n(n):
     return [create_instruction("ROT_N", arg=n)]
 
 
-def create_call_function(nargs, push_null):
+def create_call_function(nargs, push_null) -> List[Instruction]:
     """
     Creates a sequence of instructions that makes a function call.
 
@@ -204,7 +206,7 @@ def create_call_function(nargs, push_null):
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
-def create_call_method(nargs):
+def create_call_method(nargs) -> List[Instruction]:
     if sys.version_info >= (3, 11):
         return [
             create_instruction("PRECALL", arg=nargs),
@@ -213,14 +215,16 @@ def create_call_method(nargs):
     return [create_instruction("CALL_METHOD", arg=nargs)]
 
 
-def lnotab_writer(lineno, byteno=0):
+def lnotab_writer(
+    lineno: int, byteno: int = 0
+) -> Tuple[List[int], Callable[[int, int], None]]:
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table if Python < 3.10
     """
     assert sys.version_info < (3, 10)
-    lnotab = []
+    lnotab: List[int] = []
 
     def update(lineno_new, byteno_new):
         nonlocal byteno, lineno
@@ -242,7 +246,7 @@ def linetable_310_writer(first_lineno):
     This is the internal format of the line number table for Python 3.10
     """
     assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
-    linetable = []
+    linetable: List[int] = []
     lineno = first_lineno
     lineno_delta = 0
     byteno = 0
@@ -270,7 +274,7 @@ def linetable_310_writer(first_lineno):
     return linetable, update, end
 
 
-def encode_varint(n):
+def encode_varint(n: int) -> List[int]:
     """
     6-bit chunk encoding of an unsigned integer
     See https://github.com/python/cpython/blob/3.11/Objects/locations.md
@@ -285,7 +289,7 @@ def encode_varint(n):
     return b
 
 
-def linetable_311_writer(first_lineno):
+def linetable_311_writer(first_lineno: int):
     """
     Used to create typing.CodeType.co_linetable
     See https://github.com/python/cpython/blob/3.11/Objects/locations.md
@@ -295,7 +299,7 @@ def linetable_311_writer(first_lineno):
     linetable = []
     lineno = first_lineno
 
-    def update(positions: dis.Positions, inst_size):
+    def update(positions: "dis.Positions", inst_size):
         nonlocal lineno
         lineno_new = positions.lineno if positions else None
 
@@ -303,7 +307,7 @@ def linetable_311_writer(first_lineno):
             assert 0 < size <= 8
             # first byte - use 13 (no column info) is positions is
             # malformed, otherwise use 14 (long form)
-            other_varints = ()
+            other_varints: Tuple[int, ...] = ()
             if (
                 positions
                 and positions.lineno is not None
@@ -353,7 +357,7 @@ class ExceptionTableEntry:
     lasti: bool
 
 
-def encode_exception_table_varint(n):
+def encode_exception_table_varint(n: int) -> List[int]:
     """
     Similar to `encode_varint`, but the 6-bit chunks are ordered in reverse.
     """
@@ -369,7 +373,7 @@ def encode_exception_table_varint(n):
     return b
 
 
-def decode_exception_table_varint(bytes_iter):
+def decode_exception_table_varint(bytes_iter: Iterator[int]) -> int:
     """
     Inverse of `encode_exception_table_varint`.
     """
@@ -382,7 +386,7 @@ def decode_exception_table_varint(bytes_iter):
     return val
 
 
-def check_exception_table(tab: List[ExceptionTableEntry]):
+def check_exception_table(tab: List[ExceptionTableEntry]) -> None:
     """
     Verifies that a list of ExceptionTableEntries will make a well-formed
     jump table: entries are non-empty, sorted, and do not overlap.
@@ -395,7 +399,7 @@ def check_exception_table(tab: List[ExceptionTableEntry]):
         )
 
 
-def parse_exception_table(exntab: bytes):
+def parse_exception_table(exntab: bytes) -> List[ExceptionTableEntry]:
     """
     Parse the exception table according to
     https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
@@ -417,7 +421,7 @@ def parse_exception_table(exntab: bytes):
         return tab
 
 
-def assemble_exception_table(tab: List[ExceptionTableEntry]):
+def assemble_exception_table(tab: List[ExceptionTableEntry]) -> bytes:
     """
     Inverse of parse_exception_table - encodes list of exception
     table entries into bytes.
@@ -435,9 +439,9 @@ def assemble_exception_table(tab: List[ExceptionTableEntry]):
     return bytes(b)
 
 
-def assemble(instructions: List[Instruction], firstlineno):
+def assemble(instructions: List[Instruction], firstlineno: int) -> Tuple[bytes, bytes]:
     """Do the opposite of dis.get_instructions()"""
-    code = []
+    code: List[int] = []
     if sys.version_info >= (3, 11):
         lnotab, update_lineno = linetable_311_writer(firstlineno)
         num_ext = 0
@@ -487,7 +491,7 @@ def _get_instruction_by_offset(offset_to_inst: Dict[int, Instruction], offset: i
     return None
 
 
-def virtualize_jumps(instructions):
+def virtualize_jumps(instructions) -> None:
     """Replace jump targets with pointers to make editing easier"""
     jump_targets = {inst.offset: inst for inst in instructions}
 
@@ -499,7 +503,7 @@ def virtualize_jumps(instructions):
 _REL_JUMPS = set(dis.hasjrel)
 
 
-def flip_jump_direction(instruction):
+def flip_jump_direction(instruction: Instruction) -> None:
     if sys.version_info < (3, 11):
         raise RuntimeError("Cannot flip jump direction in Python < 3.11")
     if "FORWARD" in instruction.opname:
@@ -514,7 +518,7 @@ def flip_jump_direction(instruction):
 
 def _get_instruction_front(instructions: List[Instruction], idx: int):
     """
-    i.e. get the first EXTENDED_ARG instruction (if any) when targetting
+    i.e. get the first EXTENDED_ARG instruction (if any) when targeting
     instructions[idx] with a jump.
     """
     target = instructions[idx]
@@ -567,15 +571,14 @@ def devirtualize_jumps(instructions):
 def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruction]):
     """Replace exception table entries with pointers to make editing easier"""
     exn_tab = parse_exception_table(exn_tab_bytes)
-    offset_to_inst = {inst.offset: inst for inst in instructions}
+    offset_to_inst = {cast(int, inst.offset): inst for inst in instructions}
     offsets = sorted(offset_to_inst.keys())
     end_offset_idx = 0
     exn_tab_iter = iter(exn_tab)
     try:
-        entry, inst_entry = None, None
 
         def step():
-            nonlocal entry, inst_entry, end_offset_idx
+            nonlocal end_offset_idx
             entry = next(exn_tab_iter)
             # find rightmost offset <= entry.end, since entry.end may not be
             # an actual instruction, e.g. if the end instruction is LOAD_GLOBAL,
@@ -594,11 +597,12 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
                 entry.depth,
                 entry.lasti,
             )
+            return entry, inst_entry
 
-        step()
+        entry, inst_entry = step()
         for inst in instructions:
             while inst.offset > entry.end:
-                step()
+                entry, inst_entry = step()
             if inst.offset >= entry.start:
                 inst.exn_tab_entry = copy.copy(inst_entry)
     except StopIteration:
@@ -609,7 +613,7 @@ def compute_exception_table(
     instructions: List[Instruction],
 ) -> List[ExceptionTableEntry]:
     """Compute exception table in list format from instructions with exn_tab_entries"""
-    exn_dict = {}
+    exn_dict: Dict[Tuple[int, int], Tuple[int, int, bool]] = {}
     indexof = get_indexof(instructions)
 
     for inst in instructions:
@@ -620,7 +624,7 @@ def compute_exception_table(
             ).offset
             # point to the last 2 bytes of the end instruction
             end = (
-                inst.exn_tab_entry.end.offset
+                cast(int, inst.exn_tab_entry.end.offset)
                 + instruction_size(inst.exn_tab_entry.end)
                 - 2
             )
@@ -643,8 +647,8 @@ def compute_exception_table(
     # smallest byte that the next exception table entry can start at
     nexti = 0
     # stack of current nested keys
-    key_stack = []
-    exn_tab = []
+    key_stack: List[Tuple[int, int]] = []
+    exn_tab: List[ExceptionTableEntry] = []
 
     def pop():
         """
@@ -679,14 +683,16 @@ def compute_exception_table(
     return exn_tab
 
 
-def check_inst_exn_tab_entries_nested(tab: List[InstructionExnTabEntry], indexof):
+def check_inst_exn_tab_entries_nested(
+    tab: List[InstructionExnTabEntry], indexof
+) -> None:
     """
     Checks `tab` is a properly sorted list of nested InstructionExnTabEntry's,
     i.e. no entries partially overlap.
     "Properly sorted" means entries are sorted by increasing starts, then
     decreasing ends.
     """
-    entry_stack = []
+    entry_stack: List[Tuple[int, int]] = []
     for entry in tab:
         key = (indexof[entry.start], indexof[entry.end])
         while entry_stack and entry_stack[-1][1] < key[0]:
@@ -696,13 +702,13 @@ def check_inst_exn_tab_entries_nested(tab: List[InstructionExnTabEntry], indexof
         entry_stack.append(key)
 
 
-def propagate_inst_exn_table_entries(instructions: List[Instruction]):
+def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     """
     Copies exception table entries to all instructions in an entry's range.
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
-    entries = {}
+    entries: Dict[Tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
         if inst.exn_tab_entry:
             key = (
@@ -747,11 +753,11 @@ def check_inst_exn_tab_entries_valid(instructions: List[Instruction]):
             assert indexof[entry.start] <= i <= indexof[entry.end]
 
 
-def strip_extended_args(instructions: List[Instruction]):
+def strip_extended_args(instructions: List[Instruction]) -> None:
     instructions[:] = [i for i in instructions if i.opcode != dis.EXTENDED_ARG]
 
 
-def remove_load_call_method(instructions: List[Instruction]):
+def remove_load_call_method(instructions: List[Instruction]) -> List[Instruction]:
     """LOAD_METHOD puts a NULL on the stack which causes issues, so remove it"""
     rewrites = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
     for inst in instructions:
@@ -761,7 +767,7 @@ def remove_load_call_method(instructions: List[Instruction]):
     return instructions
 
 
-def remove_jump_if_none(instructions: List[Instruction]):
+def remove_jump_if_none(instructions: List[Instruction]) -> None:
     new_insts = []
     for inst in instructions:
         new_insts.append(inst)
@@ -783,7 +789,7 @@ def remove_jump_if_none(instructions: List[Instruction]):
     instructions[:] = new_insts
 
 
-def explicit_super(code: types.CodeType, instructions: List[Instruction]):
+def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
     output = []
@@ -810,16 +816,16 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
     instructions[:] = output
 
 
-def fix_extended_args(instructions: List[Instruction]):
+def fix_extended_args(instructions: List[Instruction]) -> int:
     """Fill in correct argvals for EXTENDED_ARG ops"""
-    output = []
+    output: List[Instruction] = []
 
     def maybe_pop_n(n):
         for _ in range(n):
             if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
 
-    for i, inst in enumerate(instructions):
+    for inst in instructions:
         if inst.opcode == dis.EXTENDED_ARG:
             # Leave this instruction alone for now so we never shrink code
             inst.arg = 0
@@ -860,27 +866,27 @@ _PYOPCODE_CACHES = {
 }
 
 
-def instruction_size(inst):
+def instruction_size(inst) -> int:
     if sys.version_info >= (3, 11):
         return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
     return 2
 
 
-def check_offsets(instructions):
+def check_offsets(instructions) -> None:
     offset = 0
     for inst in instructions:
         assert inst.offset == offset
         offset += instruction_size(inst)
 
 
-def update_offsets(instructions):
+def update_offsets(instructions) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
         offset += instruction_size(inst)
 
 
-def debug_bytes(*args):
+def debug_bytes(*args) -> str:
     index = range(max(map(len, args)))
     result = []
     for arg in (
@@ -904,7 +910,7 @@ HAS_FREE = set(dis.hasfree)
 HAS_CONST = set(dis.hasconst)
 
 
-def get_const_index(code_options, val):
+def get_const_index(code_options, val) -> int:
     for i, v in enumerate(code_options["co_consts"]):
         # NOTE: stronger comparison is required, since we have
         # examples where two values compare equal but have
@@ -954,7 +960,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 11):
                 instructions[i].arg = (names[instructions[i].argval] << 1) + (
-                    instructions[i].arg % 2
+                    cast(int, instructions[i].arg) % 2
                 )
             else:
                 instructions[i].arg = names[instructions[i].argval]
@@ -972,13 +978,12 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             # that any additions to co_consts are appended.
             if instructions[i].arg is None:
                 # cannot use a dictionary since consts may not be hashable
-                instructions[i].arg = get_const_index(
-                    code_options, instructions[i].argval
-                )
-                assert instructions[i].arg >= 0
+                idx = get_const_index(code_options, instructions[i].argval)
+                assert idx >= 0
+                instructions[i].arg = idx
 
 
-def get_code_keys():
+def get_code_keys() -> List[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
     # for new format.
@@ -1017,7 +1022,7 @@ def get_code_keys():
     return keys
 
 
-def transform_code_object(code, transformations, safe=False):
+def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1040,7 +1045,7 @@ def clean_and_assemble_instructions(
     if sys.version_info >= (3, 11):
         # temporary code object with updated names
         tmp_code = types.CodeType(*[code_options[k] for k in keys])
-        varname_from_oparg = tmp_code._varname_from_oparg
+        varname_from_oparg = tmp_code._varname_from_oparg  # type: ignore[attr-defined]
     fix_vars(instructions, code_options, varname_from_oparg=varname_from_oparg)
 
     dirty = True
@@ -1048,7 +1053,7 @@ def clean_and_assemble_instructions(
         update_offsets(instructions)
         devirtualize_jumps(instructions)
         # this pass might change offsets, if so we need to try again
-        dirty = fix_extended_args(instructions)
+        dirty = bool(fix_extended_args(instructions))
 
     remove_extra_line_nums(instructions)
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
@@ -1075,7 +1080,7 @@ def populate_kw_names_argval(instructions, consts):
             inst.argval = consts[inst.arg]
 
 
-def cleaned_instructions(code, safe=False):
+def cleaned_instructions(code, safe=False) -> List[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
@@ -1097,10 +1102,10 @@ def cleaned_instructions(code, safe=False):
 _unique_id_counter = itertools.count()
 
 
-def unique_id(name):
+def unique_id(name) -> str:
     return f"{name}_{next(_unique_id_counter)}"
 
 
-def is_generator(code: types.CodeType):
+def is_generator(code: types.CodeType) -> bool:
     co_generator = 0x20
     return (code.co_flags & co_generator) > 0

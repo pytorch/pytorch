@@ -29,7 +29,8 @@ from torch.utils._python_dispatch import (
     _push_mode,
 )
 
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
+from .sym_node import SymNode
+from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
@@ -48,7 +49,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -169,13 +170,13 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -274,7 +275,9 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch:
+    if not pre_dispatch and func not in [
+        torch.ops.aten.size.default, torch.ops.aten.stride.default, torch.ops.aten.storage_offset.default
+    ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -304,7 +307,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
         # incorrectly burn in constants by allowing this access.  Raise
         # an error in this case
-        if pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
+        if proxy_mode._error_on_data_dependent_ops and pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
             raise RuntimeError(
                 f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
                 "It's likely that this is caused by data-dependent control flow or similar.  "
@@ -342,7 +345,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     #
     # If lift_fresh returns t directly, the subsequent add_ call will
     # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the the argument to lift is fresh.  So what we should
+    # the invariant the argument to lift is fresh.  So what we should
     # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
     #
     #       t = self._tensor_constant0  # initialized to torch.tensor(1)
@@ -565,7 +568,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False):
+    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False, _error_on_data_dependent_ops=True):
         dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
         self.tracer = tracer
@@ -573,7 +576,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
         self._allow_fake_constant = _allow_fake_constant
-        self.is_inside_mode = False
+        self._error_on_data_dependent_ops = _error_on_data_dependent_ops
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
@@ -758,7 +761,8 @@ def make_fx(f,
             _allow_non_fake_inputs=False,
             *,
             pre_dispatch=False,
-            _allow_fake_constant=False):
+            _allow_fake_constant=False,
+            _error_on_data_dependent_ops=True):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -766,6 +770,9 @@ def make_fx(f,
 
     @functools.wraps(f)
     def wrapped(*args):
+        # Avoid importing sympy at a module level
+        from .symbolic_shapes import ShapeEnv
+
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
@@ -813,21 +820,25 @@ def make_fx(f,
         proxy_mode = ProxyTorchDispatchMode(fx_tracer,
                                             tracing_mode,
                                             pre_dispatch=pre_dispatch,
-                                            _allow_fake_constant=_allow_fake_constant)
+                                            _allow_fake_constant=_allow_fake_constant,
+                                            _error_on_data_dependent_ops=_error_on_data_dependent_ops)
 
         arg_count = 0
 
         def wrap_fake(x):
             nonlocal arg_count
+            # TODO: it would be nice to line these up with the names
+            # FX will choose for the placeholders, but we don't
+            # actually know what the names will be at this point yet
+            # NB: the Source here is actually meaningless
+            from torch._dynamo.source import ConstantSource
+            source = ConstantSource(f"input{arg_count}")
             if isinstance(x, torch.Tensor):
-                # TODO: it would be nice to line these up with the names
-                # FX will choose for the placeholders, but we don't
-                # actually know what the names will be at this point yet
-                # NB: the Source here is actually meaningless
-                from torch._dynamo.source import ConstantSource
-                source = ConstantSource(f"input{arg_count}")
                 arg_count += 1
                 return fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
+            # NB: don't match on bools
+            elif type(x) is int and tracing_mode == "symbolic":
+                return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
 
             return x
 
