@@ -22,16 +22,27 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import check_model_cuda, TestCase, ToTuple
 
 try:
-    import triton
-    from triton import language as tl
-except ImportError:
+    try:
+        import triton
+        from triton import language as tl
+    except ImportError:
+        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
     raise
 
+
+TestCase = test_torchinductor.TestCase
+ToTuple = test_torchinductor.ToTuple
+check_model_cuda = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 

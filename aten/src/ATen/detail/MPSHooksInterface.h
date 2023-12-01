@@ -8,11 +8,6 @@
 #include <c10/util/Registry.h>
 
 #include <cstddef>
-#include <functional>
-
-namespace at {
-class Context;
-}
 
 namespace at {
 

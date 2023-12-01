@@ -6,6 +6,7 @@
 #include <ATen/TensorOperators.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>
@@ -133,14 +134,14 @@ _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& bias, // additive attention bias
+    const c10::optional<at::Tensor>& kernel_bias, // additive attention bias
     const at::Tensor& out,
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_q,
+    const c10::optional<at::Tensor>& cu_seqlens_q_dummy,
     // (Mode 1MHK only) [b+1]: cu_seqlens_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_k,
+    const c10::optional<at::Tensor>& cu_seqlens_k_dummy,
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_q,
     // (Mode 1MHK only) Maximum sequence length across batches
@@ -157,6 +158,14 @@ _efficient_attention_backward(
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+  // This path is used when we directly call _efficient_attention_forward
+  // from python.
+  // This is needed because SaveVariable automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
+  bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
+  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
+  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());

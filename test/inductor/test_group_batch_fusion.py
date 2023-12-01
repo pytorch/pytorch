@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 
 import torch
 import torch._inductor
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -16,6 +17,8 @@ try:
 except Exception:
     has_fbgemm = False
     pass
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):

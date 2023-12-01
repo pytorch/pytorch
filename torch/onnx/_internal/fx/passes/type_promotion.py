@@ -911,6 +911,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
     ElementwiseTypePromotionRule(
+        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(

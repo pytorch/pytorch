@@ -3,7 +3,10 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/native/cudnn/Macros.h>
 #include <c10/util/ArrayRef.h>
+
+#if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
@@ -21,8 +24,6 @@
 
 #include <iostream>
 #include <unordered_map>
-
-int register_linear_params();
 
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
@@ -357,7 +358,6 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
-  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), QLinearInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), QLinearInt8<true>::run);
 }
@@ -367,5 +367,6 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace at
 
 
+#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA
