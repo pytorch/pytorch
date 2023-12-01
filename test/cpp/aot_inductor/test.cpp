@@ -115,8 +115,8 @@ void test_aoti_double_buffering(const std::string& device) {
   auto actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
-  // We update the weights to buffer #2 and activate it. This should still produce
-  // correct result, as it's the real constant map.
+  // We update the weights to buffer #2 and activate it. This should still
+  // produce correct result, as it's the real constant map.
   runner->update_inactive_constant_buffer(real_map);
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
