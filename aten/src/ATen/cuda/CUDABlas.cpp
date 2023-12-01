@@ -1100,8 +1100,9 @@ void int8_gemm(
       computeType,
       " scaleType ",
       scaleType);
-#endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#else
   TORCH_CHECK(false, "int8_gemm is only supported for ROCm 6.0 and above");
+#endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 }
 #endif // (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
