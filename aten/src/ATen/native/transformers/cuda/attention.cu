@@ -817,8 +817,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale,
+        c10::optional<int64_t> num_kv_groups){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, num_kv_groups};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(

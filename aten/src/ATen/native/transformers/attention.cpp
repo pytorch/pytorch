@@ -423,7 +423,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale,
+        c10::optional<int64_t> num_kv_groups){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -448,7 +449,8 @@ int64_t _fused_sdp_choice_meta(
     const c10::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    c10::optional<double> scale,
+    c10::optional<int64_t> num_kv_groups) {
   auto query_key_set = query_.key_set();
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
@@ -467,7 +469,8 @@ int64_t _fused_sdp_choice_meta(
         attn_mask_,
         dropout_p,
         is_causal,
-        scale);
+        scale,
+        num_kv_groups);
     return choice_int;
   }
 #endif
@@ -679,7 +682,8 @@ Tensor scaled_dot_product_attention(
     const c10::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    c10::optional<double> scale,
+    c10::optional<int64_t> num_kv_groups) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
@@ -753,7 +757,7 @@ Tensor scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
-        const c10::optional<Tensor>& dropout_mask, c10::optional<double> scale) {
+        const c10::optional<Tensor>& dropout_mask, c10::optional<double> scale, c10::optional<int64_t> num_kv_groups) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
