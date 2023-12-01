@@ -48,7 +48,7 @@ class AutoFunctionalized(HigherOrderOperator):
     """
 
     def __init__(self):
-        super().__init__("AutoFunctionalized")
+        super().__init__("auto_functionalized")
 
     def __call__(
         self,
