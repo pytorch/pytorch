@@ -147,7 +147,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -345,14 +345,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
