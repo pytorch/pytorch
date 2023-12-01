@@ -182,7 +182,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.example_inputs = example_inputs
         self.layout_opt = (
-            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+            layout_opt
+            if layout_opt is not None
+            else self.decide_layout_opt(gm, is_inference=is_inference)
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
@@ -247,13 +249,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_backend_registration()
 
     @staticmethod
-    def decide_layout_opt(gm) -> bool:
+    def decide_layout_opt(gm, *, is_inference) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
         if not config.layout_optimization:
             return False
+
+        if config.force_layout_optimization:
+            return True
 
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
@@ -283,7 +288,7 @@ class GraphLowering(torch.fx.Interpreter):
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
-            log.debug("Only a few conv, skip layout optimization")
+            log.debug("Skipped layout opt because only a few conv")
             return False
 
         if any(
@@ -295,6 +300,75 @@ class GraphLowering(torch.fx.Interpreter):
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
             )
             return False
+
+        def is_grouped(n):
+            return n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1
+
+        def is_in_out_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
+                and n.args[1].meta["val"].size(2) > 1
+            )
+
+        def is_small_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) <= 64
+                and n.args[1].meta["val"].size(1) <= 64
+            )
+
+        # only grouped convolutions benchmarked as slower in conv samples for inference only
+        if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
+            flop_counts: Dict[str, float] = defaultdict(float)
+            for node in conv_nodes:
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
+
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
+                else:
+                    log.debug("Conv inputs meta not found")
+
+            # average benchmarked channels last speedup / slowdown, < 1 is speedup.
+            # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
+            # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
+            GROUPED_MULTIPLIER = 1.358
+            DEFAULT_MULTIPLIER = 0.823
+            IN_OUT_MULTIPLIER = 0.725
+            SMALL_MULTIPLIER = 0.783
+
+            total_flops = sum(flop_counts.values())
+            # TODO - get different values per hardware
+            weighted_flops = (
+                flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["small"] * SMALL_MULTIPLIER
+                + flop_counts["in_out"] * IN_OUT_MULTIPLIER
+                + flop_counts["default"] * DEFAULT_MULTIPLIER
+            )
+            do_layout_opt = weighted_flops <= total_flops
+            if not do_layout_opt:
+                log.debug(
+                    "Skipped layout opt in inference because weighted flops indicate slowdown, default: %d, channels last: %d",
+                    total_flops,
+                    weighted_flops,
+                )
+            return do_layout_opt
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
@@ -313,10 +387,10 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(
-            n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
-        ):
-            log.debug("Found grouped convolution with >1 in_channels!")
+        if any(is_grouped(n) for n in conv_nodes):
+            log.debug(
+                "Skip layout opt because found grouped convolution with >1 in_channels!"
+            )
             return False
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
@@ -326,22 +400,15 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(
-            n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
-            and n.args[1].meta["val"].size(2) > 1
-            for n in conv_nodes
-        ):
+        if any(is_in_out_channel(n) for n in conv_nodes):
             log.debug(
-                "Skip layout optimization because some convolutions have smaller out_channel"
+                "Skip layout opt because some convolutions have smaller out_channel"
             )
             return False
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(
-            n.args[1].meta["val"].size(0) <= 64 and n.args[1].meta["val"].size(1) <= 64
-            for n in conv_nodes
-        ):
+        if all(is_small_channel(n) for n in conv_nodes):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 

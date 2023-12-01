@@ -8,9 +8,8 @@ from dataclasses import dataclass
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import map, cond
+from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import Constraint, Dim, export
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
@@ -20,6 +19,8 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._subclasses import FakeTensorMode
+from torch.export import Constraint, Dim, export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -29,8 +30,8 @@ from torch.utils._pytree import (
     tree_map,
     tree_unflatten,
     TreeSpec,
+    treespec_dumps,
     treespec_loads,
-    treespec_dumps
 )
 
 
@@ -111,6 +112,37 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    def test_basic_non_strict_real_tensor(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(1, 3))
+
+            def forward(self, x, y):
+                return x[0] + y - self.param
+
+        f = Basic()
+        args = ([torch.randn(1, 3)], torch.randn(1, 3))
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
+
+    def test_basic_non_strict_fake_tensor(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3, 2))
+
+            def forward(self, x, y):
+                return x[0] + y - self.param
+
+        fake_mode = FakeTensorMode()
+        f = Basic()
+        with fake_mode:
+            args = ([torch.empty(3, 2)], torch.empty(3, 2))
+        ep = export(f, args, strict=False)
+        inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
+        self.assertEqual(ep(*inputs), f(*inputs))
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
@@ -1637,7 +1669,6 @@ def forward(self, l_x_):
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        def check_device_and_fake_mode():
             exported_program = torch.export.export(model, (x,))
             export_res = exported_program(x)
             exp_res = model(x)
@@ -1645,8 +1676,9 @@ def forward(self, l_x_):
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
+            decomposed_ep = exported_program.run_decompositions()
+            export_res = decomposed_ep(x)
+            self.assertTrue(export_res.size() == exp_res.size())
 
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()

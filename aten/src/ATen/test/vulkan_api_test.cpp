@@ -2709,6 +2709,66 @@ TEST_F(VulkanAPITest, hardtanh_) {
   ASSERT_TRUE(check);
 }
 
+void test_packed_layer_norm(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef normalized_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    const float eps) {
+  c10::InferenceMode mode;
+
+  const auto input_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu =
+      at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto bias_cpu =
+      at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::layer_norm(
+      input_cpu, normalized_shape, weight_cpu, bias_cpu, eps, false);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::create_layernorm_context",
+      "",
+      weight_cpu, bias_cpu, eps);
+
+  auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_layernorm_context",
+      "",
+      input_cpu.vulkan(), normalized_shape, prepack[0]);
+
+  auto output_vulkan = vulkan_output[0].toTensor();
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_2d) {
+  test_packed_layer_norm({5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_3d) {
+  test_packed_layer_norm({11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_packed_layer_norm({11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_4d) {
+  test_packed_layer_norm({3, 11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({3, 11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_packed_layer_norm({3, 11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+  test_packed_layer_norm(
+      {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
+}
+
 TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
   c10::InferenceMode mode;
 

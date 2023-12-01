@@ -22,6 +22,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/custom_class.h>
 
 namespace c10d {
@@ -42,6 +43,12 @@ static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
+
+// Environment Variable to control whether dumping debug info on watchdog
+// timeout is enabled. This variable must be set together with
+// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
+static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
@@ -865,6 +872,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
