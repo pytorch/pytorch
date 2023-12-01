@@ -470,14 +470,23 @@ def _is_leaf(tree: PyTree) -> bool:
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass
+@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
     context: Context
     children_specs: List["TreeSpec"]
 
+    num_nodes: int = dataclasses.field(init=False)
+    num_leaves: int = dataclasses.field(init=False)
+    num_children: int = dataclasses.field(init=False)
+
     def __post_init__(self) -> None:
-        self.num_leaves: int = sum([spec.num_leaves for spec in self.children_specs])
+        num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
+        num_leaves = sum(spec.num_leaves for spec in self.children_specs)
+        num_children = len(self.children_specs)
+        object.__setattr__(self, "num_nodes", num_nodes)
+        object.__setattr__(self, "num_leaves", num_leaves)
+        object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
@@ -502,7 +511,9 @@ class TreeSpec:
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
-        self.num_leaves = 1
+        object.__setattr__(self, "num_nodes", 1)
+        object.__setattr__(self, "num_leaves", 1)
+        object.__setattr__(self, "num_children", 0)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
