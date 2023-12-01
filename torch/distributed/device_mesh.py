@@ -134,19 +134,18 @@ class DeviceMesh:
         Inconsistent `mesh` will lead to silent hang.
 
     Args:
-        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
-        mesh (ndarray): could be a multi-dimension array or an integer tensor that
-            describes the layout of devices, the ids are global ids of the
-            default process group.
+        device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+        mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
+            of devices, where the IDs are global IDs of the default process group.
 
     Returns:
-        A :class:`DeviceMesh` object
+        DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
 
     Example (2 host with 4 GPUs each):
+        The following program runs on each process/rank in an SPMD manner:
         ```
-        # The following program runs on each process/rank in SPMD manner.
-        # initialize device mesh as (2, 4) to represent the topology
-        # of cross-host(dim 0), and within-host (dim 1)
+        # Initialize device mesh as (2, 4) to represent the topology
+        # of cross-host(dim 0), and within-host (dim 1).
         mesh = DeviceMesh(device_type="cuda",
                           mesh=[
                             [0, 1, 2, 3],
@@ -155,8 +154,7 @@ class DeviceMesh:
         ```
         A reduction over the first dimension of mesh will reduce across
         columns (0, 4), .. and (3, 7), a reduction over the second dimension
-        of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7)
-
+        of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7).
     """
 
     device_type: str
@@ -395,6 +393,7 @@ class DeviceMesh:
             An integer denotes the local rank.
 
         Example (2 host with 4 GPUs each):
+            The following program runs on each process/rank in an SPMD manner:
             ```
             # Let's initialize device mesh with mesh_shape = (2, 4) to represent
             # the topology of cross-host(dim 0), and within-host (dim 1).
@@ -404,6 +403,7 @@ class DeviceMesh:
                                 [4, 5, 6, 7]
                             ])
             ```
+
             Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
             Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
             Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
@@ -453,33 +453,31 @@ def init_device_mesh(
 ) -> DeviceMesh:
     """
     Initializes a `DeviceMesh` based on `device_type`, `mesh_shape`, and `mesh_dim_names` parameters.
-    This creates a DeviceMesh with a mesh layout of n-d dimensional array, n being the len(mesh_shape)
-    and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
-    labeled as mesh_dim_names[i].
+
+    This creates a DeviceMesh with an n-dimensional array layout, where `n` is the length of `mesh_shape`.
+    If `mesh_dim_names` is provided, each dimension is labeled as `mesh_dim_names[i]`.
 
     .. note::
-        `init_device_mesh` follows SPMD programming model, which means the same PyTorch Python program
-        is running on all processes/ranks in the cluster. Therefore, users need to make sure the `mesh_shape`
-        tuple (the dimension of the nD array that describes the layout of devices) should be identical across
-        all ranks. Inconsistent `mesh_shape` will lead to silent hang.
+        `init_device_mesh` follows SPMD programming model, meaning the same PyTorch Python program
+        runs on all processes/ranks in the cluster. Ensure `mesh_shape` (the dimensions of the nD array
+        describing device layout) is identical across all ranks. Inconsistent `mesh_shape` may lead to hanging.
 
     Args:
-        device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
-        mesh_shape: Tuple[int]: A tuple defines the dimension of the multi-dimesnion array
-        that describes the layout of devices.
-    Kwargs:
-        mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
-        of the multi-dimensional array that describes the layout of devices. Its length must match the length
-        of `mesh_shape`. Each string in mesh_dim_names must be unique.
+        device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+        mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
+            describing the layout of devices.
+        mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
+            of the multi-dimensional array describing the layout of devices. Its length must match the length
+            of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
 
     Returns:
-        A :class:`DeviceMesh` object
+        DeviceMesh: A :class:`DeviceMesh` object representing the initialized device layout.
 
     .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
-    behind the scene, which are required for distributed communications.
+      required for distributed communications behind the scene.
 
     Example:
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +SKIP("no rank")
         >>> from torch.distributed._tensor.device_mesh import init_device_mesh
         >>>
         >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
