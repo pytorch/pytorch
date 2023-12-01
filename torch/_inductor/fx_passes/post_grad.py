@@ -15,6 +15,8 @@ from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+
+from torch._utils_internal import print_graph
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
 
@@ -44,7 +46,6 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_passes
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -84,9 +85,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
-
+        print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+            print_graph(
+                gm.graph,
+                f"Apply split cat pattern matcher {patterns.__class__.__name__} in post grad.",
+            )
         if is_inference:
             inference_patterns.apply(gm.graph)
 
@@ -105,13 +110,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url
-
-        log.info(
-            "Print graph after recompile in post grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
-        )
+    print_graph(gm.graph, "Aftre recompile in post grad pass.")
 
 
 @init_once_fakemode
@@ -1156,7 +1155,7 @@ class ConstructorMoverPass:
                 if (
                     self.allow_cpu_device(user)
                     and node_device
-                    and node_device.type == "cuda"
+                    and node_device.type == self.target
                 ):
                     del cpu_indeg[user]
                 else:
