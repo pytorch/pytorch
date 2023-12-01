@@ -3094,7 +3094,7 @@ instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestAttnMasks, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestAttnMasks, globals(), only_for=device_types)
 
 if __name__ == '__main__':
     run_tests()
