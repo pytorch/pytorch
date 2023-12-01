@@ -716,6 +716,7 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
+        self.device_types.add(value.device.type)
 
         if (
             config.split_const_graph

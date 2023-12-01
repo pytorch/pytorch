@@ -587,6 +587,7 @@ def fx_codegen_and_compile(
 
             const_graph = GraphLowering(
                 const_gm,
+                example_inputs=[],
                 shape_env=shape_env,
                 num_static_inputs=num_fixed,
                 graph_id=graph_id,
@@ -598,13 +599,12 @@ def fx_codegen_and_compile(
                 is_const_graph=True,
             )
             with V.set_graph_handler(const_graph):
+                assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                 const_graph.run()
-                if cpp_wrapper:
-                    const_code, _ = const_graph.codegen()
-                    original_constants = const_graph.constants
-                    const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
-                else:
-                    const_graph.compile_to_fn()([])
+
+                const_code, _ = const_graph.codegen_with_cpp_wrapper()
+                original_constants = const_graph.constants
+                const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
 
         graph = GraphLowering(
             gm,
