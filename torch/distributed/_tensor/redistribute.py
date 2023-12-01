@@ -3,7 +3,6 @@ from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -11,6 +10,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
