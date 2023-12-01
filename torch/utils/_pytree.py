@@ -292,7 +292,8 @@ def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
     sorted_keys, original_copy = context
     d = original_copy.copy()
     d.update(zip(sorted_keys, values))
-    return d
+    return d  # type: ignore[[no-any-return]
+
 
 def _dict_serialize(context: Context) -> DumpableContext:
     sorted_keys, original_copy = context
@@ -304,6 +305,7 @@ def _dict_serialize(context: Context) -> DumpableContext:
         "original_keys": list(original_copy),
     }
     return json_dict
+
 
 def _dict_deserialize(dumpable_context: DumpableContext) -> Context:
     assert isinstance(dumpable_context, dict)
