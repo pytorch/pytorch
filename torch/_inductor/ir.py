@@ -4529,7 +4529,11 @@ class FallbackKernel(ExternKernelAlloc):
                 self.outputs,
             )
         else:
-            super().codegen(wrapper)
+            self.codegen_comment(wrapper)
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
+            V.graph.wrapper_code.generate_fallback_kernel(self, args)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):

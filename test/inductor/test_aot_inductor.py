@@ -1366,6 +1366,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_convolution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(x, w, b, [4], [0], [1], True, [0], 1)
+
+        example_inputs = (
+            torch.randn([2, 32, 90], device=self.device),
+            torch.randn([32, 16, 8], device=self.device),
+            torch.randn([16], device=self.device),
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            self.check_model(Model(), example_inputs)
+
     def test_zero_size_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, channel, r=8):
