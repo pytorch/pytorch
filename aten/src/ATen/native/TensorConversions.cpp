@@ -951,6 +951,9 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
 
   if (blocksize.has_value()) {
     auto blocksize_to = *blocksize;
+    if (blocksize_to.size() != 2) {
+      AT_ERROR(funcname, ": blocksize has to specify two values, but got ", blocksize_to.size());
+    }
     if (blocksize_to[0] <= 0 || blocksize_to[1] <= 0) {
       AT_ERROR(funcname, ": blocksize needs to be positive, but got ", blocksize_to);
     }
