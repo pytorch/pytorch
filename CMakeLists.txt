@@ -735,7 +735,9 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
-if(USE_ROCM)
+if (MSVC)
+  set(CONFIG_FA OFF)
+elseif (USE_ROCM)
   set(CONFIG_FA ON)
 elseif(USE_CUDA AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6)
   set(CONFIG_FA ON)
