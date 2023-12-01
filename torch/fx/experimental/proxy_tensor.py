@@ -134,6 +134,8 @@ def extract_val(val):
                 return torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
         else:
             return None
+    elif isinstance(val, (int, float, bool)):
+        return val
 
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems

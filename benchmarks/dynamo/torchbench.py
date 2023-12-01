@@ -90,6 +90,8 @@ SKIP = {
     "clip",
     # multi gpu not always available in benchmark runners
     "simple_gpt_tp_manual",
+    # TIMEOUT, hits cache size limit with recompiles
+    "DALLE2_pytorch",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
@@ -377,6 +379,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
+        if benchmark_cls is None:
+            raise NotImplementedError(f"{model_name}.Model is None")
+
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 

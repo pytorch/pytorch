@@ -89,7 +89,10 @@ select = [
     "PLR0133", # constant comparison
     "PLR0206", # property with params
     "PLR1722", # use sys exit
-    "PLR6201", # set membership test
+    "PLW0129", # assert on string literal
+    "PLW0406", # import self
+    "PLW0711", # binary op exception
+    "PLW1509", # preexec_fn not safe with threads
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
     "PT022",

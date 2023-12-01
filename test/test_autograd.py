@@ -8743,6 +8743,18 @@ get_out().sum().backward()
         self.assertEqual(y, y2)
         self.assertEqual(y_expected, y2_expected)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_gradcheck_default_device_placement_context(self):
+        # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
+        # This test ensures that this still works when the default device is set to something else by the user.
+        with torch.device('cuda'):
+            x = torch.randn(3, dtype=torch.double, requires_grad=True)
+
+            def func(inp):
+                return inp ** 2.0
+
+            self.assertTrue(gradcheck(func, x, fast_mode=True))
+
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
