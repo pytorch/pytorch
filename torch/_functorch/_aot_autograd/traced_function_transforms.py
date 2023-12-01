@@ -380,7 +380,7 @@ def create_functionalized_fn(
                 # Ban metadata mutations on fw inputs during the bw
                 if not inpt_info.mutates_metadata:
                     assert not has_metadata_mutation(
-                        before, after, check_only_storage_mutation=False
+                        f_inpt, before, check_only_storage_mutation=False
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
@@ -395,9 +395,11 @@ def create_functionalized_fn(
             # Today, we will just error in all cases of this happening unless someone needs us to support it.
             tangents_before = args[1]
             tangents_after = pytree.tree_map(from_fun, f_args[1])
-            for before, after in zip(tangents_before, tangents_after):
+            for f_inpt, before, after in zip(
+                f_args[1], tangents_before, tangents_after
+            ):
                 assert not has_metadata_mutation(
-                    before, after, check_only_storage_mutation=False
+                    f_inpt, before, check_only_storage_mutation=False
                 ) and not has_data_mutation(
                     f_inpt
                 ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
