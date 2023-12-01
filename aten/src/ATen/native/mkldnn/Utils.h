@@ -61,8 +61,8 @@ static inline std::vector<int64_t> padding_r(
 // For example, for tensor of size = [1, 1280], stride = [0, 1], we'll convert it to size = [1, 1280], stride = [1280, 1]
 // before calling oneDNN for better performance.
 static inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
-  auto input_size = input.sizes();
-  auto input_stride = input.strides();
+  auto input_size = input.sizes().vec();
+  auto input_stride = input.strides().vec();
   IntArrayRef input_default_contiguous_strides = c10::contiguous_strides(input_size);
   if (input.is_contiguous() && input_stride != input_default_contiguous_strides) {
      return input.as_strided(input_size, input_default_contiguous_strides);
