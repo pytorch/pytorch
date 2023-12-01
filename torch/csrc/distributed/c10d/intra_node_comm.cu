@@ -75,7 +75,6 @@ DEVICE_INLINE void acquireSignal(uint32_t* addr) {
 struct FcP2pState {
   uint32_t signals[kMaxAllReduceBlocks][kMaxDevices];
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
-  uint32_t flags[kMaxAllReduceBlocks];
 };
 
 template <uint32_t kWorldSize>
@@ -147,8 +146,6 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
   }
   __syncthreads();
-
-  at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
 
   // The source pointers. Distributed round-robin for the different warps
   at::BFloat16* srcs[kWorldSize];
@@ -279,8 +276,6 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
   at::BFloat16* remoteRelay = buffers[relayRank] + kMaxIntraNodeSize / 2;
 
-  // During the first stage, every rank loads data from non-relay HCM
-  // neighbors, sums up with local data, and store in local relay buffer
   for (size_t i = offset; i < N; i += stride) {
     bf16x8 vals[4];
 
@@ -299,7 +294,6 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   }
   __syncthreads();
 
-  // Each block syncs with the same block on the relay rank
   if (threadIdx.x == 0) {
     releaseSignal(&p2pStates[relayRank]->signals[blockIdx.x][rank]);
     acquireSignal(&p2pStates[rank]->signals[blockIdx.x][relayRank]);
@@ -367,7 +361,7 @@ static auto castArr(std::array<void*, kMaxDevices> arr) {
 
 bool isIntraNodeCommSupported() {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  xxx return false;
+  return false;
 #else
   return true;
 #endif
@@ -419,8 +413,6 @@ at::Tensor oneShotAllReduce(
 
   dim3 blocks, threads;
   getLaunchConfig(N_aligned, blocks, threads);
-
-  TORCH_WARN_ONCE("blocks: ", blocks.x, " threads: ", threads.x);
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(

@@ -103,6 +103,12 @@ class TwoPhaseExchange {
   pthread_cond_t cond_;
 };
 
+static sem_t* openSem(const std::string& name) {
+  sem_t* sem = sem_open(name.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 0);
+  TORCH_CHECK(sem != SEM_FAILED, "Failed to open semaphore", name);
+  return sem;
+}
+
 SharedMemoryPtrBase::SharedMemoryPtrBase(
     const std::string& rdzvId,
     size_t rank,
@@ -117,12 +123,8 @@ SharedMemoryPtrBase::SharedMemoryPtrBase(
       worldSize_(worldSize),
       allocSize_(allocSize),
       destructor_(destructor) {
-  initSem_ = sem_open(initSemName_.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 0);
-  TORCH_CHECK(initSem_ != SEM_FAILED, "Failed to open semaphore");
-
-  tearDownSem_ =
-      sem_open(tearDownSemName_.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 0);
-  TORCH_CHECK(tearDownSem_ != SEM_FAILED, "Failed to open semaphore");
+  initSem_ = openSem(initSemName_);
+  tearDownSem_ = openSem(tearDownSemName_);
 
   shmFd_ = shm_open(shmName_.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
   TORCH_CHECK(shmFd_ != -1, "Failed to open shared memory");
