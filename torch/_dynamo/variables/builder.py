@@ -83,7 +83,12 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    EventVariable,
+    NullContextVariable,
+    StreamVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -689,6 +694,17 @@ class VariableBuilder:
                 value,
                 None,  # No kernel idx provided
                 None,  # No grid provided
+                source=self.source,
+            )
+        elif isinstance(value, torch.amp.autocast_mode.autocast):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutocastModeVariable(
+                target_values=[
+                    value.device,
+                    value.fast_dtype,
+                    value._enabled,
+                    value._cache_enabled,
+                ],
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
