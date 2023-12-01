@@ -26,7 +26,8 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     gradcheck,
     make_tensor,
-    NOTEST_CPU
+    NOTEST_CPU,
+    skipIfTorchDynamo,
 )
 
 
@@ -1047,9 +1048,10 @@ class TestTransformers(NNTestCase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
-    def test_mask_check_fastpath(self):
+    @parametrize("disable_fastpath", [True, False])
+    def test_mask_check_fastpath(self, disable_fastpath: bool):
         """
-        Test that fastpath is executed independently of the masks that are passed.
+        Test that fastpath is executed independently of the masks that are passed, subject to `disable_fastpath`.
         If the passed key padding mask is left aligned or mask_check=False, test that nested tensors are used
         (sparsity fastpath), otherwise use fastpath with traditional tensors.
         Also test that fast path is executed with both key padding mask and attention mask passed at the same time.
@@ -1057,17 +1059,18 @@ class TestTransformers(NNTestCase):
 
         x = torch.Tensor([[[1, 2], [3, 4], [5, 6]]]).to(torch.float)
 
-        def _test_fastpath(model, key_padding_mask, mock_return_value, attn_mask=None, nested_tensors=True):
+        def _test_fastpath(model, key_padding_mask, mock_return_value, attn_mask=None, nested_tensors=True, disable_fp=False):
             with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
                 fastpath_mock.return_value = mock_return_value
                 model(x, src_key_padding_mask=key_padding_mask, mask=attn_mask)
 
                 # If mock was called, fastpath was taken
-                self.assertTrue(fastpath_mock.called)
+                self.assertTrue(fastpath_mock.called != disable_fp)
 
                 # If mock was called with nested tensors, sparsity fastpath was taken
-                for call_args, _ in fastpath_mock.call_args_list:
-                    self.assertEqual(call_args[0].is_nested, nested_tensors)
+                if not disable_fp:
+                    for call_args, _ in fastpath_mock.call_args_list:
+                        self.assertEqual(call_args[0].is_nested, nested_tensors)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
 
@@ -1080,27 +1083,52 @@ class TestTransformers(NNTestCase):
         nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
         tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
 
-        # Left aligned mask results in sparsity fastpath
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+        with torch._op_ctl.atfp_kernel(
+                enable_nested_tensor=not disable_fastpath,
+                enable_encoder=not disable_fastpath,
+                enable_mha=not disable_fastpath,
+                enable_math=True,
+        ):
+            # Left aligned mask results in sparsity fastpath
+            _test_fastpath(
+                model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True, disable_fp=disable_fastpath
+            )
 
-        # Not aligned mask results in fastpath
-        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+            # Not aligned mask results in fastpath
+            _test_fastpath(
+                model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False, disable_fp=disable_fastpath
+            )
 
-        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
-        model.eval()
+            model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
+            model.eval()
 
-        # If nested tensor disabled, fastpath is always taken
-        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
-        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
-        # Fast path is taken if both attention mask and key padding mask are present
-        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, attn_mask=attn_mask, nested_tensors=False)
+            # If nested tensor disabled, fastpath is always taken
+            _test_fastpath(
+                model, aligned_key_padding_mask, tensor_return_value, nested_tensors=False, disable_fp=disable_fastpath
+            )
+            _test_fastpath(
+                model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False, disable_fp=disable_fastpath
+            )
+            # Fast path is taken if both attention mask and key padding mask are present
+            _test_fastpath(
+                model,
+                aligned_key_padding_mask,
+                tensor_return_value,
+                attn_mask=attn_mask,
+                nested_tensors=False,
+                disable_fp=disable_fastpath,
+            )
 
-        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
-        model.eval()
+            model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
+            model.eval()
 
-        # Mask check disabled results in sparisty fastpath, independently of the mask
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
-        _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+            # Mask check disabled results in sparisty fastpath, independently of the mask
+            _test_fastpath(
+                model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True, disable_fp=disable_fastpath
+            )
+            _test_fastpath(
+                model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True, disable_fp=disable_fastpath
+            )
 
     # Test failing MHA when bias was NoneType
     def test_bias_is_none(self):
@@ -1213,6 +1241,65 @@ class TestTransformers(NNTestCase):
 
         torch.jit.script(mha)
 
+
+    @parametrize("position", [-1, 0, 31, 32, 63, 72, 96, 128])
+    @parametrize("value", [False, True])
+    def test_opctl(self, position: int, value: bool):
+        def do_test(position, value):
+            torch._op_ctl._write_global_ctx(position, not value)
+            torch._op_ctl._write_global_ctx(position, value)
+            new_value = torch._op_ctl._is_global_ctx(position)
+            return new_value == value
+
+        def legit_pos(p: int) -> bool:
+            return (p >= 0) and (p < 64)
+
+        if legit_pos(position):
+            torch._op_ctl._is_global_ctx(position)
+            self.assertTrue(do_test(position, value))
+        else:
+            with self.assertRaisesRegex(RuntimeError, "expects 0 <= ctx_pos < 64"):
+                torch._op_ctl._is_global_ctx(position)
+            with self.assertRaisesRegex(RuntimeError, "expects 0 <= ctx_pos < 64"):
+                do_test(position, value)
+
+        # if we changed (a legit) context position, switch it back
+        # these are not using the context manager, so the values aren't restored when leaving the contex mgr scope
+        if legit_pos(position):
+            torch._op_ctl._write_global_ctx(position, True)
+
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle naming of parameterized tests with torchscripted code")
+    @parametrize("position", [-1, 0, 31, 32, 63, 72, 96, 128])
+    @parametrize("value", [False, True])
+    def test_opctl_scripted(self, position: int, value: bool):
+        def do_test(position: int, value: bool) -> bool:
+            torch._op_ctl._write_global_ctx(position, not value)
+            torch._op_ctl._write_global_ctx(position, value)
+            new_value = torch._op_ctl._is_global_ctx(position)
+            return new_value == value
+
+        def do_read(position: int) -> None:
+            new_value = torch._op_ctl._is_global_ctx(position)
+
+        def legit_pos(p: int) -> bool:
+            return (p >= 0) and (p < 64)
+
+        do_test_scripted = torch.jit.script(do_test)
+        do_read_scripted = torch.jit.script(do_read)
+
+        if legit_pos(position):
+            do_read_scripted(position)
+            self.assertTrue(do_test_scripted(position, value))
+        else:
+            with self.assertRaisesRegex(RuntimeError, "expects 0 <= ctx_pos < 64"):
+                do_read_scripted(position)
+            with self.assertRaisesRegex(RuntimeError, "expects 0 <= ctx_pos < 64"):
+                do_test_scripted(position, value)
+
+        # if we changed the context position, switch it back
+        # these are not using the context manager, so the values aren't restored when leaving the contex mgr scope
+        if legit_pos(position):
+            torch._op_ctl._write_global_ctx(position, True)
 
 class TestSDPAFailureModes(NNTestCase):
     """ Used to test the failure modes of scaled_dot_product_attention

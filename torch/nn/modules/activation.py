@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
+from torch._op_ctl import atfp_mha_enabled, atfp_math_enabled
 from .linear import NonDynamicallyQuantizableLinear
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
@@ -1108,12 +1109,17 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
 
-        why_not_fast_path = ''
-        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
-           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
-            why_not_fast_path = "floating-point masks are not supported for fast path."
-
         is_batched = query.dim() == 3
+
+        why_not_fast_path = ''
+        if not is_batched:
+            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+        elif attn_mask is not None and torch.is_floating_point(attn_mask):
+            if not torch.logical_or(attn_mask.eq(0.0), attn_mask.eq(-float("inf"))).all():
+                why_not_fast_path = "floating-point attn mask tensor includes values other values other than 0 or -inf"
+        elif key_padding_mask is not None and torch.is_floating_point(key_padding_mask):
+            if not torch.logical_or(key_padding_mask.eq(0.0), key_padding_mask.eq(-float("inf"))).all():
+                why_not_fast_path = "floating-point key padding mask tensor includes values other values other than 0 or -inf"
 
         key_padding_mask = F._canonical_mask(
             mask=key_padding_mask,
@@ -1133,8 +1139,8 @@ class MultiheadAttention(Module):
         )
 
 
-        if not is_batched:
-            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+        if not atfp_mha_enabled():
+            why_not_fast_path = "AT FastPath backend manager for enable_mha is False"
         elif query is not key or key is not value:
             # When lifting this restriction, don't forget to either
             # enforce that the dtypes all match or test cases where
@@ -1211,6 +1217,8 @@ class MultiheadAttention(Module):
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
+
+        assert atfp_math_enabled(), "MultiHeadAttention: Falllback math implementation not enabled"
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
