@@ -325,6 +325,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
 
     if qkv.lengths() is None:
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
+        # TODO: Explore performance impact when compiling
         max_seqlen = torch.max(qkv.offsets().diff()).item()
     else:
         cumulative_seqlen = (
@@ -332,6 +333,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         )
         batch_size = qkv.size(0)
         max_seqlen = qkv.values().size(0) // batch_size
+    # TODO: Explore performance impact when compiling
     return cumulative_seqlen, int(max_seqlen), int(cumulative_seqlen[-1].item())
 
 
@@ -606,6 +608,7 @@ def _pad_last_dim(
     return tensor
 
 
+# TODO: coalesce with torch/nn/utils/attention.py
 def _calculate_scale(query, scale):
     softmax_scale = scale if scale is not None else math.sqrt(1.0 / query.size(-1))
     return softmax_scale
