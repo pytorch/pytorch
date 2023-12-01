@@ -10,8 +10,8 @@ namespace torch {
 ParamCommsDebugInfo::ParamCommsDebugInfo(
     int rank,
     std::string&& colName,
-    int inNelems,
-    int outNelems,
+    int inSize,
+    int outSize,
     at::ScalarType dType,
     std::vector<int64_t> inSplitSizes,
     std::vector<int64_t> outSplitSizes,
@@ -19,8 +19,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     : rank_(rank),
       worldSize_(worldSize),
       columnName_(colName),
-      inMessageNelems_(inNelems),
-      outMessageNelems_(outNelems),
+      inMessageSize_(inSize),
+      outMessageSize_(outSize),
       dType_(dType),
       inputSplitSizes_(std::move(inSplitSizes)),
       outputSplitSizes_(std::move(outSplitSizes)) {}

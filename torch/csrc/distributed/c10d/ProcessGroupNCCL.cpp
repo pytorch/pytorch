@@ -620,8 +620,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       0, // process group ptr
       rank_, // rank
       "wait", // colName
-      0, // inNelems
-      0, // outNelems
+      0, // inSize
+      0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -792,8 +792,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       this->getID(),
       rank, // rank
       "init", // colName
-      0, // inNelems
-      0, // outNelems
+      0, // inSize
+      0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2591,8 +2591,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensors, // outputTensors
       rank_, // rank
       "allreduce", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2616,8 +2616,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       tensors, // outputTensors
       rank_, // rank
       "allreduce_coalesced", // colName
-      total_numel, // inNelems
-      total_numel, // outNelems
+      total_numel, // inSize
+      total_numel, // outSize
       tensors[0].scalar_type(), // dType
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
@@ -2641,10 +2641,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "broadcast", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2704,10 +2704,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "_broadcast_oop", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2746,10 +2746,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "reduce", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2810,10 +2810,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "_reduce_oop", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -2869,8 +2869,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         outputTensors, // outputTensors
         rank_, // rank
         "all_gather", // colName
-        tensor.numel(), // inNelems
-        tensor.numel() * // outNelems
+        tensor.numel(), // inSize
+        tensor.numel() * // outSize
             this->getSize(),
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
@@ -3013,8 +3013,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         outputTensors, // outputTensors
         rank_, // rank
         "reduce_scatter", // colName
-        tensor.numel() * this->getSize(), // inNelems
-        tensor.numel(), // outNelems
+        tensor.numel() * this->getSize(), // inSize
+        tensor.numel(), // outSize
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
@@ -3132,8 +3132,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       outputTensor, // outputTensor
       rank_, // rank
       "_reduce_scatter_base", // colName
-      inputTensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      inputTensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -3220,8 +3220,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       this->getID(),
       rank_, // rank
       "barrier", // colName
-      0, // inNelems
-      0, // outNelems
+      0, // inSize
+      0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -3301,8 +3301,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor, // outputTensor
         rank_, // rank
         "all_to_all", // colName
-        inputTensor.numel(), // inNelems
-        outputTensor.numel(), // outNelems
+        inputTensor.numel(), // inSize
+        outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
@@ -3343,8 +3343,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor, // outputTensor
         rank_, // rank
         "all_to_allv", // colName
-        inputTensor.numel(), // inNelems
-        outputTensor.numel(), // outNelems
+        inputTensor.numel(), // inSize
+        outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
         outputSplitSizes, // outSplitSizes
@@ -3419,8 +3419,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       outputTensors, // outputTensors
       rank_, // rank
       "all_to_all", // colName
-      total_numel, // inNelems
-      total_numel, // outNelems
+      total_numel, // inSize
+      total_numel, // outSize
       inputTensors.front().scalar_type(), // dType
       inSplitSizes, // inSplitSizes
       outSplitSizes, // outSplitSizes
@@ -3468,10 +3468,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      dstRank, // dst rank
+      dstRank, // rank
       "send", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -3506,10 +3506,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       this->getID(),
       tensors, // inputTensors
       tensors, // outputTensors
-      srcRank, // src rank
+      srcRank, // rank
       "recv", // colName
-      tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
@@ -3666,10 +3666,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "gather", // colName
-      tensor.numel(), // inNelems
-      tensor.numel() * this->getSize(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
@@ -3753,10 +3753,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
-      opts.rootRank, // root rank
+      rank_, // rank
       "scatter", // colName
-      tensor.numel(), // inNelems
-      tensor.numel() * this->getSize(), // outNelems
+      tensor.numel(), // inSize
+      tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
@@ -3826,8 +3826,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       output_tensor, // outputTensors
       rank_, // rank
       "_allgather_base", // colName
-      input_tensor.numel(), // inNelems
-      tensor.numel(), // outNelems
+      input_tensor.numel(), // inSize
+      tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
