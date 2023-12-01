@@ -3598,7 +3598,7 @@ def run(runner, args, original_dir=None):
                 except RuntimeError as e:
                     import traceback
 
-                    mode = "train" if self.args.training else "eval"
+                    mode = "train" if args.training else "eval"
                     print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
                     status = (
