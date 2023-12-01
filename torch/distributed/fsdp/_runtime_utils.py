@@ -1173,13 +1173,7 @@ def _finalize_params(
         return
     flat_param = handle.flat_param
     if hasattr(flat_param, "_post_backward_hook_handle"):
-        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
-        _p_assert(
-            post_backward_hook_state_len == expected_post_backward_hook_state_len,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
+        flat_param._post_backward_hook_handle.remove()
         delattr(flat_param, "_post_backward_hook_handle")
     if flat_param.requires_grad:
         if not state._sync_gradients:

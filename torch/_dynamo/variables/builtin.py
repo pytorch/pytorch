@@ -1287,6 +1287,7 @@ class BuiltinVariable(VariableTracker):
 
                     if isinstance(val, ConstantVariable):
                         obj.as_proxy().node.meta["example_value"].grad = val.value
+
                     else:
                         tx.output.create_proxy(
                             "call_function",
