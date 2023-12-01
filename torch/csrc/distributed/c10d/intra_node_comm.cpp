@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/driver_api.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
@@ -17,6 +16,7 @@
 #include <unistd.h>
 
 #ifdef USE_CUDA
+#include <c10/cuda/driver_api.h>
 #include <cuda_runtime.h>
 #include <nvml.h>
 #endif
