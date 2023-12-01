@@ -1943,7 +1943,7 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
-            raise NotImplementedError("eager_fail_to_run") from e
+            raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
@@ -2194,6 +2194,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -3594,13 +3595,18 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except NotImplementedError as e:
+                except RuntimeError as e:
                     import traceback
 
                     mode = "train" if self.args.training else "eval"
                     print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    write_csv_when_exception(name, str(e), device)
+                    status = (
+                        "model_fail_to_load"
+                        if isinstance(e, NotImplementedError)
+                        else "eager_fail_to_run"
+                    )
+                    write_csv_when_exception(name, status, device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
