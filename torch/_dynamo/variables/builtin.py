@@ -1216,10 +1216,10 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            name = name_var.as_python_constant()
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-                name = name_var.as_python_constant()
                 if name == "requires_grad":
                     # TODO(voz): Make it work properly
                     unimplemented(
@@ -1276,7 +1276,7 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
-            
+
             tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
