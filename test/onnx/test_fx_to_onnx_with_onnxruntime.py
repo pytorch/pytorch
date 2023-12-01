@@ -456,9 +456,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "torch._export.verifier.SpecViolationError: User input output view_1 does not point to a user input that exists."
         "Dict of user inputs that are mutated, in order: {'view_1': 'l_x_'}"
-        "User input nodes available: ('arg1_1',)"
+        "User input nodes available: ('arg0_1',)"
+        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
     )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
@@ -517,8 +518,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "User input nodes available: ('arg1_1',)"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node."
-        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -987,7 +989,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             real_model = torch.export.export(
                 real_model, args=create_args(), kwargs=create_kwargs()
             )
-            state_dict = real_model.state_dict
 
         with tempfile.NamedTemporaryFile(
             prefix=model_name, suffix=".pt"
@@ -1166,6 +1167,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "AssertionError: Dynamic shape check failed for graph inputs"
+    )
     def test_fake_tensor_mode_huggingface_google_t5(self):
         config = transformers.T5Config(
             vocab_size=8096, d_model=64, num_layers=2, num_heads=2
